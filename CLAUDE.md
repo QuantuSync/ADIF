@@ -350,6 +350,10 @@ una pantalla compartida.
 - **Comprobar si la plantilla `L9_CM.32-FE` sigue el modelo de baja única por lote
   o es la segunda familia con precio ofertado por línea** (ver el primer punto de
   esta sección). Sin verificar todavía.
+- **Sindicación como fuente secundaria.** Queda como posible fuente secundaria
+  de metadatos y descarga oportunista cuando exista `GeneralDocument` (sección
+  17.1), siempre con la navegación como respaldo obligatorio, nunca como
+  sustituto. No está previsto para la demo.
 
 ---
 
@@ -358,13 +362,20 @@ una pantalla compartida.
 Verificado en vivo, headless, contra la Plataforma real y dentro del contenedor
 Linux del worker (no solo en un script suelto). Ver `engine/app/scraping/pcsp.py`.
 
-- **El WAF de la Plataforma rechaza las descargas hechas con cliente HTTP aparte
-  del navegador**, incluso replicando cabeceras de un navegador real. Solo pasan
-  las peticiones del motor de render navegando de verdad. La descarga se hace
-  abriendo una pestaña y capturando el evento `download` del navegador, no con
-  una petición HTTP a mano. **Consecuencia: la automatización de navegador no es
-  sustituible por descarga directa por URL, ni siquiera si la sindicación
-  expusiera las URIs de los documentos.**
+- **El WAF distingue por tipo de URL, no rechaza toda descarga fuera del
+  navegador sin más.** Matizado en la sesión de sindicación (2026-09-02, ver
+  sección 17.1): las URLs capturadas del evento `download` dentro de la sesión
+  de navegador (estado JSF) sí requieren el motor de render — un cliente HTTP
+  aparte, incluso replicando cabeceras de un navegador real, es rechazado. Pero
+  las URLs `docAccCmpnt` con `DocumentIdParam` que trae el XML de sindicación
+  se descargaron con cliente HTTP plano (`curl -k`, sin cookies ni cabeceras de
+  navegador) sin problema: dos URIs reales probadas, HTTP 200 y PDF correcto en
+  ambas. Pendiente: no se ha probado con volumen, así que no se descarta
+  limitación de tasa. **La conclusión práctica se mantiene: la automatización
+  de navegador sigue siendo necesaria, porque el problema no es la descarga —
+  esa parte puede que ya esté resuelta para las URLs de sindicación — sino el
+  descubrimiento del documento, y la sindicación no lo cubre de forma fiable
+  (ver sección 17.1).**
 - Los identificadores JSF del formulario de búsqueda y los selectores
   `GetDocumentByIdServlet` y `docAccCmpnt` siguen siendo válidos a fecha de esta
   sesión (2026-09-02).
@@ -405,3 +416,56 @@ Linux del worker (no solo en un script suelto). Ver `engine/app/scraping/pcsp.py
   `bloqueado_en` supere un umbral razonable (p. ej. varias veces el timeout de
   navegación del scraping), respetando `intentos`/`max_intentos` igual que un
   fallo normal.
+
+---
+
+## 17.1 Hallazgos de sindicación (datos abiertos, sesión 2026-09-02)
+
+Sesión dedicada a comprobar si el XML CODICE de sindicación (ZIP mensual
+`licitacionesPerfilesContratanteCompleto3_AAAAMM.zip`) puede simplificar el
+descubrimiento de documentos. No tocó extracción ni el scraper. Verificado
+contra los ZIP de agosto 2024 y mayo 2025, cruzando tres expedientes reales
+ya presentes en `engine/tests/fixtures/pdfs`: `6.24/28510.0103` (pedido de
+acuerdo marco, matriz `2.18/04703.0019`), `6.24/28510.0088` y
+`6.24/28510.0193`.
+
+- **Existe un cuarto tipo de referencia documental que la especificación no
+  cita en el apartado 4.9**: `cac-place-ext:GeneralDocument`. Es ahí, no en
+  `LegalDocumentReference`/`TechnicalDocumentReference`/
+  `AdditionalDocumentReference`, donde apareció el único contrato firmado que
+  se encontró en toda la muestra.
+- **La cobertura documental es inconsistente y no se puede dar por
+  garantizada.** El expediente `6.24/28510.0103` — un pedido derivado de
+  acuerdo marco — no tiene **ninguna** referencia documental en ninguno de
+  sus estados (`ADJ` y `RES`), pese a que el scraper sí encuentra su
+  `ADJUDICACION_1.pdf` navegando. Los pedidos de acuerdo marco son un patrón
+  dominante en el corpus de ADIF (sección 3). **Consecuencia: la sindicación
+  no puede ser la fuente principal de documentos.**
+- **La Propuesta LC.27 y el Anuncio PCSP de adjudicación no aparecieron nunca**
+  en la muestra. Cuando hay algo de la fase de adjudicación, es el contrato
+  (`GeneralDocument`, ver primer punto), y solo a veces — ausente en
+  `6.24/28510.0103` y en `6.24/28510.0088` (este último aún en fase `PUB` en
+  los meses descargados).
+- **La MATRIZ no existe como campo estructurado.** Se buscó
+  `FrameworkAgreement`/`AcuerdoMarco` en el mes completo de agosto 2024: cero
+  resultados. El cruce con la matriz sigue dependiendo de la extracción por
+  etiqueta fija del Anuncio PCSP (sección 7), igual que hoy.
+- **No hay campo de baja porcentual en el XML.** Y lo confirma desde una
+  fuente independiente el hallazgo central de la sección 4: en
+  `6.24/28510.0103` y en `6.24/28510.0193`, el importe de licitación y el de
+  adjudicación (`TaxExclusiveAmount` en ambos bloques) son el mismo número.
+  La baja real (0,30 % en `6.24/28510.0193`) solo estaba en el texto del
+  contrato, no en ningún campo del XML.
+- **Nomenclatura de importes, verificada con datos reales — no hay
+  inversión.** En `ProcurementProject/BudgetAmount`, `TaxExclusiveAmount` es
+  el importe sin impuestos y `TotalAmount` el importe con impuestos. En
+  `TenderResult/AwardedTenderedProject/LegalMonetaryTotal`,
+  `TaxExclusiveAmount` sigue siendo sin impuestos, pero el importe con
+  impuestos se llama `PayableAmount`, no `TotalAmount` — son campos distintos
+  en cada bloque, así que el error del apartado 4.11.3 de la especificación
+  no genera ambigüedad real: los dos expedientes contrastados con su PDF
+  cuadraron exactamente.
+- **Un mismo expediente puede aparecer varias veces con el mismo `<id>`**
+  dentro de un mismo ZIP mensual — hasta tres versiones distintas observadas
+  para `6.24/28510.0193` en mayo 2025 (`ADJ`, `RES`, `RES`). Hay que quedarse
+  siempre con la más reciente por `<updated>`.
