@@ -21,6 +21,30 @@ arriba es la red de seguridad si no fue así.) Comprobar que responde:
 wsl -d Ubuntu-24.04 -u lucas -- docker ps
 ```
 
+### La VM de WSL se suspende sola y se lleva `dockerd` por delante
+
+Ajuste de esta máquina, no del proyecto: sin tocar nada, la VM ligera de WSL2
+se suspende tras un rato sin actividad (`vmIdleTimeout` de Windows, no algo
+de esta distro ni de Docker). Cuando pasa, `dockerd` se cae con ella —
+síntoma verificado en sesión: los cuatro servicios de `docker compose ps`
+en `Exited` y `dockerd` con un `Active: ... since` de segundos antes, sin que
+nadie tocara nada. Los trabajos de la cola que estaban `en_proceso` en ese
+momento se quedan huérfanos (CLAUDE.md sección 17). Corregido en
+`C:\Users\<usuario>\.wslconfig` (fuera del repo, uno por máquina):
+
+```ini
+[wsl2]
+vmIdleTimeout=-1
+```
+
+`-1` desactiva la suspensión por inactividad. Solo se aplica arrancando la VM
+de nuevo, nunca en caliente:
+
+```
+wsl --shutdown
+wsl -d Ubuntu-24.04 -u root -- systemctl start docker
+```
+
 ### Dónde vive el proyecto para `docker compose`
 
 El repositorio se edita en `C:\dev\ADIF` (Windows). Pero `docker compose` se

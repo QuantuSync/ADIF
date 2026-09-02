@@ -48,7 +48,7 @@ class AnthropicModelProvider(ModelProvider):
     def __init__(
         self,
         api_key: Optional[str] = None,
-        modelo: str = "claude-opus-5",
+        modelo: str = "claude-haiku-4-5",
         max_tokens: int = 2048,
         workspace_id: Optional[str] = None,
     ):

@@ -22,8 +22,13 @@ class Settings(BaseSettings):
 
     # Mapeo de cabecera (CLAUDE.md sección 6): única etapa de la cascada que
     # llama al modelo. La clave nunca se hardcodea, viene del entorno.
+    # Haiku por defecto: la tarea es traducir una cabecera de tabla a un
+    # diccionario de 6 claves, no razonamiento — Opus devolvía hasta 535
+    # tokens de salida para esa misma tarea (CLAUDE.md sección 17.2).
+    # Configurable por ANTHROPIC_MODEL para volver a un modelo mayor si una
+    # cabecera concreta lo necesita.
     anthropic_api_key: Optional[str] = None
-    anthropic_model: str = "claude-opus-5"
+    anthropic_model: str = "claude-haiku-4-5"
     # Solo necesario si ANTHROPIC_API_KEY es una clave ligada a identidad
     # (creada en la consola bajo un usuario, no una API key clásica de
     # workspace): la API la exige en la cabecera `anthropic-workspace-id` de

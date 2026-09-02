@@ -551,3 +551,118 @@ un script suelto.
   y la fusión por `clave_linea` en `guardar_lineas_catalogo` conservó el
   precio y la cantidad que ya traía `ANEJO_1.pdf` sin que la segunda pasada
   los borrase — exactamente el caso que describe el docstring de la función.
+
+---
+
+## 17.3 Migración a Haiku para el mapeo de cabecera, y coste por expediente (sesión 2026-09-02)
+
+Disparado por el propio dato de la sección 17.2: `claude-opus-5` devolvía
+hasta 535 tokens de salida para traducir una cabecera a un diccionario de 6
+claves — razonamiento (`thinking`) que la tarea no necesita. Traducir una
+cabecera nunca vista es correspondencia de etiquetas, no una tarea que se
+beneficie de un modelo grande.
+
+- **Modelo por defecto de `AnthropicModelProvider` cambiado a
+  `claude-haiku-4-5`** (`app/interfaces/model_provider.py`,
+  `app/config.py`), configurable por `ANTHROPIC_MODEL` igual que antes — el
+  worker ya leía esa variable (`app/worker.py`), así que el cambio de modelo
+  es solo el valor por defecto. `.env` y `.env.example` actualizados a
+  `claude-haiku-4-5`.
+- **Verificado contra la API real de Anthropic** (no un doble de test),
+  con las cachés vacías a propósito: sesión de base de datos en memoria
+  recién creada (sin filas en `cache_mapeo_cabecera`) y sin pasar por
+  `CachedModelProvider`, para forzar una llamada real en cada cabecera no
+  determinista. Se reprocesaron con `procesar_anejo` (cascada completa,
+  etapas 3 a 6) los dos mismos documentos de la sesión 17.2:
+  `6.24/28510.0008_ANEJO_3.pdf` (tabla de guantes, cabeceras con `Ó`
+  corrompida) y `6.25/28510.0027_ANEJO_1.pdf` (tabla de balasto, columnas
+  fantasma). Entre los dos aparecieron **5 firmas de cabecera distintas**
+  (2 y 3 respectivamente — más que las 3 de la sesión 17.2 porque esta vez
+  se recorrió el documento entero con la cascada real, no una cabecera
+  aislada elegida a mano) y las 5 forzaron una llamada real a Haiku.
+- **Los 5 mapeos salen idénticos en estructura a los que ya había validado
+  Opus**, verificado línea a línea:
+  - Las dos variantes de `ANEJO_3.pdf` (tabla de características técnicas
+    sin precio ni cantidad) devuelven `cantidad: null` y
+    `precio_unitario: null` en vez de inventar una columna — el mismo
+    comportamiento correcto que documenta el hallazgo de dominio de la
+    sección 17.2.
+  - Las tres variantes de `ANEJO_1.pdf` (0, 1 y 2 columnas fantasma
+    desplazando los índices) sitúan `cantidad` y `precio_unitario` en la
+    columna correcta en las tres, y `matricula: null` en las tres (esta
+    tabla de balasto no trae matrícula, no es un fallo del mapeo).
+  - **Ninguna cabecera falló.** No hizo falta volver a un modelo mayor para
+    ningún caso — la salvedad que pedía la tarea no aplicó.
+- **Coste medido, Haiku, 5 llamadas reales:** de 829 a 1091 tokens de
+  entrada, 48-49 de salida en las cinco (media 926 in / 49 out) — nunca los
+  535 de salida que se vio con Opus en un caso. A precio de Haiku
+  ($1,00 / $5,00 por millón de tokens entrada/salida), cada llamada cuesta
+  **≈ 0,0012 $** (≈ 0,0011 €). Las tres llamadas de Opus de la sesión 17.2
+  (1397/56, 1323/56, 1066/535 tokens) costaban, al precio de Opus
+  ($5,00 / $25,00 por millón), entre 0,0080 $ y 0,0187 $ cada una, media
+  ≈ 0,0117 $. **Haiku sale de la cascada ≈ 10 veces más barato por llamada
+  que Opus para esta tarea concreta.** (Conversión USD→EUR indicativa a
+  ≈0,92 €/$; la facturación real de Anthropic es en dólares.)
+- **Caché de desarrollo (`engine/.cache_modelo_dev/`) vaciada** como parte
+  de esta verificación: su clave es un hash de `(prompt, esquema)`, no
+  incluye el modelo, así que un acierto de caché anterior a este cambio
+  habría seguido sirviéndose sin pasar nunca por Haiku. Vacía no rompe
+  nada — se repuebla sola en el primer uso real de cada firma.
+
+### Coste estimado de procesar un expediente completo
+
+Con Haiku como modelo por defecto y el precio de arriba. La sección 6 fija
+la regla que hace esta cuenta favorable: una llamada por firma de cabecera
+nunca vista, nunca por documento ni por fila.
+
+- **Peor caso (expediente nuevo, cachés en frío — el primer expediente que
+  ve una plantilla, o el primero de la demo).** Un expediente típico trae 1
+  a 3 documentos con cuadro de precios (anejo, y a veces un segundo anejo de
+  características técnicas que repite el mismo cuadro, sección 3). Medido
+  en este mismo expediente (`6.24/28510.0008`, con `ANEJO_1` y `ANEJO_3`):
+  hasta 2-3 firmas de cabecera distintas por documento por las columnas
+  fantasma y la corrupción de extracción. Cota razonable: **hasta 6-8
+  llamadas al modelo por expediente** (mapeo de cabecera), más 1 llamada
+  adicional por documento si trae filas huérfanas que agrupar (sección 6;
+  camino no ejercitado todavía contra ningún fixture real, así que esa cota
+  es sin verificar) y, rara vez, 1 llamada de `Código del material` si no
+  casa nada del vocabulario controlado. **Techo defendible: ≈ 8-10 llamadas,
+  ≈ 0,010-0,012 $ (≈ 0,010-0,011 €) por expediente** — sigue siendo una
+  fracción de céntimo.
+- **Régimen normal, caché caliente (a partir de los primeros expedientes
+  procesados).** La sección 3 mide que las cabeceras se repiten mucho —
+  "una aparece 20 veces, otra 6, otra 4" sobre solo 7 documentos — así que
+  en cuanto el catálogo de firmas se estabiliza, un expediente nuevo casi
+  siempre trae solo cabeceras ya vistas. **0 llamadas al modelo en el caso
+  típico**, y 1 llamada (≈ 0,0012 $) en el expediente ocasional que
+  introduce una variante de cabecera realmente nueva.
+- **Efecto agregado.** Sobre un lote de, por ejemplo, 45 expedientes (el
+  corpus de la sección 3), el coste de mapeo de cabecera no pasa de un
+  puñado de céntimos en total, aunque cada uno se procesara con la caché en
+  frío — y baja hacia cero según crece el catálogo, por diseño (sección 6:
+  "el sistema llama menos al modelo cuantos más expedientes procesa"). El
+  coste de esta etapa es irrelevante frente a cualquier otro coste del
+  proyecto (cómputo, almacenamiento, scraping); no es la partida que hay
+  que vigilar para controlar el gasto.
+
+---
+
+## 17.4 Estabilidad de `dockerd` en WSL: `vmIdleTimeout` (sesión 2026-09-02)
+
+Ajuste de máquina, no de proyecto — documentado también en el `README.md`
+raíz porque afecta a cualquiera que desarrolle en este equipo, no solo a
+este repositorio.
+
+- **Causa encontrada de las caídas de `dockerd` de la sección 17 (nueve en
+  una sola sesión):** el `vmIdleTimeout` de WSL2 (por defecto 60000 ms) —
+  la VM ligera de WSL se suspende sola sin ningún comando `wsl` ni proceso
+  adjunto activo durante ese tiempo, y se lleva `dockerd` con ella. No es un
+  fallo de Docker ni de la distro: es el comportamiento por defecto de WSL2
+  documentado para ese ajuste.
+- **Corregido con `vmIdleTimeout=-1` en `C:\Users\<usuario>\.wslconfig`**
+  (fuera del repositorio, uno por máquina — ver README). Aplicado con
+  `wsl --shutdown` seguido de un arranque limpio; **verificado que aguanta**
+  dejando la VM sin ningún comando `wsl` activo durante 90 segundos seguidos
+  (por encima del umbral por defecto de 60 s que causaba la caída) y
+  comprobando después que `docker.service` seguía con el mismo `Active:
+  ... since` de antes de la espera, sin reinicio.
