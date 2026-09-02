@@ -1,0 +1,21 @@
+# Material de referencia (no forma parte del repositorio, ver CLAUDE.md sección 13)
+Ejemplo/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+
+# Node / Next.js
+node_modules/
+.next/
+
+# Entorno local
+.env
+
+# Editores/SO
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

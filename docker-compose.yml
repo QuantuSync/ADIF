@@ -1,0 +1,61 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-adif}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-adif}
+      POSTGRES_DB: ${POSTGRES_DB:-adif}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-adif} -d ${POSTGRES_DB:-adif}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: ./engine
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-adif}:${POSTGRES_PASSWORD:-adif}@postgres:5432/${POSTGRES_DB:-adif}
+      DOCUMENT_STORAGE_PATH: /data/documentos
+    volumes:
+      - documentos:/data/documentos
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  worker:
+    build: ./engine
+    command: python -m app.worker
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-adif}:${POSTGRES_PASSWORD:-adif}@postgres:5432/${POSTGRES_DB:-adif}
+      DOCUMENT_STORAGE_PATH: /data/documentos
+      WORKER_POLL_INTERVAL_SECONDS: 3
+    volumes:
+      - documentos:/data/documentos
+    depends_on:
+      api:
+        condition: service_healthy
+
+  web:
+    build: ./web
+    environment:
+      API_URL: ${API_URL:-http://api:8000}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
+  documentos:
