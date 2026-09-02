@@ -5,6 +5,17 @@ from typing import Optional
 from pydantic import BaseModel, ConfigDict
 
 
+class LoteOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    identificador_lote: str
+    baja_lote: Optional[Decimal] = None
+    importe_licitacion: Optional[Decimal] = None
+    importe_adjudicacion: Optional[Decimal] = None
+    adjudicatario: Optional[str] = None
+
+
 class ExpedienteOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -17,6 +28,12 @@ class ExpedienteOut(BaseModel):
     importe_licitacion: Optional[Decimal] = None
     importe_adjudicacion: Optional[Decimal] = None
     baja_global: Optional[Decimal] = None
+    # CLAUDE.md, encargo de esta sesión, punto 4 (ajuste 3): True cuando hay
+    # 2+ lotes con baja distinta entre sí — `baja_global` queda en None a
+    # propósito y la web tiene que decir explícitamente "varía por lote", no
+    # dejar el campo vacío sin explicación.
+    baja_variable_por_lote: Optional[bool] = None
+    lotes: list[LoteOut] = []
     estado: str
     error: Optional[str] = None
     created_at: datetime
@@ -36,14 +53,17 @@ class LineaCatalogoOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    lote_id: int
+    # None cuando la tabla de origen no se pudo asociar a un único lote sin
+    # ambigüedad (CLAUDE.md, encargo de esta sesión, punto 3): la línea
+    # existe y se puede revisar, pero no cuelga de ningún lote.
+    lote_id: Optional[int] = None
     expediente_id: int
     codigo_expediente: str
     codigo_matriz: Optional[str] = None
     nombre_proyecto: Optional[str] = None
     codigo_interno: Optional[str] = None
     codigos_cruzados: Optional[bool] = None
-    identificador_lote: str
+    identificador_lote: Optional[str] = None
     codigo_precio: Optional[str] = None
     matricula: Optional[str] = None
     descripcion: str
@@ -54,6 +74,9 @@ class LineaCatalogoOut(BaseModel):
     baja_lote: Optional[Decimal] = None
     precio_adjudicado: Optional[Decimal] = None
     comentarios: Optional[str] = None
+    # Por qué esta línea no tiene lote (siempre None si `lote_id` no es
+    # None) — distinto de `comentarios`, que son notas humanas.
+    motivo_revision: Optional[str] = None
     estado_revision: str
     # Trazabilidad (CLAUDE.md sección 9.10 y encargo de esta sesión, punto 2):
     # de qué documento, página y fragmento salió esta línea.

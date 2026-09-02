@@ -56,3 +56,19 @@ ANEJO_PRECIOS_GUANTES = FIXTURES_DIR / "6.24_28510.0008_ANEJO_1.pdf"
 # repetida dentro del mismo documento. CLAUDE.md sección 3: "11 variantes
 # distintas en solo 7 documentos".
 ANEJO_PRECIOS_TRAVIESAS = FIXTURES_DIR / "6.24_28510.0088_ANEJO_1.pdf"
+
+# Expediente multi-lote real (encargo de la sesión de extracción por lote):
+# Resolución de Adjudicación (plantilla L9_AF.01-FE) de "SUMINISTRO DE
+# BALASTO... 6 LOTES", con solo LOTE 1 (7,13 %) y LOTE 3 (1,18 %) adjudicados
+# — los otros cuatro lotes del expediente no llegaron a esta resolución. Es
+# el caso que destapó que el motor se quedaba con la primera baja del texto
+# y la presentaba como la del expediente entero.
+RESOLUCION_MULTI_LOTE = FIXTURES_DIR / "6.25_28510.0027_ADJUDICACION_1.pdf"
+
+# Pliego del mismo expediente (en realidad el nombre "ANEJO_1" es el Pliego
+# de Prescripciones Técnicas completo, igual que ANEJO_PRECIOS_GUANTES): su
+# Anejo Nº1 trae un cuadro de precios unitarios por lote, con los mismos
+# códigos P-1..P-6 repetidos en cada uno de los 6 lotes (LOTE 1 a LOTE 6),
+# cada tabla precedida por su propia cabecera "LOTE N" — el caso real que
+# ejercita la asociación tabla->lote por posición (app.extraccion.lote_tabla).
+ANEJO_PRECIOS_BALASTO_MULTI_LOTE = FIXTURES_DIR / "6.25_28510.0027_ANEJO_1.pdf"

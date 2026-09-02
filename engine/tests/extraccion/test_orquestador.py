@@ -16,6 +16,7 @@ from app.extraccion.orquestador import LOTE_UNICO, ejecutar_extraccion_expedient
 from app.interfaces.document_storage import DocumentStorage
 from app.models import Documento, EstadoExpediente, Expediente, Lote, LineaCatalogo, TipoDocumento, TrazaOrigen
 from tests import fixtures as fx
+from tests.extraccion.dobles import ProveedorModeloCabeceraPorContenido, ProveedorModeloFalso
 
 
 class _StorageDirecta(DocumentStorage):
@@ -177,3 +178,107 @@ def test_trabajo_sin_expediente_id_falla_con_mensaje_claro(db_session):
         assert False, "debía lanzar"
     except RuntimeError as exc:
         assert "expediente_id" in str(exc)
+
+
+def test_expediente_0027_multi_lote_produce_baja_correcta_por_lote(db_session):
+    """Caso de aceptación de la sesión de extracción por lote: expediente
+    real 6.25/28510.0027, "SUMINISTRO DE BALASTO... 6 LOTES", cuya Resolución
+    de Adjudicación solo adjudica dos de los seis (LOTE 1 al 7,13 %, LOTE 3
+    al 1,18 %, presupuestos distintos) — el caso que destapó que el motor se
+    quedaba con la primera baja del texto y la presentaba como la del
+    expediente entero.
+
+    El modelo de esta cabecera concreta necesita un `ModelProvider` (la
+    cabecera real trae un carácter corrompido, "CODIFICACI�N DEL PRECIO",
+    que no casa con ningún alias determinista) — se usa
+    `ProveedorModeloCabeceraPorContenido`, no un doble de respuesta fija, ver
+    su docstring para el porqué (cabecera y filas de datos de esta tabla
+    concreta no alinean su columna fantasma en el mismo índice)."""
+    expediente = _crear_expediente_con_documentos(
+        db_session,
+        "6.25/28510.0027",
+        [
+            ("ADJUDICACION", fx.RESOLUCION_MULTI_LOTE),
+            ("ANEJO", fx.ANEJO_PRECIOS_BALASTO_MULTI_LOTE),
+        ],
+    )
+    trabajo = SimpleNamespace(expediente_id=expediente.id)
+    modelo = ProveedorModeloCabeceraPorContenido()
+
+    resultado = ejecutar_extraccion_expediente(db_session, _StorageDirecta(), trabajo, model_provider=modelo)
+
+    db_session.refresh(expediente)
+    lotes = db_session.query(Lote).filter_by(expediente_id=expediente.id).order_by(Lote.identificador_lote).all()
+    assert [l.identificador_lote for l in lotes] == ["1", "3"]
+
+    lote1, lote3 = lotes
+    assert lote1.baja_lote == Decimal("0.0713")
+    assert lote1.importe_licitacion == Decimal("593375.00")
+    assert lote1.importe_adjudicacion == Decimal("593375.00")
+    assert lote1.adjudicatario == "ÁRIDOS DE VILLACASTÍN, S.A."
+
+    assert lote3.baja_lote == Decimal("0.0118")
+    assert lote3.importe_licitacion == Decimal("853250.00")
+    assert lote3.importe_adjudicacion == Decimal("853250.00")
+    assert lote3.adjudicatario == "EMIPESA, S.A."
+
+    # CLAUDE.md, encargo de esta sesión, punto 4: un expediente con lotes de
+    # bajas distintas no tiene una baja única — nunca se inventa una media,
+    # y la web tiene que poder explicar el vacío (ajuste 3, `baja_variable_por_lote`).
+    assert expediente.baja_global is None
+    assert expediente.baja_variable_por_lote is True
+    assert expediente.importe_licitacion == Decimal("1446625.00")
+    assert expediente.importe_adjudicacion == Decimal("1446625.00")
+
+    # Las trazas de baja/importe declarado cuelgan del lote, no del
+    # expediente (`_traza(..., entidad_tipo="lote")`).
+    trazas_lote = db_session.query(TrazaOrigen).filter_by(entidad_tipo="lote").all()
+    assert {t.entidad_id for t in trazas_lote} == {lote1.id, lote3.id}
+
+    # Cuadro de precios: los seis lotes del Pliego (1 a 6) traen tabla de
+    # precios, pero solo 1 y 3 están entre los lotes declarados por la
+    # Resolución (CLAUDE.md, encargo de esta sesión, punto 3: la tabla de un
+    # lote no adjudicado, o cuya cabecera "LOTE N" no se pudo leer en la
+    # franja que le precede, no se asigna por cercanía — queda huérfana).
+    lineas_lote3 = (
+        db_session.query(LineaCatalogo)
+        .filter_by(lote_id=lote3.id)
+        .order_by(LineaCatalogo.codigo_precio)
+        .all()
+    )
+    assert [l.codigo_precio for l in lineas_lote3] == ["P-1", "P-2", "P-3", "P-4", "P-5", "P-6"]
+    p1 = lineas_lote3[0]
+    assert p1.precio_unitario == Decimal("10.8500")
+    # 10,85 * (1 - 0,0118) — la baja de SU lote, no la del expediente
+    # (CLAUDE.md, encargo de esta sesión, punto 2). Numeric(14, 4) en la
+    # columna redondea a 4 decimales al guardar.
+    assert p1.precio_adjudicado == Decimal("10.7220")
+    assert all(l.expediente_id == expediente.id for l in lineas_lote3)
+
+    huerfanas = (
+        db_session.query(LineaCatalogo)
+        .filter_by(expediente_id=expediente.id, lote_id=None)
+        .all()
+    )
+    assert len(huerfanas) > 0
+    assert all(l.motivo_revision for l in huerfanas)
+    assert all(l.expediente_id == expediente.id for l in huerfanas)
+    # 28, no 6: LOTE 2, 4, 5 y 6 (y los fragmentos sueltos de LOTE 1) tienen
+    # todos su propio "P-1".."P-6" — sin lote que las separe, fundirlas por
+    # `codigo_precio` a secas mezclaría datos reales de lotes distintos entre
+    # sí (bug real encontrado al verificar contra el stack real: antes de
+    # desambiguar por página y posición de tabla en `app.extraccion.pipeline_anejo`,
+    # esto colapsaba a solo 6 filas).
+    assert len(huerfanas) == 28
+    # Ninguna línea de LOTE 1 llegó a asociarse a su lote en este documento
+    # concreto (su tabla se reparte entre dos páginas y la cabecera "LOTE 1"
+    # solo aparece en la primera; medido y reportado, no corregido por
+    # adivinación — ver `app.extraccion.lote_tabla`, ajuste 2 de esta sesión).
+    assert db_session.query(LineaCatalogo).filter_by(lote_id=lote1.id).count() == 0
+
+    # Con líneas huérfanas, el expediente va a revisión — no se presenta
+    # como completado un catálogo con líneas sin lote determinado.
+    assert expediente.estado == EstadoExpediente.pendiente_revision
+    assert expediente.error is not None
+    assert resultado["lotes"] == ["1", "3"]
+    assert resultado["motivo_revision"] is not None

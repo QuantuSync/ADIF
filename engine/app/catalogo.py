@@ -34,6 +34,7 @@ def construir_linea_catalogo(
     mapeo: dict[str, Optional[int]],
     pagina: int,
     documento_origen_id: Optional[int],
+    expediente_id: int,
     baja_lote: Optional[Decimal],
     orden_aparicion: int,
 ) -> dict:
@@ -41,7 +42,12 @@ def construir_linea_catalogo(
     fila cruda de tabla + el mapeo de columnas de la etapa 5 -> los campos de
     una `LineaCatalogo`. `precio_adjudicado` se deriva aquí, no se busca en
     ningún documento (CLAUDE.md sección 4: "no existe una tabla de precios
-    adjudicados")."""
+    adjudicados").
+
+    `expediente_id` viaja en la línea desde este punto (encargo de esta
+    sesión, punto 3): una línea cuya tabla de origen no se pudo asociar a un
+    único lote sin ambigüedad se guarda igualmente, con `lote_id=None` —
+    huérfana pero trazable hasta su expediente."""
 
     def _valor(campo: str) -> Optional[str]:
         indice = mapeo.get(campo)
@@ -66,6 +72,7 @@ def construir_linea_catalogo(
 
     return {
         "clave_linea": calcular_clave_linea(codigo_precio, matricula, descripcion, orden_aparicion),
+        "expediente_id": expediente_id,
         "orden_aparicion": orden_aparicion,
         "codigo_precio": codigo_precio,
         "matricula": matricula,
@@ -86,12 +93,13 @@ def construir_lineas_desde_tabla(
     tabla: TablaExtraida,
     mapeo: dict[str, Optional[int]],
     documento_origen_id: Optional[int],
+    expediente_id: int,
     baja_lote: Optional[Decimal],
     orden_inicial: int,
 ) -> list[dict]:
     return [
         construir_linea_catalogo(
-            fila, mapeo, tabla.pagina, documento_origen_id, baja_lote, orden_inicial + indice
+            fila, mapeo, tabla.pagina, documento_origen_id, expediente_id, baja_lote, orden_inicial + indice
         )
         for indice, fila in enumerate(tabla.filas)
     ]
@@ -123,7 +131,9 @@ def _combinar_por_clave(lineas: list[dict]) -> list[dict]:
     return list(combinadas.values())
 
 
-def guardar_lineas_catalogo(db: Session, lote_id: int, lineas: list[dict]) -> ResultadoGuardadoCatalogo:
+def guardar_lineas_catalogo(
+    db: Session, lote_id: Optional[int], lineas: list[dict]
+) -> ResultadoGuardadoCatalogo:
     """Escritura por clave, no añadido ciego (CLAUDE.md sección 9.9): una
     línea ya vista para este lote se actualiza, nunca se duplica. La
     actualización solo pisa los campos que la nueva extracción sí trae
@@ -131,13 +141,23 @@ def guardar_lineas_catalogo(db: Session, lote_id: int, lineas: list[dict]) -> Re
     cuadro de precios puede reaparecer en el documento con menos columnas
     (p.ej. una tabla de "criterios técnicos" que repite código, descripción
     y precio pero no trae cantidad): la segunda pasada no debe borrar la
-    cantidad que sí trajo la primera."""
+    cantidad que sí trajo la primera.
+
+    `lote_id=None` es el caso huérfano (CLAUDE.md, encargo de esta sesión,
+    punto 3): una tabla cuyo lote no se pudo determinar sin ambigüedad. El
+    filtro de existencia siempre incluye `expediente_id` además de
+    `lote_id`, aunque `lote_id` ya identifique el lote cuando no es None —
+    sin él, dos huérfanas del mismo `codigo_precio` ("P-001", frecuente
+    entre expedientes distintos) en dos expedientes distintos colisionarían
+    entre sí, porque Postgres no deduplica `NULL` en la constraint UNIQUE de
+    `lote_id`: aquí la idempotencia de las huérfanas la garantiza este
+    filtro explícito, no la constraint de base de datos."""
     creadas = 0
     actualizadas = 0
     for datos in _combinar_por_clave(lineas):
         existente = (
             db.query(LineaCatalogo)
-            .filter_by(lote_id=lote_id, clave_linea=datos["clave_linea"])
+            .filter_by(lote_id=lote_id, expediente_id=datos["expediente_id"], clave_linea=datos["clave_linea"])
             .one_or_none()
         )
         if existente is None:

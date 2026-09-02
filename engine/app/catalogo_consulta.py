@@ -46,7 +46,7 @@ def _aplicar_filtros(
 @dataclass(frozen=True)
 class PaginaCatalogo:
     total: int
-    filas: list[tuple[LineaCatalogo, Lote, Expediente, Optional[Documento]]]
+    filas: list[tuple[LineaCatalogo, Optional[Lote], Expediente, Optional[Documento]]]
 
 
 def consultar_catalogo(
@@ -58,18 +58,24 @@ def consultar_catalogo(
     pagina: int = 1,
     tamano_pagina: int = 50,
 ) -> PaginaCatalogo:
+    # `Lote` es outerjoin: una línea huérfana (CLAUDE.md, encargo de esta
+    # sesión, punto 3 — su tabla de origen no se pudo asociar a un lote sin
+    # ambigüedad) tiene `lote_id=None` pero sigue teniendo que aparecer en
+    # el catálogo/cola de revisión. El join a `Expediente` ya no depende de
+    # `Lote` (antes `lineas_catalogo -> lotes -> expedientes` era el único
+    # camino; ahora `LineaCatalogo.expediente_id` es directo).
     base = (
         select(LineaCatalogo, Lote, Expediente, Documento)
-        .join(Lote, LineaCatalogo.lote_id == Lote.id)
-        .join(Expediente, Lote.expediente_id == Expediente.id)
+        .join(Expediente, LineaCatalogo.expediente_id == Expediente.id)
+        .outerjoin(Lote, LineaCatalogo.lote_id == Lote.id)
         .outerjoin(Documento, LineaCatalogo.documento_origen_id == Documento.id)
     )
     base = _aplicar_filtros(base, expediente, lote, matricula, q)
 
     conteo_stmt = _aplicar_filtros(
         select(func.count(LineaCatalogo.id))
-        .join(Lote, LineaCatalogo.lote_id == Lote.id)
-        .join(Expediente, Lote.expediente_id == Expediente.id),
+        .join(Expediente, LineaCatalogo.expediente_id == Expediente.id)
+        .outerjoin(Lote, LineaCatalogo.lote_id == Lote.id),
         expediente, lote, matricula, q,
     )
     total = db.execute(conteo_stmt).scalar_one()
@@ -83,17 +89,19 @@ def consultar_catalogo(
     return PaginaCatalogo(total=total, filas=[tuple(f) for f in filas])
 
 
-def fila_a_dict(linea: LineaCatalogo, lote: Lote, expediente: Expediente, documento: Optional[Documento]) -> dict:
+def fila_a_dict(
+    linea: LineaCatalogo, lote: Optional[Lote], expediente: Expediente, documento: Optional[Documento]
+) -> dict:
     return {
         "id": linea.id,
-        "lote_id": lote.id,
+        "lote_id": lote.id if lote else None,
         "expediente_id": expediente.id,
         "codigo_expediente": expediente.codigo_expediente,
         "codigo_matriz": expediente.codigo_matriz,
         "nombre_proyecto": expediente.nombre_proyecto,
         "codigo_interno": expediente.codigo_interno,
         "codigos_cruzados": expediente.codigos_cruzados,
-        "identificador_lote": lote.identificador_lote,
+        "identificador_lote": lote.identificador_lote if lote else None,
         "codigo_precio": linea.codigo_precio,
         "matricula": linea.matricula,
         "descripcion": linea.descripcion,
@@ -104,6 +112,7 @@ def fila_a_dict(linea: LineaCatalogo, lote: Lote, expediente: Expediente, docume
         "baja_lote": linea.baja_lote,
         "precio_adjudicado": linea.precio_adjudicado,
         "comentarios": linea.comentarios,
+        "motivo_revision": linea.motivo_revision,
         "estado_revision": linea.estado_revision.value,
         "documento_origen_id": linea.documento_origen_id,
         "documento_origen_nombre": documento.nombre_archivo if documento else None,

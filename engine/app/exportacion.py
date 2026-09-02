@@ -59,7 +59,7 @@ def generar_excel_catalogo(db: Session) -> bytes:
                 linea.codigo_material,
                 float(linea.cantidad) if linea.cantidad is not None else None,
                 float(linea.precio_unitario) if linea.precio_unitario is not None else None,
-                lote.identificador_lote,
+                lote.identificador_lote if lote else None,
                 linea.comentarios,
             ])
         if pagina * _TAMANO_LOTE >= resultado.total:

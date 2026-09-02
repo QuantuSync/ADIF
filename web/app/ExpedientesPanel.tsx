@@ -2,6 +2,15 @@
 
 import { useEffect, useState } from "react";
 
+export type Lote = {
+  id: number;
+  identificador_lote: string;
+  baja_lote: string | null;
+  importe_licitacion: string | null;
+  importe_adjudicacion: string | null;
+  adjudicatario: string | null;
+};
+
 export type Expediente = {
   id: number;
   codigo_expediente: string;
@@ -9,6 +18,11 @@ export type Expediente = {
   importe_licitacion: string | null;
   importe_adjudicacion: string | null;
   baja_global: string | null;
+  // CLAUDE.md, encargo de la sesión de multi-lote: cuando hay varios lotes
+  // con baja distinta, `baja_global` es null a propósito y este campo lo
+  // explica — nunca se muestra un "—" mudo que parezca un fallo.
+  baja_variable_por_lote: boolean | null;
+  lotes: Lote[];
   estado: string;
   error: string | null;
 };
@@ -43,6 +57,59 @@ function formatearPorcentaje(valor: string | null): string {
 function formatearImporte(valor: string | null): string {
   if (valor === null) return "—";
   return `${Number(valor).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
+}
+
+// Un expediente con lotes de baja distinta no tiene una baja única (CLAUDE.md,
+// encargo de la sesión de multi-lote): nunca se muestra un valor inventado
+// ni un vacío mudo — si varía por lote, lo dice explícitamente y despliega
+// el detalle por lote.
+function CeldaBaja({ expediente }: { expediente: Expediente }) {
+  if (expediente.lotes.length <= 1) {
+    return <>{formatearPorcentaje(expediente.baja_global)}</>;
+  }
+  if (!expediente.baja_variable_por_lote) {
+    // Varios lotes pero comparten la misma baja: se muestra igual que si
+    // fuera una sola, con el detalle disponible por si hace falta.
+    return (
+      <details>
+        <summary style={{ cursor: "pointer" }}>{formatearPorcentaje(expediente.baja_global)}</summary>
+        <TablaLotes lotes={expediente.lotes} />
+      </details>
+    );
+  }
+  return (
+    <details>
+      <summary style={{ cursor: "pointer", color: "#b45309", fontWeight: 600 }}>Varía por lote</summary>
+      <TablaLotes lotes={expediente.lotes} />
+    </details>
+  );
+}
+
+function TablaLotes({ lotes }: { lotes: Lote[] }) {
+  return (
+    <table style={{ marginTop: "0.4rem", fontSize: "0.85rem", borderCollapse: "collapse" }}>
+      <thead>
+        <tr>
+          <th style={{ textAlign: "left", padding: "0.2rem 0.5rem 0.2rem 0" }}>Lote</th>
+          <th style={{ textAlign: "left", padding: "0.2rem 0.5rem" }}>Baja</th>
+          <th style={{ textAlign: "left", padding: "0.2rem 0.5rem" }}>Licitación</th>
+          <th style={{ textAlign: "left", padding: "0.2rem 0.5rem" }}>Adjudicación</th>
+          <th style={{ textAlign: "left", padding: "0.2rem 0.5rem" }}>Adjudicatario</th>
+        </tr>
+      </thead>
+      <tbody>
+        {lotes.map((lote) => (
+          <tr key={lote.id}>
+            <td style={{ padding: "0.2rem 0.5rem 0.2rem 0" }}>{lote.identificador_lote}</td>
+            <td style={{ padding: "0.2rem 0.5rem" }}>{formatearPorcentaje(lote.baja_lote)}</td>
+            <td style={{ padding: "0.2rem 0.5rem" }}>{formatearImporte(lote.importe_licitacion)}</td>
+            <td style={{ padding: "0.2rem 0.5rem" }}>{formatearImporte(lote.importe_adjudicacion)}</td>
+            <td style={{ padding: "0.2rem 0.5rem" }}>{lote.adjudicatario ?? "—"}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
 }
 
 export default function ExpedientesPanel({
@@ -166,6 +233,10 @@ export default function ExpedientesPanel({
         <tbody>
           {expedientes.map((exp) => {
             const enCurso = exp.estado === "descargando" || exp.estado === "extrayendo";
+            // No reprocesar por accidente un expediente ya completado
+            // (encargo de la sesión de pulido): hay que borrarlo y crearlo
+            // de nuevo si de verdad hace falta relanzarlo.
+            const completado = exp.estado === "completado";
             return (
               <tr key={exp.id} style={{ borderBottom: "1px solid #eee" }}>
                 <td style={{ padding: "0.4rem" }}>{exp.codigo_expediente}</td>
@@ -185,18 +256,22 @@ export default function ExpedientesPanel({
                 </td>
                 <td style={{ padding: "0.4rem" }}>{formatearImporte(exp.importe_licitacion)}</td>
                 <td style={{ padding: "0.4rem" }}>{formatearImporte(exp.importe_adjudicacion)}</td>
-                <td style={{ padding: "0.4rem" }}>{formatearPorcentaje(exp.baja_global)}</td>
+                <td style={{ padding: "0.4rem" }}>
+                  <CeldaBaja expediente={exp} />
+                </td>
                 <td style={{ padding: "0.4rem" }}>
                   <button
                     onClick={() => lanzarDescarga(exp.id)}
-                    disabled={enCurso || lanzando === exp.id}
+                    disabled={enCurso || completado || lanzando === exp.id}
+                    title={completado ? "Ya está completado — no se puede relanzar desde aquí" : undefined}
                     style={{ padding: "0.3rem 0.6rem", marginRight: "0.4rem" }}
                   >
                     Descargar
                   </button>
                   <button
                     onClick={() => lanzarExtraccion(exp.id)}
-                    disabled={enCurso || lanzando === exp.id}
+                    disabled={enCurso || completado || lanzando === exp.id}
+                    title={completado ? "Ya está completado — no se puede relanzar desde aquí" : undefined}
                     style={{ padding: "0.3rem 0.6rem" }}
                   >
                     Extraer

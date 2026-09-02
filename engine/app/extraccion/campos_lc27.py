@@ -22,8 +22,24 @@ from typing import Optional
 from app.extraccion.campos_pcsp import CODIGO_EXPEDIENTE_RE, CampoAnclado
 from app.extraccion.texto import PaginaTexto
 
+# Bug real (encargo de esta sesión, punto 5): la versión original exigía
+# `\s*\n\s*` justo entre la etiqueta y el número — solo espacios y como
+# mucho un salto de línea, nada más. Un documento multi-lote (6.25/28510.0027)
+# mete la cabecera de una tabla ("BASE IMPONIBLE IVA: (21%) TOTAL CON IVA")
+# ahí en medio y la regex no encontraba nada. `[^\d]{0,120}` salta cualquier
+# texto no numérico en medio — incluidos saltos de línea, que el caso de un
+# solo lote sí necesita cruzar ("licitación:\n138.000,00 €") — hasta el
+# primer dígito, sea el importe real o no.
+#
+# Documentos multi-lote no usan este valor de todos modos (CLAUDE.md, punto
+# 1 del encargo: el importe de licitación por lote sale de
+# `app.extraccion.lotes`, que lee la tabla "LOTE N <importe> €" directamente
+# con su propio patrón anclado a inicio de línea, y el del expediente se
+# suma a partir de esos) — esta regex solo importa ya para el camino de un
+# único lote, donde no hay cabecera de tabla de por medio en el corpus
+# visto, así que no hace falta que `[^\d]` esquive el "(21%)" del multi-lote.
 _IMPORTE_LICITACION_RE = re.compile(
-    r"Presupuesto de licitaci[oó]n:\s*\n\s*([\d.,]+)\s*€", re.IGNORECASE
+    r"Presupuesto de licitaci[oó]n:[^\d]{0,120}([\d.,]+)\s*€", re.IGNORECASE
 )
 # "Base imponible" aparece dos veces en la Propuesta: como cabecera de la
 # tabla de licitación ("(A) Base Imponible IVA (21%) Total con IVA", sin

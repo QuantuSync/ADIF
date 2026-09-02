@@ -354,6 +354,13 @@ una pantalla compartida.
   de metadatos y descarga oportunista cuando exista `GeneralDocument` (sección
   17.1), siempre con la navegación como respaldo obligatorio, nunca como
   sustituto. No está previsto para la demo.
+- **Patrón de Propuesta LC.27 multi-lote, sin verificar contra un documento
+  real** (sección 19): el corpus completo de 45 expedientes no trae ninguna
+  LC.27 con más de un lote, solo la Resolución de `6.25/28510.0027`. El
+  extractor de `app/extraccion/lotes.py` asume la misma redacción "En el
+  LOTE N..." para las dos plantillas por analogía, no por evidencia — si
+  aparece una LC.27 multi-lote real, revisar ese módulo antes de confiar en
+  el resultado.
 
 ---
 
@@ -779,3 +786,82 @@ exportación a Excel y cruce con el Excel de códigos.
   es la lectura literal de la tabla de la sección 7 ("Precio unitario |
   Cuadro de precios | No"); es una decisión de esta sesión, no una
   confirmación del cliente — sigue marcado como pendiente.
+
+---
+
+## 19. Extracción por lote (sesión 2026-09-02)
+
+Disparada por el expediente real `6.25/28510.0027` ("SUMINISTRO DE BALASTO...
+6 LOTES"): su Resolución de Adjudicación es multi-lote (LOTE 1 al 7,13 %,
+LOTE 3 al 1,18 %, presupuestos distintos), y el motor se quedaba con la
+primera baja que encontraba en el texto y la presentaba como la del
+expediente entero — **dato incorrecto, no solo incompleto**. `lotes` existía
+en el esquema desde el esqueleto pero no se usaba.
+
+- **Etapa 2, camino multi-lote** (`app/extraccion/lotes.py`): la Resolución
+  declara cada lote en un bloque autocontenido ("En el LOTE N... con una
+  baja del X%... Base imponible... €"), anclado a la frase literal "En el
+  LOTE" (no a cualquier mención suelta de "LOTE N", que también aparece sin
+  baja cerca en la cabecera "DATOS DE LA LICITACIÓN" y en la tabla de
+  presupuesto). El importe de licitación por lote sale de una tabla aparte
+  ("Presupuesto de licitación: BASE IMPONIBLE IVA..."), con filas que
+  empiezan la línea por "LOTE N" — arregla de paso la regex
+  `_IMPORTE_LICITACION_RE` de `campos_lc27.py`, que fallaba con cualquier
+  cabecera de tabla en medio. Si no aparece ningún "En el LOTE N", cae al
+  camino de siempre: un único lote implícito (`LOTE_UNICO`), sin cambiar
+  nada para los expedientes ya soportados.
+- **Etapa 3.5, asociación de tabla de precios a su lote**
+  (`app/extraccion/lote_tabla.py`): por la **posición de la tabla en la
+  página** (la caja delimitadora que da `pdfplumber`), nunca por proximidad
+  textual. Cada tabla tiene una franja vertical propia (desde el fondo de la
+  tabla anterior en la misma página hasta su propio techo); si en esa franja
+  aparece una única cabecera "LOTE N", esa tabla es de ese lote. Si aparecen
+  cero o varias, la tabla es ambigua y sus líneas quedan huérfanas
+  (`lote_id = NULL`, nunca un lote inventado ni asignado por cercanía).
+- **Sin lote centinela.** Una línea sin lote determinable no cuelga de un
+  lote "SIN_DETERMINAR" (contaminaría `lotes`, tabla de negocio, con un
+  estado de proceso): `lineas_catalogo.lote_id` pasa a admitir NULL
+  (migración 0007), y se añade `lineas_catalogo.expediente_id` directo
+  (antes el único camino hasta el expediente era `lote_id -> lotes.expediente_id`,
+  que una huérfana no tiene) y `lineas_catalogo.motivo_revision` (por qué
+  esa línea no tiene lote, distinto de `comentarios`).
+- **Herencia de lote entre páginas: deliberadamente sin implementar.**
+  Cuando la franja está vacía de texto (posible tabla partida entre
+  páginas) sería técnicamente inequívoco heredar el lote de la tabla
+  anterior, pero es la única regla que infiere en vez de leer el documento
+  directamente. **Medido sobre el corpus completo (45 expedientes, ~187
+  PDFs) antes de decidir: cero casos de "banda vacía"** — de las 7 tablas de
+  precios del único expediente multi-lote del corpus, las 2 que no se
+  asociaron por falta de cabecera tenían la franja con texto (solo sin
+  ninguna cabecera "LOTE N" reconocible), nunca vacía. La cautela no costó
+  nada en este corpus y la regla de herencia no habría resuelto ni siquiera
+  ese caso concreto: no se implementa.
+- **`baja_variable_por_lote`** (nueva columna en `expedientes`, migración
+  0007): cuando 2+ lotes tienen baja distinta entre sí, `baja_global` queda
+  en `None` a propósito (CLAUDE.md sección 4: nunca se inventa una media) y
+  este booleano se lo dice explícitamente a la web — nunca se deja un campo
+  vacío sin explicar, que parecería un fallo de extracción.
+- **Medido sobre el corpus completo de 45 expedientes** (script puntual, no
+  en el repo): **1 de 45 expedientes es multi-lote** (el propio
+  `6.25/28510.0027`) y **ninguna Propuesta LC.27 del corpus es multi-lote**
+  — el patrón "En el LOTE N" de `lotes.py` se aplica también a LC.27 por si
+  aparece alguna vez, pero **sigue sin verificar contra un documento real**
+  (sección 16): si aparece una LC.27 multi-lote con redacción distinta, ese
+  módulo es el sitio a revisar.
+- **Bug real encontrado y corregido al verificar contra el stack real:**
+  varias tablas ambiguas del mismo documento (LOTE 2, 4, 5 y 6 del Pliego,
+  ninguno declarado por la Resolución) comparten `codigo_precio` — el mismo
+  cuadro de precios se repite por lote (sección 3). Sin lote que las
+  separase, `_combinar_por_clave` las fundía entre sí por `clave_linea` a
+  secas (las 28 líneas huérfanas del expediente real colapsaban a 6 filas,
+  perdiendo datos reales de lotes distintos). Arreglado en
+  `pipeline_anejo.py`: las líneas huérfanas llevan la posición de su tabla
+  de origen (página + franja vertical) anexada a `clave_linea`, para que
+  huérfanas de tablas distintas nunca se confundan entre sí aunque
+  compartan código de precio.
+- **Verificado de extremo a extremo contra el stack real** (`docker compose
+  up`, migración 0007 aplicada, expediente `6.25/28510.0027` reprocesado):
+  la API y la web muestran sus dos lotes con las bajas correctas — LOTE 1 al
+  7,13 %, LOTE 3 al 1,18 % — con "Varía por lote" en vez de una baja única
+  inventada, y las 28 líneas huérfanas (sin lote determinable) mandan el
+  expediente a `pendiente_revision` con el motivo detallado por tabla.

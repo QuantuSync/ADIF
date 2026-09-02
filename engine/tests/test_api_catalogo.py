@@ -94,6 +94,7 @@ def _sembrar_catalogo(db_session, *, estado=EstadoExpediente.completado):
 
     linea = LineaCatalogo(
         lote_id=lote.id,
+        expediente_id=expediente.id,
         clave_linea="P-001",
         orden_aparicion=0,
         codigo_precio="P-001",
@@ -138,7 +139,7 @@ def test_catalogo_busqueda_por_matricula_a_traves_de_expedientes(cliente, db_ses
     db_session.add(otro_lote)
     db_session.commit()
     db_session.add(LineaCatalogo(
-        lote_id=otro_lote.id, clave_linea="P-099", orden_aparicion=0,
+        lote_id=otro_lote.id, expediente_id=otro.id, clave_linea="P-099", orden_aparicion=0,
         matricula="697500900", descripcion="GUANTE OTRO EXPEDIENTE", precio_unitario=Decimal("25.00"),
     ))
     db_session.commit()

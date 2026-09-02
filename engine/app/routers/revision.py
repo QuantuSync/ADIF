@@ -55,10 +55,10 @@ def detalle_revision_expediente(
 
     filas = db.execute(
         select(LineaCatalogo, Lote, Expediente, Documento)
-        .join(Lote, LineaCatalogo.lote_id == Lote.id)
-        .join(Expediente, Lote.expediente_id == Expediente.id)
+        .join(Expediente, LineaCatalogo.expediente_id == Expediente.id)
+        .outerjoin(Lote, LineaCatalogo.lote_id == Lote.id)
         .outerjoin(Documento, LineaCatalogo.documento_origen_id == Documento.id)
-        .where(Lote.expediente_id == expediente_id)
+        .where(LineaCatalogo.expediente_id == expediente_id)
         .order_by(Lote.identificador_lote, LineaCatalogo.orden_aparicion)
     ).all()
 
@@ -143,8 +143,8 @@ def corregir_linea_catalogo(
 
     fila = db.execute(
         select(LineaCatalogo, Lote, Expediente, Documento)
-        .join(Lote, LineaCatalogo.lote_id == Lote.id)
-        .join(Expediente, Lote.expediente_id == Expediente.id)
+        .join(Expediente, LineaCatalogo.expediente_id == Expediente.id)
+        .outerjoin(Lote, LineaCatalogo.lote_id == Lote.id)
         .outerjoin(Documento, LineaCatalogo.documento_origen_id == Documento.id)
         .where(LineaCatalogo.id == linea_id)
     ).one()
@@ -165,8 +165,8 @@ def confirmar_linea_catalogo(
 
     fila = db.execute(
         select(LineaCatalogo, Lote, Expediente, Documento)
-        .join(Lote, LineaCatalogo.lote_id == Lote.id)
-        .join(Expediente, Lote.expediente_id == Expediente.id)
+        .join(Expediente, LineaCatalogo.expediente_id == Expediente.id)
+        .outerjoin(Lote, LineaCatalogo.lote_id == Lote.id)
         .outerjoin(Documento, LineaCatalogo.documento_origen_id == Documento.id)
         .where(LineaCatalogo.id == linea_id)
     ).one()

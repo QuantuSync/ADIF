@@ -9,11 +9,15 @@ primera vez sobre datos reales de expediente — hasta ahora solo existían
 como funciones probadas contra fixtures sueltos. Etapas 3-6 reutilizan
 `app.extraccion.pipeline_anejo.procesar_anejo` tal cual.
 
-Sin lógica de subdivisión en varios lotes todavía (CLAUDE.md sección 16,
-pendiente de verificar): todo expediente se procesa hoy como un único lote
-`LOTE_UNICO`. El día que se verifique que hace falta partir por lote, este
-es el sitio a tocar — el resto de la cascada (mapeo de cabecera, guardado de
-catálogo) ya trabaja por `lote_id`, no por expediente.
+Extracción por lote (encargo de la sesión de multi-lote, disparado por el
+expediente real 6.25/28510.0027: LOTE 1 al 7,13 %, LOTE 3 al 1,18 %,
+presupuestos distintos — el motor se quedaba con la primera baja que
+encontraba en el texto y la presentaba como la del expediente entero, dato
+incorrecto no solo incompleto). `app.extraccion.lotes.extraer_lotes_declarados`
+decide si el expediente tiene varios lotes o uno implícito
+(`LOTE_UNICO`); el resto de la cascada (mapeo de cabecera, asociación de
+tabla a lote en `app.extraccion.lote_tabla`, guardado de catálogo) ya
+trabaja por lote, nunca por expediente.
 """
 from __future__ import annotations
 
@@ -36,6 +40,7 @@ from app.extraccion.campos_lc27 import (
 from app.extraccion.campos_pcsp import extraer_campos_anuncio_pcsp, importe_como_decimal
 from app.extraccion.clasificador import clasificar
 from app.extraccion.cruce_codigos import asegurar_cruce_codigos
+from app.extraccion.lotes import LoteDeclarado, extraer_lotes_declarados
 from app.extraccion.normalizacion import parsear_importe_es
 from app.extraccion.pipeline_anejo import procesar_anejo
 from app.extraccion.precios_unitarios import calcular_baja_efectiva
@@ -44,9 +49,11 @@ from app.interfaces.document_storage import DocumentStorage
 from app.interfaces.model_provider import ModelProvider
 from app.models import Documento, EstadoExpediente, Expediente, Lote, TipoDocumento, TrabajoCola, TrazaOrigen
 
-# Identificador de lote mientras no exista subdivisión real (ver docstring
-# del módulo). "1" para coincidir con la convención ya usada en los tests de
-# la cascada (tests/extraccion/test_pipeline_anejo.py).
+# Identificador de lote cuando el documento no declara ninguno por su nombre
+# (CLAUDE.md, encargo de esta sesión, punto 1: "un único lote implícito,
+# para que el modelo de datos sea uniforme"). "1" para coincidir con la
+# convención ya usada en los tests de la cascada
+# (tests/extraccion/test_pipeline_anejo.py).
 LOTE_UNICO = "1"
 
 # Documentos de estas plantillas declaran la baja en texto (CLAUDE.md sección
@@ -56,6 +63,15 @@ _TIPOS_CON_BAJA_DECLARADA = (
     TipoDocumento.resolucion_adjudicacion,
     TipoDocumento.contrato,
 )
+
+# Igual que `app.extraccion.baja._PRIORIDAD_BAJA` (CLAUDE.md sección 17:
+# preferir la Resolución sobre la Propuesta cuando existan las dos, por ser
+# el acto posterior y definitivo). El contrato no declara lotes por nombre
+# en el corpus visto hasta ahora, así que no entra en esta prioridad.
+_PRIORIDAD_LOTES = {
+    TipoDocumento.resolucion_adjudicacion: 0,
+    TipoDocumento.propuesta_lc27: 1,
+}
 
 
 @dataclass
@@ -67,21 +83,24 @@ class _Documento:
 
 def _traza(
     db: Session,
-    expediente_id: int,
+    entidad_id: int,
     campo: str,
     documento_id: Optional[int],
     pagina: Optional[int],
     fragmento: Optional[str],
     valor,
+    entidad_tipo: str = "expediente",
 ) -> None:
-    """CLAUDE.md sección 9.10: cada cifra derivada a nivel de expediente
-    queda anclada a documento, página y fragmento, no solo al número final."""
+    """CLAUDE.md sección 9.10: cada cifra derivada queda anclada a
+    documento, página y fragmento, no solo al número final. `entidad_tipo`
+    por defecto es "expediente" (uso histórico); las trazas de baja/importe
+    por lote pasan `entidad_tipo="lote"` con `entidad_id=lote.id`."""
     if valor is None or documento_id is None:
         return
     db.add(
         TrazaOrigen(
-            entidad_tipo="expediente",
-            entidad_id=expediente_id,
+            entidad_tipo=entidad_tipo,
+            entidad_id=entidad_id,
             campo=campo,
             documento_id=documento_id,
             pagina=pagina,
@@ -91,12 +110,18 @@ def _traza(
     )
 
 
-def _obtener_o_crear_lote(db: Session, expediente_id: int) -> Lote:
+def _acumular_motivo(motivo: Optional[str], nuevo: Optional[str]) -> Optional[str]:
+    if not nuevo:
+        return motivo
+    return f"{motivo}; {nuevo}" if motivo else nuevo
+
+
+def _obtener_o_crear_lote(db: Session, expediente_id: int, identificador: str) -> Lote:
     lote = db.execute(
-        select(Lote).where(Lote.expediente_id == expediente_id, Lote.identificador_lote == LOTE_UNICO)
+        select(Lote).where(Lote.expediente_id == expediente_id, Lote.identificador_lote == identificador)
     ).scalar_one_or_none()
     if lote is None:
-        lote = Lote(expediente_id=expediente_id, identificador_lote=LOTE_UNICO)
+        lote = Lote(expediente_id=expediente_id, identificador_lote=identificador)
         db.add(lote)
         db.commit()
         db.refresh(lote)
@@ -119,13 +144,44 @@ def _clasificar_documentos(db: Session, storage: DocumentStorage, documentos: li
     return resultado
 
 
-def _extraer_campos_expediente(db: Session, expediente: Expediente, documentos: list[_Documento]) -> tuple[
-    Optional[Decimal], Optional[Decimal], Optional[BajaDeclarada]
-]:
-    """Etapa 2: campos de etiqueta fija. Prioridad de importes: Anuncio PCSP
+def _extraer_lotes_declarados_del_expediente(
+    documentos: list[_Documento],
+) -> tuple[list[LoteDeclarado], Optional[int]]:
+    """Primer documento (por prioridad de plantilla, no por orden de lista)
+    que declare al menos un "En el LOTE N" gana — mismo criterio que
+    `app.extraccion.baja.elegir_baja_preferida` aplicado a listas de lotes
+    en vez de a una baja suelta. Devuelve también el id del documento de
+    origen, para las trazas por lote."""
+    candidatos: list[tuple[int, list[LoteDeclarado], int]] = []
+    for item in documentos:
+        prioridad = _PRIORIDAD_LOTES.get(item.tipo)
+        if prioridad is None:
+            continue
+        encontrados = extraer_lotes_declarados(item.paginas)
+        if encontrados:
+            candidatos.append((prioridad, encontrados, item.documento.id))
+    if not candidatos:
+        return [], None
+    candidatos.sort(key=lambda c: c[0])
+    return candidatos[0][1], candidatos[0][2]
+
+
+def _extraer_campos_expediente(
+    db: Session, expediente: Expediente, documentos: list[_Documento], registrar_baja_importe: bool = True,
+) -> tuple[Optional[Decimal], Optional[Decimal], Optional[BajaDeclarada]]:
+    """Etapa 2: nombre del proyecto y matriz (siempre) e importes de
+    licitación/adjudicación y baja declarada a nivel de expediente (solo
+    cuando `registrar_baja_importe`). Prioridad de importes: Anuncio PCSP
     sobre Propuesta LC.27 (CLAUDE.md sección 4, tabla "Dónde está cada
     dato") — LC.27 es la reserva para expedientes sin Anuncio PCSP en el
-    corpus (docstring de app.extraccion.campos_lc27)."""
+    corpus (docstring de app.extraccion.campos_lc27).
+
+    `registrar_baja_importe=False` es el camino multi-lote (llamador
+    `ejecutar_extraccion_expediente`): ahí la baja y los importes del
+    expediente salen de sus lotes (`_resumir_lotes_en_expediente`), no de
+    "la primera baja que aparece en el texto" — devolver y trazar esa baja
+    suelta aquí sería confuso (una cifra sin lote junto a las trazas por
+    lote que sí importan) y ya no la usa nadie."""
     # (valor Decimal, documento_id, pagina, fragmento) por fuente; None si esa
     # fuente no trajo el campo. pcsp gana sobre lc27 al elegir al final.
     licitacion_pcsp = adjudicacion_pcsp = None
@@ -175,11 +231,19 @@ def _extraer_campos_expediente(db: Session, expediente: Expediente, documentos: 
             if obj and objeto_lc27 is None:
                 objeto_lc27 = (obj.valor, item.documento.id, obj.pagina, obj.fragmento)
 
-        if item.tipo in _TIPOS_CON_BAJA_DECLARADA:
+        if registrar_baja_importe and item.tipo in _TIPOS_CON_BAJA_DECLARADA:
             baja = extraer_baja_declarada(item.paginas, tipo_documento=item.tipo)
             if baja is not None:
                 candidatos_baja.append(baja)
                 baja_doc[id(baja)] = item.documento.id
+
+    fuente_objeto = objeto_pcsp or objeto_lc27
+    if fuente_objeto and not expediente.nombre_proyecto:
+        expediente.nombre_proyecto = fuente_objeto[0]
+        _traza(db, expediente.id, "nombre_proyecto", *fuente_objeto[1:], fuente_objeto[0])
+
+    if not registrar_baja_importe:
+        return None, None, None
 
     fuente_licitacion = licitacion_pcsp or licitacion_lc27
     fuente_adjudicacion = adjudicacion_pcsp or adjudicacion_lc27
@@ -187,11 +251,6 @@ def _extraer_campos_expediente(db: Session, expediente: Expediente, documentos: 
         _traza(db, expediente.id, "importe_licitacion", *fuente_licitacion[1:], fuente_licitacion[0])
     if fuente_adjudicacion:
         _traza(db, expediente.id, "importe_adjudicacion", *fuente_adjudicacion[1:], fuente_adjudicacion[0])
-
-    fuente_objeto = objeto_pcsp or objeto_lc27
-    if fuente_objeto and not expediente.nombre_proyecto:
-        expediente.nombre_proyecto = fuente_objeto[0]
-        _traza(db, expediente.id, "nombre_proyecto", *fuente_objeto[1:], fuente_objeto[0])
 
     baja_preferida = elegir_baja_preferida(candidatos_baja)
     if baja_preferida is not None:
@@ -203,6 +262,63 @@ def _extraer_campos_expediente(db: Session, expediente: Expediente, documentos: 
     importe_licitacion = fuente_licitacion[0] if fuente_licitacion else None
     importe_adjudicacion = fuente_adjudicacion[0] if fuente_adjudicacion else None
     return importe_licitacion, importe_adjudicacion, baja_preferida
+
+
+def _procesar_lotes_declarados(
+    db: Session, expediente: Expediente, lotes_declarados: list[LoteDeclarado], documento_id: Optional[int],
+) -> tuple[list[Lote], Optional[str]]:
+    """Un lote por cada `LoteDeclarado`: la baja se extrae del texto, nunca
+    se calcula (CLAUDE.md sección 4), pero se contrasta contra los importes
+    de ESE lote con `calcular_baja_efectiva` — el mismo caso "0 % ingenuo"
+    de la sección 4 puede darse lote a lote, no solo a nivel de expediente."""
+    lotes: list[Lote] = []
+    motivo_revision: Optional[str] = None
+    for declarado in lotes_declarados:
+        baja_efectiva = declarado.baja
+        if declarado.importe_licitacion is not None and declarado.importe_adjudicacion is not None:
+            resultado = calcular_baja_efectiva(
+                declarado.importe_licitacion, declarado.importe_adjudicacion, declarado.baja,
+            )
+            baja_efectiva = resultado.baja
+            if resultado.requiere_revision:
+                motivo_revision = _acumular_motivo(motivo_revision, f"lote {declarado.identificador}: {resultado.motivo}")
+
+        lote = _obtener_o_crear_lote(db, expediente.id, declarado.identificador)
+        lote.baja_lote = baja_efectiva
+        lote.importe_licitacion = declarado.importe_licitacion
+        lote.importe_adjudicacion = declarado.importe_adjudicacion
+        lote.adjudicatario = declarado.adjudicatario
+        db.commit()
+        db.refresh(lote)
+        lotes.append(lote)
+
+        _traza(
+            db, lote.id, "baja_declarada", documento_id, declarado.pagina, declarado.fragmento,
+            declarado.baja, entidad_tipo="lote",
+        )
+    return lotes, motivo_revision
+
+
+def _resumir_lotes_en_expediente(expediente: Expediente, lotes: list[Lote]) -> None:
+    """CLAUDE.md, encargo de esta sesión, punto 4: "un expediente con lotes
+    de bajas distintas no tiene una baja única" — no se inventa una media.
+    `baja_variable_por_lote` es lo que le dice a la web que explique el
+    vacío de `baja_global` en vez de dejarlo parecer un fallo (ajuste 3)."""
+    importes_licitacion = [l.importe_licitacion for l in lotes if l.importe_licitacion is not None]
+    importes_adjudicacion = [l.importe_adjudicacion for l in lotes if l.importe_adjudicacion is not None]
+    expediente.importe_licitacion = sum(importes_licitacion) if importes_licitacion else None
+    expediente.importe_adjudicacion = sum(importes_adjudicacion) if importes_adjudicacion else None
+
+    bajas = {l.baja_lote for l in lotes if l.baja_lote is not None}
+    if len(bajas) == 1:
+        expediente.baja_global = next(iter(bajas))
+        expediente.baja_variable_por_lote = False if len(lotes) > 1 else None
+    elif len(bajas) > 1:
+        expediente.baja_global = None
+        expediente.baja_variable_por_lote = True
+    else:
+        expediente.baja_global = None
+        expediente.baja_variable_por_lote = None
 
 
 def ejecutar_extraccion_expediente(
@@ -234,37 +350,60 @@ def ejecutar_extraccion_expediente(
 
         items = _clasificar_documentos(db, storage, list(documentos))
 
-        importe_licitacion, importe_adjudicacion, baja_preferida = _extraer_campos_expediente(db, expediente, items)
-
         motivo_revision: Optional[str] = None
-        baja_efectiva: Optional[Decimal] = None
-        if importe_licitacion is not None and importe_adjudicacion is not None:
-            resultado_baja = calcular_baja_efectiva(
-                importe_licitacion, importe_adjudicacion,
-                baja_preferida.baja if baja_preferida is not None else None,
-            )
-            baja_efectiva = resultado_baja.baja
-            if resultado_baja.requiere_revision:
-                motivo_revision = resultado_baja.motivo
-        elif baja_preferida is not None:
-            baja_efectiva = baja_preferida.baja
-        else:
-            motivo_revision = (
-                "no se encontró importe de licitación/adjudicación ni baja declarada "
-                "en ningún documento de este expediente"
-            )
 
-        expediente.importe_licitacion = importe_licitacion
-        expediente.importe_adjudicacion = importe_adjudicacion
-        expediente.baja_global = baja_efectiva
+        lotes_declarados, documento_id_lotes = _extraer_lotes_declarados_del_expediente(items)
+        if lotes_declarados:
+            # Camino multi-lote (o de un único lote declarado por su nombre
+            # real, p.ej. si algún día aparece un "LOTE 2" suelto): los
+            # importes/objeto de etiqueta fija del expediente (matriz,
+            # nombre del proyecto) se siguen extrayendo igual, pero
+            # importe_licitacion/adjudicacion/baja_global del expediente
+            # salen de los lotes, no de un único campo de documento.
+            _extraer_campos_expediente(db, expediente, items, registrar_baja_importe=False)
+            lotes, motivo_lotes = _procesar_lotes_declarados(db, expediente, lotes_declarados, documento_id_lotes)
+            motivo_revision = _acumular_motivo(motivo_revision, motivo_lotes)
+            _resumir_lotes_en_expediente(expediente, lotes)
+        else:
+            # Camino de siempre: un único lote implícito (CLAUDE.md, encargo
+            # de esta sesión, punto 1).
+            importe_licitacion, importe_adjudicacion, baja_preferida = _extraer_campos_expediente(db, expediente, items)
+
+            baja_efectiva: Optional[Decimal] = None
+            if importe_licitacion is not None and importe_adjudicacion is not None:
+                resultado_baja = calcular_baja_efectiva(
+                    importe_licitacion, importe_adjudicacion,
+                    baja_preferida.baja if baja_preferida is not None else None,
+                )
+                baja_efectiva = resultado_baja.baja
+                if resultado_baja.requiere_revision:
+                    motivo_revision = _acumular_motivo(motivo_revision, resultado_baja.motivo)
+            elif baja_preferida is not None:
+                baja_efectiva = baja_preferida.baja
+            else:
+                motivo_revision = _acumular_motivo(
+                    motivo_revision,
+                    "no se encontró importe de licitación/adjudicación ni baja declarada "
+                    "en ningún documento de este expediente",
+                )
+
+            expediente.importe_licitacion = importe_licitacion
+            expediente.importe_adjudicacion = importe_adjudicacion
+            expediente.baja_global = baja_efectiva
+            expediente.baja_variable_por_lote = None
+
+            lote = _obtener_o_crear_lote(db, expediente.id, LOTE_UNICO)
+            lote.baja_lote = baja_efectiva
+            lote.importe_licitacion = importe_licitacion
+            lote.importe_adjudicacion = importe_adjudicacion
+            db.commit()
+            lotes = [lote]
+
         asegurar_cruce_codigos(db, expediente)
         db.commit()
 
-        lote = _obtener_o_crear_lote(db, expediente.id)
-        lote.baja_lote = baja_efectiva
-        lote.importe_licitacion = importe_licitacion
-        lote.importe_adjudicacion = importe_adjudicacion
-        db.commit()
+        lotes_por_identificador = {l.identificador_lote: l.id for l in lotes}
+        bajas_por_identificador = {l.identificador_lote: l.baja_lote for l in lotes}
 
         # Etapas 3-6: el cuadro de precios se busca por contenido en TODOS
         # los documentos, nunca solo en los clasificados como "anejo"
@@ -281,7 +420,8 @@ def ejecutar_extraccion_expediente(
             contenido = storage.recuperar(item.documento.ruta_almacenamiento)
             try:
                 resultado = procesar_anejo(
-                    io.BytesIO(contenido), item.documento.id, baja_efectiva, db, model_provider
+                    io.BytesIO(contenido), item.documento.id, expediente.id,
+                    bajas_por_identificador, db, model_provider,
                 )
             except Exception as exc:  # noqa: BLE001
                 db.rollback()
@@ -290,20 +430,31 @@ def ejecutar_extraccion_expediente(
             tablas_procesadas += resultado.tablas_procesadas
             llamadas_modelo += resultado.llamadas_modelo
             if resultado.lineas:
-                guardado = guardar_lineas_catalogo(db, lote.id, resultado.lineas)
-                lineas_creadas += guardado.creadas
-                lineas_actualizadas += guardado.actualizadas
+                grupos: dict[Optional[str], list[dict]] = {}
+                for linea in resultado.lineas:
+                    identificador = linea.pop("identificador_lote")
+                    grupos.setdefault(identificador, []).append(linea)
+                for identificador, lineas_grupo in grupos.items():
+                    lote_id = lotes_por_identificador.get(identificador) if identificador is not None else None
+                    guardado = guardar_lineas_catalogo(db, lote_id, lineas_grupo)
+                    lineas_creadas += guardado.creadas
+                    lineas_actualizadas += guardado.actualizadas
+            if resultado.tablas_sin_lote:
+                motivo_revision = _acumular_motivo(
+                    motivo_revision,
+                    f"{item.documento.nombre_archivo}: " + "; ".join(resultado.tablas_sin_lote),
+                )
             item.documento.procesado_en = datetime.now(timezone.utc)
         db.commit()
 
         total_lineas = lineas_creadas + lineas_actualizadas
         if documentos_con_error:
             motivo_documentos = "no se pudo extraer el cuadro de precios de: " + "; ".join(documentos_con_error)
-            motivo_revision = f"{motivo_revision}; {motivo_documentos}" if motivo_revision else motivo_documentos
+            motivo_revision = _acumular_motivo(motivo_revision, motivo_documentos)
         if motivo_revision is None and total_lineas == 0:
             motivo_revision = "no se extrajo ninguna línea de catálogo de los documentos descargados"
-        if motivo_revision is None and baja_efectiva is None:
-            motivo_revision = "no se pudo determinar la baja del lote"
+        if motivo_revision is None and not any(l.baja_lote is not None for l in lotes):
+            motivo_revision = "no se pudo determinar la baja de ningún lote"
 
         if motivo_revision is not None:
             expediente.estado = EstadoExpediente.pendiente_revision
@@ -320,7 +471,8 @@ def ejecutar_extraccion_expediente(
             "lineas_creadas": lineas_creadas,
             "lineas_actualizadas": lineas_actualizadas,
             "llamadas_modelo": llamadas_modelo,
-            "baja_global": str(baja_efectiva) if baja_efectiva is not None else None,
+            "lotes": [l.identificador_lote for l in lotes],
+            "baja_global": str(expediente.baja_global) if expediente.baja_global is not None else None,
             "estado": expediente.estado.value,
             "motivo_revision": motivo_revision,
         }

@@ -26,10 +26,11 @@ def test_construir_linea_catalogo_deriva_precio_adjudicado():
     fila = ["P-001", "697500900", "GUANTE X", "UN", "30", "24,00"]
 
     linea = construir_linea_catalogo(
-        fila, mapeo, pagina=11, documento_origen_id=7, baja_lote=Decimal("0.10"), orden_aparicion=0
+        fila, mapeo, pagina=11, documento_origen_id=7, expediente_id=1, baja_lote=Decimal("0.10"), orden_aparicion=0
     )
 
     assert linea["clave_linea"] == "P-001"
+    assert linea["expediente_id"] == 1
     assert linea["matricula"] == "697500900"
     assert linea["descripcion"] == "GUANTE X"
     assert linea["cantidad"] == Decimal("30")
@@ -43,7 +44,9 @@ def test_construir_linea_catalogo_sin_baja_no_deriva_precio_adjudicado():
     mapeo = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": None, "cantidad": None, "precio_unitario": 2}
     fila = ["P-050", "PARTIDA ALZADA", "100.000,00"]
 
-    linea = construir_linea_catalogo(fila, mapeo, pagina=18, documento_origen_id=None, baja_lote=None, orden_aparicion=0)
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=18, documento_origen_id=None, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
 
     assert linea["precio_unitario"] == Decimal("100000.00")
     assert linea["precio_adjudicado"] is None
@@ -53,7 +56,9 @@ def test_construir_linea_catalogo_codigo_partido_por_salto_de_linea_se_limpia():
     mapeo = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": None, "cantidad": None, "precio_unitario": 2}
     fila = ["P-\n001", "Traviesa", "1,00\n€"]
 
-    linea = construir_linea_catalogo(fila, mapeo, pagina=23, documento_origen_id=None, baja_lote=None, orden_aparicion=0)
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=23, documento_origen_id=None, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
 
     assert linea["codigo_precio"] == "P-001"
     assert linea["precio_unitario"] == Decimal("1.00")
@@ -78,6 +83,7 @@ def test_guardar_lineas_catalogo_primera_vez_crea(db_session):
             {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": None, "cantidad": None, "precio_unitario": 2},
             pagina=11,
             documento_origen_id=None,
+            expediente_id=lote.expediente_id,
             baja_lote=None,
             orden_aparicion=0,
         )
@@ -96,7 +102,7 @@ def test_guardar_lineas_catalogo_reprocesar_no_duplica(db_session):
     lote = _lote(db_session)
     mapeo = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": None, "cantidad": None, "precio_unitario": 2}
     fila = ["P-001", "Guante", "24,00"]
-    lineas = [construir_linea_catalogo(fila, mapeo, 11, None, None, 0)]
+    lineas = [construir_linea_catalogo(fila, mapeo, 11, None, lote.expediente_id, None, 0)]
 
     guardar_lineas_catalogo(db_session, lote.id, lineas)
     resultado = guardar_lineas_catalogo(db_session, lote.id, lineas)
@@ -116,8 +122,8 @@ def test_guardar_lineas_catalogo_no_borra_campo_con_valor_nulo_entrante(db_sessi
     mapeo_con_cantidad = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": None, "cantidad": 2, "precio_unitario": 3}
     mapeo_sin_cantidad = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": None, "cantidad": None, "precio_unitario": 2}
 
-    primera = construir_linea_catalogo(["P-003", "Traviesa", "80000", "1,95"], mapeo_con_cantidad, 18, None, None, 0)
-    segunda = construir_linea_catalogo(["P-003", "Traviesa", "1,95"], mapeo_sin_cantidad, 23, None, None, 0)
+    primera = construir_linea_catalogo(["P-003", "Traviesa", "80000", "1,95"], mapeo_con_cantidad, 18, None, lote.expediente_id, None, 0)
+    segunda = construir_linea_catalogo(["P-003", "Traviesa", "1,95"], mapeo_sin_cantidad, 23, None, lote.expediente_id, None, 0)
 
     guardar_lineas_catalogo(db_session, lote.id, [primera])
     guardar_lineas_catalogo(db_session, lote.id, [segunda])
@@ -152,8 +158,8 @@ def test_guardar_lineas_catalogo_funde_clave_repetida_en_un_solo_lote(db_session
     lote = _lote(db_session)
     mapeo_con_cantidad = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": None, "cantidad": 2, "precio_unitario": 3}
     mapeo_sin_cantidad = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": None, "cantidad": None, "precio_unitario": 2}
-    primera = construir_linea_catalogo(["P-003", "Traviesa", "80000", "1,95"], mapeo_con_cantidad, 18, None, None, 0)
-    segunda = construir_linea_catalogo(["P-003", "Traviesa", "1,95"], mapeo_sin_cantidad, 23, None, None, 1)
+    primera = construir_linea_catalogo(["P-003", "Traviesa", "80000", "1,95"], mapeo_con_cantidad, 18, None, lote.expediente_id, None, 0)
+    segunda = construir_linea_catalogo(["P-003", "Traviesa", "1,95"], mapeo_sin_cantidad, 23, None, lote.expediente_id, None, 1)
 
     resultado = guardar_lineas_catalogo(db_session, lote.id, [primera, segunda])
 
@@ -163,14 +169,35 @@ def test_guardar_lineas_catalogo_funde_clave_repetida_en_un_solo_lote(db_session
     assert linea.cantidad == Decimal("80000")
 
 
+def test_guardar_lineas_catalogo_huerfana_sin_lote_no_se_duplica_al_reprocesar(db_session):
+    # CLAUDE.md, encargo de esta sesión, punto 3 (ajuste 1 del usuario): una
+    # línea cuya tabla de origen no se pudo asociar a un lote sin ambigüedad
+    # se guarda con lote_id=None, no con un lote centinela. La idempotencia
+    # de esas huérfanas la garantiza el filtro por expediente_id + lote_id
+    # IS NULL, no la constraint UNIQUE (que no deduplica NULLs).
+    lote = _lote(db_session)
+    mapeo = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": None, "cantidad": None, "precio_unitario": 2}
+    fila = ["P-009", "Balasto", "10,00"]
+    lineas = [construir_linea_catalogo(fila, mapeo, 22, None, lote.expediente_id, None, 0)]
+
+    r1 = guardar_lineas_catalogo(db_session, None, lineas)
+    r2 = guardar_lineas_catalogo(db_session, None, lineas)
+
+    assert r1.creadas == 1
+    assert r2.creadas == 0 and r2.actualizadas == 1
+    huerfanas = db_session.query(LineaCatalogo).filter_by(lote_id=None, expediente_id=lote.expediente_id).all()
+    assert len(huerfanas) == 1
+
+
 def test_construir_lineas_desde_tabla_usa_orden_inicial():
     tabla = TablaExtraida(
         cabecera=["Código", "Descripción", "Precio"],
         filas=[["P-001", "A", "1,00"], ["P-002", "B", "2,00"]],
         pagina=1,
+        bbox=(0.0, 0.0, 100.0, 50.0),
     )
     mapeo = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": None, "cantidad": None, "precio_unitario": 2}
 
-    lineas = construir_lineas_desde_tabla(tabla, mapeo, None, None, orden_inicial=5)
+    lineas = construir_lineas_desde_tabla(tabla, mapeo, None, 1, None, orden_inicial=5)
 
     assert [l["orden_aparicion"] for l in lineas] == [5, 6]

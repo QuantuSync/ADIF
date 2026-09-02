@@ -75,6 +75,15 @@ class Expediente(Base):
     importe_licitacion = Column(Numeric(14, 4), nullable=True)
     importe_adjudicacion = Column(Numeric(14, 4), nullable=True)
     baja_global = Column(Numeric(12, 6), nullable=True)
+    # True cuando el expediente tiene 2+ lotes con baja declarada distinta
+    # entre sí: ahí `baja_global` se deja en NULL a propósito (CLAUDE.md
+    # sección 4, "no hay una baja distinta por material dentro de un lote"
+    # no dice nada de que todos los lotes de un expediente compartan baja) y
+    # este campo es lo que le dice a la web que explique el vacío en vez de
+    # dejarlo parecer un fallo de extracción (encargo de esta sesión, punto
+    # 4, ajuste 3). None mientras no se sepa (expediente de un solo lote, o
+    # todavía sin procesar); False si hay varios lotes pero comparten baja.
+    baja_variable_por_lote = Column(Boolean, nullable=True)
     estado = Column(
         Enum(EstadoExpediente, name="estado_expediente"),
         nullable=False,
@@ -147,7 +156,19 @@ class LineaCatalogo(Base):
     )
 
     id = Column(Integer, primary_key=True)
-    lote_id = Column(Integer, ForeignKey("lotes.id"), nullable=False)
+    # `expediente_id` es directo, no derivado de `lote_id` -> `lotes.expediente_id`:
+    # una línea huérfana (tabla de precios cuyo lote no se pudo determinar
+    # con fiabilidad, CLAUDE.md encargo de esta sesión punto 3) no tiene
+    # lote, pero sigue perteneciendo a un expediente concreto y tiene que
+    # poder trazarse hasta él.
+    expediente_id = Column(Integer, ForeignKey("expedientes.id"), nullable=False)
+    # NULL cuando la tabla de origen de esta línea no se pudo asociar a un
+    # único lote sin ambigüedad (ver `app.extraccion.lote_tabla`). No existe
+    # un lote "SIN_DETERMINAR": mezclar un estado de proceso con la tabla de
+    # negocio `lotes` obligaría a toda consulta futura por lote a acordarse
+    # de excluirlo. La línea huérfana va a la cola de revisión vía
+    # `motivo_revision` y el estado del expediente, no vía un lote falso.
+    lote_id = Column(Integer, ForeignKey("lotes.id"), nullable=True)
     clave_linea = Column(String(128), nullable=False)
     orden_aparicion = Column(Integer, nullable=False)
     codigo_precio = Column(String(32), nullable=True)
@@ -171,6 +192,10 @@ class LineaCatalogo(Base):
         server_default=EstadoRevisionLinea.sin_revisar.value,
     )
     comentarios = Column(Text, nullable=True)
+    # Por qué esta línea no tiene lote asignado (siempre None si `lote_id`
+    # no es None). Distinto de `comentarios` (notas humanas, sección 7):
+    # esto lo escribe el motor, no una persona.
+    motivo_revision = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),
@@ -179,6 +204,7 @@ class LineaCatalogo(Base):
         nullable=False,
     )
 
+    expediente = relationship("Expediente")
     lote = relationship("Lote", back_populates="lineas_catalogo")
     documento_origen = relationship("Documento")
 

@@ -37,6 +37,13 @@ class TablaExtraida:
     cabecera: FILA
     filas: list[FILA]
     pagina: int
+    # (x0, top, x1, bottom) en coordenadas de página de pdfplumber. Etapa 3.5
+    # (`app.extraccion.lote_tabla`) la usa para saber qué franja de la
+    # página precede a esta tabla y buscar ahí su cabecera "LOTE N" — nunca
+    # por proximidad textual global, que en una página con varias tablas de
+    # lote (CLAUDE.md sección 3: un lote pequeño cabe entero en una página
+    # junto a otro) confundiría una tabla con la cabecera de la siguiente.
+    bbox: tuple[float, float, float, float]
 
 
 def _es_fila_de_datos(fila: FILA) -> bool:
@@ -82,6 +89,11 @@ def extraer_tablas_pagina(pagina) -> list[TablaExtraida]:
             continue  # tabla espuria: ninguna fila trae un código de precio
         cabecera = _combinar_filas_cabecera(filas[:indice_datos])
         resultado.append(
-            TablaExtraida(cabecera=cabecera, filas=filas[indice_datos:], pagina=pagina.page_number)
+            TablaExtraida(
+                cabecera=cabecera,
+                filas=filas[indice_datos:],
+                pagina=pagina.page_number,
+                bbox=tuple(tabla.bbox),
+            )
         )
     return resultado

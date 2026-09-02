@@ -13,6 +13,16 @@ from tests import fixtures as fx
 from tests.extraccion.dobles import ProveedorModeloFalso
 
 
+def _sin_identificador_lote(lineas: list[dict]) -> list[dict]:
+    """`identificador_lote` es una clave de enrutamiento interna de
+    `procesar_anejo` (etapa 3.5, `app.extraccion.lote_tabla`): el
+    orquestador la usa para agrupar líneas por lote y la retira antes de
+    llamar a `guardar_lineas_catalogo` (que solo conoce columnas reales de
+    `LineaCatalogo`). Estos tests llaman a `guardar_lineas_catalogo`
+    directamente, así que hacen la misma retirada aquí."""
+    return [{k: v for k, v in l.items() if k != "identificador_lote"} for l in lineas]
+
+
 def _crear_lote(db_session, codigo_expediente, ruta_pdf):
     expediente = Expediente(codigo_expediente=codigo_expediente)
     db_session.add(expediente)
@@ -29,7 +39,7 @@ def _crear_lote(db_session, codigo_expediente, ruta_pdf):
     )
     db_session.add(documento)
     db_session.commit()
-    return lote, documento
+    return expediente, lote, documento
 
 
 def test_cascada_completa_sobre_los_dos_anejos_de_fixture(db_session, capsys):
@@ -50,12 +60,13 @@ def test_cascada_completa_sobre_los_dos_anejos_de_fixture(db_session, capsys):
     firmas_vistas: set[str] = set()
 
     for codigo_expediente, ruta, baja in documentos:
-        lote, documento = _crear_lote(db_session, codigo_expediente, ruta)
+        expediente, lote, documento = _crear_lote(db_session, codigo_expediente, ruta)
 
         resultado = procesar_anejo(
-            ruta, documento_origen_id=documento.id, baja_lote=baja, db=db_session, model_provider=modelo
+            ruta, documento_origen_id=documento.id, expediente_id=expediente.id,
+            lotes={"1": baja}, db=db_session, model_provider=modelo,
         )
-        guardado = guardar_lineas_catalogo(db_session, lote.id, resultado.lineas)
+        guardado = guardar_lineas_catalogo(db_session, lote.id, _sin_identificador_lote(resultado.lineas))
 
         llamadas_modelo_totales += resultado.llamadas_modelo
         firmas_vistas |= resultado.firmas_cabecera
@@ -86,18 +97,20 @@ def test_cascada_completa_sobre_los_dos_anejos_de_fixture(db_session, capsys):
 
 
 def test_documento_0008_guantes_produce_13_lineas_con_baja_aplicada(db_session):
-    lote, documento = _crear_lote(db_session, "6.24/28510.0008", fx.ANEJO_PRECIOS_GUANTES)
+    expediente, lote, documento = _crear_lote(db_session, "6.24/28510.0008", fx.ANEJO_PRECIOS_GUANTES)
 
     resultado = procesar_anejo(
         fx.ANEJO_PRECIOS_GUANTES,
         documento_origen_id=documento.id,
-        baja_lote=Decimal("0.5400"),
+        expediente_id=expediente.id,
+        lotes={"1": Decimal("0.5400")},
         db=db_session,
         model_provider=None,
     )
 
     assert len(resultado.lineas) == 13
     assert resultado.llamadas_modelo == 0
+    assert resultado.tablas_sin_lote == []
 
     primera = resultado.lineas[0]
     assert primera["codigo_precio"] == "P-001"
@@ -106,18 +119,20 @@ def test_documento_0008_guantes_produce_13_lineas_con_baja_aplicada(db_session):
     assert primera["precio_unitario"] == Decimal("24.00")
     # 24,00 * (1 - 0,54) = 11,04 — no 0,00 (CLAUDE.md sección 4).
     assert primera["precio_adjudicado"] == Decimal("11.0400")
+    assert primera["identificador_lote"] == "1"
 
 
 def test_documento_0088_traviesas_colapsa_a_14_lineas_unicas_en_catalogo(db_session):
     # El mismo cuadro de precios aparece dos veces en el PDF (Anejo 1 y el
     # cuadro de "criterios técnicos" del Anejo 2): 33 filas crudas deben
     # colapsar a 14 códigos de precio únicos en el catálogo.
-    lote, documento = _crear_lote(db_session, "6.24/28510.0088", fx.ANEJO_PRECIOS_TRAVIESAS)
+    expediente, lote, documento = _crear_lote(db_session, "6.24/28510.0088", fx.ANEJO_PRECIOS_TRAVIESAS)
 
     resultado = procesar_anejo(
         fx.ANEJO_PRECIOS_TRAVIESAS,
         documento_origen_id=documento.id,
-        baja_lote=Decimal("0.0050"),
+        expediente_id=expediente.id,
+        lotes={"1": Decimal("0.0050")},
         db=db_session,
         model_provider=None,
     )
@@ -129,19 +144,23 @@ def test_documento_0088_traviesas_colapsa_a_14_lineas_unicas_en_catalogo(db_sess
     # desactiva a propósito. Las 19 repeticiones dentro de este mismo
     # documento no son una "actualización": son la misma línea vista dos
     # veces antes de que exista fila alguna en la base de datos.
-    guardado = guardar_lineas_catalogo(db_session, lote.id, resultado.lineas)
+    guardado = guardar_lineas_catalogo(db_session, lote.id, _sin_identificador_lote(resultado.lineas))
     assert guardado.creadas == 14
     assert guardado.actualizadas == 0
 
 
 def test_reprocesar_el_mismo_documento_no_duplica_lineas_ni_repite_llamadas(db_session):
-    lote, documento = _crear_lote(db_session, "6.24/28510.0088", fx.ANEJO_PRECIOS_TRAVIESAS)
+    expediente, lote, documento = _crear_lote(db_session, "6.24/28510.0088", fx.ANEJO_PRECIOS_TRAVIESAS)
 
-    r1 = procesar_anejo(fx.ANEJO_PRECIOS_TRAVIESAS, documento.id, Decimal("0.0050"), db_session, None)
-    guardar_lineas_catalogo(db_session, lote.id, r1.lineas)
+    r1 = procesar_anejo(
+        fx.ANEJO_PRECIOS_TRAVIESAS, documento.id, expediente.id, {"1": Decimal("0.0050")}, db_session, None
+    )
+    guardar_lineas_catalogo(db_session, lote.id, _sin_identificador_lote(r1.lineas))
 
-    r2 = procesar_anejo(fx.ANEJO_PRECIOS_TRAVIESAS, documento.id, Decimal("0.0050"), db_session, None)
-    guardado2 = guardar_lineas_catalogo(db_session, lote.id, r2.lineas)
+    r2 = procesar_anejo(
+        fx.ANEJO_PRECIOS_TRAVIESAS, documento.id, expediente.id, {"1": Decimal("0.0050")}, db_session, None
+    )
+    guardado2 = guardar_lineas_catalogo(db_session, lote.id, _sin_identificador_lote(r2.lineas))
 
     # r2.lineas también trae las 33 filas crudas, fundidas a 14 por clave
     # antes de escribir — las 14 ya existen en la base de datos desde r1.
