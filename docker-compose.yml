@@ -27,6 +27,10 @@ services:
       # docker-compose.override.yml que monte tu `Expedientes.xlsx` en esta
       # ruta y define CODIGOS_PROYECTO_PATH=/data/codigos_proyecto.xlsx.
       CODIGOS_PROYECTO_PATH: ${CODIGOS_PROYECTO_PATH:-}
+      # Orígenes permitidos para CORS (app/config.py): el navegador llama a
+      # esta API desde fuera de la red de Docker, en el origen donde corre
+      # "web". Lista separada por comas si hace falta más de uno.
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
     volumes:
       - documentos:/data/documentos
     ports:

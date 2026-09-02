@@ -63,14 +63,25 @@ class _IndiceCodigosProyecto:
             if clave_matriz and clave_matriz not in self._por_matriz:
                 self._por_matriz[clave_matriz] = fila
 
-    def buscar(self, codigo_expediente: str, codigo_matriz: Optional[str]) -> Optional[dict]:
+    def buscar(self, codigo_expediente: str, codigo_matriz: Optional[str]) -> Optional[tuple[dict, bool]]:
+        """Devuelve la fila encontrada junto con si el cruce fue por `Nº
+        Expediente` (`True`) o por `MATRIZ` (`False`). La distinción importa:
+        cuando `codigo_expediente` cruza por la columna MATRIZ (CLAUDE.md
+        sección 3: "3 como MATRIZ"), significa que el propio expediente ES el
+        acuerdo marco de esa fila — su columna MATRIZ vale, trivialmente, el
+        propio `codigo_expediente` que se buscó. Devolver ese valor como "la
+        matriz de este expediente" sería inventarla por auto-referencia
+        (sección 7: "el sistema nunca inventa una matriz")."""
         for clave in (codigo_expediente, codigo_matriz):
             clave_normalizada = _normalizar_codigo(clave)
             if clave_normalizada is None:
                 continue
-            fila = self._por_nexpediente.get(clave_normalizada) or self._por_matriz.get(clave_normalizada)
+            fila = self._por_nexpediente.get(clave_normalizada)
             if fila is not None:
-                return fila
+                return fila, True
+            fila = self._por_matriz.get(clave_normalizada)
+            if fila is not None:
+                return fila, False
         return None
 
 
@@ -100,15 +111,20 @@ def cruzar_codigo_proyecto(
     ruta_excel: str, codigo_expediente: str, codigo_matriz: Optional[str] = None
 ) -> CruceCodigos:
     indice = _cargar_indice(ruta_excel)
-    fila = indice.buscar(codigo_expediente, codigo_matriz)
-    if fila is None:
+    encontrado = indice.buscar(codigo_expediente, codigo_matriz)
+    if encontrado is None:
         return CruceCodigos(codigo_interno=None, codigo_proyecto=None, codigo_matriz=None, cruzado=False)
+    fila, coincide_por_nexpediente = encontrado
 
     nº_interno = fila.get("Nº Interno")
     return CruceCodigos(
         codigo_interno=str(nº_interno).strip() if nº_interno is not None else None,
         codigo_proyecto=_normalizar_codigo(fila.get("Nº Expediente")),
-        codigo_matriz=_normalizar_codigo(fila.get("MATRIZ")),
+        # Solo cuando el cruce fue por Nº Expediente el campo MATRIZ de la
+        # fila es información nueva (la matriz real de este expediente). Por
+        # MATRIZ, ese campo es el propio codigo_expediente buscado (ver
+        # docstring de `buscar`): no hay matriz que devolver.
+        codigo_matriz=_normalizar_codigo(fila.get("MATRIZ")) if coincide_por_nexpediente else None,
         cruzado=True,
     )
 

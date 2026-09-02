@@ -42,6 +42,23 @@ def test_cruza_por_matriz_cuando_no_hay_por_numero_de_expediente(excel_codigos):
     assert resultado.codigo_interno == "24038"
 
 
+def test_expediente_que_es_matriz_de_otra_fila_no_se_pone_su_propia_matriz(excel_codigos):
+    # 6.25/28510.0028 nunca aparece como "Nº Expediente": solo es la MATRIZ
+    # de la fila de 6.25/28510.0085 (acuerdo marco del que cuelga ese
+    # pedido). Cruzar directamente por ese código (sección 3: "3 como
+    # MATRIZ") debe traer su Nº Interno, pero NO debe devolver
+    # codigo_matriz="6.25/28510.0028" (el propio código buscado, tal cual
+    # sale de la columna MATRIZ de la fila encontrada) como si el expediente
+    # tuviera una matriz distinta de sí mismo — eso sería inventarla por
+    # auto-referencia (bug real: expediente 6.25/28510.0027, sesión de
+    # pulido de la web, CLAUDE.md).
+    resultado = cruzar_codigo_proyecto(excel_codigos, "6.25/28510.0028")
+
+    assert resultado.cruzado is True
+    assert resultado.codigo_interno == "24038"
+    assert resultado.codigo_matriz is None
+
+
 def test_no_cruza_no_inventa_nada(excel_codigos):
     resultado = cruzar_codigo_proyecto(excel_codigos, "6.99/00000.0000")
 

@@ -13,6 +13,14 @@ class Settings(BaseSettings):
     document_storage_path: str = "/data/documentos"
     worker_poll_interval_seconds: float = 3.0
 
+    # Orígenes permitidos para CORS (lista separada por comas): la API es la
+    # única frontera con datos (CLAUDE.md sección 9.1), y el navegador del
+    # cliente llama a esta dirección directamente desde fuera de la red de
+    # Docker — sin cabeceras CORS, el navegador bloquea la respuesta aunque
+    # la petición llegue bien (a diferencia de un servidor a servidor, que no
+    # las necesita). Por defecto, el puerto donde corre "web" en local.
+    cors_allowed_origins: str = "http://localhost:3000"
+
     # Cruce con el Excel de códigos (CLAUDE.md sección 7): ruta al
     # `Expedientes.xlsx` de referencia (columnas `Nº Interno`, `Nº
     # Expediente`, `MATRIZ`). Vacío por defecto: sin esta variable, el
