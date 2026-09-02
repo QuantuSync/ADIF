@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.interfaces.document_storage import DocumentStorage
 from app.models import Documento, EstadoExpediente, Expediente, TipoDocumento, TrabajoCola
+from app.queue import encolar_trabajo
 from app.scraping.pcsp import safe, scrape_expediente
 
 CATEGORIA_A_TIPO = {
@@ -29,14 +30,16 @@ def ejecutar_scraping_expediente(db: Session, storage: DocumentStorage, trabajo:
         raise RuntimeError(f"expediente_id {trabajo.expediente_id} no existe")
 
     expediente.estado = EstadoExpediente.descargando
+    expediente.error = None
     db.commit()
 
     try:
         resultado = asyncio.run(
             scrape_expediente(expediente.codigo_expediente, expediente.codigo_matriz)
         )
-    except Exception:
+    except Exception as exc:
         expediente.estado = EstadoExpediente.fallido
+        expediente.error = str(exc)
         db.commit()
         raise
 
@@ -65,8 +68,13 @@ def ejecutar_scraping_expediente(db: Session, storage: DocumentStorage, trabajo:
             ruta_almacenamiento=ruta,
         ))
 
-    expediente.estado = EstadoExpediente.extrayendo
+    expediente.estado = EstadoExpediente.descargado
+    expediente.error = None
     db.commit()
+
+    # Encadenado (CLAUDE.md, encargo de esta sesión, punto 3): al terminar
+    # la descarga se encola la extracción, no se ejecuta suelta.
+    encolar_trabajo(db, tipo="extraer_expediente", expediente_id=expediente.id)
 
     return {
         "expediente": expediente.codigo_expediente,

@@ -23,6 +23,7 @@ from app.db import Base
 class EstadoExpediente(str, enum.Enum):
     pendiente = "pendiente"
     descargando = "descargando"
+    descargado = "descargado"
     extrayendo = "extrayendo"
     pendiente_revision = "pendiente_revision"
     completado = "completado"
@@ -70,6 +71,11 @@ class Expediente(Base):
         default=EstadoExpediente.pendiente,
         server_default=EstadoExpediente.pendiente.value,
     )
+    # Por qué está en fallido o pendiente_revision, con el mensaje real
+    # (CLAUDE.md, encargo de esta sesión, punto 2). `trabajos_cola.error`
+    # cubre el fallo de un trabajo concreto; este cubre el motivo a nivel de
+    # expediente, incluida la revisión sin que ningún trabajo haya fallado.
+    error = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),
@@ -204,9 +210,16 @@ class MapeoCabeceraCache(Base):
 class TrabajoCola(Base):
     __tablename__ = "trabajos_cola"
 
-    id = Column(BigInteger, primary_key=True)
+    # BigInteger con variante Integer en SQLite: sqlite solo autoasigna el
+    # id de una PK declarada como INTEGER (su alias del rowid); en Postgres
+    # sigue siendo bigint, igual que crea la migración 0001.
+    id = Column(BigInteger().with_variant(Integer(), "sqlite"), primary_key=True)
     tipo = Column(String(64), nullable=False)
-    payload = Column(JSONB, nullable=True)
+    # JSON genérico con variante JSONB solo en Postgres (mismo tipo de
+    # columna real que crea la migración 0001): así esta tabla también se
+    # puede crear en SQLite para tests sin Postgres levantado, igual que
+    # `MapeoCabeceraCache` — ver su docstring.
+    payload = Column(JSON().with_variant(JSONB(), "postgresql"), nullable=True)
     estado = Column(
         Enum(EstadoTrabajo, name="estado_trabajo"),
         nullable=False,
@@ -216,7 +229,7 @@ class TrabajoCola(Base):
     intentos = Column(Integer, nullable=False, default=0, server_default="0")
     max_intentos = Column(Integer, nullable=False, default=3, server_default="3")
     expediente_id = Column(Integer, ForeignKey("expedientes.id"), nullable=True)
-    resultado = Column(JSONB, nullable=True)
+    resultado = Column(JSON().with_variant(JSONB(), "postgresql"), nullable=True)
     error = Column(Text, nullable=True)
     bloqueado_por = Column(String(128), nullable=True)
     bloqueado_en = Column(DateTime(timezone=True), nullable=True)

@@ -8,6 +8,13 @@ class Settings(BaseSettings):
     document_storage_path: str = "/data/documentos"
     worker_poll_interval_seconds: float = 3.0
 
+    # Recuperación de trabajos huérfanos (CLAUDE.md sección 17, pendiente):
+    # un trabajo `en_proceso` cuyo `bloqueado_en` supera este umbral se
+    # reclama como si el worker que lo tenía hubiera desaparecido (contenedor
+    # caído, dockerd reiniciado a mitad de ejecución). Varias veces el
+    # timeout de navegación del scraping, que es el trabajo más largo hoy.
+    worker_orphan_threshold_seconds: float = 300.0
+
     # Mapeo de cabecera (CLAUDE.md sección 6): única etapa de la cascada que
     # llama al modelo. La clave nunca se hardcodea, viene del entorno.
     anthropic_api_key: Optional[str] = None

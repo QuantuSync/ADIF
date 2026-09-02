@@ -1,19 +1,19 @@
-type Expediente = {
-  id: number;
-  codigo_expediente: string;
-  estado: string;
-};
+import ExpedientesPanel, { Expediente } from "./ExpedientesPanel";
 
 export default async function Home() {
-  const apiUrl = process.env.API_URL ?? "http://localhost:8000";
+  // API_URL: red interna de contenedores, para el fetch inicial en el
+  // servidor (Next corriendo dentro de docker-compose). NEXT_PUBLIC_API_URL:
+  // variable expuesta al navegador, que no resuelve nombres de contenedor —
+  // ver CLAUDE.md sección 13, "la dirección de la API en la web es una
+  // variable de entorno".
+  const apiUrlServidor = process.env.API_URL ?? "http://localhost:8000";
+  const apiUrlNavegador = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
   let expedientes: Expediente[] = [];
   let error: string | null = null;
-
   try {
-    const res = await fetch(`${apiUrl}/expedientes`, { cache: "no-store" });
-    if (!res.ok) {
-      throw new Error(`la API respondio ${res.status}`);
-    }
+    const res = await fetch(`${apiUrlServidor}/expedientes`, { cache: "no-store" });
+    if (!res.ok) throw new Error(`la API respondió ${res.status}`);
     expedientes = await res.json();
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);
@@ -21,21 +21,12 @@ export default async function Home() {
 
   return (
     <main style={{ fontFamily: "sans-serif", padding: "2rem" }}>
-      <h1>ADIF - Catalogo de materiales</h1>
-      <p>API: {apiUrl}</p>
+      <h1>ADIF - Catálogo de materiales</h1>
+      <p style={{ color: "#666" }}>API: {apiUrlNavegador}</p>
       {error ? (
         <p style={{ color: "crimson" }}>Error al conectar con la API: {error}</p>
       ) : (
-        <>
-          <p>Expedientes en base de datos: {expedientes.length}</p>
-          <ul>
-            {expedientes.map((e) => (
-              <li key={e.id}>
-                {e.codigo_expediente} — {e.estado}
-              </li>
-            ))}
-          </ul>
-        </>
+        <ExpedientesPanel inicial={expedientes} apiUrl={apiUrlNavegador} />
       )}
     </main>
   );
