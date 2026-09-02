@@ -41,6 +41,10 @@ services:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-adif}:${POSTGRES_PASSWORD:-adif}@postgres:5432/${POSTGRES_DB:-adif}
       DOCUMENT_STORAGE_PATH: /data/documentos
       WORKER_POLL_INTERVAL_SECONDS: 3
+      # Etapa 5 de la cascada de extracción (CLAUDE.md sección 6): el
+      # worker es el único proceso que puede necesitar llamar al modelo.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-5}
     volumes:
       - documentos:/data/documentos
     depends_on:

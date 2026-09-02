@@ -1,6 +1,7 @@
 import enum
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Column,
     DateTime,
@@ -177,6 +178,26 @@ class TrazaOrigen(Base):
     pagina = Column(Integer, nullable=True)
     fragmento = Column(Text, nullable=True)
     valor_extraido = Column(String(255), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class MapeoCabeceraCache(Base):
+    """Caché de la etapa 5 (CLAUDE.md sección 6): una cabecera de tabla ya
+    vista no vuelve a pasar por el mapeo determinista ni por el modelo. La
+    firma es un hash estable de la cabecera normalizada (ver
+    app.extraccion.firma_cabecera); `mapeo` guarda a qué índice de columna
+    corresponde cada campo del esquema (o null si esa tabla no trae ese
+    campo). `JSON` genérico (no `JSONB`) a propósito: esta tabla es
+    consultable en SQLite para tests sin Postgres levantado, sin perder
+    validez en Postgres."""
+
+    __tablename__ = "cache_mapeo_cabecera"
+
+    id = Column(Integer, primary_key=True)
+    firma = Column(String(64), nullable=False, unique=True)
+    cabecera = Column(JSON, nullable=False)
+    mapeo = Column(JSON, nullable=False)
+    origen = Column(String(16), nullable=False)  # "determinista" | "modelo"
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 

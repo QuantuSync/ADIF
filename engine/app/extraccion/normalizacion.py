@@ -39,3 +39,23 @@ def parsear_porcentaje_es(cadena: str) -> Decimal:
     que `precio_adjudicado = precio_licitado * (1 - baja)` (CLAUDE.md sección
     4) se pueda aplicar directamente sin volver a dividir entre 100."""
     return parsear_numero_es(cadena) / Decimal("100")
+
+
+def limpiar_codigo_celda(valor: str | None) -> str | None:
+    """Códigos de precio y matrículas de celda de tabla, sin ningún espacio
+    ni salto de línea: "P-\\n001" -> "P-001" (CLAUDE.md sección 8, columnas
+    de tabla envueltas por el ancho de columna, no por el contenido)."""
+    if valor is None:
+        return None
+    limpio = re.sub(r"\s+", "", valor)
+    return limpio or None
+
+
+def limpiar_texto_celda(valor: str | None) -> str | None:
+    """Descripción y unidad de celda de tabla: colapsa saltos de línea y
+    espacios repetidos a un único espacio, sin perder los límites de
+    palabra."""
+    if valor is None:
+        return None
+    limpio = re.sub(r"\s+", " ", valor).strip()
+    return limpio or None
