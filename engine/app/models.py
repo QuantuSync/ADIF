@@ -31,6 +31,7 @@ class EstadoExpediente(str, enum.Enum):
 class TipoDocumento(str, enum.Enum):
     anuncio_pcsp = "anuncio_pcsp"
     propuesta_lc27 = "propuesta_lc27"
+    resolucion_adjudicacion = "resolucion_adjudicacion"
     contrato = "contrato"
     anejo = "anejo"
     pliego = "pliego"

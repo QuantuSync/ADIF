@@ -67,6 +67,17 @@ Sobre 45 expedientes y 187 PDFs reales:
   extracción. Un parser por posición fija no funciona.
 - **Las cabeceras se repiten:** una aparece 20 veces, otra 6, otra 4. Esto habilita
   la caché de la sección 6.
+- **Los ficheros nombrados `CONTRATO.pdf` de tamaño pequeño suelen ser el formulario
+  PCSP "Anuncio de formalización de contrato", no el contrato firmado.** El nombre
+  que asigna el scraper no es fiable como tipo: manda el clasificador (sección 5,
+  etapa 1), nunca el nombre del fichero.
+- **Los ficheros `*_ANEJO_1.pdf` son en realidad el Pliego de Prescripciones
+  Técnicas completo; el cuadro de precios es una sección interna.** Consecuencia
+  para la extracción: la tabla se localiza por contenido, nunca por el tipo de
+  documento ni por el nombre del fichero.
+- **Existe una tercera plantilla de propuesta, `L9_CM.32-FE` (Dirección
+  Técnica), distinta de LC.27, que hoy cae en `otro`.** Puede estar relacionada
+  con la familia pendiente de la sección 16.
 
 ---
 
@@ -336,6 +347,9 @@ una pantalla compartida.
 - **Ruido heredado en el Excel de ejemplo** (hecho con Copilot): matrícula repetida con
   descripción vacía, `BRIDA` alternando con `BRIDAS`. Decidir si se arranca limpio o
   el sistema normaliza lo heredado.
+- **Comprobar si la plantilla `L9_CM.32-FE` sigue el modelo de baja única por lote
+  o es la segunda familia con precio ofertado por línea** (ver el primer punto de
+  esta sección). Sin verificar todavía.
 
 ---
 
