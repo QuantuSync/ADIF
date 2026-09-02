@@ -59,9 +59,14 @@ def test_anthropic_model_provider_construye_la_peticion_y_parsea_json_estructura
         def __init__(self, texto):
             self.text = texto
 
+    class UsoFalso:
+        input_tokens = 111
+        output_tokens = 22
+
     class RespuestaFalsa:
         def __init__(self, texto):
             self.content = [BloqueTexto(texto)]
+            self.usage = UsoFalso()
 
     class MessagesFalso:
         def create(self, **kwargs):

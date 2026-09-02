@@ -469,3 +469,85 @@ acuerdo marco, matriz `2.18/04703.0019`), `6.24/28510.0088` y
   dentro de un mismo ZIP mensual — hasta tres versiones distintas observadas
   para `6.24/28510.0193` en mayo 2025 (`ADJ`, `RES`, `RES`). Hay que quedarse
   siempre con la más reciente por `<updated>`.
+
+---
+
+## 17.2 Validación del mapeo de cabecera contra la API real (sesión 2026-09-02)
+
+Primera vez que la etapa 5 de la cascada (sección 6) se ejercita contra la
+API de Anthropic real, no contra un doble de test. Caso disparador: el
+`ANEJO_3.pdf` del expediente `6.24/28510.0008`, que fallaba por cabecera no
+mapeable. Verificado en contenedor Linux (worker real, Postgres real), no en
+un script suelto.
+
+- **Confirmado: el prompt nunca lleva las filas de datos completas**, solo la
+  cabecera y las 3 primeras filas de ejemplo — verificado leyendo el prompt
+  real tal cual se envió, no el código que lo construye.
+- **`CachedModelProvider` ahora se cablea en el worker real vía
+  `MODEL_CACHE_DIR`** (`app/config.py`, `docker-compose.yml`), vacío por
+  defecto para no cachear en disco en producción por accidente. El caso de
+  desarrollo vive en `engine/.cache_modelo_dev/` (gitignored), montado como
+  bind mount en el contenedor del worker.
+- **Confirmado: ambas capas de caché evitan una segunda llamada real**,
+  comprobado por separado: la caché de firma en `cache_mapeo_cabecera`
+  (borrando el fichero de disco) y la caché de disco de
+  `CachedModelProvider` (borrando la fila de `cache_mapeo_cabecera`) — cada
+  una por sí sola basta para que no haya HTTP real a `api.anthropic.com`.
+- **Coste medido, tres cabeceras reales:** 1397 in / 56 out, 1323 in / 56
+  out (`ANEJO_3.pdf`, cabeceras corruptas con `Ó`→`�`), y 1066 in / 535 out
+  (`6.25/28510.0027_ANEJO_1.pdf`, cabecera con dos columnas fantasma). El
+  salto de tokens de salida en el tercer caso es razonamiento del modelo
+  (`claude-opus-5` piensa por defecto — no se desactiva `thinking` en
+  `AnthropicModelProvider`), no JSON más largo: el esquema de salida es el
+  mismo en los tres casos. `AnthropicModelProvider.completar` ahora registra
+  el prompt y el coste en tokens de cada llamada real vía `logging`
+  (nunca en un acierto de `CachedModelProvider`).
+- **Nuevo tipo de clave de API: "ligada a identidad".** Una clave creada en
+  la consola bajo un usuario (no una clave clásica de workspace) exige la
+  cabecera `anthropic-workspace-id` en cada petición a `/v1/messages` — sin
+  ella, 400 `invalid_request_error`. Se añadió `ANTHROPIC_WORKSPACE_ID`
+  (`app/config.py`, `.env`, `docker-compose.yml`) y se pasa por
+  `default_headers` **dentro de `AnthropicModelProvider`**, nunca en la
+  interfaz `ModelProvider`: es un detalle de esta implementación concreta,
+  no existe para un futuro modelo autoalojado.
+- **Confirmado: sin clave y con fallo de red, el expediente cae en
+  `pendiente_revision` con motivo claro, nunca rompe el trabajo entero** —
+  ambos casos probados contra el worker real (sin `ANTHROPIC_API_KEY`, y con
+  el cliente HTTP apuntado a un host inalcanzable).
+- **Bug real encontrado y corregido: `guardar_lineas_catalogo` podía violar
+  la constraint `UNIQUE` de golpe cuando el mismo `clave_linea` se repetía
+  más de una vez dentro de un único lote de líneas** (el mismo cuadro de
+  precios reaparece varias veces en un documento, sección 3). Causa: `app/db.py`
+  configura `SessionLocal` con `autoflush=False` a propósito, así que el
+  `db.query(...)` de comprobación de cada fila nunca veía las filas ya
+  añadidas (`db.add()`) en la misma pasada del bucle — el `INSERT` en bloque
+  final las mandaba todas juntas y Postgres rechazaba el duplicado. Los
+  tests existentes no lo veían: `tests/conftest.py` crea su `db_session` con
+  el `autoflush=True` por defecto de SQLAlchemy, que sí encubre el problema.
+  Arreglado fundiendo el lote por `clave_linea` en Python
+  (`app.catalogo._combinar_por_clave`) antes de tocar la base de datos, sin
+  depender de si la sesión autoflushea o no. `tests/extraccion/test_pipeline_anejo.py`
+  y `tests/test_catalogo.py` actualizados a la cuenta correcta de
+  creadas/actualizadas.
+- **Segundo bug real, mismo síntoma dos veces por causas distintas
+  (pérdida de conexión con Postgres, y el bug de arriba): un fallo a mitad
+  de un trabajo dejaba la sesión de SQLAlchemy en estado "necesita
+  rollback", y el propio manejo de la excepción —tanto en
+  `app.worker.ejecutar_trabajo` como en el `except` exterior de
+  `ejecutar_extraccion_expediente`— tocaba la sesión rota (leyendo
+  `trabajo.id`, o llamando a `db.commit()`) antes de hacer `db.rollback()`.
+  Eso lanzaba un `PendingRollbackError` que sustituía al error real,
+  reventaba el proceso entero del worker (el trabajo se quedaba huérfano en
+  `en_proceso` hasta el umbral de la sección 17) en vez de marcar el trabajo
+  como fallido con el motivo correcto. Arreglado con `db.rollback()` antes
+  de tocar cualquier atributo o hacer cualquier escritura en el bloque
+  `except` de ambos sitios.
+- **Hallazgo de dominio, no un bug:** el `ANEJO_3.pdf` de `6.24/28510.0008`
+  trae, para los mismos códigos de precio que el cuadro de guantes
+  (`ANEJO_1.pdf`), una segunda tabla de características técnicas —
+  normativa aplicable, impacto en seguridad, unidad de medida— **sin
+  columna de precio ni de cantidad**. El modelo lo detectó bien (`cantidad`
+  y `precio_unitario` a `null` en el mapeo, en vez de inventar una columna),
+  y la fusión por `clave_linea` en `guardar_lineas_catalogo` conservó el
+  precio y la cantidad que ya traía `ANEJO_1.pdf` sin que la segunda pasada
+  los borrase — exactamente el caso que describe el docstring de la función.

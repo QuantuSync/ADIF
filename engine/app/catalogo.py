@@ -101,6 +101,26 @@ class ResultadoGuardadoCatalogo:
     actualizadas: int
 
 
+def _combinar_por_clave(lineas: list[dict]) -> list[dict]:
+    """El mismo cuadro de precios puede reaparecer varias veces dentro de un
+    único documento (CLAUDE.md sección 3 y docstring de `guardar_lineas_catalogo`),
+    así que `lineas` puede traer la misma `clave_linea` repetida antes de tocar
+    la base de datos. Doblarlas aquí, en Python, con la misma regla de fusión
+    que ya aplica `guardar_lineas_catalogo` fila a fila (un valor `None` nunca
+    pisa uno ya conocido) — no depender de que la sesión autoflushee entre
+    iteraciones, que `SessionLocal` (app/db.py) desactiva a propósito."""
+    combinadas: dict[str, dict] = {}
+    for datos in lineas:
+        existente = combinadas.get(datos["clave_linea"])
+        if existente is None:
+            combinadas[datos["clave_linea"]] = dict(datos)
+        else:
+            for campo, valor in datos.items():
+                if valor is not None:
+                    existente[campo] = valor
+    return list(combinadas.values())
+
+
 def guardar_lineas_catalogo(db: Session, lote_id: int, lineas: list[dict]) -> ResultadoGuardadoCatalogo:
     """Escritura por clave, no añadido ciego (CLAUDE.md sección 9.9): una
     línea ya vista para este lote se actualiza, nunca se duplica. La
@@ -112,7 +132,7 @@ def guardar_lineas_catalogo(db: Session, lote_id: int, lineas: list[dict]) -> Re
     cantidad que sí trajo la primera."""
     creadas = 0
     actualizadas = 0
-    for datos in lineas:
+    for datos in _combinar_por_clave(lineas):
         existente = (
             db.query(LineaCatalogo)
             .filter_by(lote_id=lote_id, clave_linea=datos["clave_linea"])

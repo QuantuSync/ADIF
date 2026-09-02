@@ -5,7 +5,7 @@ from app.config import settings
 from app.db import SessionLocal
 from app.extraccion.orquestador import ejecutar_extraccion_expediente
 from app.interfaces.document_storage import LocalDiskStorage
-from app.interfaces.model_provider import AnthropicModelProvider
+from app.interfaces.model_provider import AnthropicModelProvider, CachedModelProvider
 from app.models import EstadoTrabajo
 from app.queue import reclamar_trabajos_huerfanos, tomar_siguiente_trabajo
 from app.scraping.job import ejecutar_scraping_expediente
@@ -19,10 +19,19 @@ storage = LocalDiskStorage(settings.document_storage_path)
 # procesa igual pero el mapeo de cabecera nunca vista fallará con un error
 # real en vez de una llamada silenciosa a ningún sitio (NullModelProvider).
 model_provider = (
-    AnthropicModelProvider(api_key=settings.anthropic_api_key, modelo=settings.anthropic_model)
+    AnthropicModelProvider(
+        api_key=settings.anthropic_api_key,
+        modelo=settings.anthropic_model,
+        workspace_id=settings.anthropic_workspace_id,
+    )
     if settings.anthropic_api_key
     else None
 )
+# Decorador de desarrollo (interfaces/model_provider.py, docstring de
+# CachedModelProvider): solo se activa si MODEL_CACHE_DIR está en el
+# entorno, para no cachear en disco en producción por accidente.
+if model_provider is not None and settings.model_cache_dir:
+    model_provider = CachedModelProvider(model_provider, settings.model_cache_dir)
 
 
 def procesar_ping(db, trabajo) -> dict:
@@ -53,13 +62,21 @@ def ejecutar_trabajo(db, trabajo) -> None:
         trabajo.error = f"tipo de trabajo desconocido: {trabajo.tipo}"
         db.commit()
         return
+    trabajo_id = trabajo.id  # capturado antes del try: sigue legible aunque la sesión quede rota
     try:
         resultado = manejador(db, trabajo)
         trabajo.estado = EstadoTrabajo.completado
         trabajo.resultado = resultado
         trabajo.error = None
     except Exception as exc:  # noqa: BLE001
-        logger.exception("fallo procesando trabajo %s", trabajo.id)
+        # Un fallo a mitad de `manejador` (p.ej. un INSERT que viola una
+        # constraint) deja la transacción de `db` en estado "necesita
+        # rollback": cualquier acceso a un atributo expirado de `trabajo`
+        # -incluido leerlo para este mismo log- dispara un
+        # PendingRollbackError que tapaba el error real y mataba el proceso
+        # entero del worker en vez de marcar el trabajo como fallido.
+        db.rollback()
+        logger.exception("fallo procesando trabajo %s", trabajo_id)
         trabajo.estado = (
             EstadoTrabajo.pendiente if trabajo.intentos < trabajo.max_intentos else EstadoTrabajo.fallido
         )

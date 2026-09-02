@@ -45,8 +45,16 @@ services:
       # worker es el único proceso que puede necesitar llamar al modelo.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-5}
+      # Solo si ANTHROPIC_API_KEY es una clave ligada a identidad (ver
+      # docstring de AnthropicModelProvider).
+      ANTHROPIC_WORKSPACE_ID: ${ANTHROPIC_WORKSPACE_ID:-}
+      # Solo desarrollo (CachedModelProvider, ver app/config.py): bind mount
+      # al host para no pagar la misma cabecera dos veces entre reinicios
+      # del contenedor. Vacío en un despliegue real.
+      MODEL_CACHE_DIR: ${MODEL_CACHE_DIR:-}
     volumes:
       - documentos:/data/documentos
+      - ./engine/.cache_modelo_dev:/app/.cache_modelo_dev
     depends_on:
       api:
         condition: service_healthy

@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 from app.catalogo import (
+    _combinar_por_clave,
     calcular_clave_linea,
     construir_linea_catalogo,
     construir_lineas_desde_tabla,
@@ -124,6 +125,42 @@ def test_guardar_lineas_catalogo_no_borra_campo_con_valor_nulo_entrante(db_sessi
     linea = db_session.query(LineaCatalogo).filter_by(lote_id=lote.id, clave_linea="P-003").one()
     assert linea.cantidad == Decimal("80000")
     assert linea.pagina == 23  # la traza sí se actualiza a la pasada más reciente
+
+
+def test_combinar_por_clave_funde_repeticiones_dentro_del_mismo_lote_de_lineas():
+    # Bug real (sesión de validación del mapeo de cabecera contra la API):
+    # SessionLocal (app/db.py) usa autoflush=False, así que un mismo
+    # clave_linea repetido más de una vez dentro de un único `lineas` (el
+    # mismo cuadro de precios reaparece en el documento — CLAUDE.md sección
+    # 3) llegaba sin fundir hasta el INSERT final y violaba la constraint
+    # UNIQUE de golpe, tirando el trabajo entero. `_combinar_por_clave` debe
+    # resolverlo en Python, sin depender de autoflush.
+    primera = {"clave_linea": "P-003", "cantidad": Decimal("80000"), "precio_unitario": None, "pagina": 18}
+    segunda = {"clave_linea": "P-003", "cantidad": None, "precio_unitario": Decimal("1.95"), "pagina": 23}
+    otra = {"clave_linea": "P-004", "cantidad": Decimal("10"), "precio_unitario": Decimal("5.00"), "pagina": 18}
+
+    combinadas = _combinar_por_clave([primera, segunda, otra])
+
+    assert len(combinadas) == 2
+    p003 = next(c for c in combinadas if c["clave_linea"] == "P-003")
+    assert p003["cantidad"] == Decimal("80000")  # el None de `segunda` no borra el valor de `primera`
+    assert p003["precio_unitario"] == Decimal("1.95")
+    assert p003["pagina"] == 23  # el campo si presente en ambas se queda con el más reciente
+
+
+def test_guardar_lineas_catalogo_funde_clave_repetida_en_un_solo_lote(db_session):
+    lote = _lote(db_session)
+    mapeo_con_cantidad = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": None, "cantidad": 2, "precio_unitario": 3}
+    mapeo_sin_cantidad = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": None, "cantidad": None, "precio_unitario": 2}
+    primera = construir_linea_catalogo(["P-003", "Traviesa", "80000", "1,95"], mapeo_con_cantidad, 18, None, None, 0)
+    segunda = construir_linea_catalogo(["P-003", "Traviesa", "1,95"], mapeo_sin_cantidad, 23, None, None, 1)
+
+    resultado = guardar_lineas_catalogo(db_session, lote.id, [primera, segunda])
+
+    assert resultado.creadas == 1
+    assert resultado.actualizadas == 0
+    linea = db_session.query(LineaCatalogo).filter_by(lote_id=lote.id, clave_linea="P-003").one()
+    assert linea.cantidad == Decimal("80000")
 
 
 def test_construir_lineas_desde_tabla_usa_orden_inicial():

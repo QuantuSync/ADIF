@@ -302,6 +302,13 @@ def ejecutar_extraccion_expediente(
             "motivo_revision": motivo_revision,
         }
     except Exception as exc:  # noqa: BLE001
+        # Igual que en app.worker.ejecutar_trabajo: una excepción a mitad de
+        # este bloque (p.ej. un fallo de conexión con Postgres, o un
+        # IntegrityError que escapase del try por documento) deja la
+        # transacción de `db` en estado "necesita rollback" — sin este
+        # rollback, el `db.commit()` de abajo lanzaría un PendingRollbackError
+        # que sustituiría a `exc` y enterraría el motivo real del fallo.
+        db.rollback()
         expediente.estado = EstadoExpediente.fallido
         expediente.error = str(exc)
         db.commit()

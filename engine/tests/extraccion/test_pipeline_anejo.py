@@ -123,9 +123,15 @@ def test_documento_0088_traviesas_colapsa_a_14_lineas_unicas_en_catalogo(db_sess
     )
     assert len(resultado.lineas) == 33
 
+    # Las 33 filas se funden por clave_linea en Python antes de tocar la base
+    # de datos (app.catalogo._combinar_por_clave) — sin depender de que la
+    # sesión autoflushee entre iteraciones, que `SessionLocal` (app/db.py)
+    # desactiva a propósito. Las 19 repeticiones dentro de este mismo
+    # documento no son una "actualización": son la misma línea vista dos
+    # veces antes de que exista fila alguna en la base de datos.
     guardado = guardar_lineas_catalogo(db_session, lote.id, resultado.lineas)
     assert guardado.creadas == 14
-    assert guardado.actualizadas == 19
+    assert guardado.actualizadas == 0
 
 
 def test_reprocesar_el_mismo_documento_no_duplica_lineas_ni_repite_llamadas(db_session):
@@ -137,8 +143,10 @@ def test_reprocesar_el_mismo_documento_no_duplica_lineas_ni_repite_llamadas(db_s
     r2 = procesar_anejo(fx.ANEJO_PRECIOS_TRAVIESAS, documento.id, Decimal("0.0050"), db_session, None)
     guardado2 = guardar_lineas_catalogo(db_session, lote.id, r2.lineas)
 
+    # r2.lineas también trae las 33 filas crudas, fundidas a 14 por clave
+    # antes de escribir — las 14 ya existen en la base de datos desde r1.
     assert guardado2.creadas == 0
-    assert guardado2.actualizadas == 33
+    assert guardado2.actualizadas == 14
     from app.models import LineaCatalogo
 
     assert db_session.query(LineaCatalogo).filter_by(lote_id=lote.id).count() == 14
