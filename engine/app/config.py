@@ -13,6 +13,14 @@ class Settings(BaseSettings):
     document_storage_path: str = "/data/documentos"
     worker_poll_interval_seconds: float = 3.0
 
+    # Cruce con el Excel de códigos (CLAUDE.md sección 7): ruta al
+    # `Expedientes.xlsx` de referencia (columnas `Nº Interno`, `Nº
+    # Expediente`, `MATRIZ`). Vacío por defecto: sin esta variable, el
+    # sistema sigue funcionando pero ningún expediente cruza (CLAUDE.md
+    # sección 7, "si no cruza, se deja vacío y se marca" — aplica igual si
+    # el propio fichero no está disponible).
+    codigos_proyecto_path: Optional[str] = None
+
     # Recuperación de trabajos huérfanos (CLAUDE.md sección 17, pendiente):
     # un trabajo `en_proceso` cuyo `bloqueado_en` supera este umbral se
     # reclama como si el worker que lo tenía hubiera desaparecido (contenedor

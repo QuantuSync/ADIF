@@ -9,6 +9,9 @@ from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 
+import openpyxl
+
+from app.config import settings
 from app.extraccion.orquestador import LOTE_UNICO, ejecutar_extraccion_expediente
 from app.interfaces.document_storage import DocumentStorage
 from app.models import Documento, EstadoExpediente, Expediente, Lote, LineaCatalogo, TipoDocumento, TrazaOrigen
@@ -67,6 +70,9 @@ def test_expediente_0008_completo_produce_catalogo_y_pasa_a_completado(db_sessio
     # Caso central del proyecto (CLAUDE.md sección 4): no 0%, la baja
     # declarada en texto.
     assert expediente.baja_global == Decimal("0.5400")
+    # Objeto del contrato (CLAUDE.md sección 7): sale de la Propuesta LC.27
+    # a falta de Anuncio PCSP en este expediente de fixture.
+    assert expediente.nombre_proyecto == "SUMINISTRO DE GUANTES CONTRA RIESGO ELECTRICO."
 
     lote = db_session.query(Lote).filter_by(expediente_id=expediente.id, identificador_lote=LOTE_UNICO).one()
     assert lote.baja_lote == Decimal("0.5400")
@@ -106,6 +112,62 @@ def test_expediente_sin_documentos_va_a_revision_no_a_fallido(db_session):
     assert expediente.estado == EstadoExpediente.pendiente_revision
     assert expediente.error is not None
     assert resultado["motivo_revision"] is not None
+
+
+def test_expediente_0008_cruza_codigo_interno_del_excel_de_referencia(db_session, tmp_path, monkeypatch):
+    # CLAUDE.md sección 7: cruce por clave exacta contra el Excel de
+    # códigos, ejecutado como parte del mismo trabajo de extracción.
+    ruta_excel = tmp_path / "Codigos_de_proyecto.xlsx"
+    libro = openpyxl.Workbook()
+    hoja = libro.active
+    hoja.append(["Nº Interno", "Nº Expediente", "MATRIZ", "ESPECIALIDAD/DISCIPLINA", "DESCRIPCIÓN"])
+    hoja.append([24099, "6.24/28510.0008", None, "EPI", "Guantes"])
+    libro.save(ruta_excel)
+    monkeypatch.setattr(settings, "codigos_proyecto_path", str(ruta_excel))
+
+    expediente = _crear_expediente_con_documentos(
+        db_session,
+        "6.24/28510.0008",
+        [
+            ("ADJUDICACION", fx.PROPUESTA_LC27_PRECIOS_UNITARIOS),
+            ("ANEJO", fx.ANEJO_PRECIOS_GUANTES),
+            ("CONTRATO", fx.CONTRATO_PRECIOS_UNITARIOS),
+        ],
+    )
+    trabajo = SimpleNamespace(expediente_id=expediente.id)
+
+    ejecutar_extraccion_expediente(db_session, _StorageDirecta(), trabajo, model_provider=None)
+
+    db_session.refresh(expediente)
+    assert expediente.codigos_cruzados is True
+    assert expediente.codigo_interno == "24099"
+
+
+def test_expediente_sin_codigo_en_excel_de_referencia_se_marca_sin_cruzar(db_session, tmp_path, monkeypatch):
+    ruta_excel = tmp_path / "Codigos_de_proyecto.xlsx"
+    libro = openpyxl.Workbook()
+    hoja = libro.active
+    hoja.append(["Nº Interno", "Nº Expediente", "MATRIZ", "ESPECIALIDAD/DISCIPLINA", "DESCRIPCIÓN"])
+    hoja.append([1, "6.24/28510.9998", None, "otra", "otra"])
+    libro.save(ruta_excel)
+    monkeypatch.setattr(settings, "codigos_proyecto_path", str(ruta_excel))
+
+    expediente = _crear_expediente_con_documentos(
+        db_session,
+        "6.24/28510.0008",
+        [
+            ("ADJUDICACION", fx.PROPUESTA_LC27_PRECIOS_UNITARIOS),
+            ("ANEJO", fx.ANEJO_PRECIOS_GUANTES),
+            ("CONTRATO", fx.CONTRATO_PRECIOS_UNITARIOS),
+        ],
+    )
+    trabajo = SimpleNamespace(expediente_id=expediente.id)
+
+    ejecutar_extraccion_expediente(db_session, _StorageDirecta(), trabajo, model_provider=None)
+
+    db_session.refresh(expediente)
+    assert expediente.codigos_cruzados is False
+    assert expediente.codigo_interno is None
 
 
 def test_trabajo_sin_expediente_id_falla_con_mensaje_claro(db_session):

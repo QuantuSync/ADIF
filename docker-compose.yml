@@ -21,6 +21,12 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-adif}:${POSTGRES_PASSWORD:-adif}@postgres:5432/${POSTGRES_DB:-adif}
       DOCUMENT_STORAGE_PATH: /data/documentos
+      # Cruce con el Excel de códigos (CLAUDE.md sección 7). Vacío por
+      # defecto: sin esta variable, ningún expediente cruza (se deja vacío
+      # y se marca, nunca se inventa). Para activarlo en local, añade un
+      # docker-compose.override.yml que monte tu `Expedientes.xlsx` en esta
+      # ruta y define CODIGOS_PROYECTO_PATH=/data/codigos_proyecto.xlsx.
+      CODIGOS_PROYECTO_PATH: ${CODIGOS_PROYECTO_PATH:-}
     volumes:
       - documentos:/data/documentos
     ports:
@@ -52,6 +58,9 @@ services:
       # al host para no pagar la misma cabecera dos veces entre reinicios
       # del contenedor. Vacío en un despliegue real.
       MODEL_CACHE_DIR: ${MODEL_CACHE_DIR:-}
+      # Ver comentario en el servicio "api": mismo cruce, el worker lo
+      # rellena al terminar la extracción de cada expediente.
+      CODIGOS_PROYECTO_PATH: ${CODIGOS_PROYECTO_PATH:-}
     volumes:
       - documentos:/data/documentos
       - ./engine/.cache_modelo_dev:/app/.cache_modelo_dev

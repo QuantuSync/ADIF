@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import Usuario, get_current_user
 from app.db import get_db
+from app.extraccion.cruce_codigos import asegurar_cruce_codigos
 from app.models import Expediente
 from app.schemas import ExpedienteCreate, ExpedienteOut
 
@@ -15,7 +16,19 @@ def listar_expedientes(
     db: Session = Depends(get_db),
     usuario: Usuario = Depends(get_current_user),
 ):
-    return db.execute(select(Expediente).order_by(Expediente.id)).scalars().all()
+    expedientes = db.execute(select(Expediente).order_by(Expediente.id)).scalars().all()
+    # Backfill perezoso (CLAUDE.md sección 7 y docstring de
+    # `asegurar_cruce_codigos`): expedientes procesados antes de que
+    # existiera el cruce con el Excel de códigos no se reprocesan enteros
+    # solo para rellenar tres columnas.
+    cambios = False
+    for expediente in expedientes:
+        antes = expediente.codigos_cruzados
+        asegurar_cruce_codigos(db, expediente)
+        cambios = cambios or expediente.codigos_cruzados != antes
+    if cambios:
+        db.commit()
+    return expedientes
 
 
 @router.post("/expedientes", response_model=ExpedienteOut)

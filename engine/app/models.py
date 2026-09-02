@@ -3,6 +3,7 @@ import enum
 from sqlalchemy import (
     JSON,
     BigInteger,
+    Boolean,
     Column,
     DateTime,
     Enum,
@@ -62,6 +63,15 @@ class Expediente(Base):
     codigo_expediente = Column(String(64), nullable=False, unique=True)
     codigo_matriz = Column(String(64), nullable=True)
     nombre_proyecto = Column(String(255), nullable=True)
+    # Cruce con el Excel de códigos (CLAUDE.md sección 7, "Cruce con el
+    # Excel de códigos"): por clave exacta contra `codigo_expediente` /
+    # `codigo_matriz`, nunca por similitud de nombre. `codigos_cruzados` es
+    # `None` mientras no se ha intentado el cruce (expedientes procesados
+    # antes de que existiera esta columna), `False` si se intentó y no
+    # cruzó ninguna fila del Excel (el sistema nunca inventa un código:
+    # `codigo_interno` se deja vacío), `True` si cruzó.
+    codigo_interno = Column(String(64), nullable=True)
+    codigos_cruzados = Column(Boolean, nullable=True)
     importe_licitacion = Column(Numeric(14, 4), nullable=True)
     importe_adjudicacion = Column(Numeric(14, 4), nullable=True)
     baja_global = Column(Numeric(12, 6), nullable=True)

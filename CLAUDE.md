@@ -666,3 +666,116 @@ este repositorio.
   (por encima del umbral por defecto de 60 s que causaba la caída) y
   comprobando después que `docker.service` seguía con el mismo `Active:
   ... since` de antes de la espera, sin reinicio.
+- **Matizado en la sesión de catálogo (2026-09-02, sección 18): la caída
+  volvió a pasar con `vmIdleTimeout=-1` ya aplicado**, varias veces en la
+  misma sesión (`journalctl -u docker` mostró `Processing signal
+  'terminated'` seguido de `Stopping docker.service` cada ~50-90 s mientras
+  había comandos `docker compose` activos, con la distro WSL en estado
+  `Running` todo el tiempo — no es el mismo síntoma que la suspensión de VM
+  documentada arriba). Causa real sin confirmar todavía. Mitigación que
+  funcionó en la práctica: mantener un `docker compose up` en primer plano
+  (sin `-d`) corriendo en una shell de fondo mientras se opera el stack
+  desde otra — reduce la frecuencia de caídas pero no las elimina del todo.
+  **No dar por cerrado el hallazgo de `vmIdleTimeout` de arriba como
+  solución completa.**
+
+---
+
+## 18. Catálogo, revisión y exportación (cierre del punto 5 del orden de trabajo)
+
+Sesión 2026-09-02. Implementa y verifica en vivo — contenedor Linux real,
+Postgres real, los dos expedientes ya procesados (`6.24/28510.0008`,
+`6.25/28510.0027`) — los cinco encargos de esta sesión: explorar el
+catálogo con búsqueda por matrícula, trazabilidad, cola de revisión,
+exportación a Excel y cruce con el Excel de códigos.
+
+- **Cruce con el Excel de códigos, implementado como búsqueda determinista,
+  no como etapa de la cascada** (`app/extraccion/cruce_codigos.py`): carga
+  `Expedientes.xlsx` una vez por proceso (cacheado en memoria por ruta +
+  fecha de modificación), indexa por `Nº Expediente` y por `MATRIZ`
+  normalizados (CLAUDE.md sección 8: recorta espacios sobrantes antes de
+  comparar), y busca primero por `codigo_expediente`, luego por
+  `codigo_matriz` si el primero no cruza. Se intenta **una sola vez por
+  expediente** (`expedientes.codigos_cruzados` pasa de `NULL` a
+  `true`/`false` y no se repite) — nuevas columnas `codigo_interno` y
+  `codigos_cruzados` (migración 0006). Se ejecuta al final de
+  `ejecutar_extraccion_expediente`, y de forma perezosa (mismo helper,
+  `asegurar_cruce_codigos`) sobre expedientes ya procesados antes de que
+  existiera esta columna, en `/expedientes`, `/catalogo` y en la
+  exportación — así no hace falta reprocesar nada para que el cruce
+  aparezca. **Verificado con el Excel real de `Ejemplo/Input/`:** los dos
+  expedientes de prueba cruzaron (`23025` y `24039`), sin tocar código.
+- **`Nombre del proyecto` no se extraía todavía (columna del esquema,
+  sección 7, pero ningún extractor la rellenaba).** Añadido
+  `objeto_contrato` a `extraer_campos_anuncio_pcsp` (etiqueta fija
+  `"Objeto del Contrato: ... \nDescripción"`, limpia) y
+  `extraer_objeto_contrato_lc27` — **hallazgo nuevo:** la Propuesta LC.27 y
+  la Resolución de Adjudicación (plantilla `L9_AF.01-FE`, sección 17) no
+  tienen una etiqueta "objeto" en la portada (el texto viene partido a dos
+  columnas por el layout del PDF), pero **ambas repiten el objeto limpio,
+  en una sola pasada de texto, en el bloque "IDENTIFICACIÓN DEL DOCUMENTO"
+  de la página de firmas**: `"PROPUESTA DE ADJUDICACIÓN DEL CONTRATO DE
+  <objeto> EXPEDIENTE..."` / `"RESOLUCIÓN DE ADJUDICACIÓN DEL CONTRATO DE
+  <objeto> EXPEDIENTE..."` — mismo patrón en las dos plantillas. Prioridad
+  igual que los importes: Anuncio PCSP gana si existe. **Verificado contra
+  los tres documentos reales de fixture** (`6.24/28510.0103` con matriz,
+  Propuesta de `6.24/28510.0008`, Propuesta UTE de `6.24/28510.0088`,
+  Resolución de `6.24/28510.0124`) y, al reprocesar en el contenedor real,
+  contra los dos expedientes ya en base de datos.
+- **De paso, mismo cambio: Propuesta LC.27 y Resolución de Adjudicación
+  ahora comparten la extracción de importes** (`elif item.tipo in
+  (propuesta_lc27, resolucion_adjudicacion)`, antes solo miraba
+  `propuesta_lc27`). Antes de este cambio, un expediente con **solo**
+  Resolución (sin Propuesta LC.27 ni Anuncio PCSP) no habría podido sacar
+  importe de licitación/adjudicación de ningún sitio — hueco real, no
+  hipotético, dado que la sección 17 documenta que a veces solo existe uno
+  de los dos documentos de adjudicación.
+- **`Código del material`: solo la parte determinista implementada
+  (CLAUDE.md sección 6), sin ruta a modelo todavía**
+  (`app/extraccion/codigo_material.py`). Vocabulario inicial: los cuatro
+  ejemplos literales de la sección 6 (`BRIDA`, `PLACA`, `JUNTA`,
+  `SUPLEMENTO`) más los sustantivos que sí aparecen en el corpus de prueba
+  fijo (`GUANTE`, `TRAVIESA`, `BALASTO`, `TIRAFONDO`, `TORNILLO`,
+  `ARANDELA`, `GRAPA`). Si la primera palabra de la descripción no está en
+  el vocabulario, hoy queda `None` en vez de llamar al modelo — **la
+  ampliación de vocabulario vía modelo queda sin implementar**, porque
+  ningún caso del corpus de prueba la necesitó todavía (los dos
+  expedientes reales reprocesados sacaron `GUANTE` sin fallar ninguno).
+  Cuando aparezca un caso real sin casar, este es el sitio a tocar.
+- **API nueva**, todas detrás de `get_current_user` (costura de
+  autenticación, sección 9.7) igual que las rutas existentes:
+  - `GET /catalogo` — filtros `expediente`, `lote`, `matricula`, `q`,
+    paginado. Sin filtro de `expediente`, `matricula` ya busca a través de
+    todos los expedientes (la pregunta que ADIF realmente tiene, sección
+    11.5) — es el mismo endpoint, no uno aparte.
+  - `GET /catalogo/exportar.xlsx` — genera el Excel a demanda desde la base
+    de datos (sección 9.8), paginando la consulta interna en lotes de 500
+    para no cargar el catálogo entero en memoria de golpe.
+  - `GET /revision`, `GET /expedientes/{id}/revision`,
+    `POST /expedientes/{id}/revision/confirmar` (con o sin corrección —
+    recalcula `precio_adjudicado` de todo el lote si la baja cambia),
+    `PATCH /catalogo/lineas/{id}`, `POST /catalogo/lineas/{id}/confirmar`.
+  - `GET /documentos/{id}/archivo` — único punto por el que la web puede
+    servir un PDF (sección 9.1: la web nunca toca un PDF directamente).
+- **Web**: `/catalogo` (búsqueda por matrícula en primer plano, tabla con
+  filtros, panel de trazabilidad al pinchar una línea — documento, página,
+  fragmento, enlace directo al PDF) y `/revision` (lista de expedientes
+  pendientes, detalle con documentos enlazados, formulario de corrección y
+  confirmación por expediente, confirmación por línea). Tipografía base
+  subida a 17px y contraste alto en toda la web (encargo de esta sesión:
+  legible en una pantalla compartida a distancia).
+- **Verificado de extremo a extremo contra el stack real** (`docker compose
+  up`, sin dobles de test): reprocesados los dos expedientes ya en base de
+  datos, `GET /catalogo/exportar.xlsx` descargado y abierto con
+  `openpyxl` dentro del contenedor — las once columnas y su orden coinciden
+  exactamente con `Ejemplo/Output/receipts_20262215070445.xlsx`, con datos
+  reales rellenos (`23025`, `SUMINISTRO DE GUANTES CONTRA RIESGO
+  ELÉCTRICO.`, `GUANTE`, precios reales). Las tres páginas web
+  (`/`, `/catalogo`, `/revision`) responden 200 y renderizan contenido real
+  contra la API en contenedor.
+- **Pendiente de la sección 16, sin resolver todavía:** si `Precio unitario`
+  en el Excel de salida debe ser el licitado o el adjudicado. Esta sesión
+  usa el licitado (`precio_unitario` tal cual, sin aplicar la baja) porque
+  es la lectura literal de la tabla de la sección 7 ("Precio unitario |
+  Cuadro de precios | No"); es una decisión de esta sesión, no una
+  confirmación del cliente — sigue marcado como pendiente.

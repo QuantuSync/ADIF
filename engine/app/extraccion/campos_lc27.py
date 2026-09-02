@@ -35,6 +35,17 @@ _IMPORTE_ADJUDICACION_RE = re.compile(r"[Bb]ase [Ii]mponible[^\d\n]{0,100}([\d.,
 _NUMERO_EXPEDIENTE_RE = re.compile(
     r"EXPEDIENTE N[oº]:?\s*(" + CODIGO_EXPEDIENTE_RE.pattern + r")", re.IGNORECASE
 )
+# El bloque "IDENTIFICACIÓN DEL DOCUMENTO" de la página de firmas repite el
+# objeto sin el reflow a dos columnas de la portada, tanto en la Propuesta
+# LC.27 ("PROPUESTA DE ADJUDICACIÓN DEL CONTRATO DE <objeto> EXPEDIENTE...")
+# como en la Resolución (plantilla L9_AF.01-FE, CLAUDE.md sección 17: misma
+# estructura de firma, "RESOLUCIÓN DE ADJUDICACIÓN DEL CONTRATO DE..."). Corta
+# en el primer " EXPEDIENTE" (con espacio o salto de línea delante, nunca a
+# mitad de palabra como en "EXPEDIENTE PRINCIPAL").
+_OBJETO_CONTRATO_RE = re.compile(
+    r"(?:PROPUESTA|RESOLUCI[OÓ]N) DE ADJUDICACI[OÓ]N DEL CONTRATO DE\s+(.+?)\s+EXPEDIENTE",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 def _buscar_en_paginas(paginas: list[PaginaTexto], patron: re.Pattern) -> Optional[CampoAnclado]:
@@ -55,3 +66,10 @@ def extraer_importe_adjudicacion_lc27(paginas: list[PaginaTexto]) -> Optional[Ca
 
 def extraer_numero_expediente_lc27(paginas: list[PaginaTexto]) -> Optional[CampoAnclado]:
     return _buscar_en_paginas(paginas, _NUMERO_EXPEDIENTE_RE)
+
+
+def extraer_objeto_contrato_lc27(paginas: list[PaginaTexto]) -> Optional[CampoAnclado]:
+    campo = _buscar_en_paginas(paginas, _OBJETO_CONTRATO_RE)
+    if campo is None:
+        return None
+    return CampoAnclado(valor=re.sub(r"\s+", " ", campo.valor), pagina=campo.pagina, fragmento=campo.fragmento)

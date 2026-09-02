@@ -16,6 +16,10 @@ def test_anuncio_con_matriz_extrae_los_dos_codigos():
     assert importe_como_decimal(campos.importe_licitacion) == Decimal("145100")
     assert importe_como_decimal(campos.importe_adjudicacion) == Decimal("145100")
     assert campos.adjudicatario.valor == "SIEL CONFECCIONES SL"
+    assert campos.objeto_contrato.valor == (
+        "Pedido nº 7 acuerdo marco de suministro de equipos de protección individual. Lote "
+        "2. Polos de manga corta, polos de manga larga y sudaderas de alta visibilidad"
+    )
 
     # Trazabilidad: cada campo sabe de qué página salió (CLAUDE.md 9.10).
     assert campos.numero_expediente.pagina == 1

@@ -31,9 +31,11 @@ from app.extraccion.baja import BajaDeclarada, elegir_baja_preferida, extraer_ba
 from app.extraccion.campos_lc27 import (
     extraer_importe_adjudicacion_lc27,
     extraer_importe_licitacion_lc27,
+    extraer_objeto_contrato_lc27,
 )
 from app.extraccion.campos_pcsp import extraer_campos_anuncio_pcsp, importe_como_decimal
 from app.extraccion.clasificador import clasificar
+from app.extraccion.cruce_codigos import asegurar_cruce_codigos
 from app.extraccion.normalizacion import parsear_importe_es
 from app.extraccion.pipeline_anejo import procesar_anejo
 from app.extraccion.precios_unitarios import calcular_baja_efectiva
@@ -128,6 +130,7 @@ def _extraer_campos_expediente(db: Session, expediente: Expediente, documentos: 
     # fuente no trajo el campo. pcsp gana sobre lc27 al elegir al final.
     licitacion_pcsp = adjudicacion_pcsp = None
     licitacion_lc27 = adjudicacion_lc27 = None
+    objeto_pcsp = objeto_lc27 = None
     candidatos_baja: list[BajaDeclarada] = []
     baja_doc: dict[int, int] = {}  # id(BajaDeclarada) -> documento.id
 
@@ -150,13 +153,27 @@ def _extraer_campos_expediente(db: Session, expediente: Expediente, documentos: 
                     db, expediente.id, "codigo_matriz", item.documento.id,
                     campos.codigo_matriz.pagina, campos.codigo_matriz.fragmento, campos.codigo_matriz.valor,
                 )
-        elif item.tipo == TipoDocumento.propuesta_lc27:
+            if campos.objeto_contrato and objeto_pcsp is None:
+                objeto_pcsp = (
+                    campos.objeto_contrato.valor, item.documento.id,
+                    campos.objeto_contrato.pagina, campos.objeto_contrato.fragmento,
+                )
+        elif item.tipo in (TipoDocumento.propuesta_lc27, TipoDocumento.resolucion_adjudicacion):
+            # Misma familia de etiquetas fijas en ambas plantillas (CLAUDE.md
+            # sección 17: Propuesta y Resolución declaran los mismos importes
+            # del mismo procedimiento) — se tratan igual aquí, "primera que
+            # aparece gana" ya cubre la preferencia por la Resolución cuando
+            # las dos existen, porque `documentos` no tiene orden fijo pero
+            # el importe es idéntico en cualquiera de las dos.
             lic = extraer_importe_licitacion_lc27(item.paginas)
             adj = extraer_importe_adjudicacion_lc27(item.paginas)
+            obj = extraer_objeto_contrato_lc27(item.paginas)
             if lic and licitacion_lc27 is None:
                 licitacion_lc27 = (parsear_importe_es(lic.valor), item.documento.id, lic.pagina, lic.fragmento)
             if adj and adjudicacion_lc27 is None:
                 adjudicacion_lc27 = (parsear_importe_es(adj.valor), item.documento.id, adj.pagina, adj.fragmento)
+            if obj and objeto_lc27 is None:
+                objeto_lc27 = (obj.valor, item.documento.id, obj.pagina, obj.fragmento)
 
         if item.tipo in _TIPOS_CON_BAJA_DECLARADA:
             baja = extraer_baja_declarada(item.paginas, tipo_documento=item.tipo)
@@ -170,6 +187,11 @@ def _extraer_campos_expediente(db: Session, expediente: Expediente, documentos: 
         _traza(db, expediente.id, "importe_licitacion", *fuente_licitacion[1:], fuente_licitacion[0])
     if fuente_adjudicacion:
         _traza(db, expediente.id, "importe_adjudicacion", *fuente_adjudicacion[1:], fuente_adjudicacion[0])
+
+    fuente_objeto = objeto_pcsp or objeto_lc27
+    if fuente_objeto and not expediente.nombre_proyecto:
+        expediente.nombre_proyecto = fuente_objeto[0]
+        _traza(db, expediente.id, "nombre_proyecto", *fuente_objeto[1:], fuente_objeto[0])
 
     baja_preferida = elegir_baja_preferida(candidatos_baja)
     if baja_preferida is not None:
@@ -235,6 +257,7 @@ def ejecutar_extraccion_expediente(
         expediente.importe_licitacion = importe_licitacion
         expediente.importe_adjudicacion = importe_adjudicacion
         expediente.baja_global = baja_efectiva
+        asegurar_cruce_codigos(db, expediente)
         db.commit()
 
         lote = _obtener_o_crear_lote(db, expediente.id)

@@ -5,6 +5,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from app.extraccion.codigo_material import derivar_codigo_material
 from app.extraccion.normalizacion import (
     limpiar_codigo_celda,
     limpiar_texto_celda,
@@ -69,6 +70,7 @@ def construir_linea_catalogo(
         "codigo_precio": codigo_precio,
         "matricula": matricula,
         "descripcion": descripcion,
+        "codigo_material": derivar_codigo_material(descripcion),
         "unidad_medida": unidad_medida,
         "cantidad": cantidad,
         "precio_unitario": precio_unitario,

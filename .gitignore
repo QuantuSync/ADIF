@@ -15,6 +15,7 @@ node_modules/
 
 # Entorno local
 .env
+docker-compose.override.yml
 
 # Caché de desarrollo de CachedModelProvider (MODEL_CACHE_DIR)
 engine/.cache_modelo_dev/

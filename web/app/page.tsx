@@ -20,8 +20,8 @@ export default async function Home() {
   }
 
   return (
-    <main style={{ fontFamily: "sans-serif", padding: "2rem" }}>
-      <h1>ADIF - Catálogo de materiales</h1>
+    <main>
+      <h1 style={{ fontSize: "1.7rem" }}>Expedientes</h1>
       <p style={{ color: "#666" }}>API: {apiUrlNavegador}</p>
       {error ? (
         <p style={{ color: "crimson" }}>Error al conectar con la API: {error}</p>

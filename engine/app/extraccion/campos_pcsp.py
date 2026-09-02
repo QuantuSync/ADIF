@@ -37,6 +37,12 @@ _IMPORTE_ADJUDICACION_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 _ADJUDICATARIO_RE = re.compile(r"^Adjudicatario\s*$\n([^\n]+)", re.MULTILINE)
+# "Objeto del Contrato: <texto, a veces partido en varias líneas>\nDescripción"
+# — la etiqueta "Descripción" que sigue siempre repite el mismo texto sin la
+# etiqueta, así que sirve de límite fiable de dónde termina el objeto.
+_OBJETO_CONTRATO_RE = re.compile(
+    r"Objeto del Contrato:\s*(.+?)\s*\nDescripci[oó]n", re.DOTALL
+)
 
 
 @dataclass(frozen=True)
@@ -53,6 +59,7 @@ class CamposAnuncioPcsp:
     importe_licitacion: Optional[CampoAnclado] = None
     importe_adjudicacion: Optional[CampoAnclado] = None
     adjudicatario: Optional[CampoAnclado] = None
+    objeto_contrato: Optional[CampoAnclado] = None
 
 
 def _buscar_en_paginas(paginas: list[PaginaTexto], patron: re.Pattern) -> Optional[CampoAnclado]:
@@ -63,6 +70,16 @@ def _buscar_en_paginas(paginas: list[PaginaTexto], patron: re.Pattern) -> Option
     return None
 
 
+def _buscar_objeto(paginas: list[PaginaTexto]) -> Optional[CampoAnclado]:
+    campo = _buscar_en_paginas(paginas, _OBJETO_CONTRATO_RE)
+    if campo is None:
+        return None
+    # El objeto puede venir partido en varias líneas de PDF (ancho de
+    # columna, no puntuación) — colapsar a una sola línea como el resto de
+    # texto libre normalizado (CLAUDE.md sección 8).
+    return CampoAnclado(valor=re.sub(r"\s+", " ", campo.valor), pagina=campo.pagina, fragmento=campo.fragmento)
+
+
 def extraer_campos_anuncio_pcsp(paginas: list[PaginaTexto]) -> CamposAnuncioPcsp:
     return CamposAnuncioPcsp(
         numero_expediente=_buscar_en_paginas(paginas, _NUMERO_EXPEDIENTE_RE),
@@ -70,6 +87,7 @@ def extraer_campos_anuncio_pcsp(paginas: list[PaginaTexto]) -> CamposAnuncioPcsp
         importe_licitacion=_buscar_en_paginas(paginas, _IMPORTE_LICITACION_RE),
         importe_adjudicacion=_buscar_en_paginas(paginas, _IMPORTE_ADJUDICACION_RE),
         adjudicatario=_buscar_en_paginas(paginas, _ADJUDICATARIO_RE),
+        objeto_contrato=_buscar_objeto(paginas),
     )
 
 
