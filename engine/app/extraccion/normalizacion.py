@@ -9,6 +9,31 @@ from decimal import Decimal, InvalidOperation
 
 _NO_DIGITO_NI_SEPARADOR = re.compile(r"[^\d,.\-]")
 
+# Sesión de rodaje sobre el corpus completo (2026-09-03), expediente
+# 6.25/28510.0028: una fuente sin tabla ToUnicode hace que pdfplumber
+# extraiga identificadores de glifo crudos, "(cid:1004)", en vez de dígitos.
+# Sin esta comprobación, `_NO_DIGITO_NI_SEPARADOR` los cuela igual (los
+# dígitos del propio identificador de glifo parecen dígitos válidos) y el
+# resultado es un "precio" de 20+ cifras que revienta `numeric(14,4)` en
+# base de datos. No se intenta parsear: mejor que la línea vaya a revisión.
+_PATRON_CID = re.compile(r"\(cid:\d+\)")
+
+
+def _resolver_valor_duplicado(cadena: str) -> str:
+    """Una celda de cuadro de precios puede traer el mismo valor repetido
+    dos veces separadas por un salto de línea — artefacto de una celda mal
+    partida en la extracción, p.ej. `"306.351,49 €\\n306.351,49 €"`
+    (expediente 6.23/28510.0051, sesión de rodaje 2026-09-03): dos comas en
+    el mismo literal rompen el reparto entre parte entera y decimales de
+    `parsear_numero_es`. Si las dos líneas coinciden, no hay ambigüedad real
+    y se puede usar una; si no coinciden, no se adivina cuál es la buena —
+    se devuelve la cadena tal cual para que el parseo normal falle más abajo
+    y el llamador la mande a revisión."""
+    lineas = [linea.strip() for linea in cadena.splitlines() if linea.strip()]
+    if len(lineas) == 2 and lineas[0] == lineas[1]:
+        return lineas[0]
+    return cadena
+
 
 def parsear_numero_es(cadena: str) -> Decimal:
     """"138.000,00 €" -> Decimal("138000.00"). "145.100 EUR." ->
@@ -16,6 +41,12 @@ def parsear_numero_es(cadena: str) -> Decimal:
     decimal — nunca hay más de una convención dentro del mismo documento)."""
     if cadena is None:
         raise ValueError("no hay número que parsear (cadena es None)")
+    if _PATRON_CID.search(cadena):
+        raise ValueError(
+            f"la celda trae identificadores de glifo sin decodificar (fuente sin ToUnicode), "
+            f"no un número: {cadena!r}"
+        )
+    cadena = _resolver_valor_duplicado(cadena)
     limpio = _NO_DIGITO_NI_SEPARADOR.sub("", cadena.strip())
     if not limpio or limpio in ("-", "."):
         raise ValueError(f"no hay dígitos en {cadena!r}")

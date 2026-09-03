@@ -68,6 +68,93 @@ def test_clave_linea_usa_codigo_precio_por_encima_de_matricula():
     assert calcular_clave_linea("P-001", "697500900", "x", 0) == "P-001"
 
 
+def test_construir_linea_catalogo_descarta_pie_de_tabla():
+    # Sesión de rodaje 2026-09-03 (expedientes 6.23/28510.0104 y otros): una
+    # fila de resumen ("IVA", "TOTAL CON IVA", "PRESUPUESTO DE LICITACIÓN")
+    # no es una línea de material — el mapeo de cabecera la trata como una
+    # fila normal y su etiqueta cae en la columna de matrícula, que es
+    # varchar(9) y revienta el INSERT con cualquier texto más largo.
+    mapeo = {"codigo_precio": None, "matricula": 0, "descripcion": None, "unidad_medida": None, "cantidad": None, "precio_unitario": 1}
+    for etiqueta in ("IVA", "PRESUPUESTO DE LICITACIÓN", "TOTAL CON IVA"):
+        fila = [etiqueta, "11.634,00 €"]
+        linea = construir_linea_catalogo(
+            fila, mapeo, pagina=13, documento_origen_id=None, expediente_id=1, baja_lote=None, orden_aparicion=0
+        )
+        assert linea is None, etiqueta
+
+
+def test_construir_linea_catalogo_recupera_partida_alzada_mal_alineada():
+    # Expediente 6.24/28510.0064 (sesión de rodaje 2026-09-03): una partida
+    # alzada no tiene celda de matrícula propia, así que sus columnas se
+    # desplazan y el texto que debía caer en descripción aterriza en
+    # matrícula. CLAUDE.md sección 2: la partida alzada es una línea
+    # legítima del catálogo — se recupera, no se descarta como un pie de
+    # tabla, pero nunca con texto en la columna de matrícula.
+    mapeo = {"codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": None, "cantidad": None, "precio_unitario": 3}
+    fila = ["P-405", "Partida alzada a justificar para imprevistos", "", "5.000,00 €"]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=28, documento_origen_id=None, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea is not None
+    assert linea["matricula"] is None
+    assert linea["descripcion"] == "Partida alzada a justificar para imprevistos"
+    assert linea["precio_unitario"] == Decimal("5000.00")
+    assert linea["motivo_revision"] is None
+
+
+def test_construir_linea_catalogo_matricula_no_reconocible_se_vacia_y_marca_revision():
+    mapeo = {"codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": None, "cantidad": None, "precio_unitario": 3}
+    fila = ["P-016", "ifireV", "PÉRTIGA VERIFICADORA", "2.298,82 €"]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=10, documento_origen_id=None, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea is not None
+    assert linea["matricula"] is None
+    assert linea["motivo_revision"] is not None
+
+
+def test_construir_linea_catalogo_valor_ilegible_no_revienta_marca_revision():
+    # CLAUDE.md, sesión de rodaje 2026-09-03: un valor de precio que no se
+    # puede interpretar (fuente sin ToUnicode) no debe tirar la fila entera
+    # ni la tabla — la línea se guarda igual, con el campo en None y un
+    # motivo de revisión.
+    mapeo = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": None, "cantidad": None, "precio_unitario": 2}
+    fila = ["P-003", "Remonte de balasto", "(cid:1005)(cid:853)(cid:1004)(cid:1004)(cid:1004)(cid:1004)"]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=120, documento_origen_id=None, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea is not None
+    assert linea["precio_unitario"] is None
+    assert linea["motivo_revision"] is not None
+    assert "no interpretable" in linea["motivo_revision"]
+
+
+def test_construir_lineas_desde_tabla_filtra_pies_de_tabla():
+    mapeo = {"codigo_precio": None, "matricula": 0, "descripcion": None, "unidad_medida": None, "cantidad": None, "precio_unitario": 1}
+    tabla = TablaExtraida(
+        cabecera=["Matrícula", "Precio"],
+        filas=[
+            ["591000001", "554,00"],
+            ["PRESUPUESTO DE LICITACIÓN", "55.400,00 €"],
+            ["IVA", "11.634,00 €"],
+            ["TOTAL CON IVA", "67.034,00 €"],
+        ],
+        pagina=13,
+        bbox=(0.0, 0.0, 100.0, 100.0),
+    )
+
+    lineas = construir_lineas_desde_tabla(tabla, mapeo, None, expediente_id=1, baja_lote=None, orden_inicial=0)
+
+    assert len(lineas) == 1
+    assert lineas[0]["matricula"] == "591000001"
+
+
 def test_clave_linea_cae_a_hash_de_descripcion_sin_codigo_ni_matricula():
     clave = calcular_clave_linea(None, None, "PARTIDA ALZADA", 3)
     assert clave != ""
@@ -94,6 +181,33 @@ def test_guardar_lineas_catalogo_primera_vez_crea(db_session):
     assert resultado.creadas == 1
     assert resultado.actualizadas == 0
     assert db_session.query(LineaCatalogo).count() == 1
+
+
+def test_guardar_lineas_catalogo_no_hace_commit_el_llamador_decide(db_session):
+    # CLAUDE.md, sesión de rodaje 2026-09-03, punto 3: antes esta función
+    # confirmaba por su cuenta, así que un documento con varias tablas podía
+    # dejar guardado un grupo y fallar en el siguiente sin poder deshacer el
+    # primero. Ahora es el llamador (`ejecutar_extraccion_expediente`) quien
+    # decide cuándo confirmar — un rollback tras llamar a esta función debe
+    # deshacer la línea igual que cualquier otro cambio pendiente de la
+    # sesión.
+    lote = _lote(db_session)
+    lineas = [
+        construir_linea_catalogo(
+            ["P-001", "Guante", "24,00"],
+            {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": None, "cantidad": None, "precio_unitario": 2},
+            pagina=11,
+            documento_origen_id=None,
+            expediente_id=lote.expediente_id,
+            baja_lote=None,
+            orden_aparicion=0,
+        )
+    ]
+
+    guardar_lineas_catalogo(db_session, lote.id, lineas)
+    db_session.rollback()
+
+    assert db_session.query(LineaCatalogo).count() == 0
 
 
 def test_guardar_lineas_catalogo_reprocesar_no_duplica(db_session):

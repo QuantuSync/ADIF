@@ -43,6 +43,12 @@ class ResultadoProcesamientoAnejo:
     # medición del corpus la usa para contar cuántas líneas caen en cada
     # caso de ambigüedad.
     tablas_sin_lote: list[str] = field(default_factory=list)
+    # Líneas cuyo valor de cantidad/precio/matrícula no se pudo interpretar
+    # (CLAUDE.md, sesión de rodaje 2026-09-03) — `linea["motivo_revision"]`
+    # ya lo explica por línea; este contador es solo para que el orquestador
+    # sepa si tiene que avisar a nivel de expediente sin releer todas las
+    # líneas.
+    lineas_con_aviso: int = 0
 
 
 def procesar_anejo(
@@ -66,6 +72,7 @@ def procesar_anejo(
     llamadas_modelo = 0
     firmas_cabecera: set[str] = set()
     tablas_sin_lote: list[str] = []
+    lineas_con_aviso = 0
 
     multi_lote = len(lotes) > 1
     identificador_unico = next(iter(lotes)) if len(lotes) == 1 else None
@@ -109,7 +116,17 @@ def procesar_anejo(
                 )
                 for linea in lineas_tabla:
                     linea["identificador_lote"] = identificador_lote
-                    linea["motivo_revision"] = motivo_ambiguo
+                    # `construir_linea_catalogo` (CLAUDE.md, sesión de rodaje
+                    # 2026-09-03) ya puede haber puesto su propio
+                    # `motivo_revision` (un valor de cantidad/precio/matrícula
+                    # ilegible): se cuenta aparte de la ambigüedad de lote
+                    # (que ya se resume en `tablas_sin_lote`) para que el
+                    # orquestador sepa si hay algo nuevo que avisar. La
+                    # ambigüedad de lote nunca pisa este motivo, se combina.
+                    if linea.get("motivo_revision"):
+                        lineas_con_aviso += 1
+                    if motivo_ambiguo is not None:
+                        linea["motivo_revision"] = motivo_ambiguo
                     if identificador_lote is None:
                         # Hallazgo real (expediente 6.25/28510.0027): varias
                         # tablas ambiguas del mismo documento pueden compartir
@@ -133,4 +150,5 @@ def procesar_anejo(
         llamadas_modelo=llamadas_modelo,
         firmas_cabecera=firmas_cabecera,
         tablas_sin_lote=tablas_sin_lote,
+        lineas_con_aviso=lineas_con_aviso,
     )

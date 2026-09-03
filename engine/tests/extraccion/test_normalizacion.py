@@ -41,3 +41,26 @@ def test_cadena_vacia_es_error():
 def test_cadena_sin_digitos_es_error():
     with pytest.raises(ValueError):
         parsear_numero_es("N/A")
+
+
+def test_identificadores_de_glifo_sin_decodificar_es_error_claro():
+    # Sesión de rodaje 2026-09-03, expediente 6.25/28510.0028: una fuente sin
+    # ToUnicode hace que pdfplumber devuelva "(cid:1004)..." en vez de
+    # dígitos. Sin esta comprobación, los dígitos del propio identificador
+    # cuelan como si fueran el número real y producen un valor absurdo.
+    with pytest.raises(ValueError, match="identificadores de glifo"):
+        parsear_numero_es("(cid:1004)(cid:853)(cid:1005)(cid:1009)(cid:1008)(cid:1004)(cid:3)(cid:934)")
+
+
+def test_valor_duplicado_con_salto_de_linea_se_colapsa_si_coincide():
+    # Expediente 6.23/28510.0051: una celda mal extraída trae el mismo
+    # importe repetido, separado por un salto de línea. Dos comas en el
+    # mismo literal rompen el reparto entero/decimales si no se colapsa antes.
+    assert parsear_importe_es("306.351,49 €\n306.351,49 €") == Decimal("306351.49")
+
+
+def test_valor_duplicado_que_no_coincide_sigue_siendo_error():
+    # Si las dos líneas no coinciden, no se adivina cuál es la buena: el
+    # parseo debe seguir fallando para que el llamador la mande a revisión.
+    with pytest.raises(ValueError):
+        parsear_numero_es("306.351,49\n412.000,00")

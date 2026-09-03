@@ -418,34 +418,53 @@ def ejecutar_extraccion_expediente(
         documentos_con_error: list[str] = []
         for item in items:
             contenido = storage.recuperar(item.documento.ruta_almacenamiento)
+            # Todo el trabajo de este documento —extraer, y guardar sus
+            # líneas— vive en el mismo bloque try/except con un único commit
+            # al final (CLAUDE.md, sesión de rodaje 2026-09-03, punto 2): un
+            # error de base de datos al guardar (p.ej. un valor que revienta
+            # una columna) es tan aislable por documento como uno de mapeo de
+            # cabecera, y antes tiraba el expediente entero porque el
+            # guardado vivía fuera de este try. El punto 3 de la misma
+            # sesión: o se guarda entero este documento, o el rollback lo
+            # deshace entero — nunca quedan restos de un grupo guardado y
+            # otro no, dentro del mismo documento.
+            lineas_creadas_doc = lineas_actualizadas_doc = 0
             try:
                 resultado = procesar_anejo(
                     io.BytesIO(contenido), item.documento.id, expediente.id,
                     bajas_por_identificador, db, model_provider,
                 )
+                if resultado.lineas:
+                    grupos: dict[Optional[str], list[dict]] = {}
+                    for linea in resultado.lineas:
+                        identificador = linea.pop("identificador_lote")
+                        grupos.setdefault(identificador, []).append(linea)
+                    for identificador, lineas_grupo in grupos.items():
+                        lote_id = lotes_por_identificador.get(identificador) if identificador is not None else None
+                        guardado = guardar_lineas_catalogo(db, lote_id, lineas_grupo)
+                        lineas_creadas_doc += guardado.creadas
+                        lineas_actualizadas_doc += guardado.actualizadas
+                item.documento.procesado_en = datetime.now(timezone.utc)
+                db.commit()
             except Exception as exc:  # noqa: BLE001
                 db.rollback()
                 documentos_con_error.append(f"{item.documento.nombre_archivo}: {exc}")
                 continue
+            lineas_creadas += lineas_creadas_doc
+            lineas_actualizadas += lineas_actualizadas_doc
             tablas_procesadas += resultado.tablas_procesadas
             llamadas_modelo += resultado.llamadas_modelo
-            if resultado.lineas:
-                grupos: dict[Optional[str], list[dict]] = {}
-                for linea in resultado.lineas:
-                    identificador = linea.pop("identificador_lote")
-                    grupos.setdefault(identificador, []).append(linea)
-                for identificador, lineas_grupo in grupos.items():
-                    lote_id = lotes_por_identificador.get(identificador) if identificador is not None else None
-                    guardado = guardar_lineas_catalogo(db, lote_id, lineas_grupo)
-                    lineas_creadas += guardado.creadas
-                    lineas_actualizadas += guardado.actualizadas
             if resultado.tablas_sin_lote:
                 motivo_revision = _acumular_motivo(
                     motivo_revision,
                     f"{item.documento.nombre_archivo}: " + "; ".join(resultado.tablas_sin_lote),
                 )
-            item.documento.procesado_en = datetime.now(timezone.utc)
-        db.commit()
+            if resultado.lineas_con_aviso:
+                motivo_revision = _acumular_motivo(
+                    motivo_revision,
+                    f"{item.documento.nombre_archivo}: {resultado.lineas_con_aviso} línea(s) con un valor "
+                    "que no se pudo interpretar, marcadas para revisión",
+                )
 
         total_lineas = lineas_creadas + lineas_actualizadas
         if documentos_con_error:

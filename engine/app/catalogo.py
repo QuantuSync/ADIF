@@ -1,4 +1,5 @@
 import hashlib
+import re
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Optional
@@ -13,7 +14,51 @@ from app.extraccion.normalizacion import (
     parsear_numero_es,
 )
 from app.extraccion.tabla import TablaExtraida
+from app.extraccion.texto import normalizar
 from app.models import LineaCatalogo
+
+# Sesión de rodaje sobre el corpus completo (2026-09-03): en varias tablas
+# reales, una fila que no es una línea de material (un pie de tabla como
+# "PRESUPUESTO DE LICITACIÓN", "IVA", "TOTAL CON IVA", o una partida alzada
+# sin celda de matrícula propia) desplaza sus columnas y el texto de esa fila
+# cae en la columna de matrícula — que es `varchar(9)` y revienta el INSERT
+# con cualquier texto más largo. CLAUDE.md sección 2: la matrícula "no es"
+# nunca texto, es un código de 9 dígitos; cualquier valor con una letra ya es
+# la señal de que esta fila no es lo que el mapeo de cabecera cree que es.
+_MATRICULA_VALIDA_RE = re.compile(r"^\d+$")
+
+# Coincidencia exacta (tras normalizar y quitar espacios): estas filas no son
+# una línea de material, son el resumen de la tabla — se descartan enteras,
+# no se guardan con matrícula vacía ni con ningún otro campo relleno.
+_ETIQUETAS_PIE_TABLA = frozenset({
+    "presupuestodelicitacion",
+    "presupuestodeadjudicacion",
+    "baseimponible",
+    "totalconiva",
+    "totaliva",
+    "subtotal",
+    "importetotal",
+    "iva",
+    "total",
+})
+
+
+def _es_pie_de_tabla(texto_normalizado_sin_espacios: str) -> bool:
+    return texto_normalizado_sin_espacios in _ETIQUETAS_PIE_TABLA
+
+
+def _es_partida_alzada(texto_normalizado_sin_espacios: str) -> bool:
+    # "Partida alzada a justificar para imprevistos" y variantes: CLAUDE.md
+    # sección 2 la define como línea legítima ("sin matrícula ni código de
+    # material"), así que el texto no se descarta — se recupera como
+    # descripción, nunca como matrícula.
+    return texto_normalizado_sin_espacios.startswith("partidaalzada")
+
+
+def _acumular_motivo(motivo: Optional[str], nuevo: Optional[str]) -> Optional[str]:
+    if not nuevo:
+        return motivo
+    return f"{motivo}; {nuevo}" if motivo else nuevo
 
 
 def calcular_clave_linea(codigo_precio, matricula, descripcion, orden_aparicion):
@@ -37,7 +82,7 @@ def construir_linea_catalogo(
     expediente_id: int,
     baja_lote: Optional[Decimal],
     orden_aparicion: int,
-) -> dict:
+) -> Optional[dict]:
     """Etapa 6 (normalización + derivación, CLAUDE.md secciones 4 y 8): una
     fila cruda de tabla + el mapeo de columnas de la etapa 5 -> los campos de
     una `LineaCatalogo`. `precio_adjudicado` se deriva aquí, no se busca en
@@ -47,7 +92,16 @@ def construir_linea_catalogo(
     `expediente_id` viaja en la línea desde este punto (encargo de esta
     sesión, punto 3): una línea cuya tabla de origen no se pudo asociar a un
     único lote sin ambigüedad se guarda igualmente, con `lote_id=None` —
-    huérfana pero trazable hasta su expediente."""
+    huérfana pero trazable hasta su expediente.
+
+    Devuelve `None` cuando la fila es un pie de tabla (CLAUDE.md sección 2,
+    sesión de rodaje 2026-09-03): no es una línea de material, es un resumen
+    ("PRESUPUESTO DE LICITACIÓN", "IVA", "TOTAL CON IVA") que el mapeo de
+    cabecera no distingue de una fila de datos. Nunca lanza por un valor de
+    `cantidad`/`precio_unitario` ilegible (identificadores de glifo sin
+    decodificar, celdas con el valor duplicado que no coinciden entre sí):
+    ese campo queda en `None` y la línea lleva `motivo_revision` explicando
+    por qué, en vez de tirar la tabla entera por una fila."""
 
     def _valor(campo: str) -> Optional[str]:
         indice = mapeo.get(campo)
@@ -55,16 +109,50 @@ def construir_linea_catalogo(
             return None
         return fila[indice]
 
+    matricula_bruta = _valor("matricula")
     codigo_precio = limpiar_codigo_celda(_valor("codigo_precio"))
-    matricula = limpiar_codigo_celda(_valor("matricula"))
+    matricula = limpiar_codigo_celda(matricula_bruta)
     descripcion = limpiar_texto_celda(_valor("descripcion")) or ""
     unidad_medida = limpiar_texto_celda(_valor("unidad_medida"))
 
+    motivo_revision: Optional[str] = None
+
+    if matricula is not None and not _MATRICULA_VALIDA_RE.match(matricula):
+        clave = normalizar(matricula).replace(" ", "")
+        if _es_pie_de_tabla(clave):
+            return None
+        if _es_partida_alzada(clave):
+            # La celda de matrícula de esta fila no existe de verdad (una
+            # partida alzada no tiene, CLAUDE.md sección 2): el texto que
+            # debía caer en descripción aterrizó aquí porque a esta fila le
+            # falta una columna respecto a las demás de la tabla. Se
+            # recupera de la celda cruda (`matricula_bruta`), no de
+            # `matricula`, que ya perdió los espacios entre palabras al
+            # limpiarse como si fuera un código.
+            if not descripcion:
+                descripcion = limpiar_texto_celda(matricula_bruta) or matricula
+            matricula = None
+        else:
+            motivo_revision = _acumular_motivo(
+                motivo_revision, f"valor de matrícula no reconocible, descartado: {matricula!r}"
+            )
+            matricula = None
+
     cantidad_bruta = _valor("cantidad")
-    cantidad = parsear_numero_es(cantidad_bruta) if cantidad_bruta else None
+    cantidad = None
+    if cantidad_bruta:
+        try:
+            cantidad = parsear_numero_es(cantidad_bruta)
+        except ValueError as exc:
+            motivo_revision = _acumular_motivo(motivo_revision, f"cantidad no interpretable: {exc}")
 
     precio_bruto = _valor("precio_unitario")
-    precio_unitario = parsear_importe_es(precio_bruto) if precio_bruto else None
+    precio_unitario = None
+    if precio_bruto:
+        try:
+            precio_unitario = parsear_importe_es(precio_bruto)
+        except ValueError as exc:
+            motivo_revision = _acumular_motivo(motivo_revision, f"precio unitario no interpretable: {exc}")
 
     precio_adjudicado = None
     if precio_unitario is not None and baja_lote is not None:
@@ -86,6 +174,7 @@ def construir_linea_catalogo(
         "documento_origen_id": documento_origen_id,
         "pagina": pagina,
         "fragmento": " | ".join((celda or "").strip() for celda in fila),
+        "motivo_revision": motivo_revision,
     }
 
 
@@ -97,12 +186,16 @@ def construir_lineas_desde_tabla(
     baja_lote: Optional[Decimal],
     orden_inicial: int,
 ) -> list[dict]:
-    return [
+    # Una fila de pie de tabla (CLAUDE.md sección 2, sesión de rodaje
+    # 2026-09-03) devuelve None de `construir_linea_catalogo`: se descarta
+    # aquí, nunca llega a `guardar_lineas_catalogo`.
+    lineas = (
         construir_linea_catalogo(
             fila, mapeo, tabla.pagina, documento_origen_id, expediente_id, baja_lote, orden_inicial + indice
         )
         for indice, fila in enumerate(tabla.filas)
-    ]
+    )
+    return [linea for linea in lineas if linea is not None]
 
 
 @dataclass(frozen=True)
@@ -143,6 +236,14 @@ def guardar_lineas_catalogo(
     y precio pero no trae cantidad): la segunda pasada no debe borrar la
     cantidad que sí trajo la primera.
 
+    No hace `commit()`: el llamador decide cuándo (CLAUDE.md, sesión de
+    rodaje 2026-09-03, punto 3 — antes cada llamada confirmaba por su cuenta,
+    así que un documento con varios lotes podía dejar committed las líneas
+    de un grupo y fallar en el siguiente, dejando el catálogo con restos de
+    un expediente marcado como fallido). `ejecutar_extraccion_expediente`
+    hace un único `commit()` por documento tras guardar todos sus grupos: o
+    se guarda entero, o el `rollback()` del `except` lo deshace entero.
+
     `lote_id=None` es el caso huérfano (CLAUDE.md, encargo de esta sesión,
     punto 3): una tabla cuyo lote no se pudo determinar sin ambigüedad. El
     filtro de existencia siempre incluye `expediente_id` además de
@@ -168,5 +269,4 @@ def guardar_lineas_catalogo(
                 if valor is not None:
                     setattr(existente, campo, valor)
             actualizadas += 1
-    db.commit()
     return ResultadoGuardadoCatalogo(creadas=creadas, actualizadas=actualizadas)
