@@ -361,19 +361,14 @@ una pantalla compartida.
   LOTE N..." para las dos plantillas por analogía, no por evidencia — si
   aparece una LC.27 multi-lote real, revisar ese módulo antes de confiar en
   el resultado.
-- **8 expedientes reales tienen `codigo_expediente` etiquetado con el código
-  de su MATRIZ, no con el suyo propio** (sección 20, sesión de herencia de
-  matriz): su propio código real solo existe, sin usar, dentro del campo
-  "Número de Expediente" de su Anuncio PCSP
-  (`campos_pcsp.CamposAnuncioPcsp.numero_expediente`). Es la causa exacta de
-  que la herencia de acuerdo marco no pueda resolver estos 8 casos —
-  `_forma_ciclo` los corta por autorreferencia, correctamente, pero no hay
-  forma de heredar de una matriz que es el propio expediente. **Decisión de
-  diseño pendiente, sin tomar todavía**: si renombrar `codigo_expediente` a
-  `numero_expediente` cuando difieren y la matriz declarada coincide con el
-  propio código, o separar el pedido real en su propia fila. Toca la clave
-  de idempotencia de la sección 9.9 sobre expedientes ya en producción — no
-  es un ajuste de regex como el punto de arriba.
+- **Resuelto (sección 21, sesión de corrección de identidad):** los 8
+  expedientes con `codigo_expediente` etiquetado con el código de su MATRIZ
+  se renombran solos, en la etapa de extracción, al valor real que declara
+  su propio Anuncio PCSP. Sigue habiendo un pendiente real, distinto: **de
+  las 8 matrices reales que este corpus necesita (5 en `2.18/04703`, 3 en
+  `2.24/04110`), ninguna de las 8 se encuentra en la Plataforma por
+  búsqueda** — mismo síntoma que los 6 expedientes de la sección 3 sin
+  documentos. Causa raíz sin verificar todavía (ver sección 21).
 
 ---
 
@@ -1006,15 +1001,12 @@ bloqueos, ninguno resuelto:**
 - **Cero conflictos de matriz** (`matriz_conflicto`) en las 45: en ningún
   caso el Anuncio PCSP y el Excel discreparon.
 
-**Pendiente, no resuelto por esta sesión**: decidir qué hacer con las filas
-mal etiquetadas (¿renombrar `codigo_expediente` al valor real de
-`numero_expediente` cuando difieren de una matriz auto-declarada? ¿crear la
-fila del pedido real por separado y mover los documentos? Ninguna opción es
-trivial, y las dos tocan la clave de idempotencia de la sección 9.9 sobre
-expedientes ya en producción — decisión de diseño nueva, no una continuación
-directa de esta sesión). Hasta que se decida, estos 8 seguirán en
-`pendiente_revision` con el motivo explícito, nunca heredando por
-autorreferencia.
+**Resuelto en la sesión de corrección de identidad (sección 21):** la
+decisión fue renombrar `codigo_expediente` al valor real en el sitio (no
+crear una fila nueva) — es seguro precisamente porque ninguna otra tabla
+referencia el código como clave externa (todas usan `expediente_id`), así
+que renombrar no duplica ni pierde nada de lo ya extraído. Ver sección 21
+para el mecanismo y la verificación contra los 8 casos reales.
 
 ### Fixtures de regresión
 
@@ -1025,3 +1017,159 @@ extremo con el fixture real `ANUNCIO_PCSP_CON_MATRIZ`
 (`2.18_04703.0019_ADJUDICACION_1.pdf`, el mismo documento real que destapó el
 hallazgo de la autorreferencia) contra `ejecutar_extraccion_expediente`. No
 hizo falta ningún PDF nuevo.
+
+---
+
+## 21. Corrección de identidad de expediente, y reingesta de los 7 sin
+    documentos (sesión 2026-09-03)
+
+Ataca junto los dos bloqueos de la sección 20 y del hallazgo 3 de
+`docs/analisis-corpus.md`, en el orden que pedía el encargo: primero corregir
+la identidad, después reingerir. Verificado de punta a punta contra el stack
+real (contenedor Linux, Postgres real, imágenes reconstruidas con el código
+nuevo) y contra la Plataforma real (scraping real, sin dobles de test).
+
+### 1. Regla: el código de expediente sale del documento, nunca del término de búsqueda
+
+**Nuevo módulo `app/extraccion/identidad_expediente.py`**, invocado en
+`ejecutar_extraccion_expediente` justo después de clasificar los documentos y
+antes de cualquier otro dato que dependa de la identidad (importes, baja,
+matriz declarada, cruce con el Excel). Si los Anuncio PCSP propios del
+expediente declaran un "Número de Expediente" (`campos_pcsp.numero_expediente`,
+ya se extraía, nunca se usaba) distinto del `codigo_expediente` guardado,
+corrige la fila **en el sitio**: el código del documento pasa a ser
+`codigo_expediente`, y el código con el que estaba registrado (en la
+práctica, siempre el de su MATRIZ) pasa a `codigo_matriz` si no había uno ya
+declarado distinto (si lo había, se marca `matriz_conflicto` en vez de
+pisarlo en silencio, mismo criterio que `asegurar_cruce_codigos`).
+
+Nunca corrige a ciegas: si los distintos Anuncio PCSP de un mismo expediente
+declaran códigos distintos entre sí, o si el código real ya pertenece a otra
+fila (un caso de fusión, no de renombrado — no implementado, fuera de
+alcance), se deja la identidad como está y se añade un motivo a la cola de
+revisión en vez de adivinar.
+
+**Por qué renombrar en el sitio es seguro**: `codigo_expediente` es la clave
+de idempotencia (sección 9.9) pero no es clave externa de ninguna otra tabla
+— `documentos.expediente_id`, `lotes.expediente_id`,
+`lineas_catalogo.expediente_id` y `trabajos_cola.expediente_id` son todos por
+`id`. Renombrar la fila no mueve ni un documento, ni un lote, ni una línea de
+catálogo ya extraída.
+
+**Por qué solo en la extracción, no en el scraping ni en un paso de
+"ingesta" aparte**: la identidad real solo se conoce leyendo el texto del
+Anuncio PCSP, y eso ya es exactamente la etapa 2 de la cascada (sección 5).
+El scraping descarga bytes sin leerlos; no hay nada que corregir ahí. Un
+expediente se registra por primera vez con el código que se tenga a mano —
+casi siempre el término de búsqueda, sea por la web (`POST /expedientes`) o
+por `herencia_matriz.resolver_o_encolar_matriz` creando una matriz — y esta
+función es lo que lo corrige la primera vez que sus propios documentos se
+leen de verdad.
+
+### 2. Verificación contra los 8 casos reales
+
+Antes de escribir código, se extrajo a mano (dentro del contenedor `api`,
+con las funciones ya existentes) el "Número de Expediente" real de los 16
+documentos de los 8 expedientes mal etiquetados. Los 8 son pedidos
+**distintos** con matrices **distintas**, no el mismo caso repetido:
+
+| Fila mal etiquetada (antes) | Código real (`numero_expediente`) | Matriz real |
+|---|---|---|
+| `2.18/04703.0019` | `6.24/28510.0103` | `2.18/04703.0019` |
+| `2.18/04703.0021` | `6.24/28510.0100` | `2.18/04703.0021` |
+| `2.18/04703.0022` | `6.24/28510.0101` | `2.18/04703.0022` |
+| `2.18/04703.0024` | `6.24/28510.0102` | `2.18/04703.0024` |
+| `2.18/04703.0025` | `6.24/28510.0111` | `2.18/04703.0025` |
+| `2.24/04110.0035` | `6.25/28510.0215` | `2.24/04110.0035` |
+| `2.24/04110.0036` | `6.25/28510.0175` | `2.24/04110.0036` |
+| `2.24/04110.0037` | `6.25/28510.0248` | `2.24/04110.0037` |
+
+Ninguno de los 8 códigos reales existía ya como fila separada (comprobado
+por consulta directa antes de tocar nada): no hacía falta el camino de
+fusión, un simple renombrado bastaba. Tras reconstruir las imágenes con el
+código nuevo y reencolar `extraer_expediente` para los 8: **los 8 se
+renombraron correctamente**, cada uno con su `codigo_matriz` puesto al valor
+antiguo y su `matriz_expediente_id` enlazado a una fila de matriz nueva (no
+duplicada) — verificado en base de datos, no solo en test.
+
+### 3. Reingesta de los 7 expedientes sin documentos
+
+`6.25/28510.5001_01` **descartado sin lanzar scraping**: no tiene forma de
+expediente válida (`CODIGO_EXPEDIENTE_RE`, `\d+\.\d+/\d+\.\d+`) — el sufijo
+`_01` lo delata como algo distinto de un código de la Plataforma.
+
+Los otros 6 (`2.24/28520.0128`, `2.25/28520.0161`, `3.24/20810.0090`,
+`3.24/28520.0129`, `3.25/27520.0055`, `4.24/27520.0090`) se lanzaron contra
+la Plataforma real vía `POST /expedientes/{id}/descargar` (scraping real,
+Chromium headless, sin ningún doble). **Resultado: 6 de 6 no encontrados**,
+cada uno agotando sus reintentos con
+`"no encontrado en la Plataforma ni por matriz ni por expediente: <código>"`
+— el mismo error que ya lanzaba `scrape_expediente` cuando ninguna variante
+de búsqueda (`search_variants`: separadores `/`, `_`, `-`, sin separador)
+encuentra una fila en la tabla de resultados. **La causa raíz que
+`docs/analisis-corpus.md` dejaba sin verificar queda verificada, en un
+sentido negativo**: no es un defecto del scraper (mismo código que sí
+encuentra los 45 expedientes con documentos), es que estos 6 códigos no son
+localizables por búsqueda en la Plataforma ahora mismo. Por qué (¿expediente
+archivado fuera del índice de búsqueda, publicado bajo otro código,
+procedimiento distinto que no aparece en "Licitaciones"?) sigue sin
+verificar — fuera de alcance de esta sesión.
+
+**Hallazgo que amplía el mismo síntoma**: de las 8 matrices nuevas que la
+corrección de identidad del punto 1 llegó a descubrir y encolar
+automáticamente (`resolver_o_encolar_matriz`), **las 8 fallaron igual, con
+el mismo error exacto** — ninguna de las 5 matrices de la familia
+`2.18/04703` ni las 3 de `2.24/04110` se encuentra en la Plataforma por
+búsqueda. El sistema lo encajó exactamente como está diseñado (sección 9.10,
+sección 12): cada matriz cae a `fallido` con su motivo, y
+`reencolar_pedidos_esperando_matriz` reencola a los 8 pedidos, que
+`intentar_heredar_de_matriz` manda a `pendiente_revision` con
+`"la matriz <código> no tiene ningún lote registrado (estado: fallido)"` —
+nunca un cuelgue en `esperando_matriz`, nunca una excepción sin capturar.
+
+**Entre los 6 expedientes de este punto y las 8 matrices del punto 2 hay 14
+códigos reales de la Plataforma que hoy no se encuentran por búsqueda.** Es
+la misma familia de problema que el hallazgo 3 del corpus señalaba sin
+verificar, ahora con 14 casos reales que lo confirman en vez de 7. Sigue
+siendo trabajo de scraping, no de extracción — ninguna de las herramientas
+de este proyecto puede intentar una búsqueda que la propia Plataforma no
+resuelve.
+
+### 4. Reproceso completo de los 45 y medición
+
+Reencolada la extracción de los 45 expedientes tras reconstruir las
+imágenes con el código nuevo:
+
+| | Antes de esta sesión | Después |
+|---|---:|---:|
+| `completado` | 10 | **10** |
+| `pendiente_revision` | 35 | **35** |
+| Líneas de catálogo | 2.041 | **2.041 (+0)** |
+| Matrículas en >1 expediente | 13 | **13** |
+| Expedientes con identidad corregida | — | **8 / 8** |
+| Matrices nuevas descubiertas | 0 | **8** |
+| Matrices encontradas y procesadas | — | **0 / 8** |
+
+**Cero cambio en los agregados del catálogo, pero no es un resultado nulo**:
+la identidad de los 8 pedidos ya es correcta (`codigo_expediente` real,
+`codigo_matriz` real, `matriz_expediente_id` enlazado a una fila propia, sin
+duplicar ninguna), lo que antes era imposible por el ciclo de
+autorreferencia. Los 8 siguen en `pendiente_revision` — ya no por un dato mal
+etiquetado, sino porque su matriz real no se encuentra en la Plataforma, un
+bloqueo distinto y ahora explícito en `expediente.error` en vez de escondido
+detrás de "forma un ciclo". Ninguno de los 14 pedidos derivados del hallazgo
+3 aporta líneas de catálogo todavía: los 6 sin documentos y las 8 matrices
+comparten la misma causa sin resolver del punto 3.
+
+### Fixtures de regresión
+
+`engine/tests/extraccion/test_identidad_expediente.py`, 7 casos: la función
+`corregir_identidad_expediente` aislada (no-op cuando el código ya es
+correcto, corrección cuando no lo es, no pisa una matriz ya declarada
+distinta, no fusiona con una fila que ya tiene el código real, dos Anuncio
+PCSP que discrepan van a revisión sin corregir) y un caso de extremo a
+extremo con el mismo fixture real de la sección 20
+(`ANUNCIO_PCSP_CON_MATRIZ`, `2.18_04703.0019_ADJUDICACION_1.pdf`): antes del
+arreglo, esta fila se quedaba en `pendiente_revision` por "forma un ciclo";
+con la identidad corregida antes de resolver la matriz, deja de ser un ciclo
+real y pasa a `esperando_matriz`. No hizo falta ningún PDF nuevo.

@@ -604,3 +604,29 @@ declarada coincide con el propio código, o si se separa el pedido real en
 una fila nueva y se mueven sus documentos. Las dos opciones tocan la clave
 de idempotencia (CLAUDE.md sección 9.9) sobre expedientes que ya están en
 producción — decisión de diseño nueva, pendiente de plantear.
+
+---
+
+## Corrección de identidad y reingesta (sesión 2026-09-03, CLAUDE.md sección 21)
+
+Cierra la decisión de diseño que dejaba pendiente la sección anterior: se
+renombra `codigo_expediente` en el sitio (nunca una fila nueva), porque
+ninguna otra tabla lo usa como clave externa. Los 8 casos reales de esta
+página se verificaron uno a uno antes de tocar código (extracción manual del
+"Número de Expediente" de sus 16 documentos): son 8 pedidos distintos con 8
+matrices distintas, no el mismo caso repetido — ver la tabla completa en
+CLAUDE.md sección 21.
+
+**El hallazgo 3 de este documento queda parcialmente verificado, en sentido
+negativo.** "Sin verificar la causa raíz" de por qué el scraping no
+descargó nada para los 7 expedientes sin documentos ya no es del todo
+cierto: se relanzó el scraping real contra la Plataforma para los 6 con
+formato de código válido (el séptimo, `6.25/28510.5001_01`, se descartó por
+no tener formato de expediente) y **los 6 no se encuentran por búsqueda,
+con cualquier variante de separador** — no es un defecto del scraper. Lo
+mismo les pasó a las 8 matrices nuevas que la corrección de identidad llegó
+a descubrir y a intentar descargar. Con esto, 14 códigos reales de la
+Plataforma (6 del hallazgo 3 + 8 matrices) están confirmados como no
+localizables por búsqueda ahora mismo, con causa todavía sin determinar
+(archivado, publicado bajo otro código, tipo de procedimiento fuera de
+"Licitaciones") — sigue siendo trabajo de scraping, no de extracción.

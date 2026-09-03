@@ -46,6 +46,7 @@ from app.extraccion.herencia_matriz import (
     reencolar_pedidos_esperando_matriz,
     resolver_o_encolar_matriz,
 )
+from app.extraccion.identidad_expediente import corregir_identidad_expediente
 from app.extraccion.lotes import LoteDeclarado, extraer_lotes_declarados
 from app.extraccion.normalizacion import parsear_importe_es
 from app.extraccion.pipeline_anejo import procesar_anejo
@@ -383,6 +384,18 @@ def ejecutar_extraccion_expediente(
         else:
             items = _clasificar_documentos(db, storage, list(documentos))
             documentos_procesados = len(items)
+
+            # Identidad del expediente (CLAUDE.md sección 20): antes de anclar
+            # cualquier otro dato a este expediente, corrige su
+            # `codigo_expediente` si sus propios Anuncio PCSP declaran uno
+            # distinto -- el código con el que se registró suele ser en
+            # realidad el de su matriz (docs/analisis-corpus.md, sesión de
+            # herencia de matriz). Tiene que ir antes de
+            # `_extraer_campos_expediente` (que rellena `codigo_matriz` si
+            # está vacío) y antes del cruce con el Excel de códigos, para que
+            # todo lo demás trabaje ya con la identidad correcta.
+            motivo_revision = _acumular_motivo(motivo_revision, corregir_identidad_expediente(db, expediente, items))
+            db.commit()
 
             lotes_declarados, documento_id_lotes = _extraer_lotes_declarados_del_expediente(items)
             if lotes_declarados:
