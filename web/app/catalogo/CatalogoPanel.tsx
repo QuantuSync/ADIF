@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { formatearImporte, formatearNumero, formatearPorcentaje, IconExternal, IconSearch } from "../ui";
+import { formatearImporte, formatearNumero, formatearPorcentaje } from "../ui";
 
 type LineaCatalogo = {
   id: number;
@@ -90,26 +90,21 @@ export default function CatalogoPanel({ apiUrl }: { apiUrl: string }) {
       {/* Búsqueda por matrícula: la pregunta que ADIF realmente tiene — cómo
           evoluciona el precio de un material a través de todos los
           expedientes — así que va primera y más grande. */}
-      <div className="card">
+      <div>
         <label className="section-label" htmlFor="buscar-matricula">
           Buscar por matrícula, en todos los expedientes
         </label>
-        <div style={{ position: "relative", maxWidth: "28rem" }}>
-          <input
-            id="buscar-matricula"
-            value={matricula}
-            onChange={(e) => actualizarFiltro(setMatricula)(e.target.value)}
-            placeholder="697500900"
-            className="input input-lg"
-            style={{ paddingLeft: "2.6rem" }}
-          />
-          <span style={{ position: "absolute", left: "0.85rem", top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)" }}>
-            <IconSearch />
-          </span>
-        </div>
+        <input
+          id="buscar-matricula"
+          value={matricula}
+          onChange={(e) => actualizarFiltro(setMatricula)(e.target.value)}
+          placeholder="697500900"
+          className="input input-lg"
+          style={{ maxWidth: "32rem" }}
+        />
       </div>
 
-      <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", margin: "1.25rem 0" }}>
+      <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", margin: "2.25rem 0 1.25rem" }}>
         <input
           value={expediente}
           onChange={(e) => actualizarFiltro(setExpediente)(e.target.value)}
@@ -176,8 +171,8 @@ export default function CatalogoPanel({ apiUrl }: { apiUrl: string }) {
                     <td className="num">{formatearNumero(linea.precio_unitario)}</td>
                     <td className="num">{formatearNumero(linea.precio_adjudicado)}</td>
                     <td>
-                      <span className={`badge ${linea.estado_revision === "confirmado" ? "badge-green" : "badge-slate"}`}>
-                        {linea.estado_revision}
+                      <span className={linea.estado_revision === "confirmado" ? "status status-ok" : "status"}>
+                        {linea.estado_revision === "confirmado" ? "Confirmado" : "Sin confirmar"}
                       </span>
                     </td>
                   </tr>
@@ -213,10 +208,10 @@ export default function CatalogoPanel({ apiUrl }: { apiUrl: string }) {
           documento, página y fragmento sale cada cifra — es lo que la
           versión hecha con Copilot no puede ofrecer. */}
       {seleccion && (
-        <div className="trace-panel" style={{ marginTop: "1.5rem" }}>
+        <div className="trace-panel" style={{ marginTop: "2.5rem" }}>
           <div className="trace-header">
             <h2>Trazabilidad — {seleccion.codigo_precio ?? seleccion.matricula ?? `línea ${seleccion.id}`}</h2>
-            <button onClick={() => setSeleccion(null)} className="btn btn-sm" style={{ background: "rgba(255,255,255,0.15)", color: "#fff", borderColor: "transparent" }}>
+            <button onClick={() => setSeleccion(null)} className="btn btn-ghost btn-sm">
               Cerrar
             </button>
           </div>
@@ -271,7 +266,6 @@ export default function CatalogoPanel({ apiUrl }: { apiUrl: string }) {
                   rel="noreferrer"
                   className="btn btn-secondary btn-sm"
                 >
-                  <IconExternal />
                   {seleccion.documento_origen_nombre ?? `documento ${seleccion.documento_origen_id}`}
                   {seleccion.pagina && ` · página ${seleccion.pagina}`}
                 </a>

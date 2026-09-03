@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { formatearNumero, IconAlertTriangle, IconInfo } from "../ui";
+import { formatearNumero } from "../ui";
 import { interpretarMotivoLinea, interpretarMotivos } from "../motivos";
 
 type ExpedienteResumen = {
@@ -59,9 +59,8 @@ function ReasonCard({ categoria, texto, tecnico }: { categoria: "contradiccion" 
   const esContradiccion = categoria === "contradiccion";
   return (
     <div className={`reason-card reason-card--${categoria}`}>
-      <span className="icon">{esContradiccion ? <IconAlertTriangle /> : <IconInfo />}</span>
+      <div className="reason-kind">{esContradiccion ? "Dato contradictorio" : "Límite del sistema"}</div>
       <div style={{ flex: 1 }}>
-        <div className="reason-kind">{esContradiccion ? "Dato contradictorio en el documento" : "Límite del sistema"}</div>
         <div className="reason-text">{texto}</div>
         {tecnico !== texto && (
           <details className="reason-tech">
@@ -180,7 +179,7 @@ export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
                 <span className="code">{exp.codigo_expediente}</span>
                 {exp.nombre_proyecto && <span className="hint">{exp.nombre_proyecto}</span>}
                 {primerMotivo && (
-                  <span className="hint" style={{ display: "block", marginTop: "0.3rem", color: "var(--slate-700)" }}>
+                  <span className="hint" style={{ display: "block", marginTop: "0.35rem" }}>
                     {primerMotivo.texto.length > 110 ? `${primerMotivo.texto.slice(0, 110)}…` : primerMotivo.texto}
                   </span>
                 )}
@@ -192,12 +191,12 @@ export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
 
       {detalle && (
         <div>
-          <h2 style={{ fontSize: "1.35rem", color: "var(--navy-800)", margin: "0 0 0.15rem" }}>
+          <h2 style={{ fontFamily: "var(--font-serif)", fontWeight: 500, fontSize: "1.6rem", color: "var(--ink)", margin: "0 0 0.25rem" }}>
             {detalle.expediente.codigo_expediente}
           </h2>
-          {detalle.expediente.nombre_proyecto && <p className="muted" style={{ margin: "0 0 1rem" }}>{detalle.expediente.nombre_proyecto}</p>}
+          {detalle.expediente.nombre_proyecto && <p className="muted" style={{ margin: "0 0 1.5rem" }}>{detalle.expediente.nombre_proyecto}</p>}
 
-          <div style={{ marginBottom: "1.5rem" }}>
+          <div style={{ marginBottom: "2.5rem" }}>
             <p className="section-label">Por qué está en revisión</p>
             {motivos.length === 0 && <p className="muted">Sin motivo registrado.</p>}
             {motivos.map((m, i) => (
@@ -282,17 +281,16 @@ export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
                             <td>{linea.descripcion}</td>
                             <td className="num">{formatearNumero(linea.precio_unitario)}</td>
                             <td>
-                              <span className={`badge ${linea.estado_revision === "confirmado" ? "badge-green" : "badge-slate"}`}>
-                                {linea.estado_revision}
+                              <span className={linea.estado_revision === "confirmado" ? "status status-ok" : "status"}>
+                                {linea.estado_revision === "confirmado" ? "Confirmado" : "Sin confirmar"}
                               </span>
                             </td>
                             <td style={{ maxWidth: "18rem" }}>
                               {aviso && (
                                 <span
-                                  className={`badge ${aviso.categoria === "contradiccion" ? "badge-amber" : "badge-slate"}`}
+                                  className={aviso.categoria === "contradiccion" ? "status-note status-attn" : "status-note"}
                                   title={aviso.texto}
                                 >
-                                  {aviso.categoria === "contradiccion" ? <IconAlertTriangle /> : <IconInfo />}
                                   {aviso.texto.length > 60 ? `${aviso.texto.slice(0, 60)}…` : aviso.texto}
                                 </span>
                               )}

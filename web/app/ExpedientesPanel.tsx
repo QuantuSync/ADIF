@@ -1,13 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import {
-  EstadoBadge,
-  accentClaseEstado,
-  formatearImporte,
-  formatearPorcentaje,
-  IconInfo,
-} from "./ui";
+import { EstadoTexto, accentClaseEstado, formatearImporte, formatearPorcentaje } from "./ui";
 
 export type Lote = {
   id: number;
@@ -63,7 +57,7 @@ function CeldaBaja({ expediente }: { expediente: Expediente }) {
     ) : (
       <details>
         <summary className="chip" style={{ display: "inline-flex" }}>
-          <span className="badge badge-amber">Varía por lote</span>
+          <strong className="status-attn">Varía por lote</strong>
         </summary>
         <TablaLotes lotes={expediente.lotes} />
       </details>
@@ -73,10 +67,12 @@ function CeldaBaja({ expediente }: { expediente: Expediente }) {
     <>
       {cuerpo}
       {esCasoPreciosUnitarios(expediente) && (
-        <div className="badge badge-blue" style={{ marginTop: "0.35rem" }} title="El importe de licitación y el de adjudicación coinciden: es el modelo de baja única sobre precios unitarios (CLAUDE.md sección 4), no un error de extracción.">
-          <IconInfo />
+        <span
+          className="status-note"
+          title="El importe de licitación y el de adjudicación coinciden: es el modelo de baja única sobre precios unitarios (CLAUDE.md sección 4), no un error de extracción."
+        >
           Importe fijo, baja en precios unitarios
-        </div>
+        </span>
       )}
     </>
   );
@@ -235,12 +231,12 @@ export default function ExpedientesPanel({
         </form>
       </div>
 
-      <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", marginBottom: "1.25rem" }}>
-        <span className="badge badge-green">{resumen.completado} completados</span>
-        <span className="badge badge-amber">{resumen.revision} en revisión</span>
-        <span className="badge badge-slate">{resumen.sinPublicar} no publicados</span>
-        {resumen.enCurso > 0 && <span className="badge badge-blue">{resumen.enCurso} en curso</span>}
-      </div>
+      <p className="muted" style={{ marginBottom: "1.75rem" }}>
+        {expedientes.length} expediente{expedientes.length === 1 ? "" : "s"} · {resumen.completado} completado
+        {resumen.completado === 1 ? "" : "s"} · {resumen.revision} en revisión · {resumen.sinPublicar} no publicado
+        {resumen.sinPublicar === 1 ? "" : "s"}
+        {resumen.enCurso > 0 && ` · ${resumen.enCurso} en curso`}
+      </p>
 
       {errorConexion && (
         <p className="error-banner">
@@ -277,12 +273,8 @@ export default function ExpedientesPanel({
                   <td style={{ fontWeight: 600 }}>{exp.codigo_expediente}</td>
                   <td>{exp.codigo_matriz ?? "—"}</td>
                   <td>
-                    <EstadoBadge estado={exp.estado} />
-                    {exp.error && !noPublicado && (
-                      <div className="muted" style={{ fontSize: "0.85rem", marginTop: "0.3rem", maxWidth: "26rem" }}>
-                        {exp.error}
-                      </div>
-                    )}
+                    <EstadoTexto estado={exp.estado} />
+                    {exp.error && !noPublicado && <span className="status-note">{exp.error}</span>}
                   </td>
                   <td className="num">{formatearImporte(exp.importe_licitacion)}</td>
                   <td className="num">{formatearImporte(exp.importe_adjudicacion)}</td>
