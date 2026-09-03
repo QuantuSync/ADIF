@@ -94,3 +94,41 @@ PROPUESTA_DT_SIN_FALSO_POSITIVO = FIXTURES_DIR / "6.24_28510.0047_ADJUDICACION_1
 # `_es_fila_de_datos` no reconocía ninguna fila como fila de datos y
 # `extraer_tablas_pagina` descartaba la tabla entera como espuria.
 ANEJO_PRECIOS_CARRILES_GUION_UNICODE = FIXTURES_DIR / "6.23_28510.0018_ANEJO_1.pdf"
+
+# Sesión de expedientes sin publicar (2026-09-03, docs/analisis-corpus.md
+# hallazgo 6): "otros formatos de código de precio", recortes de una sola
+# página de documentos reales (el documento completo no hace falta para
+# probar el filtro de fila de datos de `app.extraccion.tabla`).
+
+# Código sin separador, un dígito ("P1", "P2") — cupones de carril,
+# 6.24/28510.0047.
+ANEJO_PRECIOS_CODIGO_P_SIN_GUION = FIXTURES_DIR / "6.24_28510.0047_ANEJO_1_p18.pdf"
+
+# Código sin separador, dos dígitos ("P01", "P02") — tapas de canaleta,
+# 6.24/28510.0187. Cabecera "CODIFICACIÓN DEL PRECIO", no "CÓDIGO DE
+# PRECIO": no coincide con ningún alias determinista de `codigo_precio`
+# (a propósito — ver test_mapeo_cabecera.py), así que en producción esta
+# cabecera cae al modelo, no al mapeo determinista.
+ANEJO_PRECIOS_CODIGO_P_DOS_DIGITOS = FIXTURES_DIR / "6.24_28510.0187_ANEJO_1_p11.pdf"
+
+# Código con prefijo "PN" ("PN001".."PN018") — señalización vertical,
+# 6.24/28510.0180. Misma cabecera "CODIFICACIÓN DEL PRECIO" que el anterior.
+ANEJO_PRECIOS_CODIGO_PN = FIXTURES_DIR / "6.24_28510.0180_ANEJO_1_p18.pdf"
+
+# Código de lote+tipo ("L01-T01".."L03-T13") y partida alzada numerada
+# ("PA-01", "PA-02") en la misma tabla — traviesas, 6.24/28510.0094. Recorte
+# de 2 páginas (112-113) del Contrato real (2,8 MB / 118+ páginas): el cuadro
+# de precios es una sección interna suya, igual que los "*_ANEJO_N.pdf" de
+# CLAUDE.md sección 3.
+ANEJO_PRECIOS_LOTE_TIPO_Y_PARTIDA_ALZADA = FIXTURES_DIR / "6.24_28510.0094_CONTRATO_1_p112-113.pdf"
+
+# Tabla sin ninguna columna de código: la matrícula de 9 dígitos es el único
+# identificador de fila — hilo de contacto, 6.20/28510.0136.
+TABLA_PRECIOS_SOLO_MATRICULA = FIXTURES_DIR / "6.20_28510.0136_ANEJO_3_p3.pdf"
+
+# El único documento escaneado confirmado del corpus real (186 de 187
+# documentos tienen capa de texto, CLAUDE.md sección 3): recorte de 1 página
+# del anejo de 100 páginas real (`6.20/28510.0136_ANEJO_2.pdf`) — cada página
+# es una imagen a página completa, sin ningún carácter de texto ni con
+# `pdfplumber` ni con `pypdf`.
+DOCUMENTO_ESCANEADO_SIN_TEXTO = FIXTURES_DIR / "6.20_28510.0136_ANEJO_2_p1.pdf"

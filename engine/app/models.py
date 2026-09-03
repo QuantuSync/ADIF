@@ -36,6 +36,15 @@ class EstadoExpediente(str, enum.Enum):
     esperando_matriz = "esperando_matriz"
     completado = "completado"
     fallido = "fallido"
+    # El expediente no existe en la Plataforma (docs/analisis-corpus.md,
+    # sesión de expedientes sin publicar): comprobado a mano y confirmado por
+    # `app.scraping.pcsp.ExpedienteNoPublicadoError` en todas las variantes de
+    # separador de búsqueda. Distinto de `fallido`: ese dice "algo salió mal,
+    # puede que reintentando funcione"; este dice "no hay nada que
+    # reintentar, el documento no está publicado". Distinto también de
+    # `pendiente_revision`: no hace falta un humano, no es trabajo pendiente,
+    # es un expediente fuera de alcance del sistema.
+    sin_publicar = "sin_publicar"
 
 
 class TipoDocumento(str, enum.Enum):

@@ -57,6 +57,12 @@ _PROFUNDIDAD_MAXIMA_CADENA = 10
 
 _ESTADOS_TERMINADOS = frozenset({
     EstadoExpediente.completado, EstadoExpediente.pendiente_revision, EstadoExpediente.fallido,
+    # `sin_publicar` (CLAUDE.md sección 22) es tan terminal como `fallido`
+    # para efectos de esta resolución -- sin incluirlo aquí, una matriz sin
+    # publicar (sin documentos, sin trabajo activo) se releería como "hace
+    # falta encolar su descarga" en cada pedido que la referencia, reintentando
+    # para siempre una búsqueda ya confirmada sin resultado.
+    EstadoExpediente.sin_publicar,
 })
 
 

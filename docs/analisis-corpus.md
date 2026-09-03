@@ -630,3 +630,52 @@ Plataforma (6 del hallazgo 3 + 8 matrices) están confirmados como no
 localizables por búsqueda ahora mismo, con causa todavía sin determinar
 (archivado, publicado bajo otro código, tipo de procedimiento fuera de
 "Licitaciones") — sigue siendo trabajo de scraping, no de extracción.
+
+---
+
+## Expedientes sin publicar, y cierre de los 21 en revisión (sesión 2026-09-03)
+
+Cierra en la práctica los 14 códigos no localizables de arriba: comprobado a
+mano en la Plataforma (`2.18/04703.0019` no devuelve resultados por número
+de expediente) y confirmado con los 14 por scraping real, se marcan con el
+estado nuevo `sin_publicar` — no existen en la Plataforma, no son trabajo
+pendiente. Patrón observado: todo código que empieza por `2.`, `3.` o `4.`
+falla; todo lo que empieza por `6.` funciona (correlación con 14 casos, no
+una regla de código). Las métricas del proyecto se miden desde ahora sobre
+**31 expedientes reales**, no sobre 45. Detalle completo del mecanismo
+(`ExpedienteNoPublicadoError`, el estado y sus guardas contra reintentos y
+reprocesos) en CLAUDE.md sección 22.
+
+La misma sesión ataca, por impacto, las causas de los hallazgos 2 y 6 de este
+documento que seguían bloqueando expedientes:
+
+- **Hallazgo 6 (otros formatos de código de precio), resuelto**: `P1`/`P2`
+  sin separador, `P01`/`P02` con dos dígitos, `PN00N`, `PA-NN` (partida
+  alzada numerada), `L0N-T0N` (lote+tipo) y tablas sin ninguna columna de
+  código (identificadas solo por la matrícula de 9 dígitos) — los seis
+  formatos reales verificados contra el corpus completo, nunca adivinados.
+  `L1`/`L02-T01` de la fila original de este documento quedan cubiertos por
+  el mismo patrón `L\d+-T\d+`.
+- **Umbral de densidad numérica de la etapa 3 bajado de 0,04 a 0,025**,
+  medido contra el corpus real completo antes de decidirlo (233 páginas
+  nuevas candidatas, solo 15 con tabla real — el resto no cuesta más que un
+  `find_tables()` vacío). Recupera, además del caso que lo disparó
+  (`6.24/28510.0187`), un cuadro de precios real en `6.24/28510.0116` y las
+  dos primeras líneas de LOTE 1 del fixture multi-lote de la sección 19.
+- **Redacciones alternativas de la baja** (símbolo de porcentaje pegado a la
+  etiqueta, "baja ofertada", "porcentaje de baja", etc.), encargo explícito
+  de esta sesión con un caso real de otra fuente, no de este corpus de PDFs.
+- **El único documento escaneado del corpus** (`6.20/28510.0136_ANEJO_2.pdf`,
+  100 páginas) se detecta y se marca con un motivo propio, distinto de "no se
+  extrajo ninguna línea de catálogo" — ver CLAUDE.md secciones 3 y 15.
+
+**Medición final sobre los 31**: 14 `completado` (antes 10 sobre 45), 17
+`pendiente_revision` (antes 35 sobre 45), 2.208 líneas de catálogo. De los
+17 en revisión, 15 son comportamiento correcto (7 con baja declarada que no
+cuadra con los importes, 3 de la segunda familia de baja sin resolver, 2 con
+valores ilegibles correctamente descartados, 1 de ambigüedad de lote por
+diseño, 1 de formato de código inválido) y 2 son trabajo pendiente genuino
+(`6.24/28510.0025` y `6.24/28510.0193`, sin ningún documento con cuadro de
+precios — mismo síntoma que un pedido derivado de acuerdo marco, pero con
+código normal, sin investigar todavía). Tabla completa y categorización
+detallada en CLAUDE.md sección 22.

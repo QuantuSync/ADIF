@@ -27,6 +27,21 @@ grupos de marcadores descarta 91,7% de las páginas del anejo de un solo
 cuadro (11 de 12) y 88,5% del anejo con tres tablas de precios repartidas en
 tres cabeceras distintas (23 de 26) — del mismo orden que el 83% medido sobre
 el corpus completo en CLAUDE.md sección 3.
+
+Umbral bajado a 0,025 en la sesión de expedientes sin publicar (2026-09-03):
+`6.24/28510.0187_ANEJO_1.pdf` página 11 tiene un cuadro de precios real (dos
+líneas, códigos "P01"/"P02") en una página cuya densidad cae a 0,0253 —
+diluida por un párrafo largo de prosa introductoria ("El cuadro de precios
+unitarios del presente expediente...") que el resto de páginas de cuadro de
+precios del corpus no trae. Medido sobre el corpus real completo antes de
+bajar el umbral (nunca a ciegas): con 0,025 pasan a ser candidatas 233
+páginas más de las 0,04 originales, de las cuales solo 15 (6,4%) traen una
+tabla real — las otras 218 no cuestan nada más que un `find_tables()` que no
+encuentra nada, porque `extraer_tablas_pagina` ya descarta sin datos
+cualquier tabla sin fila reconocible. Beneficio medido, no solo el caso que
+disparó el cambio: además de `6.24/28510.0187`, esto también recupera un
+cuadro de precios real en `6.24/28510.0116_ANEJO_1.pdf` (páginas 18 y 22,
+antes sin ninguna página candidata en todo el expediente).
 """
 from __future__ import annotations
 
@@ -35,11 +50,17 @@ from decimal import Decimal
 
 from app.extraccion.texto import PaginaTexto, normalizar
 
-UMBRAL_DENSIDAD_NUMERICA = Decimal("0.04")
+UMBRAL_DENSIDAD_NUMERICA = Decimal("0.025")
 MIN_GRUPOS_MARCADORES = 2
 
 _GRUPOS_MARCADORES: dict[str, tuple[str, ...]] = {
-    "codigo": ("codigo de precio", "codigo del precio", "codigo del elemento", "codigo"),
+    "codigo": (
+        "codigo de precio",
+        "codigo del precio",
+        "codigo del elemento",
+        "codificacion del precio",
+        "codigo",
+    ),
     "precio": ("precio unitario", "precio de referencia", "precio"),
     "cantidad_unidad": ("cantidad", "unidad de medida", "unidades"),
     "matricula": ("matricula",),

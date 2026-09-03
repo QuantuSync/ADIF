@@ -49,6 +49,18 @@ def test_pagina_vacia_nunca_es_candidata():
     assert resultado.candidatas == []
 
 
+def test_pagina_con_prosa_larga_y_tabla_corta_sigue_siendo_candidata():
+    # Sesión de expedientes sin publicar: 6.24/28510.0187_ANEJO_1.pdf página
+    # 11 tiene un cuadro de precios real (2 líneas, "P01"/"P02") diluido por
+    # un párrafo largo de prosa introductoria — densidad 0,0253, por debajo
+    # del umbral antiguo (0,04). Bajado a 0,025 (medido contra el corpus
+    # real completo antes de decidirlo, ver docstring del módulo) para no
+    # perder esta página.
+    paginas = extraer_texto(fx.ANEJO_PRECIOS_CODIGO_P_DOS_DIGITOS)
+    resultado = localizar_paginas_candidatas(paginas)
+    assert [c.numero for c in resultado.candidatas] == [1]
+
+
 def test_parrafo_que_solo_menciona_precio_no_es_candidato():
     # Un párrafo de pliego puede mencionar "precio" de pasada sin ser una
     # tabla: un solo grupo de marcador, por muchas veces que aparezca, no

@@ -57,6 +57,22 @@ def test_mapeo_determinista_sin_identificador_falla():
     assert intentar_mapeo_determinista(cabecera) is None
 
 
+def test_mapeo_determinista_no_reconoce_codificacion_del_precio():
+    # Guarda de regresión (sesión de expedientes sin publicar): se probó
+    # añadir "codificacion del precio" a los alias de `codigo_precio` para
+    # resolver en determinista las 3 firmas reales que hoy caen al modelo
+    # (docs/analisis-corpus.md, "Cabeceras de cuadro de precios"). Revertido
+    # porque rompía un caso real (`ANEJO_PRECIOS_BALASTO_MULTI_LOTE`, lote 3):
+    # en esa tabla el índice de columna de la cabecera y el de la fila de
+    # datos no coinciden (una columna fantasma desplazada de forma distinta
+    # entre cabecera y filas), y el mapeo determinista -que solo mira
+    # posición de cabecera- extraía `precio_unitario=None` en vez del valor
+    # real. El modelo sí lo resuelve bien porque ve filas de ejemplo, no solo
+    # la cabecera. Esta cabecera debe seguir cayendo al modelo.
+    cabecera = ["Codificación del precio", "Descripción", "Precio Unitario de Referencia"]
+    assert intentar_mapeo_determinista(cabecera) is None
+
+
 def test_mapear_cabecera_desconocida_llama_al_modelo_una_vez_y_cachea(db_session):
     # Cabecera sintética que el mapeo determinista no puede resolver
     # (nombres de columna que no están en ningún alias conocido).

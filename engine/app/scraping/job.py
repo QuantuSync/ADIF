@@ -11,7 +11,7 @@ from app.extraccion.herencia_matriz import reencolar_pedidos_esperando_matriz
 from app.interfaces.document_storage import DocumentStorage
 from app.models import Documento, EstadoExpediente, Expediente, TipoDocumento, TrabajoCola
 from app.queue import encolar_trabajo
-from app.scraping.pcsp import safe, scrape_expediente
+from app.scraping.pcsp import ExpedienteNoPublicadoError, safe, scrape_expediente
 
 CATEGORIA_A_TIPO = {
     "CONTRATO": TipoDocumento.contrato,
@@ -38,6 +38,20 @@ def ejecutar_scraping_expediente(db: Session, storage: DocumentStorage, trabajo:
         resultado = asyncio.run(
             scrape_expediente(expediente.codigo_expediente, expediente.codigo_matriz)
         )
+    except ExpedienteNoPublicadoError as exc:
+        # Resultado negativo determinista (docstring de la excepción): no es
+        # "fallido" (que sugiere que reintentar podría cambiar el resultado),
+        # es "sin_publicar" (CLAUDE.md sección 22) -- y no hay razón para
+        # gastar dos intentos más de scraping real repitiendo una búsqueda
+        # que ya se sabe que no encuentra nada, así que se agota el trabajo
+        # aquí mismo en vez de dejar que `ejecutar_trabajo` lo reintente.
+        expediente.estado = EstadoExpediente.sin_publicar
+        expediente.error = str(exc)
+        trabajo.intentos = trabajo.max_intentos
+        db.commit()
+        if reencolar_pedidos_esperando_matriz(db, expediente):
+            db.commit()
+        raise
     except Exception as exc:
         expediente.estado = EstadoExpediente.fallido
         expediente.error = str(exc)

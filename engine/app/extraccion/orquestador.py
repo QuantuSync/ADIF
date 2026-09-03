@@ -51,7 +51,7 @@ from app.extraccion.lotes import LoteDeclarado, extraer_lotes_declarados
 from app.extraccion.normalizacion import parsear_importe_es
 from app.extraccion.pipeline_anejo import procesar_anejo
 from app.extraccion.precios_unitarios import calcular_baja_efectiva
-from app.extraccion.texto import extraer_texto
+from app.extraccion.texto import es_documento_escaneado, extraer_texto
 from app.interfaces.document_storage import DocumentStorage
 from app.interfaces.model_provider import ModelProvider
 from app.models import Documento, EstadoExpediente, Expediente, Lote, TipoDocumento, TrabajoCola, TrazaOrigen
@@ -90,6 +90,12 @@ class _Documento:
     documento: Documento
     tipo: TipoDocumento
     paginas: list
+    # CLAUDE.md sección 3: el único documento escaneado confirmado del
+    # corpus. Se marca aquí, en la clasificación, para que el motivo de
+    # revisión lo distinga de "no se extrajo ninguna línea" (ver
+    # `es_documento_escaneado`) en vez de intentar procesarlo como si tuviera
+    # texto.
+    escaneado: bool = False
 
 
 def _traza(
@@ -144,13 +150,19 @@ def _clasificar_documentos(db: Session, storage: DocumentStorage, documentos: li
     for doc in documentos:
         contenido = storage.recuperar(doc.ruta_almacenamiento)
         paginas = extraer_texto(io.BytesIO(contenido))
-        clasificacion = clasificar(paginas)
+        escaneado = es_documento_escaneado(paginas)
+        # Un documento escaneado no tiene marcadores de texto que buscar —
+        # clasificarlo igual lo mandaría a `otro` de forma indistinguible de
+        # un documento legible con una plantilla desconocida (CLAUDE.md
+        # sección 3, docstring de `es_documento_escaneado`).
+        clasificacion = clasificar(paginas) if not escaneado else None
         # El clasificador manda, nunca el nombre de fichero ni la categoría
         # que le asignó el scraper (CLAUDE.md sección 3 y docstring de
         # app.extraccion.clasificador).
-        doc.tipo_documento = clasificacion.tipo
+        tipo = clasificacion.tipo if clasificacion is not None else TipoDocumento.otro
+        doc.tipo_documento = tipo
         doc.paginas = len(paginas)
-        resultado.append(_Documento(documento=doc, tipo=clasificacion.tipo, paginas=paginas))
+        resultado.append(_Documento(documento=doc, tipo=tipo, paginas=paginas, escaneado=escaneado))
     db.commit()
     return resultado
 
@@ -344,6 +356,26 @@ def ejecutar_extraccion_expediente(
     if expediente is None:
         raise RuntimeError(f"expediente_id {trabajo.expediente_id} no existe")
 
+    if expediente.estado == EstadoExpediente.sin_publicar:
+        # CLAUDE.md sección 22: un expediente ya confirmado sin publicar no
+        # tiene nada que extraer, y no se reprocesa por error si queda un
+        # trabajo de extracción encolado de antes de que se confirmara (o si
+        # alguien lo reencola a mano) -- sin este corte, ese trabajo lo
+        # devolvería a `pendiente_revision` con un motivo mucho menos claro
+        # ("sin documentos descargados"), perdiendo la marca ya verificada.
+        return {
+            "expediente": expediente.codigo_expediente,
+            "documentos_procesados": 0,
+            "tablas_procesadas": 0,
+            "lineas_creadas": 0,
+            "lineas_actualizadas": 0,
+            "llamadas_modelo": 0,
+            "lotes": [],
+            "baja_global": None,
+            "estado": expediente.estado.value,
+            "motivo_revision": expediente.error,
+        }
+
     expediente.estado = EstadoExpediente.extrayendo
     expediente.error = None
     db.commit()
@@ -468,7 +500,18 @@ def ejecutar_extraccion_expediente(
             # extraídas de los demás — CLAUDE.md sección 12, "lo que no cuadra
             # va a la cola de revisión", no revienta el expediente entero.
             documentos_con_error: list[str] = []
+            documentos_escaneados: list[str] = []
             for item in items:
+                if item.escaneado:
+                    # Sin capa de texto no hay páginas candidatas que buscar
+                    # ni cabecera que mapear (CLAUDE.md sección 3): intentar
+                    # `procesar_anejo` igual solo gastaría tiempo abriendo el
+                    # PDF para no encontrar nada. Se registra aparte de
+                    # `documentos_con_error` para que el motivo final lo diga
+                    # con precisión ("documento escaneado"), no con el
+                    # genérico "no se pudo extraer el cuadro de precios".
+                    documentos_escaneados.append(item.documento.nombre_archivo)
+                    continue
                 contenido = storage.recuperar(item.documento.ruta_almacenamiento)
                 # Todo el trabajo de este documento —extraer, y guardar sus
                 # líneas— vive en el mismo bloque try/except con un único commit
@@ -521,6 +564,20 @@ def ejecutar_extraccion_expediente(
             if documentos_con_error:
                 motivo_documentos = "no se pudo extraer el cuadro de precios de: " + "; ".join(documentos_con_error)
                 motivo_revision = _acumular_motivo(motivo_revision, motivo_documentos)
+
+            if documentos_escaneados:
+                # Motivo aparte y explícito (CLAUDE.md sección 3): distinto
+                # de "no se pudo extraer el cuadro de precios" (ese documento
+                # sí tiene texto, solo falló su tabla) y de "no se extrajo
+                # ninguna línea de catálogo" (ese expediente sí tiene
+                # documentos legibles, solo no traían cuadro de precios).
+                # Este dice que el documento no se puede leer en absoluto con
+                # las herramientas actuales.
+                motivo_escaneados = (
+                    "documento(s) escaneado(s), sin capa de texto (fuera de alcance sin OCR o modelo "
+                    "multimodal, CLAUDE.md sección 15): " + "; ".join(documentos_escaneados)
+                )
+                motivo_revision = _acumular_motivo(motivo_revision, motivo_escaneados)
 
         total_lineas = lineas_creadas + lineas_actualizadas
 

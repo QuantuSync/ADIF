@@ -101,6 +101,29 @@ def test_expediente_0008_completo_produce_catalogo_y_pasa_a_completado(db_sessio
     assert "baja_declarada" in campos_trazados
 
 
+def test_expediente_sin_publicar_no_se_reprocesa(db_session):
+    # CLAUDE.md sección 22: un expediente ya confirmado sin publicar no tiene
+    # nada que extraer -- un trabajo de extracción encolado por error (o a
+    # mano) no debe devolverlo a `pendiente_revision` con un motivo genérico,
+    # perdiendo la marca ya verificada.
+    expediente = Expediente(
+        codigo_expediente="2.18/04703.0019",
+        estado=EstadoExpediente.sin_publicar,
+        error="no encontrado en la Plataforma ni por matriz ni por expediente: 2.18/04703.0019",
+    )
+    db_session.add(expediente)
+    db_session.commit()
+    trabajo = SimpleNamespace(expediente_id=expediente.id)
+
+    resultado = ejecutar_extraccion_expediente(db_session, _StorageDirecta(), trabajo, model_provider=None)
+
+    db_session.refresh(expediente)
+    assert expediente.estado == EstadoExpediente.sin_publicar
+    assert "no encontrado en la Plataforma" in expediente.error
+    assert resultado["estado"] == "sin_publicar"
+    assert resultado["lineas_creadas"] == 0
+
+
 def test_expediente_sin_documentos_va_a_revision_no_a_fallido(db_session):
     expediente = Expediente(codigo_expediente="6.24/28510.9999")
     db_session.add(expediente)
@@ -113,6 +136,28 @@ def test_expediente_sin_documentos_va_a_revision_no_a_fallido(db_session):
     assert expediente.estado == EstadoExpediente.pendiente_revision
     assert expediente.error is not None
     assert resultado["motivo_revision"] is not None
+
+
+def test_expediente_con_documento_escaneado_va_a_revision_con_motivo_distinto(db_session):
+    # CLAUDE.md sección 3: un documento escaneado (sin capa de texto) no
+    # aporta ninguna línea, pero el motivo debe decirlo explícitamente en vez
+    # de confundirse con "no se extrajo ninguna línea de catálogo" (ese
+    # motivo dice "se leyó pero no traía cuadro de precios"; este dice "no se
+    # pudo leer en absoluto").
+    expediente = _crear_expediente_con_documentos(
+        db_session, "6.20/28510.0136", [("ANEJO", fx.DOCUMENTO_ESCANEADO_SIN_TEXTO)],
+    )
+    trabajo = SimpleNamespace(expediente_id=expediente.id)
+
+    resultado = ejecutar_extraccion_expediente(db_session, _StorageDirecta(), trabajo, model_provider=None)
+
+    db_session.refresh(expediente)
+    assert expediente.estado == EstadoExpediente.pendiente_revision
+    assert "escaneado" in resultado["motivo_revision"]
+    assert "no se extrajo ninguna línea" not in resultado["motivo_revision"]
+
+    doc = db_session.query(Documento).filter_by(expediente_id=expediente.id).one()
+    assert doc.procesado_en is None  # nunca se intentó procesar su tabla
 
 
 def test_expediente_0008_cruza_codigo_interno_del_excel_de_referencia(db_session, tmp_path, monkeypatch):
@@ -263,18 +308,29 @@ def test_expediente_0027_multi_lote_produce_baja_correcta_por_lote(db_session):
     assert len(huerfanas) > 0
     assert all(l.motivo_revision for l in huerfanas)
     assert all(l.expediente_id == expediente.id for l in huerfanas)
-    # 28, no 6: LOTE 2, 4, 5 y 6 (y los fragmentos sueltos de LOTE 1) tienen
-    # todos su propio "P-1".."P-6" — sin lote que las separe, fundirlas por
-    # `codigo_precio` a secas mezclaría datos reales de lotes distintos entre
-    # sí (bug real encontrado al verificar contra el stack real: antes de
-    # desambiguar por página y posición de tabla en `app.extraccion.pipeline_anejo`,
-    # esto colapsaba a solo 6 filas).
+    # 28, no 6: LOTE 2, 4, 5 y 6 tienen todos su propio "P-1".."P-6" — sin
+    # lote que las separe, fundirlas por `codigo_precio` a secas mezclaría
+    # datos reales de lotes distintos entre sí (bug real encontrado al
+    # verificar contra el stack real: antes de desambiguar por página y
+    # posición de tabla en `app.extraccion.pipeline_anejo`, esto colapsaba a
+    # solo 6 filas).
     assert len(huerfanas) == 28
-    # Ninguna línea de LOTE 1 llegó a asociarse a su lote en este documento
-    # concreto (su tabla se reparte entre dos páginas y la cabecera "LOTE 1"
-    # solo aparece en la primera; medido y reportado, no corregido por
-    # adivinación — ver `app.extraccion.lote_tabla`, ajuste 2 de esta sesión).
-    assert db_session.query(LineaCatalogo).filter_by(lote_id=lote1.id).count() == 0
+    # LOTE 1 sí llega a asociarse a su lote (sesión de expedientes sin
+    # publicar, bajada del umbral de densidad de `app.extraccion.localizador`
+    # de 0,04 a 0,025): su tabla se reparte entre dos páginas, y la página con
+    # "P-1"/"P-2" tenía una densidad numérica (0,032) que quedaba por debajo
+    # del umbral antiguo — invisible para la cascada entera, ni siquiera
+    # llegaba a intentar leer la cabecera "LOTE 1" que sí la precede. Con el
+    # umbral nuevo la página se localiza, `app.extraccion.lote_tabla` encuentra
+    # la cabecera y las dos primeras líneas de LOTE 1 dejan de perderse.
+    lineas_lote1 = (
+        db_session.query(LineaCatalogo)
+        .filter_by(lote_id=lote1.id)
+        .order_by(LineaCatalogo.codigo_precio)
+        .all()
+    )
+    assert [l.codigo_precio for l in lineas_lote1] == ["P-1", "P-2"]
+    assert lineas_lote1[0].precio_unitario == Decimal("10.8500")
 
     # Con líneas huérfanas, el expediente va a revisión — no se presenta
     # como completado un catálogo con líneas sin lote determinado.

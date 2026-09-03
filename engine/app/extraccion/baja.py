@@ -38,6 +38,35 @@ _BAJA_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
+# Redacciones alternativas de la misma baja (sesión de expedientes sin
+# publicar, CLAUDE.md sección 22), verificadas contra un caso real que no
+# viene del corpus de PDFs de este proyecto sino de otra fuente: una etiqueta
+# de campo, no una frase en prosa, y sin la subordinada "precios unitarios"
+# que exige `_BAJA_RE`. Solo se intenta si `_BAJA_RE` no encontró nada en
+# ningún documento del expediente (ver `extraer_baja_declarada`), nunca antes
+# — es un patrón más laxo y solo debe ganar cuando el estricto no sirve.
+#
+# El caso que dispara esto: "% de baja:    12,5" — el símbolo de porcentaje
+# va pegado a la etiqueta, no al número ("% de baja", no "baja del 12,5%").
+# Esa variante concreta ("de baja") exige el "%" delante a propósito: sin
+# esa ancla, "de baja" también aparece en cláusulas laborales de boilerplate
+# ajenas a la baja del expediente ("el trabajador que se encuentre de
+# baja..."), y el símbolo de porcentaje pegado a la etiqueta es la señal que
+# distingue el campo de adjudicación de esa prosa. Las otras variantes
+# ("% baja adjudicado", "% total de baja", "baja ofertada", "porcentaje de
+# baja") son frases lo bastante específicas para no necesitar esa misma
+# ancla.
+_BAJA_ETIQUETA_RE = re.compile(
+    r"(?:"
+    r"%\s*de\s+baja"
+    r"|%?\s*porcentaje\s+de\s+baja"
+    r"|%?\s*total\s+de\s+baja"
+    r"|%?\s*baja\s+adjudicad[oa]"
+    r"|%?\s*baja\s+ofertada"
+    r")\b[:=\s]*([\d]+(?:[.,]\d+)?)\s*%?",
+    re.IGNORECASE,
+)
+
 # Prioridad al elegir entre varios documentos del mismo hecho para el mismo
 # expediente/lote (CLAUDE.md sección 17: "preferir la Resolución cuando
 # existan las dos" porque es el acto posterior y definitivo).
@@ -69,6 +98,19 @@ def extraer_baja_declarada(
     las hay) repiten el mismo valor."""
     for pagina in paginas:
         m = _BAJA_RE.search(pagina.texto)
+        if m:
+            return BajaDeclarada(
+                baja=parsear_porcentaje_es(m.group(1)),
+                pagina=pagina.numero,
+                fragmento=m.group(0).strip(),
+                tipo_documento=tipo_documento,
+            )
+    # Ningún documento trajo la frase estricta "baja ... del N% ... precios
+    # unitarios": antes de rendirse, se prueban las etiquetas de campo
+    # alternativas (ver docstring de `_BAJA_ETIQUETA_RE`) — más laxas a
+    # propósito, por eso solo se intentan como segunda pasada, nunca antes.
+    for pagina in paginas:
+        m = _BAJA_ETIQUETA_RE.search(pagina.texto)
         if m:
             return BajaDeclarada(
                 baja=parsear_porcentaje_es(m.group(1)),

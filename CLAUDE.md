@@ -47,8 +47,20 @@ No lo inventes ni lo traduzcas. Usa estos términos en código y en datos.
 
 Sobre 45 expedientes y 187 PDFs reales:
 
-- **Ningún documento está escaneado.** Todos tienen capa de texto. No hace falta OCR
-  ni modelo multimodal para leer estos documentos.
+- **186 de los 187 documentos tienen capa de texto.** No hace falta OCR ni
+  modelo multimodal para leerlos. La excepción, confirmada en la sesión de
+  expedientes sin publicar (2026-09-03): `6.20/28510.0136_ANEJO_2.pdf`
+  (100 páginas) es un PDF escaneado — cada página es una imagen a página
+  completa, cero caracteres extraíbles con `pdfplumber` ni con `pypdf`. Barrido
+  el corpus completo buscando el mismo síntoma: es el único caso, no un
+  patrón. `app.extraccion.texto.es_documento_escaneado` lo detecta (umbral de
+  caracteres, no cero exacto) para que el motivo de revisión lo diga
+  explícitamente ("documento escaneado, sin capa de texto") en vez de
+  confundirse con "no se extrajo ninguna línea de catálogo" — son
+  diagnósticos distintos. Sigue sin implementarse OCR (CLAUDE.md sección 15):
+  si aparecen más documentos escaneados, la vía es rasterizar la página y
+  pasarla a un modelo multimodal, coherente con la arquitectura propuesta
+  (Qwen) — no un OCR aparte.
 - **Dos familias de documento de adjudicación:**
   - *Anuncio PCSP* (11 de 38): formulario estándar con etiquetas fijas.
   - *Propuesta LC.27* (27 de 38): plantilla propia de ADIF.
@@ -333,6 +345,15 @@ Autenticación real, gestión de usuarios, SharePoint, despliegue en producción
 ejecución programada, paralelismo masivo, y todo lo estético que no sea legible en
 una pantalla compartida.
 
+**OCR o modelo multimodal para documentos escaneados.** Con el corpus real
+actual, 186 de 187 documentos tienen capa de texto (CLAUDE.md sección 3);
+construir un pipeline de OCR para el único caso conocido no está
+justificado. Si en el futuro aparecen más documentos escaneados con volumen
+propio, la vía prevista es rasterizar la página y pasarla a un modelo
+multimodal (coherente con la arquitectura propuesta, Qwen), no un OCR
+tradicional aparte — pero eso es una decisión para cuando haya casos
+suficientes, no ahora.
+
 ---
 
 ## 16. Pendiente de resolver
@@ -364,11 +385,32 @@ una pantalla compartida.
 - **Resuelto (sección 21, sesión de corrección de identidad):** los 8
   expedientes con `codigo_expediente` etiquetado con el código de su MATRIZ
   se renombran solos, en la etapa de extracción, al valor real que declara
-  su propio Anuncio PCSP. Sigue habiendo un pendiente real, distinto: **de
-  las 8 matrices reales que este corpus necesita (5 en `2.18/04703`, 3 en
-  `2.24/04110`), ninguna de las 8 se encuentra en la Plataforma por
-  búsqueda** — mismo síntoma que los 6 expedientes de la sección 3 sin
-  documentos. Causa raíz sin verificar todavía (ver sección 21).
+  su propio Anuncio PCSP.
+- **Resuelto en la práctica, sin verificar la causa raíz (sección 22, sesión
+  de expedientes sin publicar):** de las 8 matrices reales que este corpus
+  necesita (5 en `2.18/04703`, 3 en `2.24/04110`) más los 6 expedientes de la
+  sección 3 sin documentos, **los 14 códigos se comprobaron a mano en la
+  Plataforma y no devuelven resultados** — no están publicados, no es un
+  fallo del scraper. Se marcan `sin_publicar` (estado nuevo, distinto de
+  `fallido` y de `pendiente_revision`) y dejan de contar como trabajo
+  pendiente; las métricas del proyecto se miden desde ahora sobre los 31
+  expedientes reales restantes, no sobre 45. **Por qué no están publicados
+  sigue sin verificar** (archivado, publicado bajo otro código, tipo de
+  procedimiento fuera de "Licitaciones") — pero ya no bloquea nada, así que
+  deja de ser una prioridad. Patrón observado, con 14 casos: todo código que
+  empieza por `2.`, `3.` o `4.` falla la búsqueda; todo lo que empieza por
+  `6.` funciona. Es una correlación, no una regla verificada — no se ha
+  construido ningún atajo de código que rechace un `2./3./4.` nuevo sin
+  intentarlo, solo se documenta el patrón.
+- **Nuevo, sin resolver (sección 22):** `6.24/28510.0025` y `6.24/28510.0193`
+  tienen exactamente 2 documentos (`anuncio_pcsp` + `contrato`), sin ningún
+  `anejo` ni `pliego` — mismo síntoma estructural que los pedidos derivados
+  de acuerdo marco (sección 3), pero estos dos usan código `6.24/28510.0NNN`
+  normal, no el formato de MATRIZ (`2.18/...`, `2.24/...`): no está claro si
+  son pedidos derivados con una matriz todavía no identificada, o contratos
+  reales cuyo anejo de precios nunca se adjuntó a la Plataforma. Sin
+  investigar caso a caso — fuera de alcance de la sesión de expedientes sin
+  publicar, que se centró en los 14 códigos ya confirmados.
 
 ---
 
@@ -1173,3 +1215,241 @@ extremo con el mismo fixture real de la sección 20
 arreglo, esta fila se quedaba en `pendiente_revision` por "forma un ciclo";
 con la identidad corregida antes de resolver la matriz, deja de ser un ciclo
 real y pasa a `esperando_matriz`. No hizo falta ningún PDF nuevo.
+
+---
+
+## 22. Expedientes sin publicar, y cierre de los 21 en revisión (sesión 2026-09-03)
+
+Ataca los dos encargos de esta sesión en el orden pedido: primero marcar como
+fuera de alcance los códigos que la Plataforma no publica, después atacar por
+impacto las causas ya identificadas en `docs/analisis-corpus.md` que dejaban
+21 expedientes en revisión. Verificado de punta a punta contra el stack real
+(imágenes reconstruidas, migración `0010` aplicada, reproceso completo desde
+el worker real) — nunca solo con tests aislados.
+
+### 1. `sin_publicar`: comprobado a mano, no solo por el scraper
+
+Comprobación manual en la Plataforma (no solo el intento automático de
+`scrape_expediente`): buscar `2.18/04703.0019` por número de expediente no
+devuelve ningún resultado. Es la misma conclusión a la que ya había llegado
+el scraping real en la sesión de corrección de identidad (sección 21), pero
+esta vez confirmada por fuera del propio sistema antes de decidir marcarlo
+como definitivo.
+
+**Estado nuevo `sin_publicar`** (`EstadoExpediente`, migración `0010`,
+`ALTER TYPE ... ADD VALUE`, no reversible): significa "este expediente no
+existe en la Plataforma", no "hace falta revisarlo" ni "algo falló y puede
+que reintentando funcione". Se distingue de los otros dos estados que se le
+podían confundir:
+
+- de `fallido`: ese sugiere que reintentar podría cambiar el resultado
+  (timeout, WAF, formulario no localizado); `sin_publicar` es un resultado
+  negativo determinista, reintentar no va a encontrar nada nuevo.
+- de `pendiente_revision`: ese dice "hace falta un humano decidiendo algo
+  sobre datos reales de este expediente"; `sin_publicar` dice que no hay
+  datos que decidir, el expediente está fuera de alcance del sistema.
+
+**Mecanismo** (`app/scraping/pcsp.py`, `app/scraping/job.py`): nueva
+excepción `ExpedienteNoPublicadoError(RuntimeError)`, lanzada solo cuando
+ninguna variante de búsqueda encuentra una fila de resultados — nunca para
+timeouts, WAF ni otros fallos de scraping, que siguen siendo `fallido` y
+elegibles para reintento normal. `ejecutar_scraping_expediente` la captura
+aparte: marca `sin_publicar`, y **agota los intentos del trabajo ahí mismo**
+(`trabajo.intentos = trabajo.max_intentos`) en vez de dejar que la cola
+reintente dos veces más una búsqueda que ya se sabe que no cambia de
+resultado — cada intento es una sesión real de Chromium headless contra la
+Plataforma, no algo gratis. `app.extraccion.herencia_matriz._ESTADOS_TERMINADOS`
+incluye ahora `sin_publicar`: sin esto, una matriz sin publicar (sin
+documentos, sin trabajo activo) se releería en cada pedido que la referencia
+como "hace falta encolar su descarga", reintentando para siempre.
+`ejecutar_extraccion_expediente` corta en seco si el expediente ya está
+`sin_publicar` al empezar — guarda contra un trabajo de extracción encolado
+por error (o a mano) que lo devolvería a `pendiente_revision` con un motivo
+mucho menos claro, perdiendo la marca ya verificada.
+
+**Los 14 códigos marcados, verificados contra la Plataforma real** (scraping
+real, sin dobles de test, cada uno con un único intento gracias al agotado
+inmediato de intentos): las 8 matrices de la sección 16 (`2.18/04703.0019`,
+`0021`, `0022`, `0024`, `0025`; `2.24/04110.0035`, `0036`, `0037`) y los 6
+expedientes sin documentos (`2.24/28520.0128`, `2.25/28520.0161`,
+`3.24/20810.0090`, `3.24/28520.0129`, `3.25/27520.0055`, `4.24/27520.0090`).
+Los 8 pedidos reales que dependen de esas matrices (`6.24/28510.0100`,
+`0101`, `0102`, `0103`, `0111`, `6.25/28510.0175`, `0215`, `0248`) **no** se
+marcan `sin_publicar` — son expedientes reales, encontrados y descargados,
+que siguen en `pendiente_revision` con un motivo ahora preciso: "la matriz
+`<código>` no tiene ningún lote registrado (estado: sin_publicar)".
+
+**Patrón observado, no una regla de código**: los 14 códigos no publicados
+empiezan todos por `2.`, `3.` o `4.`; los que empiezan por `6.` siempre se
+encuentran. Documentado como correlación (sección 16), no convertido en un
+atajo que rechace un código nuevo por su prefijo sin intentarlo — con 14
+casos no hay base para generalizar, y CLAUDE.md sección 9 prohíbe inventar
+lo que no está verificado.
+
+**Métricas del proyecto, desde ahora sobre 31, no sobre 45**: los 14 códigos
+nunca fueron expedientes "reales" que el catálogo pudiera completar, así que
+medir el progreso contra 45 escondía un techo que nunca iba a alcanzarse. La
+sección "Medición final" más abajo da el detalle sobre los 31.
+
+### 2. Los 21 en revisión: por impacto
+
+Atacados en el orden que pedía el encargo — el que más expedientes
+desbloquea primero.
+
+**a) Otros formatos de código de precio (`app/extraccion/tabla.py`).**
+`_CODIGO_PRECIO_RE` solo reconocía `P-NNN` (con guion ASCII o Unicode, sección
+anterior de este documento). Verificado contra el corpus real completo antes
+de tocar el regex — no adivinado —, los formatos reales que aparecen son:
+
+| Formato | Ejemplo real | Expediente |
+|---|---|---|
+| `P` + dígitos, sin separador | `P1`, `P2` | `6.24/28510.0047` |
+| `P` + dígitos, dos cifras | `P01`, `P02` | `6.24/28510.0187` |
+| `PN` + dígitos | `PN001`..`PN018` | `6.24/28510.0180` |
+| `PA-` + dígitos (partida alzada numerada) | `PA-01`, `PA-02` | `6.24/28510.0094` |
+| `L` + dígitos + `-T` + dígitos (lote+tipo, no es semánticamente "código de precio" per sección 3, pero identifica la fila igual) | `L01-T01`..`L03-T19` | `6.24/28510.0094` |
+| Sin ninguna columna de código: la matrícula de 9 dígitos identifica la fila | `642910100` | `6.20/28510.0136` |
+
+`_CODIGO_PRECIO_RE` pasa a `^(?:P-?\d+|PN\d+|PA-\d+|L\d+-T\d+)$`, y
+`_es_fila_de_datos` acepta además una matrícula de 9 dígitos exacta
+(`_MATRICULA_DATO_RE`) como señal alternativa de fila de datos, para las
+tablas que no traen columna de código en absoluto.
+
+**Intento revertido, documentado como guarda de regresión**: se probó
+también añadir `"codificacion del precio"` a los alias deterministas de
+`codigo_precio` en `mapeo_cabecera.py` (docs/analisis-corpus.md ya señalaba
+esta cabecera como una de las 5 que hoy resuelve el modelo). **Revertido**:
+rompía `ANEJO_PRECIOS_BALASTO_MULTI_LOTE` (lote 3, `6.25/28510.0027`) en los
+tests — esa tabla real tiene una columna fantasma cuyo índice no coincide
+entre la fila de cabecera y las filas de datos, y el mapeo determinista (que
+solo mira la posición del texto de cabecera) extraía `precio_unitario=None`
+donde el modelo sí acierta porque ve filas de ejemplo, no solo la cabecera.
+**No se necesitaba de todas formas**: el bloqueo real de los 5 expedientes de
+esta sesión con esta cabecera estaba en la etapa 4 (row de datos, arriba),
+no en la etapa 5 — una vez la tabla se localiza, cae al modelo como ya
+estaba diseñado (CLAUDE.md sección 6), se cachea, y no hace falta el atajo
+determinista. `tests/extraccion/test_mapeo_cabecera.py` guarda este caso
+explícitamente para que no se repita el intento.
+
+**b) Umbral de densidad numérica, etapa 3 (`app/extraccion/localizador.py`).**
+Con el arreglo de (a) ya desplegado, `6.24/28510.0187` seguía sin ninguna
+línea: su página de cuadro de precios (2 líneas, `P01`/`P02`) trae un párrafo
+largo de prosa introductoria que diluye la densidad numérica a 0,0253, por
+debajo del umbral de 0,04. **Medido sobre el corpus real completo antes de
+bajar el umbral, no a ciegas**: con un umbral de 0,025, pasan a ser
+candidatas 233 páginas más que con 0,04, de las cuales solo 15 (6,4%) traen
+una tabla real — las otras 218 no cuestan más que un `find_tables()` vacío,
+porque `extraer_tablas_pagina` ya descarta sin fila reconocible cualquier
+tabla espuria. Umbral bajado a **0,025**. Beneficio medido, no solo el caso
+que disparó el cambio: además de `6.24/28510.0187`, recupera un cuadro de
+precios real en `6.24/28510.0116_ANEJO_1.pdf` (páginas 18 y 22, antes sin
+ninguna página candidata en todo el expediente) y las dos primeras líneas de
+LOTE 1 en el fixture real `6.25/28510.0027` (`ANEJO_PRECIOS_BALASTO_MULTI_LOTE`),
+que antes se perdían por completo — el test de esa sesión (CLAUDE.md sección
+19) se actualiza para reflejar el comportamiento correcto, no el limitado.
+
+**c) Redacciones alternativas de la baja (`app/extraccion/baja.py`).**
+Encargo explícito de esta sesión, con un caso concreto que viene de otra
+fuente (no del corpus de PDFs de este proyecto): el símbolo de porcentaje
+pegado a la etiqueta, no al número (`"% de baja:    12,5"`), y cuatro
+variantes de etiqueta más (`"% baja adjudicado"`, `"% total de baja"`,
+`"baja ofertada"`, `"porcentaje de baja"`). `_BAJA_ETIQUETA_RE` es un
+segundo patrón, más laxo a propósito, que solo se intenta si `_BAJA_RE` (la
+frase estricta "baja del N% ... precios unitarios") no encontró nada en
+ningún documento del expediente — nunca antes, para no ganarle a un caso que
+ya resuelve el patrón estricto. La variante `"de baja"` sola (sin la
+subordinada "precios unitarios" que la distinguiría) exige el símbolo `%`
+pegado a la etiqueta como ancla: sin él, "de baja" también aparece en
+boilerplate laboral de pliegos ("el trabajador que se encuentre de baja
+médica..."), y el `%` pegado a la etiqueta es justo la señal que lo distingue
+de esa prosa. Las otras cuatro variantes son frases lo bastante específicas
+para no necesitar esa misma ancla. Probado con fixtures sintéticos de texto
+(no PDF: no hace falta un documento real para una expresión regular sobre
+texto ya extraído), incluida una prueba explícita de que la variante laboral
+NO dispara el patrón.
+
+**d) Documento escaneado (`app/extraccion/texto.py`).** Ver sección 3 y 15
+de este documento. `es_documento_escaneado` (umbral de caracteres extraídos,
+no cero exacto) marca `6.20/28510.0136_ANEJO_2.pdf` aparte, con un motivo
+("documento escaneado, sin capa de texto") distinto de "no se extrajo
+ninguna línea de catálogo" — antes ambos casos se confundían en el mismo
+mensaje genérico. El documento se salta en la etapa 4 (nunca se abre con
+`procesar_anejo`, que no encontraría nada) en vez de intentarlo igual.
+
+### 3. Medición final: 31 expedientes reales
+
+Reprocesados los 31 desde cero contra el stack real tras desplegar los
+cuatro arreglos de arriba (imágenes reconstruidas, migración `0010`
+aplicada):
+
+| | Antes de esta sesión (sobre 45) | Después (sobre 31) |
+|---|---:|---:|
+| `completado` | 10 | **14** |
+| `pendiente_revision` | 35 | **17** |
+| `sin_publicar` | — | **14** (fuera de la medición, ver punto 1) |
+| Líneas de catálogo (sobre los 31) | 2.041 (sobre 45) | **2.208** |
+| Matrículas en más de un expediente | 13 | **13** (sin cambio: siguen siendo las de carril, bloqueadas por la segunda familia de baja) |
+
+**Los 17 que siguen en `pendiente_revision`, agrupados por motivo — cuáles
+son comportamiento correcto y cuáles trabajo pendiente:**
+
+Comportamiento correcto (el sistema detecta una contradicción real o un caso
+ya documentado, y por diseño no adivina — CLAUDE.md sección 12):
+
+- **7 expedientes, baja declarada no cuadra con la baja por importes**
+  (`6.23/28510.0139`, `6.24/28510.0094`, `0117`, `0130`, `0203`,
+  `6.25/28510.0019`, `0028`). Validación funcionando como está diseñada;
+  varios de estos ya se señalaban en sesiones anteriores como posibles
+  pedidos derivados de acuerdo marco con importes de la matriz mal cruzados,
+  sin confirmar caso a caso.
+- **3 expedientes, segunda familia de baja** (`6.23/28510.0018`, `0102`,
+  `6.25/28510.0016`): fórmula `Ct = Oferta × Kt × Coeficiente de baja` por
+  pedido, no una baja única de lote (hallazgo 5, sección "Pendiente de
+  resolver"). No hay un valor que extraer, es un modelo de cálculo distinto
+  — diseño pendiente, no un fallo de extracción.
+- **2 expedientes, valores ilegibles marcados y descartados en vez de
+  adivinados** (`6.23/28510.0042`: matrícula `"***"`, un placeholder
+  explícito; `6.23/28510.0051`: dos valores distintos en la misma celda que
+  no coinciden entre sí). `6.20/28510.0136` también trae 2 filas de este
+  tipo (encabezados de sección dentro del cuadro de matrículas, sin dato
+  real que extraer) más su documento escaneado, ya contado aparte.
+- **1 expediente, ambigüedad de lote por diseño** (`6.25/28510.0027`: LOTE
+  2, 4, 5 y 6 no están entre los lotes que adjudica la Resolución — CLAUDE.md
+  sección 19, "sin lote centinela", las líneas quedan huérfanas en vez de
+  asignarse por cercanía).
+- **1 expediente, formato de código inválido** (`6.25/28510.5001_01`,
+  sección 21: el sufijo `_01` lo descarta como candidato a búsqueda desde el
+  principio).
+
+Trabajo pendiente, no resuelto por esta sesión (estructural, necesita
+investigación futura, no un ajuste de expresión regular):
+
+- **2 expedientes, ningún documento con cuadro de precios**
+  (`6.24/28510.0025`, `6.24/28510.0193`): los dos tienen exactamente 2
+  documentos (`anuncio_pcsp` + `contrato`), sin `anejo` ni `pliego` — mismo
+  síntoma estructural que los pedidos derivados de acuerdo marco, pero con
+  código `6.24/28510.0NNN` normal, no de MATRIZ. Sin investigar si son
+  pedidos derivados con una matriz sin identificar o contratos cuyo anejo de
+  precios nunca se adjuntó — ver sección 16.
+
+### Fixtures de regresión
+
+`engine/tests/fixtures/pdfs/`, seis recortes nuevos de documentos reales
+(nunca el documento completo — CLAUDE.md sección 13):
+
+- `6.24_28510.0047_ANEJO_1_p18.pdf`, `6.24_28510.0187_ANEJO_1_p11.pdf`,
+  `6.24_28510.0180_ANEJO_1_p18.pdf`: una página cada uno, los tres formatos
+  `P1`/`P01`/`PN00N`.
+- `6.24_28510.0094_CONTRATO_1_p112-113.pdf`: dos páginas del Contrato real
+  (2,8 MB / 118+ páginas) con `L0N-T0N` y `PA-NN` en la misma tabla.
+- `6.20_28510.0136_ANEJO_3_p3.pdf`: tabla real sin columna de código, solo
+  matrícula.
+- `6.20_28510.0136_ANEJO_2_p1.pdf`: una página del documento escaneado real.
+
+`tests/extraccion/test_tabla.py` (5 casos nuevos), `test_texto.py` (nuevo,
+4 casos), `test_localizador.py` (1 caso), `test_mapeo_cabecera.py` (1 caso,
+la guarda de regresión del intento revertido), `test_baja.py` (7 casos),
+`test_orquestador.py` (2 casos nuevos + 1 actualizado para el umbral),
+`test_herencia_matriz.py` (2 casos), `tests/scraping/test_job.py` (nuevo,
+2 casos: `sin_publicar` agota intentos, un error genérico no). Ningún PDF
+nuevo de más de 2 páginas.

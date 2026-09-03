@@ -38,6 +38,18 @@ from PyPDF2 import PdfReader
 
 from app.config import settings
 
+
+class ExpedienteNoPublicadoError(RuntimeError):
+    """Ninguna variante de búsqueda (matriz, expediente, separadores `/`, `_`,
+    `-`, sin separador) encontró una fila en la tabla de resultados de la
+    Plataforma. Distinto de un `RuntimeError` genérico (timeout, WAF,
+    formulario no localizado): esto es un resultado negativo determinista, no
+    un fallo transitorio -- `app.scraping.job` lo trata aparte para marcar el
+    expediente `sin_publicar` en vez de `fallido` y no gastar reintentos en
+    repetir una búsqueda que no va a cambiar de resultado (sesión de
+    expedientes sin publicar, CLAUDE.md sección 22: comprobado a mano que
+    estos códigos no están en la Plataforma, no es un problema del scraper)."""
+
 BASE = "https://contrataciondelestado.es"
 SEARCH = BASE + "/wps/portal/plataforma/buscadores/busqueda"
 
@@ -774,7 +786,7 @@ async def scrape_expediente(codigo_expediente: str, codigo_matriz: Optional[str]
                     matched = code
                     break
             if not matched:
-                raise RuntimeError(
+                raise ExpedienteNoPublicadoError(
                     f"no encontrado en la Plataforma ni por matriz ni por expediente: "
                     f"{' | '.join(candidatos)}"
                 )

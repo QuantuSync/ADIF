@@ -80,3 +80,64 @@ def test_codigo_con_guion_unicode_se_reconoce_como_fila_de_datos():
     assert len(tabla.filas) == 13
     assert tabla.filas[0][1] == "P‐01"  # el guion Unicode se conserva en la celda cruda
     assert tabla.filas[-1][1] == "P‐13"
+
+
+# Sesión de expedientes sin publicar (docs/analisis-corpus.md hallazgo 6):
+# "otros formatos de código de precio" — antes del arreglo, ninguna de estas
+# cinco tablas reales aportaba ninguna línea de catálogo porque
+# `_es_fila_de_datos` solo reconocía "P-NNN" (con o sin guion Unicode).
+
+def test_codigo_p_sin_guion_un_digito_se_reconoce_como_fila_de_datos():
+    with pdfplumber.open(fx.ANEJO_PRECIOS_CODIGO_P_SIN_GUION) as pdf:
+        tablas = extraer_tablas_pagina(pdf.pages[0])
+
+    assert len(tablas) == 1
+    assert [f[0] for f in tablas[0].filas] == ["P1", "P2"]
+
+
+def test_codigo_p_sin_guion_dos_digitos_se_reconoce_como_fila_de_datos():
+    with pdfplumber.open(fx.ANEJO_PRECIOS_CODIGO_P_DOS_DIGITOS) as pdf:
+        tablas = extraer_tablas_pagina(pdf.pages[0])
+
+    assert len(tablas) == 1
+    assert [f[0] for f in tablas[0].filas] == ["P01", "P02"]
+
+
+def test_codigo_con_prefijo_pn_se_reconoce_como_fila_de_datos():
+    with pdfplumber.open(fx.ANEJO_PRECIOS_CODIGO_PN) as pdf:
+        tablas = extraer_tablas_pagina(pdf.pages[0])
+
+    assert len(tablas) == 1
+    assert tablas[0].filas[0][0] == "PN001"
+    assert tablas[0].filas[-1][0] == "PN018"
+    assert len(tablas[0].filas) == 18
+
+
+def test_codigo_lote_tipo_y_partida_alzada_se_reconocen_como_fila_de_datos():
+    # 6.24/28510.0094: el mismo cuadro de traviesas trae "L0N-T0M" (lote+tipo,
+    # no es semánticamente un código de precio per CLAUDE.md sección 3, pero
+    # identifica la fila igual) y "PA-NN" (partida alzada numerada) — dos
+    # tablas en el recorte de 2 páginas, cada una con su propia cabecera.
+    with pdfplumber.open(fx.ANEJO_PRECIOS_LOTE_TIPO_Y_PARTIDA_ALZADA) as pdf:
+        tablas = [t for pagina in pdf.pages for t in extraer_tablas_pagina(pagina)]
+
+    codigos = [fila[0] for tabla in tablas for fila in tabla.filas]
+    assert "L01-T01" in codigos
+    assert "L02-T01" in codigos
+    assert "L03-T13" in codigos
+    assert codigos.count("PA-01") == 2  # aparece una vez por página en este recorte
+    assert codigos.count("PA-02") == 2
+
+
+def test_matricula_de_9_digitos_se_reconoce_como_fila_de_datos_sin_codigo_precio():
+    # 6.20/28510.0136: esta tabla no trae ninguna columna de código de
+    # precio, solo matrícula (CLAUDE.md sección 2: forma fija de 9 dígitos).
+    # Antes del arreglo, `_es_fila_de_datos` solo miraba códigos de precio y
+    # esta tabla entera se descartaba como espuria.
+    with pdfplumber.open(fx.TABLA_PRECIOS_SOLO_MATRICULA) as pdf:
+        tablas = extraer_tablas_pagina(pdf.pages[0])
+
+    assert len(tablas) == 1
+    matriculas = [fila[0] for fila in tablas[0].filas]
+    assert "642910100" in matriculas
+    assert "642910360" in matriculas

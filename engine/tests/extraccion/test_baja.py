@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 from app.extraccion.baja import BajaDeclarada, elegir_baja_preferida, extraer_baja_declarada
-from app.extraccion.texto import extraer_texto
+from app.extraccion.texto import PaginaTexto, extraer_texto
 from app.models import TipoDocumento
 from tests import fixtures as fx
 
@@ -67,3 +67,59 @@ def test_elegir_baja_preferida_prioriza_resolucion_sobre_propuesta():
 
 def test_elegir_baja_preferida_sin_candidatas():
     assert elegir_baja_preferida([]) is None
+
+
+# Sesión de expedientes sin publicar (CLAUDE.md sección 22): variantes de
+# etiqueta de campo, no de frase en prosa — no vienen del corpus de PDFs de
+# este proyecto, sino de otra fuente real. `_BAJA_RE` no las alcanza (no
+# tienen "del" ni "precios unitarios"), así que solo las resuelve el patrón
+# de respaldo `_BAJA_ETIQUETA_RE`. Fixture sintético (texto, no PDF): no hace
+# falta un documento real para probar una expresión regular sobre texto ya
+# extraído.
+def test_baja_con_simbolo_de_porcentaje_pegado_a_la_etiqueta():
+    r = extraer_baja_declarada([PaginaTexto(numero=1, texto="% de baja:    12,5")])
+    assert r.baja == Decimal("0.1250")
+    assert r.pagina == 1
+
+
+def test_baja_variante_total_de_baja():
+    r = extraer_baja_declarada([PaginaTexto(numero=1, texto="% total de baja: 6,02")])
+    assert r.baja == Decimal("0.0602")
+
+
+def test_baja_variante_baja_adjudicado():
+    r = extraer_baja_declarada([PaginaTexto(numero=1, texto="% baja adjudicado: 20")])
+    assert r.baja == Decimal("0.2000")
+
+
+def test_baja_variante_baja_ofertada():
+    r = extraer_baja_declarada([PaginaTexto(numero=1, texto="Baja ofertada: 12,50%")])
+    assert r.baja == Decimal("0.1250")
+
+
+def test_baja_variante_porcentaje_de_baja():
+    r = extraer_baja_declarada([PaginaTexto(numero=1, texto="Porcentaje de baja: 3,00%")])
+    assert r.baja == Decimal("0.0300")
+
+
+def test_baja_etiqueta_no_confunde_baja_laboral_con_baja_de_expediente():
+    # "de baja" sin el símbolo de porcentaje pegado a la etiqueta es
+    # boilerplate laboral habitual en pliegos ("el trabajador que se
+    # encuentre de baja médica..."), no la baja del expediente -- sin el "%"
+    # como ancla, el patrón de respaldo no debe dispararse.
+    r = extraer_baja_declarada(
+        [PaginaTexto(numero=1, texto="El trabajador que se encuentre de baja médica percibirá el 100% de su salario.")]
+    )
+    assert r is None
+
+
+def test_baja_etiqueta_solo_se_intenta_si_baja_re_no_encuentra_nada():
+    # Si ya hay una baja declarada en la forma estricta en cualquier página,
+    # esa gana siempre -- el patrón de respaldo ni se llega a probar.
+    paginas = [
+        PaginaTexto(numero=1, texto="% de baja: 99,00"),
+        PaginaTexto(numero=2, texto="con una baja del 54,00 % a precios unitarios licitados"),
+    ]
+    r = extraer_baja_declarada(paginas)
+    assert r.baja == Decimal("0.5400")
+    assert r.pagina == 2

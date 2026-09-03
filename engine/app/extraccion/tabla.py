@@ -28,6 +28,24 @@ el guion del código viene como uno de los guiones tipográficos Unicode
 el guion antes de comparar (`app.extraccion.normalizacion.normalizar_guiones`,
 punto único de esa normalización) para no fallar en silencio y descartar la
 tabla entera como espuria.
+
+Sesión de expedientes sin publicar (2026-09-03, docs/analisis-corpus.md
+hallazgo 6): "P-NNN" tampoco es el único formato real de identificador de
+fila. Verificado documento a documento contra el corpus real (no inventado):
+- `P1`, `P2` (sin separador, `6.24/28510.0047_ANEJO_1.pdf`, cupones de carril).
+- `P01`, `P02` (sin separador, dos dígitos, `6.24/28510.0187_ANEJO_1.pdf`,
+  tapas de canaleta).
+- `PN001`..`PN024` (prefijo "PN", `6.24/28510.0180_ANEJO_1.pdf`, señalización).
+- `PA-01`, `PA-02` (partida alzada numerada, `6.24/28510.0094`, dentro del
+  Contrato — el mismo cuadro de traviesas trae también `L01-T01`..`L03-T19`,
+  ver siguiente punto).
+- `L01-T01`..`L03-T19` (prefijo de lote+tipo, no es semánticamente un "código
+  de precio" per CLAUDE.md sección 3, pero identifica la fila igual de bien
+  dentro de su tabla — no hace falta distinguirlo aquí, solo saber que esa
+  fila es una fila de datos).
+- Tablas sin ninguna columna de código: la fila de datos se identifica por su
+  matrícula de 9 dígitos en su lugar (`6.20/28510.0136_ANEJO_3.pdf`, hilo de
+  contacto) — CLAUDE.md sección 2, la matrícula tiene forma fija de 9 dígitos.
 """
 from __future__ import annotations
 
@@ -39,7 +57,14 @@ from app.extraccion.normalizacion import normalizar_guiones
 CELDA = str | None
 FILA = list[CELDA]
 
-_CODIGO_PRECIO_RE = re.compile(r"^P-\d+$")
+# Alternativas verificadas contra el corpus real (ver docstring del módulo,
+# hallazgo 6): un guion opcional cubre "P-001" y "P1"/"P01" a la vez, sin
+# necesitar una rama aparte para cada uno.
+_CODIGO_PRECIO_RE = re.compile(r"^(?:P-?\d+|PN\d+|PA-\d+|L\d+-T\d+)$")
+# Matrícula como identificador de fila cuando la tabla no trae ninguna
+# columna de código en absoluto (CLAUDE.md sección 2: forma fija de 9
+# dígitos) — señal aparte, nunca se confunde con un código de precio.
+_MATRICULA_DATO_RE = re.compile(r"^\d{9}$")
 
 
 @dataclass(frozen=True)
@@ -57,10 +82,13 @@ class TablaExtraida:
 
 
 def _es_fila_de_datos(fila: FILA) -> bool:
-    return any(
-        celda and _CODIGO_PRECIO_RE.match(normalizar_guiones(re.sub(r"\s+", "", celda)))
-        for celda in fila
-    )
+    for celda in fila:
+        if not celda:
+            continue
+        limpia = normalizar_guiones(re.sub(r"\s+", "", celda))
+        if _CODIGO_PRECIO_RE.match(limpia) or _MATRICULA_DATO_RE.match(limpia):
+            return True
+    return False
 
 
 def _indice_primera_fila_datos(filas: list[FILA]) -> int | None:

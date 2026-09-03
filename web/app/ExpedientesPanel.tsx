@@ -32,9 +32,14 @@ const ETIQUETA_ESTADO: Record<string, string> = {
   descargando: "Descargando",
   descargado: "Descargado",
   extrayendo: "Extrayendo",
+  esperando_matriz: "Esperando matriz",
   pendiente_revision: "Pendiente de revisión",
   completado: "Completado",
   fallido: "Fallido",
+  // No existe en la Plataforma, comprobado a mano (CLAUDE.md sección 22):
+  // distinto de "Fallido" (sugiere reintentar) y de "Pendiente de revisión"
+  // (sugiere que hace falta un humano decidiendo algo).
+  sin_publicar: "No publicado",
 };
 
 const COLOR_ESTADO: Record<string, string> = {
@@ -42,9 +47,11 @@ const COLOR_ESTADO: Record<string, string> = {
   descargando: "#2563eb",
   descargado: "#2563eb",
   extrayendo: "#2563eb",
+  esperando_matriz: "#2563eb",
   pendiente_revision: "#b45309",
   completado: "#15803d",
   fallido: "#b91c1c",
+  sin_publicar: "#6b7280",
 };
 
 const INTERVALO_SONDEO_MS = 3000;
