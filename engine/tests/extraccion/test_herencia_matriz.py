@@ -1,0 +1,407 @@
+"""Herencia de acuerdo marco (docs/analisis-corpus.md hallazgo 3, sesión de
+herencia de matriz): un pedido derivado no trae su propio cuadro de precios
+ni su propia baja, viven en los documentos de la matriz. Cubre las tres
+piezas del encargo por separado (`resolver_o_encolar_matriz`,
+`intentar_heredar_de_matriz`, `reencolar_pedidos_esperando_matriz`) y un caso
+de aceptación de extremo a extremo con el fixture real que declara una
+matriz (`ANUNCIO_PCSP_CON_MATRIZ`, expediente 6.24/28510.0103, matriz
+2.18/04703.0019 — CLAUDE.md sección 17.1)."""
+from __future__ import annotations
+
+from decimal import Decimal
+from pathlib import Path
+from types import SimpleNamespace
+
+from app.extraccion.herencia_matriz import (
+    EstadoResolucionMatriz,
+    intentar_heredar_de_matriz,
+    reencolar_pedidos_esperando_matriz,
+    resolver_o_encolar_matriz,
+)
+from app.extraccion.orquestador import LOTE_UNICO, ejecutar_extraccion_expediente
+from app.interfaces.document_storage import DocumentStorage
+from app.models import (
+    Documento,
+    EstadoExpediente,
+    EstadoTrabajo,
+    Expediente,
+    LineaCatalogo,
+    Lote,
+    TipoDocumento,
+    TrabajoCola,
+    TrazaOrigen,
+)
+from tests import fixtures as fx
+
+
+class _StorageDirecta(DocumentStorage):
+    def guardar(self, nombre: str, contenido: bytes) -> str:
+        raise NotImplementedError
+
+    def recuperar(self, ruta: str) -> bytes:
+        return Path(ruta).read_bytes()
+
+    def listar(self, prefijo: str = "") -> list[str]:
+        raise NotImplementedError
+
+
+def _crear_expediente(db, codigo_expediente, **campos) -> Expediente:
+    expediente = Expediente(codigo_expediente=codigo_expediente, **campos)
+    db.add(expediente)
+    db.commit()
+    db.refresh(expediente)
+    return expediente
+
+
+def _crear_lote(db, expediente_id, identificador_lote=LOTE_UNICO, **campos) -> Lote:
+    lote = Lote(expediente_id=expediente_id, identificador_lote=identificador_lote, **campos)
+    db.add(lote)
+    db.commit()
+    db.refresh(lote)
+    return lote
+
+
+# --- resolver_o_encolar_matriz -----------------------------------------
+
+
+def test_sin_codigo_matriz_no_hace_nada(db_session):
+    pedido = _crear_expediente(db_session, "6.24/28510.0001")
+    resultado = resolver_o_encolar_matriz(db_session, pedido)
+    assert resultado.estado == EstadoResolucionMatriz.sin_matriz
+
+
+def test_matriz_nueva_se_crea_y_encola_su_descarga(db_session):
+    pedido = _crear_expediente(db_session, "6.24/28510.0103", codigo_matriz="2.18/04703.0019")
+
+    resultado = resolver_o_encolar_matriz(db_session, pedido)
+
+    assert resultado.estado == EstadoResolucionMatriz.en_proceso
+    matriz = db_session.query(Expediente).filter_by(codigo_expediente="2.18/04703.0019").one()
+    assert resultado.matriz.id == matriz.id
+    db_session.refresh(pedido)
+    assert pedido.matriz_expediente_id == matriz.id
+
+    trabajos = db_session.query(TrabajoCola).filter_by(expediente_id=matriz.id).all()
+    assert len(trabajos) == 1
+    assert trabajos[0].tipo == "descargar_expediente"
+    assert trabajos[0].estado == EstadoTrabajo.pendiente
+
+
+def test_matriz_existente_con_documentos_sin_procesar_encola_extraccion(db_session):
+    matriz = _crear_expediente(db_session, "2.18/04703.0019")
+    db_session.add(Documento(
+        expediente_id=matriz.id, tipo_documento=TipoDocumento.otro,
+        hash="h1", nombre_archivo="a.pdf", ruta_almacenamiento="/x/a.pdf",
+    ))
+    db_session.commit()
+    pedido = _crear_expediente(db_session, "6.24/28510.0103", codigo_matriz="2.18/04703.0019")
+
+    resultado = resolver_o_encolar_matriz(db_session, pedido)
+
+    assert resultado.estado == EstadoResolucionMatriz.en_proceso
+    trabajos = db_session.query(TrabajoCola).filter_by(expediente_id=matriz.id).all()
+    assert len(trabajos) == 1
+    assert trabajos[0].tipo == "extraer_expediente"
+
+
+def test_matriz_en_curso_no_duplica_trabajo(db_session):
+    matriz = _crear_expediente(db_session, "2.18/04703.0019", estado=EstadoExpediente.descargando)
+    # Mientras el estado es "descargando" existe de verdad un trabajo
+    # "descargar_expediente" en curso (es lo que puso ese estado) -- sin él,
+    # esto no prueba nada distinto del caso "matriz nueva".
+    db_session.add(TrabajoCola(
+        tipo="descargar_expediente", expediente_id=matriz.id, estado=EstadoTrabajo.en_proceso,
+    ))
+    db_session.commit()
+    pedido = _crear_expediente(db_session, "6.24/28510.0103", codigo_matriz="2.18/04703.0019")
+
+    resultado = resolver_o_encolar_matriz(db_session, pedido)
+
+    assert resultado.estado == EstadoResolucionMatriz.en_proceso
+    assert db_session.query(TrabajoCola).count() == 1
+
+
+def test_matriz_terminada_se_reporta_lista(db_session):
+    matriz = _crear_expediente(db_session, "2.18/04703.0019", estado=EstadoExpediente.completado)
+    pedido = _crear_expediente(db_session, "6.24/28510.0103", codigo_matriz="2.18/04703.0019")
+
+    resultado = resolver_o_encolar_matriz(db_session, pedido)
+
+    assert resultado.estado == EstadoResolucionMatriz.lista
+    assert resultado.matriz.id == matriz.id
+    assert db_session.query(TrabajoCola).count() == 0
+
+
+def test_ciclo_autoreferencia_se_corta(db_session):
+    # Caso real (CLAUDE.md sección 19): 6.25/28510.0027 llegó a declararse su
+    # propia matriz. No se crea ninguna fila nueva ni se encola nada.
+    pedido = _crear_expediente(db_session, "6.25/28510.0027", codigo_matriz="6.25/28510.0027")
+
+    resultado = resolver_o_encolar_matriz(db_session, pedido)
+
+    assert resultado.estado == EstadoResolucionMatriz.ciclo
+    assert db_session.query(Expediente).count() == 1
+    assert db_session.query(TrabajoCola).count() == 0
+
+
+def test_ciclo_de_cadena_larga_se_corta(db_session):
+    # A -> B -> A: ninguno de los dos es una autorreferencia directa, pero
+    # seguir la cadena desde A vuelve sobre A.
+    _crear_expediente(db_session, "A", codigo_matriz="B")
+    b = _crear_expediente(db_session, "B", codigo_matriz="A")
+    pedido = db_session.query(Expediente).filter_by(codigo_expediente="A").one()
+
+    resultado = resolver_o_encolar_matriz(db_session, pedido)
+
+    assert resultado.estado == EstadoResolucionMatriz.ciclo
+    # No se tocó nada de B ni se creó nada nuevo.
+    assert db_session.query(Expediente).count() == 2
+    assert db_session.query(TrabajoCola).count() == 0
+
+
+# --- intentar_heredar_de_matriz -----------------------------------------
+
+
+def test_hereda_lineas_y_baja_con_trazabilidad_al_documento_de_la_matriz(db_session):
+    matriz = _crear_expediente(db_session, "2.18/04703.0019", estado=EstadoExpediente.completado)
+    lote_matriz = _crear_lote(db_session, matriz.id, baja_lote=Decimal("0.10"))
+    doc_matriz = Documento(
+        expediente_id=matriz.id, tipo_documento=TipoDocumento.anejo,
+        hash="hm", nombre_archivo="anejo_matriz.pdf", ruta_almacenamiento="/x/m.pdf",
+    )
+    db_session.add(doc_matriz)
+    db_session.commit()
+    db_session.add(TrazaOrigen(
+        entidad_tipo="lote", entidad_id=lote_matriz.id, campo="baja_declarada",
+        documento_id=doc_matriz.id, pagina=3, fragmento="baja del 10%", valor_extraido="0.10",
+    ))
+    db_session.add(LineaCatalogo(
+        lote_id=lote_matriz.id, expediente_id=matriz.id, clave_linea="P-001", orden_aparicion=0,
+        codigo_precio="P-001", descripcion="BRIDA X", precio_unitario=Decimal("100.00"),
+        baja_lote=Decimal("0.10"), precio_adjudicado=Decimal("90.00"),
+        documento_origen_id=doc_matriz.id, pagina=5, fragmento="P-001 BRIDA X 100,00",
+    ))
+    db_session.commit()
+
+    pedido = _crear_expediente(db_session, "6.24/28510.0103", codigo_matriz="2.18/04703.0019")
+    lote_pedido = _crear_lote(db_session, pedido.id)
+
+    resultado = intentar_heredar_de_matriz(db_session, pedido, matriz, lote_pedido, total_lineas_propias=0)
+
+    assert resultado.motivo_revision is None
+    assert resultado.lineas_creadas == 1
+    db_session.refresh(lote_pedido)
+    assert lote_pedido.baja_lote == Decimal("0.10")
+    assert lote_pedido.baja_heredada_de_matriz is True
+
+    lineas_pedido = db_session.query(LineaCatalogo).filter_by(lote_id=lote_pedido.id).all()
+    assert len(lineas_pedido) == 1
+    linea = lineas_pedido[0]
+    assert linea.heredado_de_matriz is True
+    assert linea.precio_unitario == Decimal("100.00")
+    assert linea.precio_adjudicado == Decimal("90.00")
+    # Trazabilidad: el documento de origen sigue siendo el real de la
+    # matriz, no uno inventado del pedido.
+    assert linea.documento_origen_id == doc_matriz.id
+    assert linea.pagina == 5
+
+    traza_baja_pedido = (
+        db_session.query(TrazaOrigen)
+        .filter_by(entidad_tipo="lote", entidad_id=lote_pedido.id, campo="baja_declarada")
+        .one()
+    )
+    assert traza_baja_pedido.documento_id == doc_matriz.id
+    assert traza_baja_pedido.pagina == 3
+
+
+def test_baja_propia_del_pedido_manda_sobre_la_de_la_matriz(db_session):
+    matriz = _crear_expediente(db_session, "2.18/04703.0019", estado=EstadoExpediente.completado)
+    lote_matriz = _crear_lote(db_session, matriz.id, baja_lote=Decimal("0.10"))
+    db_session.add(LineaCatalogo(
+        lote_id=lote_matriz.id, expediente_id=matriz.id, clave_linea="P-001", orden_aparicion=0,
+        codigo_precio="P-001", descripcion="BRIDA X", precio_unitario=Decimal("100.00"),
+        baja_lote=Decimal("0.10"), precio_adjudicado=Decimal("90.00"),
+    ))
+    db_session.commit()
+
+    pedido = _crear_expediente(db_session, "6.24/28510.0103", codigo_matriz="2.18/04703.0019")
+    # El pedido ya trae su propia baja (p.ej. de su propio contrato), pero
+    # ningún cuadro de precios propio.
+    lote_pedido = _crear_lote(db_session, pedido.id, baja_lote=Decimal("0.20"))
+
+    resultado = intentar_heredar_de_matriz(db_session, pedido, matriz, lote_pedido, total_lineas_propias=0)
+
+    assert resultado.motivo_revision is None
+    db_session.refresh(lote_pedido)
+    # La baja propia no se pisa con la de la matriz.
+    assert lote_pedido.baja_lote == Decimal("0.20")
+    assert lote_pedido.baja_heredada_de_matriz is None
+
+    linea = db_session.query(LineaCatalogo).filter_by(lote_id=lote_pedido.id).one()
+    # El precio adjudicado heredado usa la baja EFECTIVA del pedido (20 %),
+    # no la que traía la línea de la matriz (10 %) — "lo propio manda".
+    assert linea.baja_lote == Decimal("0.20")
+    assert linea.precio_adjudicado == Decimal("80.00")
+
+
+def test_lineas_propias_parciales_van_a_revision_con_el_conteo_exacto(db_session):
+    matriz = _crear_expediente(db_session, "2.18/04703.0019", estado=EstadoExpediente.completado)
+    lote_matriz = _crear_lote(db_session, matriz.id, baja_lote=Decimal("0.10"))
+    for i in range(5):
+        db_session.add(LineaCatalogo(
+            lote_id=lote_matriz.id, expediente_id=matriz.id, clave_linea=f"P-{i}", orden_aparicion=i,
+            codigo_precio=f"P-{i}", descripcion="X", precio_unitario=Decimal("10.00"),
+        ))
+    db_session.commit()
+
+    pedido = _crear_expediente(db_session, "6.24/28510.0103", codigo_matriz="2.18/04703.0019")
+    lote_pedido = _crear_lote(db_session, pedido.id)
+
+    resultado = intentar_heredar_de_matriz(db_session, pedido, matriz, lote_pedido, total_lineas_propias=2)
+
+    assert resultado.motivo_revision is not None
+    assert "2" in resultado.motivo_revision
+    assert "5" in resultado.motivo_revision
+    # No se tocó nada: ninguna línea de la matriz se copió al pedido.
+    assert db_session.query(LineaCatalogo).filter_by(lote_id=lote_pedido.id).count() == 0
+
+
+def test_matriz_multilote_va_a_revision_ambigua(db_session):
+    matriz = _crear_expediente(db_session, "2.18/04703.0019", estado=EstadoExpediente.completado)
+    _crear_lote(db_session, matriz.id, identificador_lote="1", baja_lote=Decimal("0.10"))
+    _crear_lote(db_session, matriz.id, identificador_lote="2", baja_lote=Decimal("0.20"))
+
+    pedido = _crear_expediente(db_session, "6.24/28510.0103", codigo_matriz="2.18/04703.0019")
+    lote_pedido = _crear_lote(db_session, pedido.id)
+
+    resultado = intentar_heredar_de_matriz(db_session, pedido, matriz, lote_pedido, total_lineas_propias=0)
+
+    assert resultado.motivo_revision is not None
+    assert "multi-lote" in resultado.motivo_revision
+
+
+def test_matriz_sin_datos_va_a_revision_citando_su_propio_motivo(db_session):
+    matriz = _crear_expediente(
+        db_session, "2.18/04703.0019", estado=EstadoExpediente.fallido, error="no se encontró en la Plataforma",
+    )
+    _crear_lote(db_session, matriz.id)  # sin baja, sin líneas
+
+    pedido = _crear_expediente(db_session, "6.24/28510.0103", codigo_matriz="2.18/04703.0019")
+    lote_pedido = _crear_lote(db_session, pedido.id)
+
+    resultado = intentar_heredar_de_matriz(db_session, pedido, matriz, lote_pedido, total_lineas_propias=0)
+
+    assert resultado.motivo_revision is not None
+    assert "no se encontró en la Plataforma" in resultado.motivo_revision
+
+
+# --- reencolar_pedidos_esperando_matriz ----------------------------------
+
+
+def test_reencola_solo_los_pedidos_esperando_esa_matriz(db_session):
+    matriz = _crear_expediente(db_session, "2.18/04703.0019", estado=EstadoExpediente.completado)
+    esperando_1 = _crear_expediente(
+        db_session, "6.24/28510.0103", matriz_expediente_id=matriz.id, estado=EstadoExpediente.esperando_matriz,
+    )
+    esperando_2 = _crear_expediente(
+        db_session, "6.24/28510.0104", matriz_expediente_id=matriz.id, estado=EstadoExpediente.esperando_matriz,
+    )
+    # Este referencia a la misma matriz pero ya está en revisión por otro
+    # motivo -- reencolarlo sería ruido, no lo pidió nadie.
+    _crear_expediente(
+        db_session, "6.24/28510.0105", matriz_expediente_id=matriz.id, estado=EstadoExpediente.pendiente_revision,
+    )
+
+    total = reencolar_pedidos_esperando_matriz(db_session, matriz)
+
+    assert total == 2
+    trabajos = db_session.query(TrabajoCola).all()
+    assert {t.expediente_id for t in trabajos} == {esperando_1.id, esperando_2.id}
+    assert all(t.tipo == "extraer_expediente" for t in trabajos)
+
+
+# --- extremo a extremo, con el fixture real que declara matriz ----------
+
+
+def test_pedido_real_sin_matriz_creada_pasa_a_esperando_matriz(db_session):
+    """Fixture real (CLAUDE.md sección 17.1): el Anuncio PCSP de
+    6.24/28510.0103 declara "Licitación basada en el acuerdo marco ->
+    Expediente 2.18/04703.0019" y no trae cuadro de precios propio (es el
+    patrón de los 14 pedidos derivados de docs/analisis-corpus.md hallazgo 3:
+    solo 2 documentos PCSP, sin anejo)."""
+    pedido = Expediente(codigo_expediente="6.24/28510.0103")
+    db_session.add(pedido)
+    db_session.commit()
+    db_session.add(Documento(
+        expediente_id=pedido.id, tipo_documento=TipoDocumento.otro,
+        hash="h-pedido", nombre_archivo="ADJUDICACION_1.pdf",
+        ruta_almacenamiento=str(fx.ANUNCIO_PCSP_CON_MATRIZ),
+    ))
+    db_session.commit()
+    trabajo = SimpleNamespace(expediente_id=pedido.id)
+
+    resultado = ejecutar_extraccion_expediente(db_session, _StorageDirecta(), trabajo, model_provider=None)
+
+    db_session.refresh(pedido)
+    assert pedido.codigo_matriz == "2.18/04703.0019"
+    assert pedido.estado == EstadoExpediente.esperando_matriz
+    assert resultado["estado"] == "esperando_matriz"
+
+    matriz = db_session.query(Expediente).filter_by(codigo_expediente="2.18/04703.0019").one()
+    assert pedido.matriz_expediente_id == matriz.id
+    trabajo_matriz = db_session.query(TrabajoCola).filter_by(expediente_id=matriz.id).one()
+    assert trabajo_matriz.tipo == "descargar_expediente"
+
+
+def test_pedido_real_hereda_al_reprocesar_una_vez_la_matriz_esta_completa(db_session):
+    """Continuación del caso anterior: una vez la matriz existe y ya se
+    procesó (aquí, simulada a mano -- no vuelve a ejercitarse el scraping
+    real), reprocesar el pedido lo completa por herencia, con el 54,00 % de
+    baja y la línea de la matriz."""
+    pedido = Expediente(codigo_expediente="6.24/28510.0103")
+    db_session.add(pedido)
+    db_session.commit()
+    db_session.add(Documento(
+        expediente_id=pedido.id, tipo_documento=TipoDocumento.otro,
+        hash="h-pedido", nombre_archivo="ADJUDICACION_1.pdf",
+        ruta_almacenamiento=str(fx.ANUNCIO_PCSP_CON_MATRIZ),
+    ))
+    db_session.commit()
+    trabajo = SimpleNamespace(expediente_id=pedido.id)
+    ejecutar_extraccion_expediente(db_session, _StorageDirecta(), trabajo, model_provider=None)
+    db_session.refresh(pedido)
+    matriz = db_session.query(Expediente).filter_by(codigo_expediente="2.18/04703.0019").one()
+
+    # Simula que el trabajo de descarga+extracción de la matriz ya terminó
+    # con éxito (fuera del alcance de este test: eso lo cubren los tests de
+    # scraping y de la cascada de extracción por separado).
+    matriz.estado = EstadoExpediente.completado
+    lote_matriz = Lote(expediente_id=matriz.id, identificador_lote=LOTE_UNICO, baja_lote=Decimal("0.5400"))
+    db_session.add(lote_matriz)
+    db_session.commit()
+    db_session.add(LineaCatalogo(
+        lote_id=lote_matriz.id, expediente_id=matriz.id, clave_linea="P-001", orden_aparicion=0,
+        codigo_precio="P-001", descripcion="POLO MANGA CORTA", precio_unitario=Decimal("24.00"),
+        baja_lote=Decimal("0.5400"), precio_adjudicado=Decimal("11.04"),
+    ))
+    db_session.commit()
+
+    resultado = reencolar_pedidos_esperando_matriz(db_session, matriz)
+    assert resultado == 1
+    db_session.commit()
+
+    # El reencolado real lo ejecuta el worker; aquí se llama directamente al
+    # mismo punto de entrada que usaría, sobre el mismo trabajo.
+    resultado_pedido = ejecutar_extraccion_expediente(
+        db_session, _StorageDirecta(), SimpleNamespace(expediente_id=pedido.id), model_provider=None,
+    )
+
+    db_session.refresh(pedido)
+    assert pedido.estado == EstadoExpediente.completado
+    assert pedido.baja_global == Decimal("0.5400")
+    assert resultado_pedido["motivo_revision"] is None
+
+    lineas = db_session.query(LineaCatalogo).filter_by(expediente_id=pedido.id).all()
+    assert len(lineas) == 1
+    assert lineas[0].heredado_de_matriz is True
+    assert lineas[0].precio_adjudicado == Decimal("11.04")

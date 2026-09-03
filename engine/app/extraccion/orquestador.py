@@ -40,6 +40,12 @@ from app.extraccion.campos_lc27 import (
 from app.extraccion.campos_pcsp import extraer_campos_anuncio_pcsp, importe_como_decimal
 from app.extraccion.clasificador import clasificar
 from app.extraccion.cruce_codigos import asegurar_cruce_codigos
+from app.extraccion.herencia_matriz import (
+    EstadoResolucionMatriz,
+    intentar_heredar_de_matriz,
+    reencolar_pedidos_esperando_matriz,
+    resolver_o_encolar_matriz,
+)
 from app.extraccion.lotes import LoteDeclarado, extraer_lotes_declarados
 from app.extraccion.normalizacion import parsear_importe_es
 from app.extraccion.pipeline_anejo import procesar_anejo
@@ -345,141 +351,215 @@ def ejecutar_extraccion_expediente(
         documentos = db.execute(
             select(Documento).where(Documento.expediente_id == expediente.id)
         ).scalars().all()
-        if not documentos:
-            motivo = "extracción encolada sin documentos descargados para este expediente"
-            expediente.estado = EstadoExpediente.pendiente_revision
-            expediente.error = motivo
-            db.commit()
-            return {"expediente": expediente.codigo_expediente, "documentos": 0, "motivo_revision": motivo}
-
-        items = _clasificar_documentos(db, storage, list(documentos))
 
         motivo_revision: Optional[str] = None
-
-        lotes_declarados, documento_id_lotes = _extraer_lotes_declarados_del_expediente(items)
-        if lotes_declarados:
-            # Camino multi-lote (o de un único lote declarado por su nombre
-            # real, p.ej. si algún día aparece un "LOTE 2" suelto): los
-            # importes/objeto de etiqueta fija del expediente (matriz,
-            # nombre del proyecto) se siguen extrayendo igual, pero
-            # importe_licitacion/adjudicacion/baja_global del expediente
-            # salen de los lotes, no de un único campo de documento.
-            _extraer_campos_expediente(db, expediente, items, registrar_baja_importe=False)
-            lotes, motivo_lotes = _procesar_lotes_declarados(db, expediente, lotes_declarados, documento_id_lotes)
-            motivo_revision = _acumular_motivo(motivo_revision, motivo_lotes)
-            _resumir_lotes_en_expediente(expediente, lotes)
-        else:
-            # Camino de siempre: un único lote implícito (CLAUDE.md, encargo
-            # de esta sesión, punto 1).
-            importe_licitacion, importe_adjudicacion, baja_preferida = _extraer_campos_expediente(db, expediente, items)
-
-            baja_efectiva: Optional[Decimal] = None
-            if importe_licitacion is not None and importe_adjudicacion is not None:
-                resultado_baja = calcular_baja_efectiva(
-                    importe_licitacion, importe_adjudicacion,
-                    baja_preferida.baja if baja_preferida is not None else None,
-                )
-                baja_efectiva = resultado_baja.baja
-                if resultado_baja.requiere_revision:
-                    motivo_revision = _acumular_motivo(motivo_revision, resultado_baja.motivo)
-            elif baja_preferida is not None:
-                baja_efectiva = baja_preferida.baja
-            else:
-                motivo_revision = _acumular_motivo(
-                    motivo_revision,
-                    "no se encontró importe de licitación/adjudicación ni baja declarada "
-                    "en ningún documento de este expediente",
-                )
-
-            expediente.importe_licitacion = importe_licitacion
-            expediente.importe_adjudicacion = importe_adjudicacion
-            expediente.baja_global = baja_efectiva
-            expediente.baja_variable_por_lote = None
-
-            lote = _obtener_o_crear_lote(db, expediente.id, LOTE_UNICO)
-            lote.baja_lote = baja_efectiva
-            lote.importe_licitacion = importe_licitacion
-            lote.importe_adjudicacion = importe_adjudicacion
-            db.commit()
-            lotes = [lote]
-
-        asegurar_cruce_codigos(db, expediente)
-        db.commit()
-
-        lotes_por_identificador = {l.identificador_lote: l.id for l in lotes}
-        bajas_por_identificador = {l.identificador_lote: l.baja_lote for l in lotes}
-
-        # Etapas 3-6: el cuadro de precios se busca por contenido en TODOS
-        # los documentos, nunca solo en los clasificados como "anejo"
-        # (CLAUDE.md sección 3: los *_ANEJO_N.pdf son a veces el Pliego
-        # completo, y localizar_paginas_candidatas ya descarta barato lo que
-        # no trae tabla). Cada documento se procesa de forma aislada: una
-        # tabla que no se puede mapear (cabecera nunca vista y sin modelo
-        # configurado) manda ESE documento a revisión, no tira las líneas ya
-        # extraídas de los demás — CLAUDE.md sección 12, "lo que no cuadra
-        # va a la cola de revisión", no revienta el expediente entero.
+        estado_especial: Optional[EstadoExpediente] = None
         lineas_creadas = lineas_actualizadas = tablas_procesadas = llamadas_modelo = 0
-        documentos_con_error: list[str] = []
-        for item in items:
-            contenido = storage.recuperar(item.documento.ruta_almacenamiento)
-            # Todo el trabajo de este documento —extraer, y guardar sus
-            # líneas— vive en el mismo bloque try/except con un único commit
-            # al final (CLAUDE.md, sesión de rodaje 2026-09-03, punto 2): un
-            # error de base de datos al guardar (p.ej. un valor que revienta
-            # una columna) es tan aislable por documento como uno de mapeo de
-            # cabecera, y antes tiraba el expediente entero porque el
-            # guardado vivía fuera de este try. El punto 3 de la misma
-            # sesión: o se guarda entero este documento, o el rollback lo
-            # deshace entero — nunca quedan restos de un grupo guardado y
-            # otro no, dentro del mismo documento.
-            lineas_creadas_doc = lineas_actualizadas_doc = 0
-            try:
-                resultado = procesar_anejo(
-                    io.BytesIO(contenido), item.documento.id, expediente.id,
-                    bajas_por_identificador, db, model_provider,
-                )
-                if resultado.lineas:
-                    grupos: dict[Optional[str], list[dict]] = {}
-                    for linea in resultado.lineas:
-                        identificador = linea.pop("identificador_lote")
-                        grupos.setdefault(identificador, []).append(linea)
-                    for identificador, lineas_grupo in grupos.items():
-                        lote_id = lotes_por_identificador.get(identificador) if identificador is not None else None
-                        guardado = guardar_lineas_catalogo(db, lote_id, lineas_grupo)
-                        lineas_creadas_doc += guardado.creadas
-                        lineas_actualizadas_doc += guardado.actualizadas
-                item.documento.procesado_en = datetime.now(timezone.utc)
+        documentos_procesados = 0
+        lotes: list[Lote] = []
+        lotes_declarados: list[LoteDeclarado] = []
+        sin_documentos = not documentos
+        # Motivo específico de "caso de precios unitarios sin baja
+        # declarada" (app.extraccion.precios_unitarios): se guarda aparte en
+        # vez de acumularse ya en `motivo_revision` porque la herencia de
+        # matriz de más abajo puede resolverlo todavía -- solo se usa si,
+        # tras intentarlo, la baja del lote sigue sin determinar.
+        motivo_baja_diferido: Optional[str] = None
+
+        if sin_documentos:
+            # Sin documentos propios no hay nada que clasificar ni que leer
+            # por etiqueta fija -- pero el cruce con el Excel de códigos
+            # (CLAUDE.md sección 7) no depende de los documentos, solo del
+            # propio `codigo_expediente`: es el único camino que le queda a
+            # un pedido derivado de acuerdo marco sin ningún documento
+            # descargado (docs/analisis-corpus.md hallazgo 3, 7 de los 14
+            # casos) para encontrar su matriz por la columna MATRIZ del
+            # Excel (encargo de la sesión de herencia, requisito 1). Sin
+            # este cruce aquí, estos 7 nunca podrían heredar nada aunque su
+            # matriz sí esté disponible.
+            motivo_revision = _acumular_motivo(motivo_revision, asegurar_cruce_codigos(db, expediente))
+            db.commit()
+            lotes = [_obtener_o_crear_lote(db, expediente.id, LOTE_UNICO)]
+        else:
+            items = _clasificar_documentos(db, storage, list(documentos))
+            documentos_procesados = len(items)
+
+            lotes_declarados, documento_id_lotes = _extraer_lotes_declarados_del_expediente(items)
+            if lotes_declarados:
+                # Camino multi-lote (o de un único lote declarado por su nombre
+                # real, p.ej. si algún día aparece un "LOTE 2" suelto): los
+                # importes/objeto de etiqueta fija del expediente (matriz,
+                # nombre del proyecto) se siguen extrayendo igual, pero
+                # importe_licitacion/adjudicacion/baja_global del expediente
+                # salen de los lotes, no de un único campo de documento.
+                _extraer_campos_expediente(db, expediente, items, registrar_baja_importe=False)
+                lotes, motivo_lotes = _procesar_lotes_declarados(db, expediente, lotes_declarados, documento_id_lotes)
+                motivo_revision = _acumular_motivo(motivo_revision, motivo_lotes)
+                _resumir_lotes_en_expediente(expediente, lotes)
+            else:
+                # Camino de siempre: un único lote implícito (CLAUDE.md,
+                # encargo de esta sesión, punto 1). La falta de importe/baja
+                # ya no se explica en línea aquí: si el expediente declara
+                # una matriz, la herencia de más abajo puede resolverla
+                # todavía — el motivo genérico de "no se pudo determinar la
+                # baja" solo se compone al final, después de intentarlo.
+                importe_licitacion, importe_adjudicacion, baja_preferida = _extraer_campos_expediente(db, expediente, items)
+
+                baja_efectiva: Optional[Decimal] = None
+                if importe_licitacion is not None and importe_adjudicacion is not None:
+                    resultado_baja = calcular_baja_efectiva(
+                        importe_licitacion, importe_adjudicacion,
+                        baja_preferida.baja if baja_preferida is not None else None,
+                    )
+                    baja_efectiva = resultado_baja.baja
+                    if resultado_baja.requiere_revision:
+                        if baja_efectiva is None:
+                            # Caso de precios unitarios sin baja declarada:
+                            # `baja_efectiva` sigue sin valor, así que la
+                            # herencia de matriz de más abajo todavía puede
+                            # resolverlo -- no se fija ya, se difiere.
+                            motivo_baja_diferido = resultado_baja.motivo
+                        else:
+                            # Hay una baja (declarada, pero que no cuadra con
+                            # los importes): es un problema real de este
+                            # expediente, ajeno a si tiene matriz.
+                            motivo_revision = _acumular_motivo(motivo_revision, resultado_baja.motivo)
+                elif baja_preferida is not None:
+                    baja_efectiva = baja_preferida.baja
+
+                expediente.importe_licitacion = importe_licitacion
+                expediente.importe_adjudicacion = importe_adjudicacion
+                expediente.baja_global = baja_efectiva
+                expediente.baja_variable_por_lote = None
+
+                lote = _obtener_o_crear_lote(db, expediente.id, LOTE_UNICO)
+                lote.baja_lote = baja_efectiva
+                lote.importe_licitacion = importe_licitacion
+                lote.importe_adjudicacion = importe_adjudicacion
                 db.commit()
-            except Exception as exc:  # noqa: BLE001
-                db.rollback()
-                documentos_con_error.append(f"{item.documento.nombre_archivo}: {exc}")
-                continue
-            lineas_creadas += lineas_creadas_doc
-            lineas_actualizadas += lineas_actualizadas_doc
-            tablas_procesadas += resultado.tablas_procesadas
-            llamadas_modelo += resultado.llamadas_modelo
-            if resultado.tablas_sin_lote:
-                motivo_revision = _acumular_motivo(
-                    motivo_revision,
-                    f"{item.documento.nombre_archivo}: " + "; ".join(resultado.tablas_sin_lote),
-                )
-            if resultado.lineas_con_aviso:
-                motivo_revision = _acumular_motivo(
-                    motivo_revision,
-                    f"{item.documento.nombre_archivo}: {resultado.lineas_con_aviso} línea(s) con un valor "
-                    "que no se pudo interpretar, marcadas para revisión",
-                )
+                lotes = [lote]
+
+            motivo_revision = _acumular_motivo(motivo_revision, asegurar_cruce_codigos(db, expediente))
+            db.commit()
+
+            lotes_por_identificador = {l.identificador_lote: l.id for l in lotes}
+            bajas_por_identificador = {l.identificador_lote: l.baja_lote for l in lotes}
+
+            # Etapas 3-6: el cuadro de precios se busca por contenido en TODOS
+            # los documentos, nunca solo en los clasificados como "anejo"
+            # (CLAUDE.md sección 3: los *_ANEJO_N.pdf son a veces el Pliego
+            # completo, y localizar_paginas_candidatas ya descarta barato lo que
+            # no trae tabla). Cada documento se procesa de forma aislada: una
+            # tabla que no se puede mapear (cabecera nunca vista y sin modelo
+            # configurado) manda ESE documento a revisión, no tira las líneas ya
+            # extraídas de los demás — CLAUDE.md sección 12, "lo que no cuadra
+            # va a la cola de revisión", no revienta el expediente entero.
+            documentos_con_error: list[str] = []
+            for item in items:
+                contenido = storage.recuperar(item.documento.ruta_almacenamiento)
+                # Todo el trabajo de este documento —extraer, y guardar sus
+                # líneas— vive en el mismo bloque try/except con un único commit
+                # al final (CLAUDE.md, sesión de rodaje 2026-09-03, punto 2): un
+                # error de base de datos al guardar (p.ej. un valor que revienta
+                # una columna) es tan aislable por documento como uno de mapeo de
+                # cabecera, y antes tiraba el expediente entero porque el
+                # guardado vivía fuera de este try. El punto 3 de la misma
+                # sesión: o se guarda entero este documento, o el rollback lo
+                # deshace entero — nunca quedan restos de un grupo guardado y
+                # otro no, dentro del mismo documento.
+                lineas_creadas_doc = lineas_actualizadas_doc = 0
+                try:
+                    resultado = procesar_anejo(
+                        io.BytesIO(contenido), item.documento.id, expediente.id,
+                        bajas_por_identificador, db, model_provider,
+                    )
+                    if resultado.lineas:
+                        grupos: dict[Optional[str], list[dict]] = {}
+                        for linea in resultado.lineas:
+                            identificador = linea.pop("identificador_lote")
+                            grupos.setdefault(identificador, []).append(linea)
+                        for identificador, lineas_grupo in grupos.items():
+                            lote_id = lotes_por_identificador.get(identificador) if identificador is not None else None
+                            guardado = guardar_lineas_catalogo(db, lote_id, lineas_grupo)
+                            lineas_creadas_doc += guardado.creadas
+                            lineas_actualizadas_doc += guardado.actualizadas
+                    item.documento.procesado_en = datetime.now(timezone.utc)
+                    db.commit()
+                except Exception as exc:  # noqa: BLE001
+                    db.rollback()
+                    documentos_con_error.append(f"{item.documento.nombre_archivo}: {exc}")
+                    continue
+                lineas_creadas += lineas_creadas_doc
+                lineas_actualizadas += lineas_actualizadas_doc
+                tablas_procesadas += resultado.tablas_procesadas
+                llamadas_modelo += resultado.llamadas_modelo
+                if resultado.tablas_sin_lote:
+                    motivo_revision = _acumular_motivo(
+                        motivo_revision,
+                        f"{item.documento.nombre_archivo}: " + "; ".join(resultado.tablas_sin_lote),
+                    )
+                if resultado.lineas_con_aviso:
+                    motivo_revision = _acumular_motivo(
+                        motivo_revision,
+                        f"{item.documento.nombre_archivo}: {resultado.lineas_con_aviso} línea(s) con un valor "
+                        "que no se pudo interpretar, marcadas para revisión",
+                    )
+
+            if documentos_con_error:
+                motivo_documentos = "no se pudo extraer el cuadro de precios de: " + "; ".join(documentos_con_error)
+                motivo_revision = _acumular_motivo(motivo_revision, motivo_documentos)
 
         total_lineas = lineas_creadas + lineas_actualizadas
-        if documentos_con_error:
-            motivo_documentos = "no se pudo extraer el cuadro de precios de: " + "; ".join(documentos_con_error)
-            motivo_revision = _acumular_motivo(motivo_revision, motivo_documentos)
-        if motivo_revision is None and total_lineas == 0:
-            motivo_revision = "no se extrajo ninguna línea de catálogo de los documentos descargados"
-        if motivo_revision is None and not any(l.baja_lote is not None for l in lotes):
-            motivo_revision = "no se pudo determinar la baja de ningún lote"
 
-        if motivo_revision is not None:
+        # Herencia de acuerdo marco (docs/analisis-corpus.md hallazgo 3):
+        # solo tiene sentido para el lote único implícito -- ningún pedido
+        # derivado del corpus declara "En el LOTE N" propio, y sin ese dato
+        # no habría forma de saber a qué lote de un pedido multi-lote
+        # correspondería la matriz. Solo se intenta si al pedido le falta el
+        # cuadro de precios o la baja ("heredar lo que el pedido no tiene"),
+        # y nunca si las dos fuentes de matriz ya se marcaron en conflicto
+        # (`asegurar_cruce_codigos` más arriba): ahí no hay una matriz
+        # fiable de la que heredar.
+        if not lotes_declarados and not expediente.matriz_conflicto and expediente.codigo_matriz and lotes:
+            lote_pedido = lotes[0]
+            if total_lineas == 0 or lote_pedido.baja_lote is None:
+                resolucion = resolver_o_encolar_matriz(db, expediente)
+                if resolucion.estado == EstadoResolucionMatriz.ciclo:
+                    motivo_revision = _acumular_motivo(motivo_revision, resolucion.motivo)
+                elif resolucion.estado == EstadoResolucionMatriz.en_proceso:
+                    estado_especial = EstadoExpediente.esperando_matriz
+                    motivo_revision = _acumular_motivo(
+                        motivo_revision,
+                        f"esperando a que se procese la matriz {resolucion.matriz.codigo_expediente}",
+                    )
+                elif resolucion.estado == EstadoResolucionMatriz.lista:
+                    resultado_herencia = intentar_heredar_de_matriz(
+                        db, expediente, resolucion.matriz, lote_pedido, total_lineas,
+                    )
+                    if resultado_herencia.motivo_revision is not None:
+                        motivo_revision = _acumular_motivo(motivo_revision, resultado_herencia.motivo_revision)
+                    else:
+                        lineas_creadas += resultado_herencia.lineas_creadas
+                        lineas_actualizadas += resultado_herencia.lineas_actualizadas
+                        total_lineas += resultado_herencia.lineas_creadas + resultado_herencia.lineas_actualizadas
+                        expediente.baja_global = lote_pedido.baja_lote
+                        expediente.importe_licitacion = expediente.importe_licitacion or lote_pedido.importe_licitacion
+                        expediente.importe_adjudicacion = expediente.importe_adjudicacion or lote_pedido.importe_adjudicacion
+                db.commit()
+
+        if motivo_revision is None and total_lineas == 0:
+            motivo_revision = (
+                "extracción encolada sin documentos descargados para este expediente"
+                if sin_documentos
+                else "no se extrajo ninguna línea de catálogo de los documentos descargados"
+            )
+        if motivo_revision is None and not any(l.baja_lote is not None for l in lotes):
+            motivo_revision = motivo_baja_diferido or "no se pudo determinar la baja de ningún lote"
+
+        if estado_especial is not None:
+            expediente.estado = estado_especial
+            expediente.error = motivo_revision
+        elif motivo_revision is not None:
             expediente.estado = EstadoExpediente.pendiente_revision
             expediente.error = motivo_revision
         else:
@@ -487,9 +567,12 @@ def ejecutar_extraccion_expediente(
             expediente.error = None
         db.commit()
 
+        if reencolar_pedidos_esperando_matriz(db, expediente):
+            db.commit()
+
         return {
             "expediente": expediente.codigo_expediente,
-            "documentos_procesados": len(items),
+            "documentos_procesados": documentos_procesados,
             "tablas_procesadas": tablas_procesadas,
             "lineas_creadas": lineas_creadas,
             "lineas_actualizadas": lineas_actualizadas,
@@ -510,4 +593,6 @@ def ejecutar_extraccion_expediente(
         expediente.estado = EstadoExpediente.fallido
         expediente.error = str(exc)
         db.commit()
+        if reencolar_pedidos_esperando_matriz(db, expediente):
+            db.commit()
         raise

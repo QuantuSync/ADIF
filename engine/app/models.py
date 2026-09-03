@@ -27,6 +27,13 @@ class EstadoExpediente(str, enum.Enum):
     descargado = "descargado"
     extrayendo = "extrayendo"
     pendiente_revision = "pendiente_revision"
+    # Un pedido derivado de acuerdo marco (docs/analisis-corpus.md hallazgo 3)
+    # descubrió que necesita su matriz y el sistema ya la está resolviendo
+    # solo (creándola, encolando su descarga o su extracción) —
+    # app.extraccion.herencia_matriz. Distinto de `pendiente_revision`: ese
+    # dice "hace falta un humano", este dice "ya se está resolviendo, todavía
+    # no hay nada que revisar".
+    esperando_matriz = "esperando_matriz"
     completado = "completado"
     fallido = "fallido"
 
@@ -91,6 +98,16 @@ class Expediente(Base):
     # 4, ajuste 3). None mientras no se sepa (expediente de un solo lote, o
     # todavía sin procesar); False si hay varios lotes pero comparten baja.
     baja_variable_por_lote = Column(Boolean, nullable=True)
+    # Relación resuelta con la matriz (app.extraccion.herencia_matriz),
+    # distinta de `codigo_matriz` de arriba: ese es el código de texto
+    # extraído del Anuncio PCSP o del Excel, que puede no tener fila propia
+    # todavía. `matriz_expediente_id` es esa fila real, una vez existe.
+    matriz_expediente_id = Column(Integer, ForeignKey("expedientes.id"), nullable=True)
+    # True cuando el Anuncio PCSP propio y la columna MATRIZ del Excel de
+    # códigos declaran una matriz distinta entre sí: el sistema nunca elige
+    # una de las dos en silencio (encargo de la sesión de herencia de
+    # acuerdo marco, requisito 1 — "si discrepan, a revisión").
+    matriz_conflicto = Column(Boolean, nullable=True)
     estado = Column(
         Enum(EstadoExpediente, name="estado_expediente"),
         nullable=False,
@@ -112,6 +129,9 @@ class Expediente(Base):
 
     lotes = relationship("Lote", back_populates="expediente")
     documentos = relationship("Documento", back_populates="expediente")
+    # Autorreferencial: la matriz de este expediente, si ya se resolvió
+    # (app.extraccion.herencia_matriz.resolver_o_encolar_matriz).
+    matriz = relationship("Expediente", remote_side=[id], foreign_keys=[matriz_expediente_id])
 
 
 class Lote(Base):
@@ -128,6 +148,11 @@ class Lote(Base):
     importe_adjudicacion = Column(Numeric(14, 4), nullable=True)
     adjudicatario = Column(String(255), nullable=True)
     numero_contrato = Column(String(64), nullable=True)
+    # True cuando `baja_lote` (y los importes, si los trae) vinieron de la
+    # matriz de un pedido derivado de acuerdo marco, no de los propios
+    # documentos de este expediente (app.extraccion.herencia_matriz). None
+    # cuando no aplica.
+    baja_heredada_de_matriz = Column(Boolean, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),
@@ -203,6 +228,13 @@ class LineaCatalogo(Base):
     # no es None). Distinto de `comentarios` (notas humanas, sección 7):
     # esto lo escribe el motor, no una persona.
     motivo_revision = Column(Text, nullable=True)
+    # True cuando esta línea se copió del cuadro de precios de la matriz de
+    # un pedido derivado de acuerdo marco (app.extraccion.herencia_matriz),
+    # no se extrajo de los documentos propios de este expediente.
+    # `documento_origen_id`/`pagina`/`fragmento` siguen apuntando al
+    # documento real de origen (el de la matriz): la trazabilidad no se
+    # pierde por heredar, solo se marca para que se distinga a simple vista.
+    heredado_de_matriz = Column(Boolean, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),

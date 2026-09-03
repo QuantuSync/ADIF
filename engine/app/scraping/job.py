@@ -7,6 +7,7 @@ import asyncio
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.extraccion.herencia_matriz import reencolar_pedidos_esperando_matriz
 from app.interfaces.document_storage import DocumentStorage
 from app.models import Documento, EstadoExpediente, Expediente, TipoDocumento, TrabajoCola
 from app.queue import encolar_trabajo
@@ -41,6 +42,14 @@ def ejecutar_scraping_expediente(db: Session, storage: DocumentStorage, trabajo:
         expediente.estado = EstadoExpediente.fallido
         expediente.error = str(exc)
         db.commit()
+        # Si este expediente es la matriz de algún pedido derivado
+        # (app.extraccion.herencia_matriz) que se quedó `esperando_matriz`,
+        # un fallo aquí es tan terminal como uno en la extracción: si no se
+        # reencola ahora, esos pedidos se quedarían esperando para siempre,
+        # porque nunca llega a generarse el trabajo "extraer_expediente" de
+        # esta matriz que dispararía el reencolado normal.
+        if reencolar_pedidos_esperando_matriz(db, expediente):
+            db.commit()
         raise
 
     carpeta = safe(expediente.codigo_expediente.replace("/", "_"))

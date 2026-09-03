@@ -537,3 +537,70 @@ y tests que fallarían sin el arreglo correspondiente:
 - `6.24_28510.0047_ADJUDICACION_1.pdf` (`PROPUESTA_DT_SIN_FALSO_POSITIVO`):
   mismo formato sin la mención de pasada al pliego — mismos dos ficheros de
   test.
+
+---
+
+## Herencia de acuerdo marco (sesión de herencia de matriz, 2026-09-03)
+
+Implementa el mecanismo del hallazgo 3 (CLAUDE.md sección 20: modelo,
+`app.extraccion.herencia_matriz`, protección de ciclos, encolado de la
+matriz, `esperando_matriz`) y lo verifica reprocesando los 45 expedientes
+reales desde cero, con scraping real habilitado (sin dobles de test).
+
+**Resultado: 0 de 14 pedidos derivados resueltos — cero cambio neto en el
+corpus.** No por un fallo del mecanismo (los 15 tests de
+`test_herencia_matriz.py` prueban que funciona correctamente en cada pieza,
+incluida la herencia completa con trazabilidad), sino porque los 14 casos
+reales de este corpus concreto tropiezan, cada uno, con un bloqueo que el
+diseño manda explícitamente a revisión en vez de adivinar:
+
+| | Antes | Después |
+|---|---:|---:|
+| `completado` | 10 | 10 |
+| `pendiente_revision` | 35 | 35 |
+| Líneas de catálogo | 2.041 | 2.041 (+0) |
+| Matrículas en más de un expediente | 13 | 13 |
+| Matrices nuevas descubiertas / descargadas / falladas | — | 0 / 0 / 0 |
+
+**7 sin ningún documento** (`2.24/28520.0128`, `2.25/28520.0161`,
+`3.24/20810.0090`, `3.24/28520.0129`, `3.25/27520.0055`, `4.24/27520.0090`,
+`6.25/28510.5001_01`): el cruce con el Excel de códigos ahora se intenta
+también sin documentos propios (antes, la extracción con 0 documentos
+retornaba antes de llegar a intentarlo), pero ninguno de los 7 cruza una
+columna MATRIZ en el Excel real. Sin ese dato ni un documento propio que
+leer, no hay ningún camino determinista para encontrar su matriz. Sigue
+siendo la causa raíz sin verificar que ya señalaba este informe: por qué el
+scraping no descargó ningún documento para estos 7.
+
+**8 con 2 documentos PCSP, los 8 cortados por autorreferencia — hallazgo
+nuevo, confirmado leyendo el documento real** (`2.18/04703.0019`, `0021`,
+`0022`, `0024`, `0025`, `2.24/04110.0035`, `0036`, `0037`): el Anuncio PCSP
+de cada uno declara, en su campo "Licitación basada en el acuerdo marco →
+Expediente", el mismo código que ya tiene su propia fila en
+`expedientes.codigo_expediente`. Verificado extrayendo el documento real de
+`2.18/04703.0019`: su "Número de Expediente" (el código real del pedido) es
+`6.24/28510.0103` — **completamente distinto** del `codigo_expediente`
+guardado en la base de datos para esa fila. La fila no representa al pedido:
+representa la matriz, etiquetada por error con su propio código en el lugar
+de `codigo_expediente`, mientras el código real del pedido queda sin usar
+dentro del texto del documento
+(`campos_pcsp.CamposAnuncioPcsp.numero_expediente`, extraído pero nunca
+guardado). La protección de ciclos (`_forma_ciclo`,
+`app.extraccion.herencia_matriz`) detecta la autorreferencia y corta, tal
+como se diseñó — el mecanismo no puede heredar de una matriz que es, según
+sus propios datos, el mismo expediente. Esto confirma con precisión, y por
+primera vez con el documento real delante, la sospecha que ya apuntaba este
+informe en el hallazgo 3 ("el propio texto del Anuncio PCSP declara un
+'Número de Expediente' distinto del `codigo_expediente` guardado").
+
+**Cero conflictos de matriz** (`matriz_conflicto`, Anuncio PCSP vs. Excel):
+en ninguno de los 45 discreparon las dos fuentes.
+
+**No resuelto por esta sesión, y no trivial**: decidir qué hacer con las 8
+filas mal etiquetadas — no es un ajuste de expresión regular como el de la
+sección 1 (código de expediente sin capturar), es decidir si se renombra
+`codigo_expediente` al valor real de `numero_expediente` cuando la matriz
+declarada coincide con el propio código, o si se separa el pedido real en
+una fila nueva y se mueven sus documentos. Las dos opciones tocan la clave
+de idempotencia (CLAUDE.md sección 9.9) sobre expedientes que ya están en
+producción — decisión de diseño nueva, pendiente de plantear.

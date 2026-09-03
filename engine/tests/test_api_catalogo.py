@@ -11,6 +11,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app import models
+from app.config import settings
 from app.db import Base, get_db
 from app.interfaces.document_storage import LocalDiskStorage
 from app.main import app
@@ -161,7 +162,12 @@ def test_catalogo_filtra_por_expediente_sin_afectar_a_otros(cliente, db_session)
     assert resp.json()["total"] == 0
 
 
-def test_exportar_catalogo_genera_xlsx_con_columnas_del_formato_esperado(cliente, db_session, tmp_path):
+def test_exportar_catalogo_genera_xlsx_con_columnas_del_formato_esperado(cliente, db_session, tmp_path, monkeypatch):
+    # Este test comprueba el caso "sin cruce" (fila[0]/fila[1] vacíos) --
+    # tiene que valer sea cual sea el entorno local, incluso con un
+    # docker-compose.override.yml real montando un Excel de códigos de
+    # verdad (CODIGOS_PROYECTO_PATH no vacío fuera de este proceso de test).
+    monkeypatch.setattr(settings, "codigos_proyecto_path", None)
     _sembrar_catalogo(db_session)
 
     resp = cliente.get("/catalogo/exportar.xlsx")

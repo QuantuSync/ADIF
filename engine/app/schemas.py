@@ -14,6 +14,10 @@ class LoteOut(BaseModel):
     importe_licitacion: Optional[Decimal] = None
     importe_adjudicacion: Optional[Decimal] = None
     adjudicatario: Optional[str] = None
+    # True cuando `baja_lote` vino de la matriz de un pedido derivado de
+    # acuerdo marco, no de los propios documentos de este expediente
+    # (app.extraccion.herencia_matriz).
+    baja_heredada_de_matriz: Optional[bool] = None
 
 
 class ExpedienteOut(BaseModel):
@@ -33,6 +37,10 @@ class ExpedienteOut(BaseModel):
     # propósito y la web tiene que decir explícitamente "varía por lote", no
     # dejar el campo vacío sin explicación.
     baja_variable_por_lote: Optional[bool] = None
+    # True cuando la matriz declarada en el Anuncio PCSP propio y la columna
+    # MATRIZ del Excel de códigos no coinciden entre sí (CLAUDE.md sección 7
+    # y app.extraccion.cruce_codigos): el sistema no elige una en silencio.
+    matriz_conflicto: Optional[bool] = None
     lotes: list[LoteOut] = []
     estado: str
     error: Optional[str] = None
@@ -77,6 +85,11 @@ class LineaCatalogoOut(BaseModel):
     # Por qué esta línea no tiene lote (siempre None si `lote_id` no es
     # None) — distinto de `comentarios`, que son notas humanas.
     motivo_revision: Optional[str] = None
+    # True cuando esta línea se copió del cuadro de precios de la matriz de
+    # un pedido derivado de acuerdo marco (app.extraccion.herencia_matriz).
+    # `documento_origen_id`/`pagina`/`fragmento` de abajo siguen apuntando al
+    # documento real de origen (el de la matriz): la trazabilidad no cambia.
+    heredado_de_matriz: Optional[bool] = None
     estado_revision: str
     # Trazabilidad (CLAUDE.md sección 9.10 y encargo de esta sesión, punto 2):
     # de qué documento, página y fragmento salió esta línea.

@@ -361,6 +361,19 @@ una pantalla compartida.
   LOTE N..." para las dos plantillas por analogía, no por evidencia — si
   aparece una LC.27 multi-lote real, revisar ese módulo antes de confiar en
   el resultado.
+- **8 expedientes reales tienen `codigo_expediente` etiquetado con el código
+  de su MATRIZ, no con el suyo propio** (sección 20, sesión de herencia de
+  matriz): su propio código real solo existe, sin usar, dentro del campo
+  "Número de Expediente" de su Anuncio PCSP
+  (`campos_pcsp.CamposAnuncioPcsp.numero_expediente`). Es la causa exacta de
+  que la herencia de acuerdo marco no pueda resolver estos 8 casos —
+  `_forma_ciclo` los corta por autorreferencia, correctamente, pero no hay
+  forma de heredar de una matriz que es el propio expediente. **Decisión de
+  diseño pendiente, sin tomar todavía**: si renombrar `codigo_expediente` a
+  `numero_expediente` cuando difieren y la matriz declarada coincide con el
+  propio código, o separar el pedido real en su propia fila. Toca la clave
+  de idempotencia de la sección 9.9 sobre expedientes ya en producción — no
+  es un ajuste de regex como el punto de arriba.
 
 ---
 
@@ -865,3 +878,150 @@ en el esquema desde el esqueleto pero no se usaba.
   7,13 %, LOTE 3 al 1,18 % — con "Varía por lote" en vez de una baja única
   inventada, y las 28 líneas huérfanas (sin lote determinable) mandan el
   expediente a `pendiente_revision` con el motivo detallado por tabla.
+
+---
+
+## 20. Herencia de acuerdo marco (sesión de herencia de matriz, 2026-09-03)
+
+Cierra (parcialmente — ver más abajo) el hallazgo 3 de
+`docs/analisis-corpus.md`: 14 pedidos derivados de acuerdo marco sin cuadro
+de precios ni baja propios, porque viven en los documentos de la MATRIZ.
+
+### Modelo
+
+- **`expedientes.matriz_expediente_id`** (FK a `expedientes.id`, migración
+  `0009`): la matriz *resuelta*, distinta de `codigo_matriz` (el código de
+  texto que ya se extraía — Anuncio PCSP o Excel de códigos). Se rellena la
+  primera vez que `app.extraccion.herencia_matriz.resolver_o_encolar_matriz`
+  identifica o crea la fila de la matriz.
+- **`expedientes.matriz_conflicto`**: cuando el Anuncio PCSP propio y la
+  columna MATRIZ del Excel declaran una matriz distinta entre sí (requisito
+  1 del encargo: "si discrepan, a revisión"). Antes de esta sesión,
+  `asegurar_cruce_codigos` solo usaba la MATRIZ del Excel como reserva si el
+  Anuncio no traía ninguna — nunca comparaba las dos fuentes.
+- **Estado nuevo `esperando_matriz`** (enum `estado_expediente`, valor
+  añadido por `ALTER TYPE ... ADD VALUE`, no reversible): un pedido cuya
+  matriz el sistema ya está resolviendo solo (creándola, encolando su
+  descarga o su extracción). Distinto de `pendiente_revision` — ese
+  significa "hace falta un humano", este "ya se está resolviendo".
+- **`lotes.baja_heredada_de_matriz`** y **`lineas_catalogo.heredado_de_matriz`**:
+  booleanos de lectura rápida para la web. La trazabilidad real no depende de
+  ellos — `documento_origen_id`/`pagina`/`fragmento` de cada línea heredada
+  siguen apuntando al documento real de la matriz, copiados tal cual al
+  copiar la línea.
+- **Copiar, no referenciar.** Las líneas heredadas se materializan como
+  `LineaCatalogo` normales del pedido, vía el mismo `guardar_lineas_catalogo`
+  idempotente de siempre (mismo mecanismo, misma clave). Se descartó
+  referenciar en caliente porque todo el sistema ya es snapshot-y-traza
+  (sección 9), y porque `/catalogo` y la exportación pagan directo sobre
+  `lineas_catalogo` sin saber resolver "esta línea vive en otro expediente".
+- **"Lo propio del pedido manda" se decide a nivel de tabla completa, no
+  fila a fila**: si el pedido ya aportó alguna línea propia a su lote, no se
+  mezcla con las de la matriz — se manda a revisión con el conteo exacto de
+  líneas de cada lado (ajuste 3 de la sesión de diseño: "sin ese dato, quien
+  revise no puede decidir"). Solo se hereda la tabla completa cuando el
+  pedido no aportó ninguna línea propia. Lo mismo con la baja: la propia
+  gana si existe.
+- **Matriz multi-lote sin dato en el pedido para elegir uno: a revisión**,
+  nunca se asigna a ciegas.
+- **Protección contra ciclos** (ajuste 1 de la sesión de diseño):
+  `_forma_ciclo` corta antes de crear o seguir una matriz si el pedido se
+  referencia a sí mismo, o si la cadena de matrices (A -> B -> A, o más
+  larga, tope de 10 saltos) vuelve sobre un expediente ya visitado. Resultó
+  ser el caso dominante del corpus real — ver más abajo.
+- **Descarga de la matriz** (ajuste 1): si la matriz no existe como
+  expediente, se crea y se encola su descarga (`descargar_expediente`, que
+  ya encadena a `extraer_expediente` sola, `app/scraping/job.py`); si ya
+  existe con documentos pero sin procesar, se encola directamente su
+  extracción. Un `TrabajoCola` activo del mismo tipo para esa matriz evita
+  encolar por duplicado (dos pedidos pueden compartir matriz).
+- **`reencolar_pedidos_esperando_matriz`**: al terminar el procesamiento de
+  un expediente que resulta ser matriz de otros — con cualquier desenlace,
+  `completado`, `pendiente_revision` o `fallido` -, se reencola la
+  extracción de los pedidos que estaban `esperando_matriz` de él. Dispara
+  tanto al final de `ejecutar_extraccion_expediente` (éxito y fallo) como en
+  el `except` de `ejecutar_scraping_expediente` (si la matriz falla ya en la
+  descarga, antes de llegar nunca a generarse un trabajo de extracción que
+  disparase el reencolado normal — sin este segundo punto, esos pedidos se
+  quedarían `esperando_matriz` para siempre).
+- **Límite conocido, no un descuido (ajuste 2 del encargo): reprocesar una
+  matriz ya resuelta a mano no refresca sola a los pedidos que ya heredaron
+  de ella.** `reencolar_pedidos_esperando_matriz` solo dispara cuando la
+  matriz *termina un trabajo de extracción* — un reproceso posterior de una
+  matriz que ya estaba `completado`/`pendiente_revision`/`fallido` no tiene
+  ningún gancho que avise a sus pedidos. Si hace falta, hay que reencolarlos
+  a mano. No se implementó un listener permanente a propósito: sería más
+  alcance del que pide el encargo.
+
+### Verificación contra el corpus real: 0 de 14 pedidos resueltos, y por qué
+
+Reprocesados los 45 expedientes reales desde cero (worker real, scraping
+real habilitado, sin dobles de test). Resultado idéntico al de antes de esta
+sesión en todos los agregados — **cero cambio neto**, porque ningún pedido
+llegó a heredar nada:
+
+| | Antes | Después |
+|---|---:|---:|
+| `completado` | 10 | 10 |
+| `pendiente_revision` | 35 | 35 |
+| Líneas de catálogo | 2.041 | 2.041 (+0) |
+| Matrículas en >1 expediente | 13 | 13 |
+| Matrices nuevas descubiertas | — | **0** |
+| Trabajos `descargar_expediente` encolados | — | **0** |
+
+**Los 14 pedidos derivados reales de este corpus se reparten en dos
+bloqueos, ninguno resuelto:**
+
+- **7 sin ningún documento** (`2.24/28520.0128`, `2.25/28520.0161`,
+  `3.24/20810.0090`, `3.24/28520.0129`, `3.25/27520.0055`,
+  `4.24/27520.0090`, `6.25/28510.5001_01`): sin documentos que leer, y el
+  cruce con el Excel de códigos (que sí se intenta ahora incluso sin
+  documentos, requisito 1 del encargo) tampoco les encuentra una MATRIZ. No
+  hay ningún dato del que partir — motivo sin cambios, "extracción encolada
+  sin documentos descargados para este expediente". Causa raíz sin
+  verificar, igual que antes (hallazgo 3 de `docs/analisis-corpus.md`: por
+  qué el scraping no descargó nada para estos 7).
+- **8 con 2 documentos PCSP, todos cortados por autorreferencia**
+  (`2.18/04703.0019`, `0021`, `0022`, `0024`, `0025`, `2.24/04110.0035`,
+  `0036`, `0037`): **hallazgo nuevo, verificado leyendo el documento real**
+  (`2.18_04703.0019_ADJUDICACION_1...pdf`): su "Licitación basada en el
+  acuerdo marco → Expediente" declara literalmente `2.18/04703.0019` — el
+  mismo código que ya tiene `expedientes.codigo_expediente` para esta fila.
+  No es un dato corrupto ni una matriz mal declarada: es que **la fila de
+  este expediente en la base de datos está etiquetada con el código de la
+  MATRIZ, no con el del pedido** — el código real del pedido
+  (`6.24/28510.0103` en este caso) solo existe dentro del texto del
+  documento, en el campo "Número de Expediente"
+  (`campos_pcsp.CamposAnuncioPcsp.numero_expediente`), que hoy se extrae
+  pero **nunca se usa ni se guarda en ningún sitio**. `_forma_ciclo` detecta
+  la autorreferencia y corta, tal como se diseñó (requisito 1 de la sesión
+  de diseño: "protege contra el ciclo") — el mecanismo de herencia funciona
+  exactamente como se pidió, pero no puede resolver estos 8 casos reales
+  porque la premisa de la que parte ("codigo_expediente identifica al
+  pedido, codigo_matriz a su matriz") no se cumple para ellos. Es
+  exactamente el mismo síntoma que ya documentaba el hallazgo 3 del corpus
+  ("el propio texto del Anuncio PCSP declara un 'Número de Expediente'
+  distinto del `codigo_expediente` guardado"), confirmado ahora como la
+  causa exacta del bloqueo, no solo una curiosidad del dato.
+- **Cero conflictos de matriz** (`matriz_conflicto`) en las 45: en ningún
+  caso el Anuncio PCSP y el Excel discreparon.
+
+**Pendiente, no resuelto por esta sesión**: decidir qué hacer con las filas
+mal etiquetadas (¿renombrar `codigo_expediente` al valor real de
+`numero_expediente` cuando difieren de una matriz auto-declarada? ¿crear la
+fila del pedido real por separado y mover los documentos? Ninguna opción es
+trivial, y las dos tocan la clave de idempotencia de la sección 9.9 sobre
+expedientes ya en producción — decisión de diseño nueva, no una continuación
+directa de esta sesión). Hasta que se decida, estos 8 seguirán en
+`pendiente_revision` con el motivo explícito, nunca heredando por
+autorreferencia.
+
+### Fixtures de regresión
+
+`engine/tests/extraccion/test_herencia_matriz.py`, 15 casos: las tres
+funciones del módulo por separado (creación/encolado de matriz, herencia con
+trazabilidad, protección de ciclo simple y de cadena) y dos de extremo a
+extremo con el fixture real `ANUNCIO_PCSP_CON_MATRIZ`
+(`2.18_04703.0019_ADJUDICACION_1.pdf`, el mismo documento real que destapó el
+hallazgo de la autorreferencia) contra `ejecutar_extraccion_expediente`. No
+hizo falta ningún PDF nuevo.
