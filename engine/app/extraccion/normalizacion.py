@@ -9,6 +9,23 @@ from decimal import Decimal, InvalidOperation
 
 _NO_DIGITO_NI_SEPARADOR = re.compile(r"[^\d,.\-]")
 
+# Sesión de arreglos pequeños (2026-09-03, ver docs/analisis-corpus.md
+# hallazgo 2): `pdfplumber` extrae el guion del código de precio como uno de
+# los guiones tipográficos Unicode (U+2010 HYPHEN, U+2011 NON-BREAKING
+# HYPHEN, U+2012 FIGURE DASH, U+2013 EN DASH, U+2014 EM DASH) en vez del
+# guion ASCII U+002D que el resto del sistema da por hecho ("P-001"). Punto
+# único de normalización: cualquier código que se compare o se guarde pasa
+# por aquí, para que un patrón nuevo que espere un guion no repita el mismo
+# fallo (CLAUDE.md sección 8, "Normalización — errores que van a aparecer").
+_TRADUCCION_GUIONES = str.maketrans({c: "-" for c in "‐‑‒–—"})
+
+
+def normalizar_guiones(texto: str) -> str:
+    """Sustituye los guiones tipográficos Unicode por el guion ASCII. No
+    toca nada más (mayúsculas, acentos, espacios) — es un normalizador
+    específico, no un sustituto de `app.extraccion.texto.normalizar`."""
+    return texto.translate(_TRADUCCION_GUIONES)
+
 # Sesión de rodaje sobre el corpus completo (2026-09-03), expediente
 # 6.25/28510.0028: una fuente sin tabla ToUnicode hace que pdfplumber
 # extraiga identificadores de glifo crudos, "(cid:1004)", en vez de dígitos.
@@ -75,10 +92,14 @@ def parsear_porcentaje_es(cadena: str) -> Decimal:
 def limpiar_codigo_celda(valor: str | None) -> str | None:
     """Códigos de precio y matrículas de celda de tabla, sin ningún espacio
     ni salto de línea: "P-\\n001" -> "P-001" (CLAUDE.md sección 8, columnas
-    de tabla envueltas por el ancho de columna, no por el contenido)."""
+    de tabla envueltas por el ancho de columna, no por el contenido). También
+    normaliza el guion (ver `normalizar_guiones`), para que el mismo código
+    "P‐001"/"P-001" quede siempre igual en el catálogo, sin importar qué
+    guion tipográfico trajera la extracción."""
     if valor is None:
         return None
     limpio = re.sub(r"\s+", "", valor)
+    limpio = normalizar_guiones(limpio)
     return limpio or None
 
 

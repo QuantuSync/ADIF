@@ -34,6 +34,24 @@ def test_propuesta_y_contrato_del_mismo_expediente_declaran_la_misma_baja():
     assert baja_propuesta.baja == baja_contrato.baja
 
 
+def test_baja_en_propuesta_dt_con_falso_positivo_de_pliego():
+    # docs/analisis-corpus.md hallazgo 4: la baja ("con una baja del 20% a
+    # todos los precios unitarios") la captura `_BAJA_RE` sin cambios, una
+    # vez que el documento llega a `extraer_baja_declarada` en absoluto —
+    # antes del arreglo de clasificación, ni siquiera llegaba a intentarlo.
+    r = extraer_baja_declarada(
+        extraer_texto(fx.PROPUESTA_DT_CON_FALSO_POSITIVO_PLIEGO), tipo_documento=TipoDocumento.propuesta_dt
+    )
+    assert r.baja == Decimal("0.2000")
+
+
+def test_baja_en_propuesta_dt_sin_falso_positivo():
+    r = extraer_baja_declarada(
+        extraer_texto(fx.PROPUESTA_DT_SIN_FALSO_POSITIVO), tipo_documento=TipoDocumento.propuesta_dt
+    )
+    assert r.baja == Decimal("0.0013")
+
+
 def test_anuncio_pcsp_no_declara_baja():
     # El Anuncio PCSP no trae la frase de baja; no debe inventarse un match.
     r = extraer_baja_declarada(extraer_texto(fx.ANUNCIO_PCSP_CON_MATRIZ))

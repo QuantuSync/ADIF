@@ -86,18 +86,55 @@ def test_resolucion_sin_verbo_resuelve_tiene_menos_confianza():
     assert r_completa.confianza > r_incompleta.confianza
 
 
-def test_plantilla_desconocida_no_se_fuerza_a_una_familia():
-    # Tercera plantilla real vista en el corpus (L9_CM.32-FE,
-    # "INFORME-PROPUESTA DE ADJUDICACIÓN DE CONTRATO") que no encaja en
-    # ninguna regla todavía: debe caer en `otro`, no clasificarse a la fuerza
-    # como propuesta_lc27 solo porque también es una propuesta.
+def test_propuesta_dt_no_se_fuerza_a_lc27():
+    # docs/analisis-corpus.md hallazgo 4: tercera plantilla real del corpus
+    # (L9_CM.32-FE, "INFORME-PROPUESTA DE ADJUDICACIÓN DE CONTRATO"), usada
+    # por Dirección Técnica. Tiene su propio tipo (propuesta_dt), no se
+    # clasifica a la fuerza como propuesta_lc27 solo porque también es una
+    # propuesta.
     paginas = _paginas(
         "L9_CM.32-FE\nINFORME-PROPUESTA DE ADJUDICACIÓN DE CONTRATO\n"
         "Denominación del Contrato: SUMINISTRO DE FUSIBLES PROTISTORES\n"
     )
     r = clasificar(paginas)
+    assert r.tipo == TipoDocumento.propuesta_dt
+    assert r.confianza >= Decimal("0.9")
+
+
+def test_propuesta_dt_real_sin_falso_positivo_de_pliego():
+    # 6.23/28510.0104 (docs/analisis-corpus.md hallazgo 4): esta Propuesta de
+    # Dirección Técnica cita de pasada "el determinado en Pliego de Cláusulas
+    # Administrativas Particulares del contrato" a mitad de página. Antes de
+    # la regla propia y de `_buscar_titulo`, esa mención bastaba para que el
+    # documento cayera en `pliego` en vez de en su propia familia.
+    r = clasificar(extraer_texto(fx.PROPUESTA_DT_CON_FALSO_POSITIVO_PLIEGO))
+    assert r.tipo == TipoDocumento.propuesta_dt
+    assert r.confianza >= Decimal("0.9")
+
+
+def test_propuesta_dt_real_sin_mencion_de_pliego():
+    # 6.24/28510.0047 (docs/analisis-corpus.md hallazgo 4): mismo formato,
+    # sin la mención de pasada al pliego — caía en `otro` antes de esta
+    # regla.
+    r = clasificar(extraer_texto(fx.PROPUESTA_DT_SIN_FALSO_POSITIVO))
+    assert r.tipo == TipoDocumento.propuesta_dt
+    assert r.confianza >= Decimal("0.9")
+
+
+def test_pliego_real_con_mencion_de_pasada_no_es_falso_positivo():
+    # Mención de "pliego de cláusulas administrativas" a mitad de un párrafo,
+    # sin ser el propio documento un pliego (posición del hallazgo real:
+    # índice 1662 sobre el texto normalizado) — `_buscar_titulo` no debe
+    # contarla, ni siquiera si el documento no tuviera ya su propia regla
+    # (aquí sin marcador propio de ninguna otra familia, para aislar el
+    # comportamiento de la regla 6 sin la regla 5 de por medio).
+    paginas = _paginas(
+        "Un texto cualquiera de portada sin ningún título reconocible. "
+        "El plazo ofertado, el determinado en Pliego de Cláusulas "
+        "Administrativas Particulares del contrato, es conforme."
+    )
+    r = clasificar(paginas)
     assert r.tipo == TipoDocumento.otro
-    assert r.confianza == Decimal("0")
 
 
 def test_documento_vacio():

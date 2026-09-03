@@ -410,3 +410,130 @@ son heterogéneos y no forman categoría.
   confirmarlo uno a uno, se infiere del patrón (2 documentos, formato de
   código, "Número de Expediente" distinto en el texto) que se repite
   idéntico en los 7.
+
+---
+
+## Arreglos de los hallazgos 2 y 4 (sesión 2026-09-03)
+
+Sesión de código sobre los dos hallazgos de mejor relación impacto/esfuerzo
+del resumen ejecutivo. Verificado contra el stack real (contenedor Linux,
+Postgres real, worker real) reprocesando los 45 expedientes desde cero
+después del cambio, no solo con tests aislados.
+
+### 1. Guion Unicode en el código de precio
+
+`_CODIGO_PRECIO_RE` seguía exigiendo el guion ASCII. Arreglo de fondo, no
+solo la expresión regular: `app.extraccion.normalizacion.normalizar_guiones`
+es ahora el único punto de esa normalización (U+2010 HYPHEN, U+2011 NON-BREAKING
+HYPHEN, U+2012 FIGURE DASH, U+2013 EN DASH, U+2014 EM DASH → guion ASCII), y
+lo usan tanto el filtro de fila de datos de `tabla.py` como
+`limpiar_codigo_celda` — así el `codigo_precio` que llega al catálogo queda
+siempre igual sin importar qué guion trajera la extracción (verificado en
+producción: `P‐01` en el PDF real se guarda como `P-01`). Revisadas todas las
+demás expresiones regulares del proyecto que tocan guiones
+(`_NO_DIGITO_NI_SEPARADOR` de importes, ninguna otra con forma `P-\d+`):
+ninguna otra tenía el mismo defecto.
+
+### 2. Tercera plantilla L9_CM.32-FE
+
+Nuevo tipo `TipoDocumento.propuesta_dt` (migración `0008`, no un alias de
+`propuesta_lc27`: declara el mismo tipo de hecho pero con anatomía propia).
+Regla de clasificador nueva por el marcador único `"l9_cm.32-fe"`, insertada
+antes de la regla de pliego. `propuesta_dt` añadido a
+`_TIPOS_CON_BAJA_DECLARADA` en el orquestador — sin esto, aunque el
+clasificador reconociera la plantilla, su baja nunca se llegaba a buscar.
+`_BAJA_RE` capturó la redacción de los dos documentos reales sin ningún
+cambio, confirmando la hipótesis del hallazgo 4.
+
+**Falso positivo de `pliego` corregido de forma general, no solo para este
+caso.** Se midió la posición de "pliego de clausulas administrativas" en las
+188 páginas del corpus completo: las 23 apariciones reales como título
+abren la página en la posición 0 del texto normalizado; las 3 apariciones
+que son solo una mención de pasada (`6.23/28510.0104_ADJUDICACION_1.pdf`,
+`6.20/28510.0136_CONTRATO_1.pdf`, `6.25/28510.0016_CONTRATO_1.pdf`) aparecen
+en la posición 265, 607 y 1662. `_buscar_titulo` (nueva, en
+`clasificador.py`) exige que el marcador esté a 50 caracteres o menos del
+principio de la página — solo para esta frase: se comprobó que
+"pliego de prescripciones tecnicas" y "documento de pliegos" sí aparecen
+lejos del principio en documentos reales correctamente clasificados
+(portadas con índice antes del título), así que la restricción no se aplicó
+ahí para no romper ningún caso ya correcto.
+
+### Verificación: los 45 expedientes reprocesados desde cero
+
+Estado antes de esta sesión: 5 `completado`, 40 `pendiente_revision`, 0
+`fallido`, 1.731 líneas de catálogo. Después de reconstruir las imágenes de
+`api`/`worker` con el código nuevo, aplicar la migración `0008` y reencolar
+`extraer_expediente` para los 45:
+
+| | Antes | Después |
+|---|---:|---:|
+| `completado` | 5 | **10** |
+| `pendiente_revision` | 40 | **35** |
+| `fallido` | 0 | 0 |
+| Líneas de catálogo | 1.731 | **2.041** (+310) |
+
+**Los 9 expedientes del guion Unicode**: los 9 pasan a tener líneas de
+catálogo (0 antes, con `_es_fila_de_datos` descartando la tabla entera como
+espuria). 4 quedan `completado` (`6.23/28510.0066` 9 líneas baja 3,00 %;
+`6.23/28510.0109` 8 líneas baja 7,20 %; `6.23/28510.0129` 6 líneas baja
+0,50 %; `6.24/28510.0124` 6 líneas baja 4,50 %, esta última ya declarada por
+su Resolución, ajena al guion). Los otros 5 siguen en `pendiente_revision`,
+pero ya no por falta de líneas — por motivos distintos y ya documentados en
+este informe, no por el arreglo:
+
+- `6.23/28510.0018` (26 líneas) y `6.23/28510.0102` (26 líneas): sin baja
+  declarada porque son, tal como predice el hallazgo 5, dos de los tres
+  expedientes de la segunda familia de baja (fórmula `Ct = Oferta × Kt ×
+  Coeficiente de baja` por pedido, sin una baja única de lote que extraer)
+  — confirmado ahora con datos reales del catálogo, no solo con el patrón de
+  texto.
+- `6.23/28510.0139` (6 líneas), `6.24/28510.0117` (103 líneas) y
+  `6.24/28510.0130` (120 líneas): la validación de la sección 12 de CLAUDE.md
+  hizo su trabajo — la baja declarada en texto no cuadra con la que resulta
+  de licitación/adjudicación (5,07 % declarado contra 68,64 % de los
+  importes en `0139`; 24,99 % contra 90,00 % en `0117`; 0,00 % contra
+  84,44 % en `0130`), así que van a revisión en vez de aceptarse en
+  silencio. Los saltos tan grandes entre importes apuntan al mismo patrón
+  del hallazgo 3 (pedido derivado de acuerdo marco) más que a un error de
+  transcripción; sin verificar caso a caso, fuera de alcance de esta sesión.
+
+**Los 2 expedientes de la plantilla L9_CM.32-FE** (no 3: el corpus completo
+solo trae 2 documentos reales con este marcador, confirmado consultando
+`documentos.tipo_documento = 'propuesta_dt'` tras el reproceso —
+`6.23/28510.0104` y `6.24/28510.0047`, los mismos dos que ya citaba el
+hallazgo 4). `6.23/28510.0104` queda `completado`, baja 20,00 %: el falso
+positivo de `pliego` está resuelto de punta a punta, no solo en el test
+unitario. `6.24/28510.0047` extrae su baja correctamente (0,13 %) pero
+sigue en `pendiente_revision` por un motivo ajeno a la clasificación: ningún
+documento de este expediente aporta líneas de catálogo (no hay cuadro de
+precios reconocible en sus otros documentos) — mismo síntoma que otros
+expedientes sin `ANEJO`/`Pliego` con tabla real, no una regresión de este
+arreglo.
+
+**Matrículas que aparecen en más de un expediente**: de las 2.041 líneas,
+solo 13 matrículas se repiten entre expedientes distintos — las 13 de
+carril (`601020180`…`613000033`), compartidas entre `6.23/28510.0018`,
+`6.23/28510.0102` y `6.25/28510.0016`. Ningún otro material del catálogo
+actual aparece en más de un expediente. Dato notable: dos de los tres
+expedientes que comparten estas matrículas (`0018` y `0102`) no tenían
+ninguna línea de catálogo antes de esta sesión — el arreglo del guion
+Unicode es lo que hace posible, por primera vez, cruzar el precio de estos
+materiales entre expedientes (la pregunta real de ADIF, CLAUDE.md sección
+11.5).
+
+### Fixtures de regresión añadidos
+
+`engine/tests/fixtures/pdfs/`, con su entrada en `tests/fixtures/__init__.py`
+y tests que fallarían sin el arreglo correspondiente:
+
+- `6.23_28510.0018_ANEJO_1.pdf` (`ANEJO_PRECIOS_CARRILES_GUION_UNICODE`):
+  página 12, cuadro de precios de carriles con código `P‐01`..`P‐13` en
+  guion Unicode real — `tests/extraccion/test_tabla.py`.
+- `6.23_28510.0104_ADJUDICACION_1.pdf`
+  (`PROPUESTA_DT_CON_FALSO_POSITIVO_PLIEGO`): el documento real que
+  destapó el falso positivo de `pliego` — `tests/extraccion/test_clasificador.py`
+  y `tests/extraccion/test_baja.py`.
+- `6.24_28510.0047_ADJUDICACION_1.pdf` (`PROPUESTA_DT_SIN_FALSO_POSITIVO`):
+  mismo formato sin la mención de pasada al pliego — mismos dos ficheros de
+  test.

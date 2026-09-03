@@ -72,3 +72,25 @@ RESOLUCION_MULTI_LOTE = FIXTURES_DIR / "6.25_28510.0027_ADJUDICACION_1.pdf"
 # cada tabla precedida por su propia cabecera "LOTE N" — el caso real que
 # ejercita la asociación tabla->lote por posición (app.extraccion.lote_tabla).
 ANEJO_PRECIOS_BALASTO_MULTI_LOTE = FIXTURES_DIR / "6.25_28510.0027_ANEJO_1.pdf"
+
+# Sesión de arreglos pequeños (2026-09-03, docs/analisis-corpus.md hallazgo
+# 4): 3ª plantilla de propuesta ("L9_CM.32-FE", Dirección Técnica en vez de
+# Mesa de Contratación), baja declarada del 20,00 %. Su propia página 1 cita
+# de pasada "el determinado en Pliego de Cláusulas Administrativas
+# Particulares del contrato" (índice 1662 del texto normalizado): antes de
+# la regla propia de esta plantilla, esa mención bastaba para clasificar el
+# documento como `pliego` en vez de `propuesta_dt` — el caso real que
+# destapó el falso positivo, no solo la plantilla sin clasificar.
+PROPUESTA_DT_CON_FALSO_POSITIVO_PLIEGO = FIXTURES_DIR / "6.23_28510.0104_ADJUDICACION_1.pdf"
+
+# Mismo formato, expediente 6.24/28510.0047, baja declarada del 0,13 %. Sin
+# la mención de pasada al pliego: antes de la regla propia caía en `otro`,
+# no en el falso positivo — los dos casos reales de la misma plantilla.
+PROPUESTA_DT_SIN_FALSO_POSITIVO = FIXTURES_DIR / "6.24_28510.0047_ADJUDICACION_1.pdf"
+
+# docs/analisis-corpus.md hallazgo 2: cuadro de precios real (carriles) cuyo
+# código viene con el guion tipográfico Unicode U+2010 ("P‐01".."P‐13"), no
+# el guion ASCII — página 12 (índice 11) del documento. Antes del arreglo,
+# `_es_fila_de_datos` no reconocía ninguna fila como fila de datos y
+# `extraer_tablas_pagina` descartaba la tabla entera como espuria.
+ANEJO_PRECIOS_CARRILES_GUION_UNICODE = FIXTURES_DIR / "6.23_28510.0018_ANEJO_1.pdf"

@@ -11,10 +11,13 @@ declaran la misma frase con redacciones distintas:
     unitarios de los artículos que componen el objeto del contrato"
   - Contrato: "La baja económica ofertada del 54,00% será aplicable a
     todos los precios unitarios licitados."
+  - Propuesta de Dirección Técnica (L9_CM.32-FE, docs/analisis-corpus.md
+    hallazgo 4): "con una baja del 20% a todos los precios unitarios"
 
 Todas comparten la forma "baja [económica] [ofertada] del N %  ... precios
-unitarios": un único patrón laxo basta para las tres, sin necesitar una regla
-por plantilla.
+unitarios": un único patrón laxo basta para las cuatro, sin necesitar una
+regla por plantilla — verificado contra los dos documentos reales de
+Dirección Técnica sin tener que tocar `_BAJA_RE`.
 """
 from __future__ import annotations
 
@@ -38,10 +41,14 @@ _BAJA_RE = re.compile(
 # Prioridad al elegir entre varios documentos del mismo hecho para el mismo
 # expediente/lote (CLAUDE.md sección 17: "preferir la Resolución cuando
 # existan las dos" porque es el acto posterior y definitivo).
+# `propuesta_dt` (docs/analisis-corpus.md hallazgo 4) es al mismo tipo de
+# hecho que propuesta_lc27 — una propuesta previa a la Resolución, nunca
+# vista junto a una LC.27 en el mismo expediente — misma prioridad.
 _PRIORIDAD_BAJA = {
     TipoDocumento.resolucion_adjudicacion: 0,
     TipoDocumento.contrato: 1,
     TipoDocumento.propuesta_lc27: 2,
+    TipoDocumento.propuesta_dt: 2,
 }
 
 

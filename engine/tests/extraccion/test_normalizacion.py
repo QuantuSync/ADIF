@@ -3,6 +3,8 @@ from decimal import Decimal
 import pytest
 
 from app.extraccion.normalizacion import (
+    limpiar_codigo_celda,
+    normalizar_guiones,
     parsear_importe_es,
     parsear_numero_es,
     parsear_porcentaje_es,
@@ -64,3 +66,26 @@ def test_valor_duplicado_que_no_coincide_sigue_siendo_error():
     # parseo debe seguir fallando para que el llamador la mande a revisión.
     with pytest.raises(ValueError):
         parsear_numero_es("306.351,49\n412.000,00")
+
+
+def test_normalizar_guiones_traduce_variantes_unicode():
+    # docs/analisis-corpus.md hallazgo 2: `pdfplumber` extrae el guion del
+    # código de precio como uno de estos guiones tipográficos en 9
+    # expedientes reales, no el guion ASCII que el resto del sistema da por
+    # hecho ("P-001").
+    for guion in ("‐", "‑", "‒", "–", "—"):
+        assert normalizar_guiones(f"P{guion}001") == "P-001"
+
+
+def test_normalizar_guiones_no_toca_el_guion_ascii_ni_el_resto():
+    assert normalizar_guiones("P-001") == "P-001"
+    assert normalizar_guiones("BRIDA DE FIJACIÓN") == "BRIDA DE FIJACIÓN"
+
+
+def test_limpiar_codigo_celda_normaliza_el_guion():
+    # Punto único de normalización (CLAUDE.md sección 8): el código de
+    # precio que llega al catálogo queda con guion ASCII sin importar cuál
+    # trajera la extracción, para que el mismo código no aparezca dos veces
+    # con caracteres distintos.
+    assert limpiar_codigo_celda("P‐001") == "P-001"
+    assert limpiar_codigo_celda("P‐\n001") == "P-001"

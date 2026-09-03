@@ -57,11 +57,15 @@ from app.models import Documento, EstadoExpediente, Expediente, Lote, TipoDocume
 LOTE_UNICO = "1"
 
 # Documentos de estas plantillas declaran la baja en texto (CLAUDE.md sección
-# 4 y docstring de app.extraccion.baja).
+# 4 y docstring de app.extraccion.baja). `propuesta_dt` añadido en la sesión
+# de arreglos pequeños (docs/analisis-corpus.md hallazgo 4): sin esto, aunque
+# el clasificador ya reconociera la plantilla, su baja declarada ("con una
+# baja del N% a todos los precios unitarios") nunca se llegaba a buscar.
 _TIPOS_CON_BAJA_DECLARADA = (
     TipoDocumento.propuesta_lc27,
     TipoDocumento.resolucion_adjudicacion,
     TipoDocumento.contrato,
+    TipoDocumento.propuesta_dt,
 )
 
 # Igual que `app.extraccion.baja._PRIORIDAD_BAJA` (CLAUDE.md sección 17:

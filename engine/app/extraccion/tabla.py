@@ -20,11 +20,21 @@ partida en dos regiones, o un pliego que reaparece por dentro con otro
 Anejo) y `find_tables()` también puede devolver una tabla espuria (una
 leyenda envuelta que cae fuera de cualquier tabla real): una tabla sin
 ninguna fila con código de precio se descarta entera, no se fuerza un mapeo.
+
+Hallazgo de la sesión de arreglos pequeños (2026-09-03,
+docs/analisis-corpus.md hallazgo 2): en 9 expedientes / 11 documentos reales
+el guion del código viene como uno de los guiones tipográficos Unicode
+("P‐001", U+2010), no el guion ASCII. El filtro de fila de datos normaliza
+el guion antes de comparar (`app.extraccion.normalizacion.normalizar_guiones`,
+punto único de esa normalización) para no fallar en silencio y descartar la
+tabla entera como espuria.
 """
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+
+from app.extraccion.normalizacion import normalizar_guiones
 
 CELDA = str | None
 FILA = list[CELDA]
@@ -48,7 +58,7 @@ class TablaExtraida:
 
 def _es_fila_de_datos(fila: FILA) -> bool:
     return any(
-        celda and _CODIGO_PRECIO_RE.match(re.sub(r"\s+", "", celda))
+        celda and _CODIGO_PRECIO_RE.match(normalizar_guiones(re.sub(r"\s+", "", celda)))
         for celda in fila
     )
 

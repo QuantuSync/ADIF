@@ -14,11 +14,13 @@ recoge:
   "CONTRATO" puede ser en realidad uno de estos formularios PCSP, no el
   contrato firmado — el marcador de texto "Publicado en la Plataforma de
   Contratación del Sector Público" es lo único fiable.
-- Existe una tercera plantilla de propuesta ("L9_CM.32-FE",
-  "INFORME-PROPUESTA DE ADJUDICACIÓN DE CONTRATO"), usada por Dirección
-  Técnica en vez de la Mesa de Contratación, distinta de LC.27. No tiene
-  regla propia todavía: cae en `otro` con confianza 0 hasta decidir si se
-  trata como familia nueva o como alias de propuesta_lc27.
+- Tercera plantilla de propuesta ("L9_CM.32-FE", "INFORME-PROPUESTA DE
+  ADJUDICACIÓN DE CONTRATO"), usada por Dirección Técnica en vez de la Mesa
+  de Contratación, distinta de LC.27: declara el mismo tipo de hecho (baja y
+  adjudicatario) con su propia anatomía (tabla "RAZÓN SOCIAL / BAJA
+  OFERTADA / ORDEN CLASIFICATORIO"), así que tiene su propio tipo
+  (`propuesta_dt`) en vez de forzarse como alias de `propuesta_lc27`
+  (docs/analisis-corpus.md hallazgo 4).
 - Un fichero descargado como "*_ANEJO_N.pdf" puede ser en realidad el Pliego
   de Prescripciones Técnicas completo, con el anejo de precios unitarios
   como una sección interna suya (título de página 1: "PLIEGO DE
@@ -26,6 +28,16 @@ recoge:
   `pliego`, no a `anejo` — y es correcto: localizar páginas candidatas
   (CLAUDE.md sección 5, etapa 3) se hace por página dentro de cualquier tipo
   de documento, no depende de que el documento entero se llame "anejo".
+- Falso positivo de `pliego` (docs/analisis-corpus.md hallazgo 4, corpus
+  completo, sesión de arreglos pequeños 2026-09-03): el título real de un
+  Pliego siempre abre la página (verificado en las 23 apariciones reales del
+  corpus, todas en la posición 0 del texto normalizado), pero la misma frase
+  también aparece de pasada, a mitad de página, en documentos que citan "el
+  Pliego de Cláusulas Administrativas Particulares" sin ser ese documento
+  (verificado en 3 casos reales: una Resolución, un Contrato y la 3ª
+  plantilla de Dirección Técnica, con el marcador en la posición 265, 607 y
+  1662 respectivamente). La regla de pliego exige que el marcador aparezca
+  cerca del principio de la página — una mención de pasada no cuenta.
 """
 from __future__ import annotations
 
@@ -65,6 +77,32 @@ def _buscar(paginas_norm: list[tuple[int, str]], *marcadores: str) -> Optional[t
     return None
 
 
+# Límite de posición para `_buscar_titulo` (docs/analisis-corpus.md hallazgo
+# 4, corpus completo): las 23 apariciones reales de "pliego de clausulas
+# administrativas" como título abren la página en la posición 0; las tres
+# apariciones de la misma frase citada de pasada dentro de un párrafo
+# aparecen en la posición 265, 607 y 1662. 50 separa los dos casos con
+# margen sin arriesgarse a acercarse al segundo grupo.
+_LIMITE_POSICION_TITULO = 50
+
+
+def _buscar_titulo(paginas_norm: list[tuple[int, str]], marcador: str) -> Optional[tuple[int, str]]:
+    """Como `_buscar`, pero solo cuenta si el marcador aparece cerca del
+    principio de la página normalizada — la posición real de un título de
+    portada, nunca de una mención de pasada en medio de un párrafo. No es el
+    comportamiento por defecto de `_buscar`: otros marcadores de este mismo
+    clasificador (p.ej. "pliego de prescripciones tecnicas") sí aparecen
+    lejos del principio en documentos reales y correctamente clasificados
+    (portadas con índice antes del título, layout a dos columnas), así que
+    esta restricción se aplica solo donde el corpus real confirma que hace
+    falta — ver docstring del módulo."""
+    for numero, texto in paginas_norm:
+        indice = texto.find(marcador)
+        if indice != -1 and indice <= _LIMITE_POSICION_TITULO:
+            return numero, marcador
+    return None
+
+
 def clasificar(paginas: list[PaginaTexto]) -> ResultadoClasificacion:
     if not paginas:
         return ResultadoClasificacion(TipoDocumento.otro, Decimal("0"), "", None)
@@ -98,18 +136,34 @@ def clasificar(paginas: list[PaginaTexto]) -> ResultadoClasificacion:
     if hallazgo:
         return ResultadoClasificacion(TipoDocumento.contrato, Decimal("0.9"), hallazgo[1], hallazgo[0])
 
-    # 5. Pliego: administrativo, técnico, o el "Documento de Pliegos" índice
+    # 5. Propuesta de Dirección Técnica (L9_CM.32-FE), tercera plantilla de
+    # adjudicación: código de plantilla único e inequívoco, igual que "lc.27"
+    # para la regla 2. Tiene que ir antes de la regla 6 (pliego): su propio
+    # texto cita de pasada "el Pliego de Cláusulas Administrativas
+    # Particulares" (docs/analisis-corpus.md hallazgo 4), y sin esta regla
+    # antes caía en ese falso positivo en vez de en su propia familia.
+    hallazgo = _buscar(pn, "l9_cm.32-fe")
+    if hallazgo:
+        return ResultadoClasificacion(TipoDocumento.propuesta_dt, Decimal("0.95"), hallazgo[1], hallazgo[0])
+
+    # 6. Pliego: administrativo, técnico, o el "Documento de Pliegos" índice
     # que también es un formulario PCSP pero sin datos de adjudicación.
-    for titulo in (
-        "pliego de clausulas administrativas",
-        "pliego de prescripciones tecnicas",
-        "documento de pliegos",
-    ):
+    # "pliego de clausulas administrativas" exige posición de título
+    # (`_buscar_titulo`, ver su docstring y el docstring del módulo,
+    # hallazgo 4): la misma frase aparece de pasada, a mitad de página, en
+    # documentos que solo citan el pliego sin ser ellos mismos un pliego.
+    # Los otros dos marcadores de esta familia no muestran ese problema en
+    # el corpus real (a veces aparecen lejos del principio en un Pliego
+    # real, p.ej. tras un índice) y mantienen la búsqueda normal.
+    hallazgo = _buscar_titulo(pn, "pliego de clausulas administrativas")
+    if hallazgo:
+        return ResultadoClasificacion(TipoDocumento.pliego, Decimal("0.9"), hallazgo[1], hallazgo[0])
+    for titulo in ("pliego de prescripciones tecnicas", "documento de pliegos"):
         hallazgo = _buscar(pn, titulo)
         if hallazgo:
             return ResultadoClasificacion(TipoDocumento.pliego, Decimal("0.9"), hallazgo[1], hallazgo[0])
 
-    # 6. Anejo suelto (p.ej. "Criterios técnicos"): un documento cuyo título
+    # 7. Anejo suelto (p.ej. "Criterios técnicos"): un documento cuyo título
     # es explícitamente un anejo numerado, no un Pliego que lo contiene.
     hallazgo = _buscar(pn, "criterios tecnicos para el suministro")
     if hallazgo:

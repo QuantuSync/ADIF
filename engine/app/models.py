@@ -38,6 +38,13 @@ class TipoDocumento(str, enum.Enum):
     contrato = "contrato"
     anejo = "anejo"
     pliego = "pliego"
+    # Tercera plantilla de propuesta (código "L9_CM.32-FE",
+    # "INFORME-PROPUESTA DE ADJUDICACIÓN DE CONTRATO"), usada por Dirección
+    # Técnica en vez de la Mesa de Contratación (docs/analisis-corpus.md
+    # hallazgo 4): mismo tipo de hecho que propuesta_lc27 (declara baja y
+    # adjudicatario) pero con anatomía propia, así que es su propio tipo, no
+    # un alias forzado.
+    propuesta_dt = "propuesta_dt"
     otro = "otro"
 
 

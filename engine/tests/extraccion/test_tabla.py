@@ -64,3 +64,19 @@ def test_celdas_con_codigo_partido_por_salto_de_linea():
     assert len(tablas) == 1
     assert tablas[0].filas[0][0] == "P-\n001"
     assert len(tablas[0].filas) == 13
+
+
+def test_codigo_con_guion_unicode_se_reconoce_como_fila_de_datos():
+    # docs/analisis-corpus.md hallazgo 2: expediente real 6.23/28510.0018,
+    # página 12, cuadro de precios de carriles con código "P‐01".."P‐13"
+    # (guion U+2010, no ASCII). Antes del arreglo esta tabla se descartaba
+    # entera como espuria porque ninguna fila pasaba `_es_fila_de_datos`.
+    with pdfplumber.open(fx.ANEJO_PRECIOS_CARRILES_GUION_UNICODE) as pdf:
+        tablas = extraer_tablas_pagina(pdf.pages[11])  # página 12
+
+    assert len(tablas) == 1  # la segunda tabla de la página es la leyenda espuria, sin código
+    tabla = tablas[0]
+    assert normalizar(tabla.cabecera[1]) == "codigo"
+    assert len(tabla.filas) == 13
+    assert tabla.filas[0][1] == "P‐01"  # el guion Unicode se conserva en la celda cruda
+    assert tabla.filas[-1][1] == "P‐13"
