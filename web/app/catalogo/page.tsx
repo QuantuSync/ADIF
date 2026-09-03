@@ -8,7 +8,8 @@ export default function PaginaCatalogo() {
   const apiUrlNavegador = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
   return (
     <main>
-      <h1 style={{ fontSize: "1.7rem" }}>Catálogo de materiales</h1>
+      <h1 className="page-title">Catálogo de materiales</h1>
+      <p className="page-subtitle">Un catálogo único, acumulativo, para todos los expedientes.</p>
       <CatalogoPanel apiUrl={apiUrlNavegador} />
     </main>
   );

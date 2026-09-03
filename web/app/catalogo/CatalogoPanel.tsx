@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { formatearImporte, formatearNumero, formatearPorcentaje, IconExternal, IconSearch } from "../ui";
 
 type LineaCatalogo = {
   id: number;
@@ -37,18 +38,6 @@ type RespuestaCatalogo = {
 };
 
 const TAMANO_PAGINA = 25;
-
-function formatearImporte(valor: string | null): string {
-  if (valor === null) return "—";
-  return Number(valor).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 4 });
-}
-
-const inputEstilo: React.CSSProperties = {
-  padding: "0.5rem 0.6rem",
-  fontSize: "1rem",
-  border: "1px solid #9ca3af",
-  borderRadius: "4px",
-};
 
 export default function CatalogoPanel({ apiUrl }: { apiUrl: string }) {
   const [matricula, setMatricula] = useState("");
@@ -101,73 +90,72 @@ export default function CatalogoPanel({ apiUrl }: { apiUrl: string }) {
       {/* Búsqueda por matrícula: la pregunta que ADIF realmente tiene — cómo
           evoluciona el precio de un material a través de todos los
           expedientes — así que va primera y más grande. */}
-      <div style={{ marginBottom: "1.25rem" }}>
-        <label style={{ display: "block", fontSize: "1.15rem", fontWeight: 700, marginBottom: "0.4rem" }}>
-          Buscar por matrícula (todos los expedientes)
+      <div className="card">
+        <label className="section-label" htmlFor="buscar-matricula">
+          Buscar por matrícula, en todos los expedientes
         </label>
-        <input
-          value={matricula}
-          onChange={(e) => actualizarFiltro(setMatricula)(e.target.value)}
-          placeholder="697500900"
-          style={{ ...inputEstilo, fontSize: "1.2rem", padding: "0.6rem 0.8rem", minWidth: "20rem" }}
-        />
+        <div style={{ position: "relative", maxWidth: "28rem" }}>
+          <input
+            id="buscar-matricula"
+            value={matricula}
+            onChange={(e) => actualizarFiltro(setMatricula)(e.target.value)}
+            placeholder="697500900"
+            className="input input-lg"
+            style={{ paddingLeft: "2.6rem" }}
+          />
+          <span style={{ position: "absolute", left: "0.85rem", top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)" }}>
+            <IconSearch />
+          </span>
+        </div>
       </div>
 
-      <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", marginBottom: "1rem" }}>
+      <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", margin: "1.25rem 0" }}>
         <input
           value={expediente}
           onChange={(e) => actualizarFiltro(setExpediente)(e.target.value)}
           placeholder="Filtrar por expediente"
-          style={{ ...inputEstilo, minWidth: "14rem" }}
+          className="input"
+          style={{ minWidth: "14rem", width: "auto" }}
         />
         <input
           value={lote}
           onChange={(e) => actualizarFiltro(setLote)(e.target.value)}
           placeholder="Lote"
-          style={{ ...inputEstilo, minWidth: "8rem" }}
+          className="input"
+          style={{ minWidth: "8rem", width: "auto" }}
         />
         <input
           value={q}
           onChange={(e) => actualizarFiltro(setQ)(e.target.value)}
           placeholder="Buscar en descripción / código"
-          style={{ ...inputEstilo, minWidth: "16rem" }}
+          className="input"
+          style={{ minWidth: "16rem", width: "auto" }}
         />
-        <a
-          href={`${apiUrl}/catalogo/exportar.xlsx`}
-          style={{
-            padding: "0.5rem 1rem",
-            background: "#111827",
-            color: "#fff",
-            textDecoration: "none",
-            borderRadius: "4px",
-            fontWeight: 600,
-            fontSize: "1rem",
-            alignSelf: "center",
-          }}
-        >
+        <a href={`${apiUrl}/catalogo/exportar.xlsx`} className="btn btn-primary" style={{ marginLeft: "auto" }}>
           Exportar Excel
         </a>
       </div>
 
-      {error && <p style={{ color: "crimson", fontSize: "1.05rem" }}>Error al conectar con la API: {error}</p>}
-      {cargando && <p style={{ color: "#6b7280" }}>Cargando…</p>}
+      {error && <p className="error-banner">Error al conectar con la API: {error}</p>}
 
       {datos && (
         <>
-          <p style={{ color: "#374151", fontSize: "1rem" }}>{datos.total} línea(s) de catálogo</p>
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ borderCollapse: "collapse", width: "100%", fontSize: "1rem" }}>
+          <p className="muted" style={{ marginBottom: "0.6rem" }}>
+            {cargando ? "Cargando…" : `${datos.total} línea(s) de catálogo`}
+          </p>
+          <div className="table-scroll" style={{ maxHeight: "70vh", overflowY: "auto" }}>
+            <table className="table">
               <thead>
-                <tr style={{ textAlign: "left", borderBottom: "2px solid #111827" }}>
-                  <th style={{ padding: "0.5rem" }}>Expediente</th>
-                  <th style={{ padding: "0.5rem" }}>Lote</th>
-                  <th style={{ padding: "0.5rem" }}>Matrícula</th>
-                  <th style={{ padding: "0.5rem" }}>Código</th>
-                  <th style={{ padding: "0.5rem" }}>Descripción</th>
-                  <th style={{ padding: "0.5rem" }}>Cantidad</th>
-                  <th style={{ padding: "0.5rem" }}>Precio unitario</th>
-                  <th style={{ padding: "0.5rem" }}>Precio adjudicado</th>
-                  <th style={{ padding: "0.5rem" }}>Revisión</th>
+                <tr>
+                  <th>Expediente</th>
+                  <th>Lote</th>
+                  <th>Matrícula</th>
+                  <th>Código</th>
+                  <th>Descripción</th>
+                  <th className="num">Cantidad</th>
+                  <th className="num">Precio unitario</th>
+                  <th className="num">Precio adjudicado</th>
+                  <th>Revisión</th>
                 </tr>
               </thead>
               <tbody>
@@ -175,43 +163,45 @@ export default function CatalogoPanel({ apiUrl }: { apiUrl: string }) {
                   <tr
                     key={linea.id}
                     onClick={() => setSeleccion(linea)}
-                    style={{
-                      borderBottom: "1px solid #e5e7eb",
-                      cursor: "pointer",
-                      background: seleccion?.id === linea.id ? "#eff6ff" : undefined,
-                    }}
+                    className={`clickable${seleccion?.id === linea.id ? " selected" : ""}`}
                   >
-                    <td style={{ padding: "0.5rem" }}>{linea.codigo_expediente}</td>
-                    <td style={{ padding: "0.5rem" }}>{linea.identificador_lote}</td>
-                    <td style={{ padding: "0.5rem", fontWeight: 600 }}>{linea.matricula ?? "—"}</td>
-                    <td style={{ padding: "0.5rem" }}>{linea.codigo_precio ?? "—"}</td>
-                    <td style={{ padding: "0.5rem" }}>{linea.descripcion}</td>
-                    <td style={{ padding: "0.5rem" }}>{linea.cantidad ?? "—"}</td>
-                    <td style={{ padding: "0.5rem" }}>{formatearImporte(linea.precio_unitario)}</td>
-                    <td style={{ padding: "0.5rem" }}>{formatearImporte(linea.precio_adjudicado)}</td>
-                    <td style={{ padding: "0.5rem" }}>{linea.estado_revision}</td>
+                    <td>{linea.codigo_expediente}</td>
+                    <td>{linea.identificador_lote}</td>
+                    <td style={{ fontWeight: 700 }} className="mono">
+                      {linea.matricula ?? "—"}
+                    </td>
+                    <td className="mono">{linea.codigo_precio ?? "—"}</td>
+                    <td>{linea.descripcion}</td>
+                    <td className="num">{formatearNumero(linea.cantidad, 2)}</td>
+                    <td className="num">{formatearNumero(linea.precio_unitario)}</td>
+                    <td className="num">{formatearNumero(linea.precio_adjudicado)}</td>
+                    <td>
+                      <span className={`badge ${linea.estado_revision === "confirmado" ? "badge-green" : "badge-slate"}`}>
+                        {linea.estado_revision}
+                      </span>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          {datos.lineas.length === 0 && <p>Sin resultados para estos filtros.</p>}
+          {datos.lineas.length === 0 && <p className="empty-state">Sin resultados para estos filtros.</p>}
 
           <div style={{ display: "flex", gap: "0.75rem", alignItems: "center", marginTop: "1rem" }}>
             <button
               onClick={() => setPagina((p) => Math.max(1, p - 1))}
               disabled={pagina <= 1}
-              style={{ padding: "0.4rem 0.8rem", fontSize: "1rem" }}
+              className="btn btn-secondary btn-sm"
             >
               ← Anterior
             </button>
-            <span>
+            <span className="muted">
               Página {pagina} de {totalPaginas}
             </span>
             <button
               onClick={() => setPagina((p) => Math.min(totalPaginas, p + 1))}
               disabled={pagina >= totalPaginas}
-              style={{ padding: "0.4rem 0.8rem", fontSize: "1rem" }}
+              className="btn btn-secondary btn-sm"
             >
               Siguiente →
             </button>
@@ -223,83 +213,81 @@ export default function CatalogoPanel({ apiUrl }: { apiUrl: string }) {
           documento, página y fragmento sale cada cifra — es lo que la
           versión hecha con Copilot no puede ofrecer. */}
       {seleccion && (
-        <div
-          style={{
-            marginTop: "1.5rem",
-            padding: "1.25rem",
-            border: "2px solid #111827",
-            borderRadius: "8px",
-            fontSize: "1.05rem",
-          }}
-        >
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-            <h2 style={{ fontSize: "1.3rem", margin: 0 }}>
-              Trazabilidad — {seleccion.codigo_precio ?? seleccion.matricula ?? `línea ${seleccion.id}`}
-            </h2>
-            <button onClick={() => setSeleccion(null)} style={{ padding: "0.3rem 0.7rem" }}>
+        <div className="trace-panel" style={{ marginTop: "1.5rem" }}>
+          <div className="trace-header">
+            <h2>Trazabilidad — {seleccion.codigo_precio ?? seleccion.matricula ?? `línea ${seleccion.id}`}</h2>
+            <button onClick={() => setSeleccion(null)} className="btn btn-sm" style={{ background: "rgba(255,255,255,0.15)", color: "#fff", borderColor: "transparent" }}>
               Cerrar
             </button>
           </div>
-          <p>
-            <strong>Expediente:</strong> {seleccion.codigo_expediente}
-            {seleccion.codigo_matriz && <> · <strong>Matriz:</strong> {seleccion.codigo_matriz}</>}
-            {seleccion.nombre_proyecto && (
-              <>
-                <br />
-                <strong>Proyecto:</strong> {seleccion.nombre_proyecto}
-              </>
+          <div className="trace-body">
+            <div className="trace-row">
+              <dl className="trace-field">
+                <dt>Expediente</dt>
+                <dd>{seleccion.codigo_expediente}</dd>
+              </dl>
+              {seleccion.codigo_matriz && (
+                <dl className="trace-field">
+                  <dt>Matriz</dt>
+                  <dd>{seleccion.codigo_matriz}</dd>
+                </dl>
+              )}
+              <dl className="trace-field">
+                <dt>Código interno</dt>
+                <dd>{seleccion.codigo_interno ?? "sin cruzar con el Excel de códigos"}</dd>
+              </dl>
+              {seleccion.nombre_proyecto && (
+                <dl className="trace-field" style={{ flex: "1 1 100%" }}>
+                  <dt>Proyecto</dt>
+                  <dd>{seleccion.nombre_proyecto}</dd>
+                </dl>
+              )}
+            </div>
+
+            <div>
+              <p className="section-label">Precio y baja</p>
+              {seleccion.baja_lote ? (
+                <div className="formula">
+                  <span>{formatearImporte(seleccion.precio_unitario)}</span>
+                  <span className="op">×</span>
+                  <span>(1 − {formatearPorcentaje(seleccion.baja_lote)})</span>
+                  <span className="op">=</span>
+                  <span className="result">{formatearImporte(seleccion.precio_adjudicado)}</span>
+                </div>
+              ) : (
+                <div className="formula">
+                  <span>{formatearImporte(seleccion.precio_unitario)}</span>
+                  <span className="op muted">— sin baja de lote todavía</span>
+                </div>
+              )}
+            </div>
+
+            <div>
+              <p className="section-label">Origen documental</p>
+              {seleccion.documento_origen_id ? (
+                <a
+                  href={`${apiUrl}/documentos/${seleccion.documento_origen_id}/archivo`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="btn btn-secondary btn-sm"
+                >
+                  <IconExternal />
+                  {seleccion.documento_origen_nombre ?? `documento ${seleccion.documento_origen_id}`}
+                  {seleccion.pagina && ` · página ${seleccion.pagina}`}
+                </a>
+              ) : (
+                <span className="muted">—</span>
+              )}
+              {seleccion.fragmento && <code className="fragment" style={{ marginTop: "0.75rem" }}>{seleccion.fragmento}</code>}
+            </div>
+
+            {seleccion.comentarios && (
+              <div>
+                <p className="section-label">Comentarios</p>
+                <p style={{ margin: 0 }}>{seleccion.comentarios}</p>
+              </div>
             )}
-          </p>
-          <p>
-            <strong>Código interno:</strong> {seleccion.codigo_interno ?? "sin cruzar con el Excel de códigos"}
-          </p>
-          <p>
-            <strong>Precio unitario:</strong> {formatearImporte(seleccion.precio_unitario)} €{" "}
-            {seleccion.baja_lote && (
-              <>
-                × (1 − {(Number(seleccion.baja_lote) * 100).toFixed(2)}%) ={" "}
-                <strong>{formatearImporte(seleccion.precio_adjudicado)} €</strong>
-              </>
-            )}
-          </p>
-          <p>
-            <strong>Documento origen:</strong>{" "}
-            {seleccion.documento_origen_id ? (
-              <a
-                href={`${apiUrl}/documentos/${seleccion.documento_origen_id}/archivo`}
-                target="_blank"
-                rel="noreferrer"
-              >
-                {seleccion.documento_origen_nombre ?? `documento ${seleccion.documento_origen_id}`}
-              </a>
-            ) : (
-              "—"
-            )}
-            {seleccion.pagina && <> · página {seleccion.pagina}</>}
-          </p>
-          {seleccion.fragmento && (
-            <p>
-              <strong>Fragmento extraído:</strong>
-              <br />
-              <code
-                style={{
-                  display: "block",
-                  background: "#f3f4f6",
-                  padding: "0.6rem",
-                  borderRadius: "4px",
-                  whiteSpace: "pre-wrap",
-                  fontSize: "0.95rem",
-                }}
-              >
-                {seleccion.fragmento}
-              </code>
-            </p>
-          )}
-          {seleccion.comentarios && (
-            <p>
-              <strong>Comentarios:</strong> {seleccion.comentarios}
-            </p>
-          )}
+          </div>
         </div>
       )}
     </div>

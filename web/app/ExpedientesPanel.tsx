@@ -1,6 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import {
+  EstadoBadge,
+  accentClaseEstado,
+  formatearImporte,
+  formatearPorcentaje,
+  IconInfo,
+} from "./ui";
 
 export type Lote = {
   id: number;
@@ -27,91 +34,74 @@ export type Expediente = {
   error: string | null;
 };
 
-const ETIQUETA_ESTADO: Record<string, string> = {
-  pendiente: "Pendiente",
-  descargando: "Descargando",
-  descargado: "Descargado",
-  extrayendo: "Extrayendo",
-  esperando_matriz: "Esperando matriz",
-  pendiente_revision: "Pendiente de revisión",
-  completado: "Completado",
-  fallido: "Fallido",
-  // No existe en la Plataforma, comprobado a mano (CLAUDE.md sección 22):
-  // distinto de "Fallido" (sugiere reintentar) y de "Pendiente de revisión"
-  // (sugiere que hace falta un humano decidiendo algo).
-  sin_publicar: "No publicado",
-};
-
-const COLOR_ESTADO: Record<string, string> = {
-  pendiente: "#6b7280",
-  descargando: "#2563eb",
-  descargado: "#2563eb",
-  extrayendo: "#2563eb",
-  esperando_matriz: "#2563eb",
-  pendiente_revision: "#b45309",
-  completado: "#15803d",
-  fallido: "#b91c1c",
-  sin_publicar: "#6b7280",
-};
-
 const INTERVALO_SONDEO_MS = 3000;
 
-function formatearPorcentaje(valor: string | null): string {
-  if (valor === null) return "—";
-  return `${(Number(valor) * 100).toFixed(2)}%`;
+// El hallazgo central del proyecto (CLAUDE.md sección 4): en el modelo de
+// "baja única por lote", licitación y adjudicación son a menudo el mismo
+// importe (el presupuesto es un techo de gasto, no cambia) y la baja real
+// vive solo en el porcentaje declarado. Sin esta nota, esa fila se lee como
+// un error ("¿por qué no ha bajado nada?") en vez de como el comportamiento
+// esperado.
+function esCasoPreciosUnitarios(exp: Expediente): boolean {
+  if (exp.importe_licitacion === null || exp.importe_adjudicacion === null) return false;
+  if (Number(exp.importe_licitacion) !== Number(exp.importe_adjudicacion)) return false;
+  const baja = exp.baja_global !== null ? Number(exp.baja_global) : null;
+  return (baja !== null && baja > 0) || exp.baja_variable_por_lote === true;
 }
 
-function formatearImporte(valor: string | null): string {
-  if (valor === null) return "—";
-  return `${Number(valor).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
-}
-
-// Un expediente con lotes de baja distinta no tiene una baja única (CLAUDE.md,
-// encargo de la sesión de multi-lote): nunca se muestra un valor inventado
-// ni un vacío mudo — si varía por lote, lo dice explícitamente y despliega
-// el detalle por lote.
 function CeldaBaja({ expediente }: { expediente: Expediente }) {
-  if (expediente.lotes.length <= 1) {
-    return <>{formatearPorcentaje(expediente.baja_global)}</>;
-  }
-  if (!expediente.baja_variable_por_lote) {
-    // Varios lotes pero comparten la misma baja: se muestra igual que si
-    // fuera una sola, con el detalle disponible por si hace falta.
-    return (
+  const cuerpo =
+    expediente.lotes.length <= 1 ? (
+      <strong>{formatearPorcentaje(expediente.baja_global)}</strong>
+    ) : !expediente.baja_variable_por_lote ? (
       <details>
-        <summary style={{ cursor: "pointer" }}>{formatearPorcentaje(expediente.baja_global)}</summary>
+        <summary className="chip" style={{ display: "inline-flex" }}>
+          <strong>{formatearPorcentaje(expediente.baja_global)}</strong>
+        </summary>
+        <TablaLotes lotes={expediente.lotes} />
+      </details>
+    ) : (
+      <details>
+        <summary className="chip" style={{ display: "inline-flex" }}>
+          <span className="badge badge-amber">Varía por lote</span>
+        </summary>
         <TablaLotes lotes={expediente.lotes} />
       </details>
     );
-  }
+
   return (
-    <details>
-      <summary style={{ cursor: "pointer", color: "#b45309", fontWeight: 600 }}>Varía por lote</summary>
-      <TablaLotes lotes={expediente.lotes} />
-    </details>
+    <>
+      {cuerpo}
+      {esCasoPreciosUnitarios(expediente) && (
+        <div className="badge badge-blue" style={{ marginTop: "0.35rem" }} title="El importe de licitación y el de adjudicación coinciden: es el modelo de baja única sobre precios unitarios (CLAUDE.md sección 4), no un error de extracción.">
+          <IconInfo />
+          Importe fijo, baja en precios unitarios
+        </div>
+      )}
+    </>
   );
 }
 
 function TablaLotes({ lotes }: { lotes: Lote[] }) {
   return (
-    <table style={{ marginTop: "0.4rem", fontSize: "0.85rem", borderCollapse: "collapse" }}>
+    <table className="table" style={{ marginTop: "0.5rem", width: "auto", fontSize: "0.85rem" }}>
       <thead>
         <tr>
-          <th style={{ textAlign: "left", padding: "0.2rem 0.5rem 0.2rem 0" }}>Lote</th>
-          <th style={{ textAlign: "left", padding: "0.2rem 0.5rem" }}>Baja</th>
-          <th style={{ textAlign: "left", padding: "0.2rem 0.5rem" }}>Licitación</th>
-          <th style={{ textAlign: "left", padding: "0.2rem 0.5rem" }}>Adjudicación</th>
-          <th style={{ textAlign: "left", padding: "0.2rem 0.5rem" }}>Adjudicatario</th>
+          <th>Lote</th>
+          <th className="num">Baja</th>
+          <th className="num">Licitación</th>
+          <th className="num">Adjudicación</th>
+          <th>Adjudicatario</th>
         </tr>
       </thead>
       <tbody>
         {lotes.map((lote) => (
           <tr key={lote.id}>
-            <td style={{ padding: "0.2rem 0.5rem 0.2rem 0" }}>{lote.identificador_lote}</td>
-            <td style={{ padding: "0.2rem 0.5rem" }}>{formatearPorcentaje(lote.baja_lote)}</td>
-            <td style={{ padding: "0.2rem 0.5rem" }}>{formatearImporte(lote.importe_licitacion)}</td>
-            <td style={{ padding: "0.2rem 0.5rem" }}>{formatearImporte(lote.importe_adjudicacion)}</td>
-            <td style={{ padding: "0.2rem 0.5rem" }}>{lote.adjudicatario ?? "—"}</td>
+            <td>{lote.identificador_lote}</td>
+            <td className="num">{formatearPorcentaje(lote.baja_lote)}</td>
+            <td className="num">{formatearImporte(lote.importe_licitacion)}</td>
+            <td className="num">{formatearImporte(lote.importe_adjudicacion)}</td>
+            <td>{lote.adjudicatario ?? "—"}</td>
           </tr>
         ))}
       </tbody>
@@ -201,95 +191,131 @@ export default function ExpedientesPanel({
     }
   }
 
+  const resumen = {
+    completado: expedientes.filter((e) => e.estado === "completado").length,
+    revision: expedientes.filter((e) => e.estado === "pendiente_revision" || e.estado === "fallido").length,
+    sinPublicar: expedientes.filter((e) => e.estado === "sin_publicar").length,
+    enCurso: expedientes.filter((e) =>
+      ["pendiente", "descargando", "descargado", "extrayendo", "esperando_matriz"].includes(e.estado)
+    ).length,
+  };
+
   return (
     <div>
-      <form onSubmit={crearExpediente} style={{ display: "flex", gap: "0.5rem", marginBottom: "1.5rem", flexWrap: "wrap" }}>
-        <input
-          value={codigoNuevo}
-          onChange={(e) => setCodigoNuevo(e.target.value)}
-          placeholder="Código de expediente (6.24/28510.0088)"
-          style={{ padding: "0.4rem", minWidth: "16rem" }}
-        />
-        <input
-          value={matrizNuevo}
-          onChange={(e) => setMatrizNuevo(e.target.value)}
-          placeholder="Código matriz (opcional)"
-          style={{ padding: "0.4rem", minWidth: "14rem" }}
-        />
-        <button type="submit" disabled={creando} style={{ padding: "0.4rem 0.8rem" }}>
-          {creando ? "Añadiendo..." : "Añadir expediente"}
-        </button>
-      </form>
+      <div className="card" style={{ marginBottom: "1.5rem" }}>
+        <p className="section-label">Añadir expediente</p>
+        <form onSubmit={crearExpediente} style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", alignItems: "end" }}>
+          <div style={{ minWidth: "16rem" }}>
+            <label className="field-label" htmlFor="codigo-nuevo">
+              Código de expediente
+            </label>
+            <input
+              id="codigo-nuevo"
+              className="input"
+              value={codigoNuevo}
+              onChange={(e) => setCodigoNuevo(e.target.value)}
+              placeholder="6.24/28510.0088"
+            />
+          </div>
+          <div style={{ minWidth: "14rem" }}>
+            <label className="field-label" htmlFor="matriz-nuevo">
+              Código matriz (opcional)
+            </label>
+            <input
+              id="matriz-nuevo"
+              className="input"
+              value={matrizNuevo}
+              onChange={(e) => setMatrizNuevo(e.target.value)}
+              placeholder="2.18/04703.0019"
+            />
+          </div>
+          <button type="submit" disabled={creando} className="btn btn-primary">
+            {creando ? "Añadiendo…" : "Añadir expediente"}
+          </button>
+        </form>
+      </div>
+
+      <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", marginBottom: "1.25rem" }}>
+        <span className="badge badge-green">{resumen.completado} completados</span>
+        <span className="badge badge-amber">{resumen.revision} en revisión</span>
+        <span className="badge badge-slate">{resumen.sinPublicar} no publicados</span>
+        {resumen.enCurso > 0 && <span className="badge badge-blue">{resumen.enCurso} en curso</span>}
+      </div>
 
       {errorConexion && (
-        <p style={{ color: "crimson" }}>Error al conectar con la API ({apiUrl}): {errorConexion}</p>
+        <p className="error-banner">
+          Error al conectar con la API ({apiUrl}): {errorConexion}
+        </p>
       )}
 
-      <table style={{ borderCollapse: "collapse", width: "100%" }}>
-        <thead>
-          <tr style={{ textAlign: "left", borderBottom: "2px solid #ccc" }}>
-            <th style={{ padding: "0.4rem" }}>Expediente</th>
-            <th style={{ padding: "0.4rem" }}>Matriz</th>
-            <th style={{ padding: "0.4rem" }}>Estado</th>
-            <th style={{ padding: "0.4rem" }}>Licitación</th>
-            <th style={{ padding: "0.4rem" }}>Adjudicación</th>
-            <th style={{ padding: "0.4rem" }}>Baja</th>
-            <th style={{ padding: "0.4rem" }}>Acciones</th>
-          </tr>
-        </thead>
-        <tbody>
-          {expedientes.map((exp) => {
-            const enCurso = exp.estado === "descargando" || exp.estado === "extrayendo";
-            // No reprocesar por accidente un expediente ya completado
-            // (encargo de la sesión de pulido): hay que borrarlo y crearlo
-            // de nuevo si de verdad hace falta relanzarlo.
-            const completado = exp.estado === "completado";
-            return (
-              <tr key={exp.id} style={{ borderBottom: "1px solid #eee" }}>
-                <td style={{ padding: "0.4rem" }}>{exp.codigo_expediente}</td>
-                <td style={{ padding: "0.4rem" }}>{exp.codigo_matriz ?? "—"}</td>
-                <td style={{ padding: "0.4rem" }}>
-                  <span
-                    style={{
-                      color: COLOR_ESTADO[exp.estado] ?? "#000",
-                      fontWeight: 600,
-                    }}
-                  >
-                    {ETIQUETA_ESTADO[exp.estado] ?? exp.estado}
-                  </span>
-                  {exp.error && (
-                    <div style={{ fontSize: "0.8rem", color: "#b91c1c", marginTop: "0.2rem" }}>{exp.error}</div>
-                  )}
-                </td>
-                <td style={{ padding: "0.4rem" }}>{formatearImporte(exp.importe_licitacion)}</td>
-                <td style={{ padding: "0.4rem" }}>{formatearImporte(exp.importe_adjudicacion)}</td>
-                <td style={{ padding: "0.4rem" }}>
-                  <CeldaBaja expediente={exp} />
-                </td>
-                <td style={{ padding: "0.4rem" }}>
-                  <button
-                    onClick={() => lanzarDescarga(exp.id)}
-                    disabled={enCurso || completado || lanzando === exp.id}
-                    title={completado ? "Ya está completado — no se puede relanzar desde aquí" : undefined}
-                    style={{ padding: "0.3rem 0.6rem", marginRight: "0.4rem" }}
-                  >
-                    Descargar
-                  </button>
-                  <button
-                    onClick={() => lanzarExtraccion(exp.id)}
-                    disabled={enCurso || completado || lanzando === exp.id}
-                    title={completado ? "Ya está completado — no se puede relanzar desde aquí" : undefined}
-                    style={{ padding: "0.3rem 0.6rem" }}
-                  >
-                    Extraer
-                  </button>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-      {expedientes.length === 0 && <p>Sin expedientes todavía.</p>}
+      <div className="table-scroll">
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Expediente</th>
+              <th>Matriz</th>
+              <th>Estado</th>
+              <th className="num">Licitación</th>
+              <th className="num">Adjudicación</th>
+              <th className="num">Baja</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {expedientes.map((exp) => {
+              const enCurso = exp.estado === "descargando" || exp.estado === "extrayendo";
+              // No reprocesar por accidente un expediente ya completado
+              // (encargo de la sesión de pulido): hay que borrarlo y crearlo
+              // de nuevo si de verdad hace falta relanzarlo.
+              const completado = exp.estado === "completado";
+              const noPublicado = exp.estado === "sin_publicar";
+              return (
+                <tr
+                  key={exp.id}
+                  className={`row-accent ${accentClaseEstado(exp.estado)}${noPublicado ? " row-muted" : ""}`}
+                >
+                  <td style={{ fontWeight: 600 }}>{exp.codigo_expediente}</td>
+                  <td>{exp.codigo_matriz ?? "—"}</td>
+                  <td>
+                    <EstadoBadge estado={exp.estado} />
+                    {exp.error && !noPublicado && (
+                      <div className="muted" style={{ fontSize: "0.85rem", marginTop: "0.3rem", maxWidth: "26rem" }}>
+                        {exp.error}
+                      </div>
+                    )}
+                  </td>
+                  <td className="num">{formatearImporte(exp.importe_licitacion)}</td>
+                  <td className="num">{formatearImporte(exp.importe_adjudicacion)}</td>
+                  <td className="num">
+                    <CeldaBaja expediente={exp} />
+                  </td>
+                  <td>
+                    <div style={{ display: "flex", gap: "0.4rem" }}>
+                      <button
+                        onClick={() => lanzarDescarga(exp.id)}
+                        disabled={enCurso || completado || lanzando === exp.id}
+                        title={completado ? "Ya está completado — no se puede relanzar desde aquí" : undefined}
+                        className="btn btn-secondary btn-sm"
+                      >
+                        Descargar
+                      </button>
+                      <button
+                        onClick={() => lanzarExtraccion(exp.id)}
+                        disabled={enCurso || completado || lanzando === exp.id}
+                        title={completado ? "Ya está completado — no se puede relanzar desde aquí" : undefined}
+                        className="btn btn-secondary btn-sm"
+                      >
+                        Extraer
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {expedientes.length === 0 && <p className="muted" style={{ marginTop: "1rem" }}>Sin expedientes todavía.</p>}
     </div>
   );
 }

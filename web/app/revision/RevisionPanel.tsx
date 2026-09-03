@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { formatearNumero, IconAlertTriangle, IconInfo } from "../ui";
+import { interpretarMotivoLinea, interpretarMotivos } from "../motivos";
 
 type ExpedienteResumen = {
   id: number;
@@ -30,6 +32,7 @@ type LineaCatalogo = {
   precio_unitario: string | null;
   precio_adjudicado: string | null;
   estado_revision: string;
+  motivo_revision: string | null;
   documento_origen_id: number | null;
   documento_origen_nombre: string | null;
   pagina: number | null;
@@ -41,18 +44,41 @@ type DetalleRevision = {
   lineas: LineaCatalogo[];
 };
 
-const inputEstilo: React.CSSProperties = {
-  padding: "0.4rem 0.5rem",
-  fontSize: "0.95rem",
-  border: "1px solid #9ca3af",
-  borderRadius: "4px",
-  width: "9rem",
+const ETIQUETA_TIPO_DOCUMENTO: Record<string, string> = {
+  anuncio_pcsp: "Anuncio PCSP",
+  propuesta_lc27: "Propuesta de adjudicación",
+  propuesta_dt: "Propuesta (Dirección Técnica)",
+  resolucion_adjudicacion: "Resolución de adjudicación",
+  contrato: "Contrato",
+  anejo: "Anejo",
+  pliego: "Pliego",
+  otro: "Otro documento",
 };
+
+function ReasonCard({ categoria, texto, tecnico }: { categoria: "contradiccion" | "limitacion"; texto: string; tecnico: string }) {
+  const esContradiccion = categoria === "contradiccion";
+  return (
+    <div className={`reason-card reason-card--${categoria}`}>
+      <span className="icon">{esContradiccion ? <IconAlertTriangle /> : <IconInfo />}</span>
+      <div style={{ flex: 1 }}>
+        <div className="reason-kind">{esContradiccion ? "Dato contradictorio en el documento" : "Límite del sistema"}</div>
+        <div className="reason-text">{texto}</div>
+        {tecnico !== texto && (
+          <details className="reason-tech">
+            <summary>Ver mensaje técnico</summary>
+            <code>{tecnico}</code>
+          </details>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
   const [lista, setLista] = useState<ExpedienteResumen[]>([]);
   const [seleccionId, setSeleccionId] = useState<number | null>(null);
   const [detalle, setDetalle] = useState<DetalleRevision | null>(null);
+  const [documentoActivo, setDocumentoActivo] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [guardando, setGuardando] = useState(false);
   const [correccion, setCorreccion] = useState({
@@ -79,6 +105,7 @@ export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
       if (!res.ok) throw new Error(`la API respondió ${res.status}`);
       const datos: DetalleRevision = await res.json();
       setDetalle(datos);
+      setDocumentoActivo(datos.documentos[0]?.id ?? null);
       setCorreccion({
         importe_licitacion: datos.expediente.importe_licitacion ?? "",
         importe_adjudicacion: datos.expediente.importe_adjudicacion ?? "",
@@ -134,144 +161,192 @@ export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
     if (seleccionId !== null) await cargarDetalle(seleccionId);
   }
 
+  const motivos = useMemo(() => interpretarMotivos(detalle?.expediente.error), [detalle]);
+
   return (
-    <div style={{ display: "flex", gap: "2rem", alignItems: "flex-start" }}>
-      <div style={{ minWidth: "20rem" }}>
-        {error && <p style={{ color: "crimson" }}>{error}</p>}
-        {lista.length === 0 && <p style={{ color: "#374151" }}>Sin casos pendientes de revisión.</p>}
-        <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-          {lista.map((exp) => (
-            <li key={exp.id}>
+    <div className="revision-layout">
+      <div>
+        {error && <p className="error-banner">{error}</p>}
+        {lista.length === 0 && !error && <p className="empty-state">Sin casos pendientes de revisión.</p>}
+        <div className="revision-list">
+          {lista.map((exp) => {
+            const primerMotivo = interpretarMotivos(exp.error)[0];
+            return (
               <button
+                key={exp.id}
                 onClick={() => setSeleccionId(exp.id)}
-                style={{
-                  display: "block",
-                  width: "100%",
-                  textAlign: "left",
-                  padding: "0.75rem",
-                  marginBottom: "0.5rem",
-                  border: seleccionId === exp.id ? "2px solid #111827" : "1px solid #d1d5db",
-                  borderRadius: "6px",
-                  background: seleccionId === exp.id ? "#eff6ff" : "#fff",
-                  cursor: "pointer",
-                  fontSize: "1rem",
-                }}
+                className={`revision-item${seleccionId === exp.id ? " active" : ""}`}
               >
-                <strong>{exp.codigo_expediente}</strong>
-                <div style={{ fontSize: "0.9rem", color: "#b45309", marginTop: "0.2rem" }}>{exp.error}</div>
+                <span className="code">{exp.codigo_expediente}</span>
+                {exp.nombre_proyecto && <span className="hint">{exp.nombre_proyecto}</span>}
+                {primerMotivo && (
+                  <span className="hint" style={{ display: "block", marginTop: "0.3rem", color: "var(--slate-700)" }}>
+                    {primerMotivo.texto.length > 110 ? `${primerMotivo.texto.slice(0, 110)}…` : primerMotivo.texto}
+                  </span>
+                )}
               </button>
-            </li>
-          ))}
-        </ul>
+            );
+          })}
+        </div>
       </div>
 
       {detalle && (
-        <div style={{ flex: 1, fontSize: "1.05rem" }}>
-          <h2 style={{ fontSize: "1.3rem" }}>{detalle.expediente.codigo_expediente}</h2>
-          <p style={{ color: "#b45309" }}>
-            <strong>Motivo:</strong> {detalle.expediente.error}
-          </p>
+        <div>
+          <h2 style={{ fontSize: "1.35rem", color: "var(--navy-800)", margin: "0 0 0.15rem" }}>
+            {detalle.expediente.codigo_expediente}
+          </h2>
+          {detalle.expediente.nombre_proyecto && <p className="muted" style={{ margin: "0 0 1rem" }}>{detalle.expediente.nombre_proyecto}</p>}
 
-          <h3 style={{ fontSize: "1.1rem" }}>Documentos</h3>
-          <ul>
-            {detalle.documentos.map((doc) => (
-              <li key={doc.id}>
-                <a href={`${apiUrl}/documentos/${doc.id}/archivo`} target="_blank" rel="noreferrer">
-                  {doc.nombre_archivo}
-                </a>{" "}
-                <span style={{ color: "#6b7280" }}>({doc.tipo_documento})</span>
-              </li>
+          <div style={{ marginBottom: "1.5rem" }}>
+            <p className="section-label">Por qué está en revisión</p>
+            {motivos.length === 0 && <p className="muted">Sin motivo registrado.</p>}
+            {motivos.map((m, i) => (
+              <ReasonCard key={i} categoria={m.categoria} texto={m.texto} tecnico={m.tecnico} />
             ))}
-            {detalle.documentos.length === 0 && <li style={{ color: "#6b7280" }}>Sin documentos descargados.</li>}
-          </ul>
-
-          <h3 style={{ fontSize: "1.1rem" }}>Corregir datos del expediente</h3>
-          <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", marginBottom: "0.75rem" }}>
-            <label>
-              Importe licitación
-              <br />
-              <input
-                style={inputEstilo}
-                value={correccion.importe_licitacion}
-                onChange={(e) => setCorreccion({ ...correccion, importe_licitacion: e.target.value })}
-              />
-            </label>
-            <label>
-              Importe adjudicación
-              <br />
-              <input
-                style={inputEstilo}
-                value={correccion.importe_adjudicacion}
-                onChange={(e) => setCorreccion({ ...correccion, importe_adjudicacion: e.target.value })}
-              />
-            </label>
-            <label>
-              Baja (0-1)
-              <br />
-              <input
-                style={inputEstilo}
-                value={correccion.baja_global}
-                onChange={(e) => setCorreccion({ ...correccion, baja_global: e.target.value })}
-              />
-            </label>
-            <label>
-              Código matriz
-              <br />
-              <input
-                style={inputEstilo}
-                value={correccion.codigo_matriz}
-                onChange={(e) => setCorreccion({ ...correccion, codigo_matriz: e.target.value })}
-              />
-            </label>
-          </div>
-          <div style={{ display: "flex", gap: "0.75rem", marginBottom: "1.5rem" }}>
-            <button
-              onClick={() => confirmarExpediente(false)}
-              disabled={guardando}
-              style={{ padding: "0.5rem 1rem", fontSize: "1rem" }}
-            >
-              Confirmar tal cual
-            </button>
-            <button
-              onClick={() => confirmarExpediente(true)}
-              disabled={guardando}
-              style={{ padding: "0.5rem 1rem", fontSize: "1rem", fontWeight: 700 }}
-            >
-              Guardar corrección y confirmar
-            </button>
           </div>
 
-          <h3 style={{ fontSize: "1.1rem" }}>Líneas de catálogo ({detalle.lineas.length})</h3>
-          <table style={{ borderCollapse: "collapse", width: "100%", fontSize: "0.95rem" }}>
-            <thead>
-              <tr style={{ textAlign: "left", borderBottom: "2px solid #111827" }}>
-                <th style={{ padding: "0.4rem" }}>Código</th>
-                <th style={{ padding: "0.4rem" }}>Matrícula</th>
-                <th style={{ padding: "0.4rem" }}>Descripción</th>
-                <th style={{ padding: "0.4rem" }}>Precio unitario</th>
-                <th style={{ padding: "0.4rem" }}>Estado</th>
-                <th style={{ padding: "0.4rem" }} />
-              </tr>
-            </thead>
-            <tbody>
-              {detalle.lineas.map((linea) => (
-                <tr key={linea.id} style={{ borderBottom: "1px solid #e5e7eb" }}>
-                  <td style={{ padding: "0.4rem" }}>{linea.codigo_precio ?? "—"}</td>
-                  <td style={{ padding: "0.4rem" }}>{linea.matricula ?? "—"}</td>
-                  <td style={{ padding: "0.4rem" }}>{linea.descripcion}</td>
-                  <td style={{ padding: "0.4rem" }}>{linea.precio_unitario ?? "—"}</td>
-                  <td style={{ padding: "0.4rem" }}>{linea.estado_revision}</td>
-                  <td style={{ padding: "0.4rem" }}>
-                    {linea.estado_revision !== "confirmado" && (
-                      <button onClick={() => confirmarLinea(linea.id)} style={{ padding: "0.2rem 0.5rem" }}>
-                        Confirmar línea
+          <div className="revision-detail-grid">
+            <div>
+              <div className="card" style={{ marginBottom: "1.25rem" }}>
+                <p className="section-label">Corregir datos del expediente</p>
+                <div className="field-grid">
+                  <label>
+                    <span className="field-label">Importe licitación</span>
+                    <input
+                      className="input"
+                      value={correccion.importe_licitacion}
+                      onChange={(e) => setCorreccion({ ...correccion, importe_licitacion: e.target.value })}
+                    />
+                  </label>
+                  <label>
+                    <span className="field-label">Importe adjudicación</span>
+                    <input
+                      className="input"
+                      value={correccion.importe_adjudicacion}
+                      onChange={(e) => setCorreccion({ ...correccion, importe_adjudicacion: e.target.value })}
+                    />
+                  </label>
+                  <label>
+                    <span className="field-label">Baja (0-1)</span>
+                    <input
+                      className="input"
+                      value={correccion.baja_global}
+                      onChange={(e) => setCorreccion({ ...correccion, baja_global: e.target.value })}
+                    />
+                  </label>
+                  <label>
+                    <span className="field-label">Código matriz</span>
+                    <input
+                      className="input"
+                      value={correccion.codigo_matriz}
+                      onChange={(e) => setCorreccion({ ...correccion, codigo_matriz: e.target.value })}
+                    />
+                  </label>
+                </div>
+                <div className="button-row" style={{ marginTop: "1rem" }}>
+                  <button onClick={() => confirmarExpediente(false)} disabled={guardando} className="btn btn-secondary">
+                    Confirmar tal cual
+                  </button>
+                  <button onClick={() => confirmarExpediente(true)} disabled={guardando} className="btn btn-primary">
+                    Guardar corrección y confirmar
+                  </button>
+                </div>
+              </div>
+
+              <p className="section-label">Líneas de catálogo ({detalle.lineas.length})</p>
+              {detalle.lineas.length === 0 ? (
+                <p className="empty-state">
+                  Este expediente todavía no tiene ninguna línea de catálogo — no hay tabla de precios que mostrar.
+                </p>
+              ) : (
+                <div className="table-scroll">
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Código</th>
+                        <th>Matrícula</th>
+                        <th>Descripción</th>
+                        <th className="num">Precio unitario</th>
+                        <th>Estado</th>
+                        <th>Aviso</th>
+                        <th />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {detalle.lineas.map((linea) => {
+                        const aviso = interpretarMotivoLinea(linea.motivo_revision);
+                        return (
+                          <tr key={linea.id}>
+                            <td className="mono">{linea.codigo_precio ?? "—"}</td>
+                            <td className="mono">{linea.matricula ?? "—"}</td>
+                            <td>{linea.descripcion}</td>
+                            <td className="num">{formatearNumero(linea.precio_unitario)}</td>
+                            <td>
+                              <span className={`badge ${linea.estado_revision === "confirmado" ? "badge-green" : "badge-slate"}`}>
+                                {linea.estado_revision}
+                              </span>
+                            </td>
+                            <td style={{ maxWidth: "18rem" }}>
+                              {aviso && (
+                                <span
+                                  className={`badge ${aviso.categoria === "contradiccion" ? "badge-amber" : "badge-slate"}`}
+                                  title={aviso.texto}
+                                >
+                                  {aviso.categoria === "contradiccion" ? <IconAlertTriangle /> : <IconInfo />}
+                                  {aviso.texto.length > 60 ? `${aviso.texto.slice(0, 60)}…` : aviso.texto}
+                                </span>
+                              )}
+                            </td>
+                            <td>
+                              {linea.estado_revision !== "confirmado" && (
+                                <button onClick={() => confirmarLinea(linea.id)} className="btn btn-ghost btn-sm">
+                                  Confirmar línea
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            <div>
+              <p className="section-label">Documento</p>
+              {detalle.documentos.length === 0 ? (
+                <p className="empty-state">Sin documentos descargados.</p>
+              ) : (
+                <>
+                  <div className="pdf-tabs">
+                    {detalle.documentos.map((doc) => (
+                      <button
+                        key={doc.id}
+                        onClick={() => setDocumentoActivo(doc.id)}
+                        className={`pdf-tab${documentoActivo === doc.id ? " active" : ""}`}
+                        title={doc.nombre_archivo}
+                      >
+                        {ETIQUETA_TIPO_DOCUMENTO[doc.tipo_documento] ?? doc.tipo_documento}
                       </button>
+                    ))}
+                  </div>
+                  <div className="pdf-frame-wrap">
+                    {documentoActivo ? (
+                      <iframe
+                        key={documentoActivo}
+                        src={`${apiUrl}/documentos/${documentoActivo}/archivo`}
+                        className="pdf-frame"
+                        title="Documento"
+                      />
+                    ) : (
+                      <div className="pdf-empty">Selecciona un documento para verlo aquí.</div>
                     )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

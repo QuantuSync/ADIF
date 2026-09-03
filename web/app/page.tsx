@@ -21,9 +21,10 @@ export default async function Home() {
 
   return (
     <main>
-      <h1 style={{ fontSize: "1.7rem" }}>Expedientes</h1>
+      <h1 className="page-title">Expedientes</h1>
+      <p className="page-subtitle">Descarga, extracción y estado de cada expediente del catálogo.</p>
       {error ? (
-        <p style={{ color: "crimson" }}>Error al conectar con la API: {error}</p>
+        <p className="error-banner">Error al conectar con la API: {error}</p>
       ) : (
         <ExpedientesPanel inicial={expedientes} apiUrl={apiUrlNavegador} />
       )}
