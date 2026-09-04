@@ -30,7 +30,12 @@ def _crear_documento(db, expediente_id: int, hash_: str) -> Documento:
 
 
 def _trabajo_ciclo(db, payload=None) -> TrabajoCola:
-    return encolar_trabajo(db, tipo="mantenimiento_ciclo", payload=payload)
+    # Bloque 2 (app.sindicacion.descubrimiento): desactivado por defecto en
+    # estos tests de bloque 1, que no deben tocar la red ni depender de un
+    # ZIP -- ver tests/sindicacion/test_descubrimiento.py y
+    # tests/mantenimiento/test_ciclo_descubrimiento.py para eso.
+    payload_final = {"sindicacion_desactivada": True, **(payload or {})}
+    return encolar_trabajo(db, tipo="mantenimiento_ciclo", payload=payload_final)
 
 
 def test_expediente_sin_documentos_encola_y_drena_descarga_y_extraccion_encadenada(db_session):

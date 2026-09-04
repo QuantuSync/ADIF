@@ -13,6 +13,7 @@ _TABLAS = [
     models.TrazaOrigen.__table__,
     models.MapeoCabeceraCache.__table__,
     models.TrabajoCola.__table__,
+    models.SindicacionExpediente.__table__,
 ]
 
 

@@ -11,10 +11,11 @@ from app.interfaces.model_provider import AnthropicModelProvider, CachedModelPro
 from app.mantenimiento.ciclo import TIPO_TRABAJO as TIPO_MANTENIMIENTO_CICLO
 from app.mantenimiento.ciclo import ejecutar_ciclo_mantenimiento
 from app.mantenimiento.frescura import debe_estampar_extraccion, estampar_descarga_exitosa, estampar_extraccion
-from app.models import Documento, Expediente
+from app.models import Documento, EstadoExpediente, Expediente
 from app.queue import ejecutar_trabajo as ejecutar_trabajo_generico
 from app.queue import reclamar_trabajos_huerfanos, tomar_siguiente_trabajo
 from app.scraping.job import ejecutar_scraping_expediente
+from app.sindicacion.contraste import contrastar_expediente
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s worker %(message)s")
 logger = logging.getLogger("worker")
@@ -79,6 +80,26 @@ def procesar_extraer_expediente(db, trabajo) -> dict:
                 select(Documento).where(Documento.expediente_id == expediente.id)
             ).scalars().all()
             estampar_extraccion(db, expediente, documentos)
+            _contrastar_con_sindicacion(db, expediente)
+
+
+def _contrastar_con_sindicacion(db, expediente) -> None:
+    """Bloque 2, punto 4 (CLAUDE.md sección 24): dos fuentes que se
+    verifican entre sí. Solo tiene sentido sobre un resultado real de la
+    cascada (`completado` o `pendiente_revision`, nunca `fallido` — ahí no
+    hay un importe fiable que contrastar, y downgradearlo escondería el
+    motivo real del fallo)."""
+    if expediente.estado not in (EstadoExpediente.completado, EstadoExpediente.pendiente_revision):
+        return
+    motivo = contrastar_expediente(db, expediente)
+    if motivo is None:
+        return
+    if expediente.estado == EstadoExpediente.completado:
+        expediente.estado = EstadoExpediente.pendiente_revision
+        expediente.error = motivo
+    else:
+        expediente.error = f"{expediente.error}; {motivo}" if expediente.error else motivo
+    db.commit()
 
 
 def procesar_mantenimiento_ciclo(db, trabajo) -> dict:

@@ -304,6 +304,54 @@ class MapeoCabeceraCache(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
+class SindicacionExpediente(Base):
+    """Bloque 2, descubrimiento por sindicación (CLAUDE.md sección 24):
+    última instantánea conocida de un expediente en el XML CODICE de
+    sindicación (ZIP mensual `licitacionesPerfilesContratanteCompleto3_
+    AAAAMM.zip`), guardada como fuente independiente de los PDFs — nunca se
+    escribe encima de `expedientes`/`lotes` directamente. Sirve para dos
+    cosas: detectar novedades (un expediente nuevo, o uno que cambió de
+    `estado_pcsp`) y contrastar (`app.sindicacion.contraste`) sus importes
+    contra lo que extrajo la cascada de los PDFs — dos fuentes que se
+    verifican entre sí, no una sustituye a la otra.
+
+    Clave `codigo_expediente` (no `id` de la entrada `<atom:entry>`, que
+    identifica la publicación sindicada, no el expediente en sí — CLAUDE.md
+    sección 17.1: "un mismo expediente puede aparecer varias veces"). Una
+    fila por expediente, siempre la más reciente por `actualizado_en`
+    (`<updated>` del feed) — nunca se regresa a un dato más viejo."""
+
+    __tablename__ = "sindicacion_expedientes"
+
+    id = Column(Integer, primary_key=True)
+    codigo_expediente = Column(String(64), nullable=False, unique=True)
+    expediente_id = Column(Integer, ForeignKey("expedientes.id"), nullable=True)
+    actualizado_en = Column(DateTime(timezone=True), nullable=False)
+    estado_pcsp = Column(String(16), nullable=True)
+    organo_contratacion = Column(String(255), nullable=True)
+    titulo = Column(Text, nullable=True)
+    importe_licitacion_sin_impuestos = Column(Numeric(14, 4), nullable=True)
+    importe_licitacion_con_impuestos = Column(Numeric(14, 4), nullable=True)
+    importe_adjudicacion_sin_impuestos = Column(Numeric(14, 4), nullable=True)
+    importe_adjudicacion_con_impuestos = Column(Numeric(14, 4), nullable=True)
+    adjudicatario = Column(String(255), nullable=True)
+    # Lista de {identificador, nombre, importe_licitacion_sin_impuestos,
+    # importe_licitacion_con_impuestos} por cada cac:ProcurementProjectLot
+    # del XML. `JSON` genérico (no `JSONB`), mismo motivo que
+    # `MapeoCabeceraCache`: válido también en SQLite para tests.
+    lotes = Column(JSON, nullable=True)
+    periodo_zip = Column(String(6), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    expediente = relationship("Expediente")
+
+
 class TrabajoCola(Base):
     __tablename__ = "trabajos_cola"
 

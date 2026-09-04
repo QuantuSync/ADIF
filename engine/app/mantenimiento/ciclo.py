@@ -1,7 +1,8 @@
 """Ciclo de mantenimiento (CLAUDE.md sección 23): descubrir expedientes
-nuevos (bloque 2, todavía no implementado en este módulo), descargar lo que
-falte y extraer lo que falte — como un tipo de trabajo más de la cola
-(CLAUDE.md sección 10: "no un script suelto"), no como un comando aparte.
+nuevos por sindicación (bloque 2, `app.sindicacion.descubrimiento`),
+descargar lo que falte y extraer lo que falte — como un tipo de trabajo más
+de la cola (CLAUDE.md sección 10: "no un script suelto"), no como un comando
+aparte.
 
 Bloque 1: decide, expediente a expediente, si hace falta encolar una
 descarga o una extracción (`app.mantenimiento.frescura`) y encola lo que
@@ -17,7 +18,8 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
 from sqlalchemy import select
@@ -28,6 +30,7 @@ from app.interfaces.model_provider import ModelProvider
 from app.mantenimiento.frescura import debe_descargar, debe_extraer
 from app.models import Documento, EstadoExpediente, Expediente, TrabajoCola
 from app.queue import ejecutar_trabajo, encolar_trabajo, tomar_siguiente_trabajo
+from app.sindicacion.descubrimiento import descubrir_novedades
 
 logger = logging.getLogger("mantenimiento.ciclo")
 
@@ -50,6 +53,10 @@ class ResumenCiclo:
     saltados_extraccion: int = 0
     trabajos_drenados: int = 0
     duracion_segundos: float = 0.0
+    # Resumen completo de app.sindicacion.descubrimiento.ResumenDescubrimiento
+    # (o {"error": ...} si el descubrimiento falló) — None si estaba
+    # desactivado para esta ejecución (payload "sindicacion_desactivada").
+    descubrimiento: Optional[dict] = field(default=None)
 
     def to_dict(self) -> dict:
         return {
@@ -61,6 +68,7 @@ class ResumenCiclo:
             "saltados_extraccion": self.saltados_extraccion,
             "trabajos_drenados": self.trabajos_drenados,
             "duracion_segundos": round(self.duracion_segundos, 3),
+            "descubrimiento": self.descubrimiento,
         }
 
 
@@ -89,9 +97,30 @@ def ejecutar_ciclo_mantenimiento(
 
     resumen = ResumenCiclo()
 
-    # Bloque 2 se engancha aquí: descubrir expedientes nuevos por sindicación
-    # antes de evaluar frescura, para que un expediente recién descubierto
-    # entre ya en el mismo bucle de decisión de abajo.
+    # Bloque 2: descubrir expedientes nuevos (y detectar cambio de estado en
+    # los que ya existían) por sindicación, ANTES de evaluar frescura, para
+    # que un expediente recién descubierto entre ya en el mismo bucle de
+    # decisión de abajo sin esperar al ciclo siguiente. Un fallo aquí (red,
+    # ZIP no disponible para el periodo) no debe impedir que el resto del
+    # ciclo -- descargar/extraer lo que ya se conocía -- siga su curso.
+    if not payload.get("sindicacion_desactivada"):
+        try:
+            resumen_descubrimiento = descubrir_novedades(
+                db,
+                periodo=payload.get("sindicacion_periodo"),
+                ruta_zip=Path(payload["sindicacion_ruta_zip"]) if payload.get("sindicacion_ruta_zip") else None,
+            )
+            resumen.nuevos_descubiertos = resumen_descubrimiento.expedientes_nuevos
+            resumen.descubrimiento = resumen_descubrimiento.to_dict()
+        except Exception as exc:  # noqa: BLE001
+            # Igual que app.queue.ejecutar_trabajo: un fallo a mitad de
+            # descubrir_novedades (p.ej. un IntegrityError) deja `db` en
+            # estado "necesita rollback" -- sin esto, el resto del ciclo
+            # (que reutiliza la misma sesión) reventaría con un
+            # PendingRollbackError que enterraría el motivo real.
+            db.rollback()
+            logger.warning("descubrimiento por sindicación falló, se continúa sin él: %s", exc)
+            resumen.descubrimiento = {"error": str(exc)}
 
     expedientes = (
         db.execute(

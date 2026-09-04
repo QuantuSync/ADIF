@@ -66,5 +66,21 @@ class Settings(BaseSettings):
     scraping_contract_max_keep: int = 2
     scraping_require_contract_qr_csv_hint: bool = True
 
+    # Bloque 2, descubrimiento por sindicación (CLAUDE.md sección 24): ZIP
+    # mensual de "licitacionesPerfilesContratanteCompleto3" bajo la
+    # sindicación 643, verificado real en la sesión de mantenimiento
+    # automático (agosto 2024 y la sesión previa de CLAUDE.md 17.1, mayo
+    # 2025). Configurable para poder apuntar a un espejo o a un doble en
+    # tests, nunca hardcodeado en el código de descubrimiento.
+    sindicacion_base_url: str = "https://contrataciondelestado.es/sindicacion/sindicacion_643"
+    # Departamentos de ADIF que el descubrimiento da de alta solos (CLAUDE.md
+    # sección 24): "28510" es el único que usan los 45 expedientes del
+    # corpus y todo lo documentado hasta ahora — el motor de extracción está
+    # pensado para su patrón (cuadro de precios + baja única por lote), no
+    # para la obra civil de otros departamentos ni de "ADIF Alta Velocidad".
+    # Lista separada por comas; añadir un departamento nuevo es cambiar esta
+    # variable, nunca tocar código.
+    sindicacion_departamentos_adif: str = "28510"
+
 
 settings = Settings()
