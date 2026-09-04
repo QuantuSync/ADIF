@@ -122,6 +122,15 @@ export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // El punto principal del rediseño (CLAUDE.md, encargo de la sesión de
+  // pulido de 1280px): el documento y el formulario al lado de la lista,
+  // no detrás de un clic. Sin esto, la pantalla se abría con dos tercios en
+  // blanco hasta que alguien seleccionaba un caso a mano.
+  useEffect(() => {
+    if (seleccionId === null && lista.length > 0) setSeleccionId(lista[0].id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lista]);
+
   useEffect(() => {
     if (seleccionId !== null) cargarDetalle(seleccionId);
     else setDetalle(null);
@@ -177,7 +186,11 @@ export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
                 className={`revision-item${seleccionId === exp.id ? " active" : ""}`}
               >
                 <span className="code">{exp.codigo_expediente}</span>
-                {exp.nombre_proyecto && <span className="hint">{exp.nombre_proyecto}</span>}
+                {exp.nombre_proyecto && (
+                  <span className="hint proyecto" title={exp.nombre_proyecto}>
+                    {exp.nombre_proyecto}
+                  </span>
+                )}
                 {primerMotivo && (
                   <span className="hint" style={{ display: "block", marginTop: "0.35rem" }}>
                     {primerMotivo.texto.length > 110 ? `${primerMotivo.texto.slice(0, 110)}…` : primerMotivo.texto}
@@ -205,7 +218,12 @@ export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
           </div>
 
           <div className="revision-detail-grid">
-            <div>
+            {/* minWidth 0: por defecto un hijo de grid no encoge por debajo
+                del ancho mínimo de su contenido (aquí, la tabla de líneas) —
+                sin esto, esa tabla empujaba la columna entera fuera de la
+                pista de 1fr y desbordaba la página (encargo de la sesión de
+                pulido de 1280px). */}
+            <div style={{ minWidth: 0 }}>
               <div className="card" style={{ marginBottom: "1.25rem" }}>
                 <p className="section-label">Corregir datos del expediente</p>
                 <div className="field-grid">
@@ -258,7 +276,7 @@ export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
                   Este expediente todavía no tiene ninguna línea de catálogo — no hay tabla de precios que mostrar.
                 </p>
               ) : (
-                <div className="table-scroll">
+                <div className="table-scroll table-scroll--panel">
                   <table className="table">
                     <thead>
                       <tr>

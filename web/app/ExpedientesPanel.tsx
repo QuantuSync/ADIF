@@ -20,7 +20,7 @@ function ResumenMotivo({ error }: { error: string | null }) {
       ? `${primerMotivo.texto.slice(0, LARGO_MOTIVO_LISTA)}…`
       : primerMotivo.texto;
   return (
-    <span className="status-note" title={primerMotivo.texto}>
+    <span className="status-note status-note-tight" title={primerMotivo.texto}>
       {texto}
     </span>
   );
@@ -91,7 +91,7 @@ function CeldaBaja({ expediente }: { expediente: Expediente }) {
       {cuerpo}
       {esCasoPreciosUnitarios(expediente) && (
         <span
-          className="status-note"
+          className="status-note status-note-tight"
           title="El importe de licitación y el de adjudicación coinciden: es el modelo de baja única sobre precios unitarios (CLAUDE.md sección 4), no un error de extracción."
         >
           Importe fijo, baja en precios unitarios
@@ -305,7 +305,11 @@ export default function ExpedientesPanel({
                     <CeldaBaja expediente={exp} />
                   </td>
                   <td>
-                    <div style={{ display: "flex", gap: "0.4rem" }}>
+                    {/* Apiladas, no en fila: dos btn-sm uno junto al otro
+                        empujaban la tabla a desbordar 1280px (encargo de la
+                        sesión de pulido de 1280px) — el ancho de esta
+                        columna era casi tan grande como el de "Estado". */}
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem", alignItems: "flex-start" }}>
                       <button
                         onClick={() => lanzarDescarga(exp.id)}
                         disabled={enCurso || completado || lanzando === exp.id}

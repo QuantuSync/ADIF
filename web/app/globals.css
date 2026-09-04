@@ -430,6 +430,21 @@ input:focus-visible {
   color: var(--text-muted);
   margin: 0.3rem 0 0 1.15rem;
   max-width: 28rem;
+  /* La celda de Baja es `.table .num` (nowrap, para las cifras) y
+     `white-space` se hereda: sin este reset, esta nota ignoraba su
+     max-width al medir el ancho de columna (nowrap fuerza una sola línea
+     antes de que max-width pueda partirla) y desbordaba Expedientes.
+     Encargo de la sesión de pulido de 1280px. */
+  white-space: normal;
+}
+
+/* Nota de estado dentro de una celda de tabla (Expedientes: motivo de
+   revisión, aviso de "importe fijo"): sin este tope, `max-width` participa
+   en el cálculo de ancho automático de columna con el texto SIN partir en
+   líneas — es lo que desbordaba Expedientes por 257px a 1280px, medido con
+   Playwright (encargo de la sesión de pulido de 1280px). */
+.status-note-tight {
+  max-width: 13rem;
 }
 
 .chip {
@@ -567,7 +582,11 @@ input:focus-visible {
   display: flex;
   align-items: baseline;
   gap: 0.65rem;
-  max-width: 30rem;
+  /* Ancho de columna, no de contenido: a 1280px de viewport el catálogo
+     tiene nueve columnas — la descripción es la única con margen para
+     ceder (encargo de la sesión de pulido de 1280px). 30rem desbordaba la
+     tabla por 218px, medido con Playwright. */
+  max-width: 16rem;
 }
 
 .descripcion span {
@@ -820,6 +839,16 @@ input:focus-visible {
   margin-top: 0.2rem;
 }
 
+/* Nombre de proyecto: en el documento real es un párrafo en mayúsculas de
+   hasta cinco líneas (encargo de la sesión de pulido de 1280px) — recortado
+   a dos líneas con elipsis para que la tarjeta no se dispare de alto. */
+.revision-item .hint.proyecto {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 .revision-detail-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(320px, 480px);
@@ -920,6 +949,24 @@ input:focus-visible {
   border: none;
   border-top: 1px solid var(--border);
   margin: 1.75rem 0;
+}
+
+/* Tabla de líneas dentro del panel de revisión (columna izquierda de
+   `.revision-detail-grid`, junto al PDF): a diferencia de las tablas de
+   página completa, esta vive en una columna angosta que puede terminar
+   más estrecha que el contenido mínimo de la tabla — sin scroll propio,
+   ese desbordamiento se propagaba a la página entera (encargo de la
+   sesión de pulido de 1280px). El sticky de `.table thead` asume que el
+   único scroll es el de la página; dentro de un contenedor con su propio
+   scroll horizontal deja de tener sentido (se ancla a este panel, no a la
+   ventana), así que se desactiva aquí. */
+.table-scroll--panel {
+  overflow-x: auto;
+  min-width: 0;
+}
+
+.table-scroll--panel .table thead {
+  position: static;
 }
 
 @media (max-width: 980px) {

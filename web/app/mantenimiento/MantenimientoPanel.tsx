@@ -44,6 +44,15 @@ function disparadoPor(trabajo: Trabajo): string {
   return valor === "programado" ? "Programado" : valor === "manual" ? "Manual" : "";
 }
 
+// No hay ninguna vía de código que produzca esta marca (comprobado: no
+// aparece en ningún .py) — es texto que alguien escribe a mano en la base
+// de datos para desatascar un trabajo durante desarrollo, nunca un fallo
+// real del sistema. Encargo de la sesión de pulido de 1280px: que no se
+// lea como un fallo real de extracción/scraping.
+function esInterrupcionManual(trabajo: Trabajo): boolean {
+  return trabajo.estado === "fallido" && !!trabajo.error?.toLowerCase().includes("abortado manualmente");
+}
+
 function ResumenCiclo({ resultado }: { resultado: Record<string, unknown> | null }) {
   if (!resultado) return null;
   const descubrimiento = resultado.descubrimiento as Record<string, unknown> | null | undefined;
@@ -161,14 +170,32 @@ export default function MantenimientoPanel({ apiUrl }: { apiUrl: string }) {
         {estado?.ultima_ejecucion && (
           <>
             <div className="hr" />
-            <p className="muted" style={{ marginBottom: "0.4rem" }}>
-              Qué encontró la última ejecución
-            </p>
-            <ResumenCiclo resultado={estado.ultima_ejecucion.resultado} />
-            {estado.ultima_ejecucion.error && (
-              <p className="status-note" style={{ marginTop: "0.4rem" }}>
-                {estado.ultima_ejecucion.error}
-              </p>
+            {estado.ultima_ejecucion.estado === "fallido" ? (
+              esInterrupcionManual(estado.ultima_ejecucion) ? (
+                // Distinto de un fallo real (encargo de la sesión de pulido
+                // de 1280px): tono neutro, sin el acento de atención — es
+                // ruido de una sesión de diagnóstico, no un problema del
+                // sistema que alguien tenga que mirar.
+                <div>
+                  <span className="status status-faint">Interrumpida manualmente</span>
+                  <p className="muted" style={{ margin: "0.35rem 0 0" }}>
+                    Se detuvo a mano durante una sesión de diagnóstico — no es un fallo real del motor de
+                    mantenimiento. Puede lanzarse un ciclo nuevo cuando convenga.
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <span className="status status-attn">La última ejecución falló</span>
+                  <p style={{ margin: "0.35rem 0 0" }}>{estado.ultima_ejecucion.error}</p>
+                </div>
+              )
+            ) : (
+              <>
+                <p className="muted" style={{ marginBottom: "0.4rem" }}>
+                  Qué encontró la última ejecución
+                </p>
+                <ResumenCiclo resultado={estado.ultima_ejecucion.resultado} />
+              </>
             )}
           </>
         )}
@@ -188,23 +215,43 @@ export default function MantenimientoPanel({ apiUrl }: { apiUrl: string }) {
             </tr>
           </thead>
           <tbody>
-            {historial.map((trabajo) => (
-              <tr key={trabajo.id} className={trabajo.error ? "row-accent row-accent-attn" : "row-accent"}>
-                <td className="num">{trabajo.id}</td>
-                <td>{disparadoPor(trabajo)}</td>
-                <td>
-                  <span className={`status ${trabajo.estado === "completado" ? "status-ok" : trabajo.estado === "fallido" ? "status-attn" : ""}`}>
-                    {trabajo.estado}
-                  </span>
-                </td>
-                <td>{formatearFecha(trabajo.created_at)}</td>
-                <td>{trabajo.estado === "pendiente" || trabajo.estado === "en_proceso" ? "" : formatearFecha(trabajo.updated_at)}</td>
-                <td>
-                  <ResumenCiclo resultado={trabajo.resultado} />
-                  {trabajo.error && <div className="status-note">{trabajo.error}</div>}
-                </td>
-              </tr>
-            ))}
+            {historial.map((trabajo) => {
+              const interrumpido = esInterrupcionManual(trabajo);
+              return (
+                <tr
+                  key={trabajo.id}
+                  className={trabajo.error && !interrumpido ? "row-accent row-accent-attn" : "row-accent"}
+                >
+                  <td className="num">{trabajo.id}</td>
+                  <td>{disparadoPor(trabajo)}</td>
+                  <td>
+                    <span
+                      className={`status ${
+                        trabajo.estado === "completado"
+                          ? "status-ok"
+                          : interrumpido
+                          ? "status-faint"
+                          : trabajo.estado === "fallido"
+                          ? "status-attn"
+                          : ""
+                      }`}
+                    >
+                      {interrumpido ? "Interrumpido" : trabajo.estado}
+                    </span>
+                  </td>
+                  <td>{formatearFecha(trabajo.created_at)}</td>
+                  <td>{trabajo.estado === "pendiente" || trabajo.estado === "en_proceso" ? "" : formatearFecha(trabajo.updated_at)}</td>
+                  <td>
+                    <ResumenCiclo resultado={trabajo.resultado} />
+                    {trabajo.error && (
+                      <div className="status-note" title={interrumpido ? trabajo.error ?? undefined : undefined}>
+                        {interrumpido ? "Interrumpida manualmente para diagnóstico — no es un fallo real." : trabajo.error}
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
