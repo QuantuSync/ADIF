@@ -411,18 +411,35 @@ suficientes, no ahora.
   reales cuyo anejo de precios nunca se adjuntó a la Plataforma. Sin
   investigar caso a caso — fuera de alcance de la sesión de expedientes sin
   publicar, que se centró en los 14 códigos ya confirmados.
-- **Diagnosticado en la sección 26, sin corregir la causa raíz todavía:**
-  `6.24/28510.0088` y `6.23/28510.0129` no son pedidos de un solo lote —
-  son licitaciones de varios lotes (2 y 3 respectivamente) de las que solo
-  tenemos el `ADJUDICACION_1.pdf` de un lote concreto, que declara su propio
-  número de expediente distinto (`6.24/28510.0113`, `6.23/28510.0143`) del
-  código bajo el que están archivados los documentos (`.0088`, `.0129`, el
-  expediente principal). Mismo tipo de problema que la identidad de acuerdo
-  marco (secciones 20-21), variante nueva sin resolver: falta crear los
-  expedientes de lote reales y dejar el expediente principal como lo que es,
-  sin cuadro de precios propio. El síntoma urgente (bajaban de `completado`
-  por el contraste con sindicación) ya está arreglado — sección 26 — pero la
-  identidad de fondo sigue sin separar.
+- **Resuelto en la sesión de identidad de lote (sección 27):** `6.24/28510.0088`
+  y `6.23/28510.0129` (y 13 expedientes multi-lote más, no solo estos dos) no
+  son pedidos de un solo lote — son licitaciones de varios lotes de las que
+  solo teníamos documentos de una parte. El código propio de cada lote
+  (`6.24/28510.0113`, `6.23/28510.0143`...) se modela ahora como
+  `lotes.codigo_expediente_lote`, atributo del lote, no como fila de
+  `Expediente` nueva — decisión explícita del cliente (sección 27): la
+  identidad derivada de la partición en lotes no justifica la complejidad de
+  expedientes nuevos. Lo que seguía pendiente aquí (cobertura parcial nunca
+  mostrada como completado) queda cerrado.
+- **Nuevo, sin resolver (sesión de identidad de lote, sección 27):**
+  `6.23/28510.0051` tiene, con diferencia, el catálogo más grande del corpus
+  (1.080 líneas, frente a las ~10-50 de un expediente típico) repartido en
+  617 páginas de documentos. Reprocesarlo en un proceso recién arrancado
+  tarda ~110 s, dentro de lo razonable — pero reprocesarlo como el N-ésimo
+  expediente dentro de un mismo proceso Python de vida larga (el propio
+  worker, o un script que encadena varios expedientes) se vuelve
+  progresivamente más lento hasta parecer colgado (más de 15 minutos sin
+  avanzar en un caso observado), sin ninguna excepción ni error visible —
+  activo en CPU todo el tiempo, nunca bloqueado. Verificado que no es un
+  bucle infinito de este código (el mismo expediente, en un proceso nuevo,
+  siempre termina en menos de 2 minutos); sin verificar si la causa es una
+  fuga de memoria/recursos de `pdfplumber` acumulada entre documentos
+  grandes sucesivos, u otra cosa — no se ha investigado más porque es un
+  problema de rendimiento del pipeline ya existente (`procesar_anejo`,
+  `lote_tabla.asociar_lote_tabla`), no de esta sesión. Mitigación de hecho
+  que sí funcionó: procesar expedientes grandes en procesos aislados en vez
+  de un bucle largo. Candidato para una sesión de rendimiento aparte si
+  aparecen más expedientes de este tamaño.
 
 ---
 
@@ -2188,3 +2205,230 @@ administrativas, el par de contratos de `6.23/28510.0051`, los dos LC.27 de
 lote de `6.24/28510.0088` y `6.23/28510.0129`) se inspeccionó directamente
 sobre el corpus ya descargado en el volumen de Docker, sin copiarlo al
 repositorio (sección 13: no se meten los PDFs completos).
+
+---
+
+## 27. Identidad de lote: la licitación multi-lote como estructura de primera
+    clase (sesión 2026-09-04)
+
+Ataca de raíz el problema que la sección 26 solo diagnosticaba para dos
+casos (`6.24/28510.0088`, `6.23/28510.0129`): **13 expedientes multi-lote
+más del corpus real comparten el mismo síntoma**, silenciados hasta ahora
+porque el motor no sabía leer ninguna redacción salvo la de
+`6.25/28510.0027` (sección 19). El encargo explícito de esta sesión: recorrer
+el corpus entero antes de tocar código, generalizar la extracción contra
+todas las variantes reales encontradas — no contra una — y nunca dejar que
+una cobertura parcial de lotes se disfrace de expediente completo.
+
+### 1. La estructura real, verificada documento a documento (no supuesta)
+
+Tres relaciones distintas coexisten en el corpus, y conviene no confundirlas:
+
+- **Expediente principal ⟷ lote con número propio.** Cuando el título de una
+  licitación dice "N LOTES" (N≥2), el propio documento declara dos
+  identificadores: `EXPEDIENTE PRINCIPAL Nº X` (a veces `EXPEDIENTE ORIGEN
+  Nº`, o "`Nº EXPEDIENTE MATRIZ`" — ver la trampa de vocabulario del punto 2)
+  para el conjunto, y por cada lote que el documento cubre, `LOTE N:
+  <descripción>. EXPEDIENTE Nº Y` — un código con el mismo formato que
+  cualquier expediente (`6.NN/28510.0NNN`), distinto y casi siempre
+  correlativo al principal. Verificado en **15 de los 38 expedientes con
+  documentos (39%)**: `6.23/28510.0051` (2 lotes), `0066` (4), `0109` (2),
+  `0129` (3), `0139` (2, sección 3 más abajo), `6.24/28510.0064` (3), `0088`
+  (2), `0094` (3), `0117` (3), `0124` (2), `0130` (**13**), `0203` (6),
+  `6.25/28510.0019` (**9**), `0027` (6), `0028` (7).
+- **Contrato ⟷ lote.** El "Contrato nº" del Contrato firmado coincide
+  siempre con el "EXPEDIENTE Nº" que ese mismo lote declaró en su
+  adjudicación — verificado en `0088` (lote1=`.0113`, lote2=`.0114`), `0027`
+  (lote1=`.0099`, lote3=`.0101`), `0129` (lote2=`.0143`), `0066`
+  (lote1=`.0073`, lote2=`.0074`). **Y esto solo ocurre cuando hay lotes**: en
+  un expediente de un solo lote (`6.24/28510.0008`), "Contrato nº" es
+  idéntico al expediente. La numeración independiente del contrato es
+  consecuencia de la partición en lotes, no un fenómeno aparte — no hace
+  falta modelarlo como una tercera entidad.
+- **Acuerdo marco / pedidos derivados (secciones 20-22), sin relación con lo
+  anterior más allá de compartir vocabulario** (ver punto 2). Estructura ya
+  estable, no tocada en esta sesión.
+
+### 2. Dos trampas de vocabulario verificadas, no supuestas
+
+El corpus reutiliza dos palabras del dominio con un segundo significado
+ajeno al de la sección 2 — confusión real, no hipotética, y hay que evitar
+que el código las mezcle:
+
+- **"Lote"**: en una licitación multi-lote (este documento) es la
+  subdivisión en contratos concurrentes que describe el punto 1. En un
+  pedido derivado de acuerdo marco (secciones 3 y 20), "Lote N" es una
+  **categoría de producto dentro del catálogo del acuerdo marco** ("Pedido
+  nº 7 acuerdo marco de suministro de equipos de protección individual. Lote
+  4.- guantes de protección..."), sin ninguna subdivisión en contratos
+  concurrentes. Dos conceptos distintos, misma palabra.
+- **"Matriz"**: `6.24/28510.0094` etiqueta su expediente principal como "Nº
+  EXPEDIENTE MATRIZ" — verificado en el documento real, sin relación alguna
+  con `codigo_matriz`/`matriz_expediente_id` (acuerdo marco, secciones 2 y
+  20). Es solo cómo esta Propuesta LC.27 concreta llama a "el expediente que
+  agrupa los lotes". **Guarda de código**: `app.extraccion.lotes` captura
+  este valor como `codigo_principal_declarado` únicamente para
+  contraste/trazabilidad (si no coincide con `expediente.codigo_expediente`,
+  se manda a revisión con el motivo explícito) — **nunca se escribe en
+  `expediente.codigo_matriz`**, porque hacerlo reintroduciría el bug de
+  autorreferencia de las secciones 20-21 (una fila etiquetada con el código
+  de su propia licitación agrupadora, tratada como si fuera una matriz de
+  acuerdo marco). Verificado con un test de aceptación contra el documento
+  real de `0094` (`test_codigo_principal_declarado_nunca_se_confunde_con_matriz`).
+
+### 3. El caso más peligroso: cobertura cero sin ningún documento que la desglose
+
+`6.23/28510.0139` no tiene ninguna Propuesta LC.27 ni Resolución de
+Adjudicación — solo un Anuncio PCSP con el campo estructurado **"Nº de
+Lotes: 2"** (`campos_pcsp.numero_lotes`, nuevo) y dos Contratos, cada uno de
+un lote distinto, sin ningún documento que diga cuál es cuál. Antes de esta
+sesión figuraba `completado`: el camino de lote único implícito
+(`LOTE_UNICO`) le atribuía al expediente entero la baja/importe de un solo
+Contrato, sin saber que representaba solo uno de los dos lotes reales — el
+mismo patrón que `6.24/28510.0088` (sección 26), pero sin siquiera un
+documento que lo desglosara. Ahora: `lotes_totales_declarados=2` (del campo
+PCSP, único origen posible aquí) contra 0 lotes identificados por número →
+`"cobertura parcial: 0 de 2 lotes identificados por número"`, nunca
+`completado`.
+
+### 4. Modelo de datos: atributo del lote, no expediente nuevo
+
+Decisión explícita del cliente, con justificación de la sección 1 (punto
+"Contrato ⟷ lote"): la identidad del lote es derivada de la partición, no
+una entidad independiente — crear 40-50 filas de `Expediente` nuevas
+complicaría la web, el Excel y la idempotencia sin ganancia clara mientras
+nadie necesite buscar un lote como expediente propio. Si algún día hace
+falta, se promueve.
+
+- **`lotes.numero_contrato`** (columna existente desde la migración 0001,
+  nunca poblada) **renombrada a `lotes.codigo_expediente_lote`** — nombre
+  más preciso, porque el dato casi siempre se conoce antes por la
+  Propuesta/Resolución, no solo por el Contrato firmado (aunque ambos
+  declaran el mismo valor, verificado). Migración `0015`, reversible
+  (`ALTER COLUMN ... RENAME`).
+- **`expedientes.lotes_totales_declarados`** (integer, nullable, migración
+  `0015`): el N de "N LOTES" del título, o del campo "Nº de Lotes:" del
+  Anuncio PCSP cuando no hay narrativa de lote (punto 3). **Nunca se usa
+  para generar una secuencia 1..N** — verificado con `6.25/28510.0028`
+  ("7 LOTES" cuyo LOTE 5 no aparece en ningún sitio del documento, desierto
+  o anulado sin verificar cuál): la numeración real tiene huecos, y
+  `lotes_totales_declarados` solo sirve para comparar "cuántos conocemos"
+  contra "cuántos hay", nunca para inventar el que falta.
+- **Cobertura parcial, sin estado nuevo ni columna booleana**: se compara
+  `lotes_totales_declarados` contra los lotes que sí traen `baja_lote` o
+  `importe_adjudicacion` (no basta con que el lote *exista* por nombre,
+  sección 5). Si faltan, se acumula en `motivo_revision` — el mecanismo ya
+  existente hace que eso nunca llegue a `completado`, sin tocar la máquina
+  de estados.
+- **Lote conocido por nombre pero sin bloque de adjudicación**: se modela
+  igual que cualquier otro (`Lote` con `identificador_lote` y
+  `codigo_expediente_lote` si se declaró, baja/importe/adjudicatario en
+  `NULL`) — "existe, sin datos", no se omite ni se inventa.
+
+### 5. Extracción generalizada, no enumerada por variante
+
+Catalogadas las 15 variantes reales antes de tocar `app.extraccion.lotes`
+(recopilación completa en la sesión, no repetida aquí): "En el LOTE N."
+(`0027`, la única que reconocía el código anterior), "- ADJUDICAR el
+contrato de \<título repetido\> - LOTE N: ..." con importe antes de la baja
+(`0028`, `0124`), título repetido con "Nº DE EXPEDIENTE:" y baja antes de
+importe (`0203`), numerado "1º.-/2º.-/3º.-" (`0094`), lista con dos puntos
+"- LOTE N: ... EXPEDIENTE Nº X: \<empresa\>" (`0117`, `0130`, `0019`), y
+documentos de un solo lote que nunca repiten "LOTE N" en el cuerpo (`0051`,
+`0066`, `0088`, `0109`, `0129`).
+
+En vez de un regex por variante, dos pasadas independientes sobre las
+páginas **concatenadas** (un bloque de adjudicación puede partirse por un
+salto de página — verificado en `6.24/28510.0117`, la baja de LOTE 2 queda
+en la página siguiente a su importe):
+
+1. **Ventaneo por ocurrencia de `LOTE\s*N`** (con o sin "En el"/"-"/"▪"/"•"/
+   numeración delante — el único ancla que comparten las 15 variantes):
+   cada aparición abre una ventana hasta la siguiente aparición de
+   cualquier `LOTE N` o el final del texto. Un documento de un solo lote
+   simplemente tiene una única ventana gigante (desde la cabecera hasta la
+   firma), así que no necesita ninguna rama especial.
+2. **Sub-extractores genéricos por ventana**: código propio (etiquetado
+   "EXPEDIENTE Nº"/"Nº DE EXPEDIENTE:", o pelado sin etiqueta — verificado
+   en `6.25/28510.0019`, LOTE 1: "...MATERIAL AUXILIAR. 6.25/28510.0039:"),
+   baja (`app.extraccion.baja.buscar_baja_en_texto`, factorizada de
+   `extraer_baja_declarada` para reutilizarla aquí) e importe adjudicado
+   ("Base imponible...€", el mismo patrón que ya usaba `campos_lc27` para
+   el camino de un único lote). El orden baja/importe dentro del texto deja
+   de importar porque cada sub-extractor busca su propio patrón, no una
+   secuencia fija.
+
+**Dos bugs reales de regex encontrados verificando contra los documentos,
+no supuestos:**
+
+- `_LOTES_TOTALES_RE` (total de "N LOTES" del título) leía "88\nLOTE 1:" (los
+  dos últimos dígitos de "...6.24/28510.0088" seguidos de un salto de línea
+  y el "LOTE 1" real) como si fuera "88 LOTES" — devolvía 88 en vez de 2.
+  Arreglado con un lookahead negativo que exige que tras "LOTE(S)" no venga
+  inmediatamente un número.
+- `_BAJA_RE` no toleraba puntuación suelta entre "del" y el número: `0203`
+  trae literalmente "con una baja del. 10,75%," (un punto de más). Arreglado
+  aceptando `[.,]?` opcional en ese hueco.
+
+**Redacción nueva de baja, no vista hasta esta sesión**: `0051` dice "con un
+25,31 % de baja a todos los precios unitarios" — el número precede a "% de
+baja" en vez de seguir a "baja del", el orden inverso de `_BAJA_RE`. Nuevo
+patrón `_BAJA_INVERTIDA_RE` en `app.extraccion.baja`, con el mismo riesgo
+bajo de falso positivo que ya limita `_BAJA_ETIQUETA_RE` (exige un número
+inmediatamente antes de "% de baja", no basta la palabra "baja" sola).
+
+### 6. Medición final: 12 de los 20 `completado` estaban mal, 0 se recomponen
+
+Reprocesados los 15 expedientes multi-lote reales (más `0139`) contra el
+stack real, uno a uno en procesos aislados (ver nota de rendimiento más
+arriba en la sección "Pendiente de resolver"):
+
+| | Antes de esta sesión | Después |
+|---|---:|---:|
+| `completado` (sobre 38 con documentos) | 20 | **8** |
+| `pendiente_revision` | 18 | **30** |
+| `sin_publicar` | 15 | 15 (sin cambio) |
+| Líneas de catálogo | 2.208 | **3.018** |
+| Matrículas en más de un expediente | 13 | 13 (sin cambio) |
+
+**De los 20 `completado` anteriores, 12 mostraban datos de un solo lote
+presentados como si fueran del expediente entero** (`0066`, `0109`, `0129`,
+`0139`, `0064`, `0088`, `0094`, `0117`, `0124`, `0130`, `0203`, `0019` — los
+15 multi-lote menos los 3 que ya estaban en `pendiente_revision` antes por
+otra causa: `0051`, `0027`, `0028`). **Ninguno de los 15 se recompone a
+`completado`**: los 12 con cobertura genuinamente incompleta quedan con el
+motivo exacto ("cobertura parcial: N de M lotes..."); los 3 con cobertura
+completa de sus lotes conocidos (`0094` 3/3, `0117` 3/3, `0203` 6/6) siguen
+en `pendiente_revision` por motivos ya existentes y correctos (fragmentos de
+tabla huérfanos entre páginas, celdas ilegibles) — la cobertura de lote deja
+de ser su problema, pero no inventa que están limpios cuando no lo están.
+**Es exactamente el resultado que pedía el encargo**: un dato que se ve bien
+y está mal es peor que tenerlo en revisión, y ahora ninguno de los 15 se ve
+bien sin estarlo de verdad.
+
+El aumento de líneas de catálogo (+810) no es principalmente por lotes
+nuevos descubiertos, sino por `6.23/28510.0051`: con la identidad de lote
+corregida, su cuadro de precios completo (1.080 líneas, el catálogo más
+grande del corpus) se guarda por primera vez sin que el guion de
+autorreferencia del lote lo bloqueara a medias.
+
+### Fixtures de regresión
+
+`engine/tests/fixtures/pdfs/`, cinco documentos reales completos añadidos
+(CLAUDE.md sección 13: pequeños, `6.23_28510.0066_ADJUDICACION_1.pdf`
+(153 KB), `6.24_28510.0117_ADJUDICACION_1.pdf` (146 KB),
+`6.25_28510.0028_ADJUDICACION_1.pdf` (144 KB),
+`6.24_28510.0094_ADJUDICACION_1.pdf` (207 KB, la trampa "Nº EXPEDIENTE
+MATRIZ"), `6.23_28510.0139_ADJUDICACION_1.pdf` (24 KB, el Anuncio PCSP sin
+desglose) — reutilizados también los ya existentes `PROPUESTA_LC27_UTE`
+(`0088`) y `RESOLUCION_ADJUDICACION` (`0124`), que ya cubrían dos de las
+variantes sin saberlo.
+
+`engine/tests/extraccion/test_lotes.py` (7 casos, generalización contra
+cada variante real), `test_baja.py` (2 casos: orden invertido, puntuación
+suelta), `test_campos_pcsp.py` (1 caso: `numero_lotes`),
+`test_orquestador.py` (6 casos: lote único con número real en vez del
+sentinela, cobertura completa sin motivo espurio, hueco en la numeración,
+cobertura cero sin desglose, sustitución del lote sentinela obsoleto al
+migrar, guarda de vocabulario "matriz"). 257 tests en verde, ninguno nuevo
+de más de 210 KB.

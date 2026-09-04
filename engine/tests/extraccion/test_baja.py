@@ -113,6 +113,29 @@ def test_baja_etiqueta_no_confunde_baja_laboral_con_baja_de_expediente():
     assert r is None
 
 
+# Sesión de identidad de lote (CLAUDE.md sección 27), verificado contra
+# 6.23/28510.0051_ADJUDICACION_1.pdf: "con un 25,31 % de baja a todos los
+# precios unitarios" -- el número precede a "% de baja" en vez de seguirlo,
+# la redacción exactamente opuesta a `_BAJA_RE`. Fixture sintético: el
+# regex no necesita el PDF completo, `test_lotes.py` ya prueba el documento
+# real.
+def test_baja_invertida_numero_antes_de_baja():
+    r = extraer_baja_declarada(
+        [PaginaTexto(numero=1, texto="con un 25,31 % de baja a todos los precios unitarios")]
+    )
+    assert r.baja == Decimal("0.2531")
+
+
+def test_baja_del_con_puntuacion_suelta():
+    # 6.24/28510.0203_ADJUDICACION_1.pdf, LOTE 4: "con una baja del. 10,75%,
+    # aplicable al conjunto de precios unitarios" -- un punto suelto entre
+    # "del" y el número que `_BAJA_RE` no toleraba antes de esta sesión.
+    r = extraer_baja_declarada(
+        [PaginaTexto(numero=1, texto="con una baja del. 10,75%, aplicable al conjunto de precios unitarios")]
+    )
+    assert r.baja == Decimal("0.1075")
+
+
 def test_baja_etiqueta_solo_se_intenta_si_baja_re_no_encuentra_nada():
     # Si ya hay una baja declarada en la forma estricta en cualquier página,
     # esa gana siempre -- el patrón de respaldo ni se llega a probar.

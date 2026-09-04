@@ -34,7 +34,7 @@ from app.models import TipoDocumento
 # subordinada entera) pero nunca cruza a la frase siguiente en los ejemplos
 # vistos; 160 caracteres da margen sin arriesgarse a saltar de párrafo.
 _BAJA_RE = re.compile(
-    r"baja(?:\s+econ[oó]mica)?(?:\s+ofertada)?\s+del\s+([\d.,]+)\s*%[^.]{0,160}?precios unitarios",
+    r"baja(?:\s+econ[oó]mica)?(?:\s+ofertada)?\s+del[.,]?\s*([\d.,]+)\s*%[^.]{0,160}?precios unitarios",
     re.IGNORECASE | re.DOTALL,
 )
 
@@ -67,6 +67,20 @@ _BAJA_ETIQUETA_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Redacción invertida, verificada en un documento real del corpus
+# (6.23/28510.0051_ADJUDICACION_1.pdf, propuesta LC.27 individual): "con un
+# 25,31 % de baja a todos los precios unitarios" -- el número precede a "%
+# de baja" en vez de seguir a "baja del". No es la misma forma que
+# `_BAJA_ETIQUETA_RE` (esa exige el número DESPUÉS de la etiqueta): aquí el
+# número va delante, así que hace falta un patrón propio. El riesgo de falso
+# positivo es bajo porque exige un número inmediatamente antes de "% de
+# baja", a diferencia de la "de baja" sola que sí puede confundirse con
+# boilerplate laboral.
+_BAJA_INVERTIDA_RE = re.compile(
+    r"([\d]+(?:[.,]\d+)?)\s*%\s*de\s+baja\b[^.]{0,160}?precios unitarios",
+    re.IGNORECASE | re.DOTALL,
+)
+
 # Prioridad al elegir entre varios documentos del mismo hecho para el mismo
 # expediente/lote (CLAUDE.md sección 17: "preferir la Resolución cuando
 # existan las dos" porque es el acto posterior y definitivo).
@@ -89,13 +103,37 @@ class BajaDeclarada:
     tipo_documento: Optional[TipoDocumento] = None
 
 
+@dataclass(frozen=True)
+class BajaEnTexto:
+    baja: Decimal
+    fragmento: str
+
+
+def buscar_baja_en_texto(texto: str) -> Optional[BajaEnTexto]:
+    """Busca la frase de baja declarada dentro de un fragmento de texto
+    cualquiera -- no solo una página completa. Reutilizada tal cual por
+    `extraer_baja_declarada` (página a página) y por
+    `app.extraccion.lotes` (ventana de texto por lote): las tres variantes
+    de redacción son las mismas se busque en un documento entero o en el
+    trozo de un lote."""
+    for patron in (_BAJA_RE, _BAJA_INVERTIDA_RE, _BAJA_ETIQUETA_RE):
+        m = patron.search(texto)
+        if m:
+            return BajaEnTexto(baja=parsear_porcentaje_es(m.group(1)), fragmento=m.group(0).strip())
+    return None
+
+
 def extraer_baja_declarada(
     paginas: list[PaginaTexto], tipo_documento: Optional[TipoDocumento] = None
 ) -> Optional[BajaDeclarada]:
     """Primera aparición, en orden de página, de la frase de baja declarada.
     No busca todas las apariciones: en los documentos vistos la baja se
     declara una sola vez por lote/expediente y las siguientes menciones (si
-    las hay) repiten el mismo valor."""
+    las hay) repiten el mismo valor. Primero se prueba la frase estricta
+    (`_BAJA_RE`) en todas las páginas antes de caer a las variantes más
+    laxas (`_BAJA_INVERTIDA_RE`, `_BAJA_ETIQUETA_RE`) si no encontró nada en
+    ninguna -- mismo orden de prioridad que antes, ahora compartido con
+    `buscar_baja_en_texto`."""
     for pagina in paginas:
         m = _BAJA_RE.search(pagina.texto)
         if m:
@@ -105,19 +143,20 @@ def extraer_baja_declarada(
                 fragmento=m.group(0).strip(),
                 tipo_documento=tipo_documento,
             )
-    # Ningún documento trajo la frase estricta "baja ... del N% ... precios
-    # unitarios": antes de rendirse, se prueban las etiquetas de campo
-    # alternativas (ver docstring de `_BAJA_ETIQUETA_RE`) — más laxas a
-    # propósito, por eso solo se intentan como segunda pasada, nunca antes.
+    # Ninguna página trajo la frase estricta "baja ... del N% ... precios
+    # unitarios": antes de rendirse, se prueban las variantes más laxas (ver
+    # docstrings de `_BAJA_INVERTIDA_RE` y `_BAJA_ETIQUETA_RE`) — solo como
+    # segunda pasada, nunca antes.
     for pagina in paginas:
-        m = _BAJA_ETIQUETA_RE.search(pagina.texto)
-        if m:
-            return BajaDeclarada(
-                baja=parsear_porcentaje_es(m.group(1)),
-                pagina=pagina.numero,
-                fragmento=m.group(0).strip(),
-                tipo_documento=tipo_documento,
-            )
+        for patron in (_BAJA_INVERTIDA_RE, _BAJA_ETIQUETA_RE):
+            m = patron.search(pagina.texto)
+            if m:
+                return BajaDeclarada(
+                    baja=parsear_porcentaje_es(m.group(1)),
+                    pagina=pagina.numero,
+                    fragmento=m.group(0).strip(),
+                    tipo_documento=tipo_documento,
+                )
     return None
 
 

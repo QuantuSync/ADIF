@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.catalogo import guardar_lineas_catalogo
@@ -39,7 +39,7 @@ from app.extraccion.campos_lc27 import (
 )
 from app.extraccion.campos_pcsp import CampoAnclado, extraer_campos_anuncio_pcsp, importe_como_decimal
 from app.extraccion.clasificador import clasificar, es_pliego_sin_precios
-from app.extraccion.cruce_codigos import asegurar_cruce_codigos
+from app.extraccion.cruce_codigos import asegurar_cruce_codigos, normalizar_codigo_expediente
 from app.extraccion.herencia_matriz import (
     EstadoResolucionMatriz,
     intentar_heredar_de_matriz,
@@ -47,14 +47,23 @@ from app.extraccion.herencia_matriz import (
     resolver_o_encolar_matriz,
 )
 from app.extraccion.identidad_expediente import corregir_identidad_expediente
-from app.extraccion.lotes import LoteDeclarado, extraer_lotes_declarados
+from app.extraccion.lotes import LoteDeclarado, ResultadoLotes, extraer_lotes_declarados
 from app.extraccion.normalizacion import parsear_importe_es
 from app.extraccion.pipeline_anejo import procesar_anejo
 from app.extraccion.precios_unitarios import calcular_baja_efectiva
 from app.extraccion.texto import es_documento_escaneado, extraer_texto
 from app.interfaces.document_storage import DocumentStorage
 from app.interfaces.model_provider import ModelProvider
-from app.models import Documento, EstadoExpediente, Expediente, Lote, TipoDocumento, TrabajoCola, TrazaOrigen
+from app.models import (
+    Documento,
+    EstadoExpediente,
+    Expediente,
+    LineaCatalogo,
+    Lote,
+    TipoDocumento,
+    TrabajoCola,
+    TrazaOrigen,
+)
 
 # Identificador de lote cuando el documento no declara ninguno por su nombre
 # (CLAUDE.md, encargo de esta sesión, punto 1: "un único lote implícito,
@@ -77,11 +86,14 @@ _TIPOS_CON_BAJA_DECLARADA = (
 
 # Igual que `app.extraccion.baja._PRIORIDAD_BAJA` (CLAUDE.md sección 17:
 # preferir la Resolución sobre la Propuesta cuando existan las dos, por ser
-# el acto posterior y definitivo). El contrato no declara lotes por nombre
-# en el corpus visto hasta ahora, así que no entra en esta prioridad.
+# el acto posterior y definitivo). `propuesta_dt` es al mismo tipo de hecho
+# que `propuesta_lc27` (docs/analisis-corpus.md hallazgo 4), misma
+# prioridad. El contrato no declara lotes por nombre en el corpus visto
+# hasta ahora, así que no entra en esta prioridad.
 _PRIORIDAD_LOTES = {
     TipoDocumento.resolucion_adjudicacion: 0,
     TipoDocumento.propuesta_lc27: 1,
+    TipoDocumento.propuesta_dt: 1,
 }
 
 
@@ -151,6 +163,28 @@ def _obtener_o_crear_lote(db: Session, expediente_id: int, identificador: str) -
     return lote
 
 
+def _eliminar_lote_sentinela_obsoleto(db: Session, expediente_id: int) -> None:
+    """Idempotencia (CLAUDE.md sección 9.9) al migrar al arreglo de
+    identidad de lote (sección 27): un expediente reprocesado con el
+    generalizador nuevo puede pasar de "un único lote implícito"
+    (`LOTE_UNICO`, camino de antes de esta sesión) a lotes reales de
+    verdad, y en varios casos reales (`6.23/28510.0066`) las líneas que
+    colgaban del sentinela mezclaban precios de varios lotes distintos
+    (sección 22/26 del análisis) -- sustituirlas por las correctas exige
+    borrar primero el lote sentinela y sus líneas, nunca dejarlas
+    conviviendo con las nuevas. Solo actúa cuando el expediente tiene
+    EXACTAMENTE un lote existente y es el sentinela: un expediente que ya
+    tenía lotes reales de una ejecución anterior correcta no se toca aquí,
+    lo actualiza `_obtener_o_crear_lote` como siempre."""
+    lotes_existentes = db.execute(select(Lote).where(Lote.expediente_id == expediente_id)).scalars().all()
+    if len(lotes_existentes) != 1 or lotes_existentes[0].identificador_lote != LOTE_UNICO:
+        return
+    lote_sentinela = lotes_existentes[0]
+    db.execute(delete(LineaCatalogo).where(LineaCatalogo.lote_id == lote_sentinela.id))
+    db.delete(lote_sentinela)
+    db.commit()
+
+
 def _clasificar_documentos(db: Session, storage: DocumentStorage, documentos: list[Documento]) -> list[_Documento]:
     resultado = []
     for doc in documentos:
@@ -176,26 +210,39 @@ def _clasificar_documentos(db: Session, storage: DocumentStorage, documentos: li
     return resultado
 
 
-def _extraer_lotes_declarados_del_expediente(
-    documentos: list[_Documento],
-) -> tuple[list[LoteDeclarado], Optional[int]]:
+@dataclass(frozen=True)
+class _LotesExtraidos:
+    lotes: list[LoteDeclarado]
+    documento_id: Optional[int]
+    lotes_totales_declarados: Optional[int]
+    codigo_principal_declarado: Optional[CampoAnclado]
+
+
+def _extraer_lotes_declarados_del_expediente(documentos: list[_Documento]) -> _LotesExtraidos:
     """Primer documento (por prioridad de plantilla, no por orden de lista)
-    que declare al menos un "En el LOTE N" gana — mismo criterio que
+    que declare al menos un lote por su nombre gana — mismo criterio que
     `app.extraccion.baja.elegir_baja_preferida` aplicado a listas de lotes
-    en vez de a una baja suelta. Devuelve también el id del documento de
-    origen, para las trazas por lote."""
-    candidatos: list[tuple[int, list[LoteDeclarado], int]] = []
+    en vez de a una baja suelta."""
+    candidatos: list[tuple[int, ResultadoLotes, int]] = []
     for item in documentos:
         prioridad = _PRIORIDAD_LOTES.get(item.tipo)
         if prioridad is None:
             continue
-        encontrados = extraer_lotes_declarados(item.paginas)
-        if encontrados:
-            candidatos.append((prioridad, encontrados, item.documento.id))
+        resultado = extraer_lotes_declarados(item.paginas)
+        if resultado.lotes:
+            candidatos.append((prioridad, resultado, item.documento.id))
     if not candidatos:
-        return [], None
+        return _LotesExtraidos(
+            lotes=[], documento_id=None, lotes_totales_declarados=None, codigo_principal_declarado=None
+        )
     candidatos.sort(key=lambda c: c[0])
-    return candidatos[0][1], candidatos[0][2]
+    _, resultado, documento_id = candidatos[0]
+    return _LotesExtraidos(
+        lotes=resultado.lotes,
+        documento_id=documento_id,
+        lotes_totales_declarados=resultado.lotes_totales_declarados,
+        codigo_principal_declarado=resultado.codigo_principal_declarado,
+    )
 
 
 _TIPOS_CONTRATO_OBRA = ("obras", "obra")
@@ -214,6 +261,22 @@ def _detectar_contrato_obra(documentos: list[_Documento]) -> Optional[CampoAncla
         campo = extraer_campos_anuncio_pcsp(item.paginas).tipo_contrato
         if campo is not None and campo.valor.strip().lower() in _TIPOS_CONTRATO_OBRA:
             return campo
+    return None
+
+
+def _detectar_numero_lotes_pcsp(documentos: list[_Documento]) -> Optional[int]:
+    """Sesión de identidad de lote (CLAUDE.md sección 27): el campo
+    estructurado "Nº de Lotes:" del Anuncio PCSP es la única fuente de
+    "cuántos lotes declara la licitación" para un expediente que no trae
+    ninguna Propuesta LC.27 ni Resolución con bloque narrativo por lote —
+    caso real verificado: `6.23/28510.0139` ("2 lotes" en el título, "Nº de
+    Lotes: 2" aquí, cero documentos que declaren baja/importe por lote)."""
+    for item in documentos:
+        if item.tipo != TipoDocumento.anuncio_pcsp:
+            continue
+        campo = extraer_campos_anuncio_pcsp(item.paginas).numero_lotes
+        if campo is not None:
+            return int(campo.valor)
     return None
 
 
@@ -339,6 +402,8 @@ def _procesar_lotes_declarados(
         lote.importe_licitacion = declarado.importe_licitacion
         lote.importe_adjudicacion = declarado.importe_adjudicacion
         lote.adjudicatario = declarado.adjudicatario
+        if declarado.codigo_expediente_lote:
+            lote.codigo_expediente_lote = declarado.codigo_expediente_lote
         db.commit()
         db.refresh(lote)
         lotes.append(lote)
@@ -471,7 +536,15 @@ def ejecutar_extraccion_expediente(
             motivo_revision = _acumular_motivo(motivo_revision, corregir_identidad_expediente(db, expediente, items))
             db.commit()
 
-            lotes_declarados, documento_id_lotes = _extraer_lotes_declarados_del_expediente(items)
+            # Nº de lotes declarado por el Anuncio PCSP (campo estructurado,
+            # sección 27): única fuente para un expediente sin ninguna
+            # Propuesta/Resolución con bloque narrativo por lote
+            # (`6.23/28510.0139`) -- se detecta pronto para estar disponible
+            # en las dos ramas de abajo.
+            lotes_totales_pcsp = _detectar_numero_lotes_pcsp(items)
+
+            resultado_lotes = _extraer_lotes_declarados_del_expediente(items)
+            lotes_declarados = resultado_lotes.lotes
             if lotes_declarados:
                 # Camino multi-lote (o de un único lote declarado por su nombre
                 # real, p.ej. si algún día aparece un "LOTE 2" suelto): los
@@ -480,9 +553,59 @@ def ejecutar_extraccion_expediente(
                 # importe_licitacion/adjudicacion/baja_global del expediente
                 # salen de los lotes, no de un único campo de documento.
                 _extraer_campos_expediente(db, expediente, items, registrar_baja_importe=False)
-                lotes, motivo_lotes = _procesar_lotes_declarados(db, expediente, lotes_declarados, documento_id_lotes)
+
+                # Contraste, nunca escritura: `codigo_principal_declarado`
+                # es solo para detectar una identidad rota (mismo espíritu
+                # que `corregir_identidad_expediente`), jamás se asigna a
+                # `expediente.codigo_matriz` -- una de sus tres etiquetas
+                # reales es literalmente "Nº EXPEDIENTE MATRIZ"
+                # (`6.24/28510.0094`), una trampa de vocabulario sin
+                # relación con acuerdo marco (CLAUDE.md sección 27):
+                # escribirla ahí reintroduciría el bug de autorreferencia
+                # de las secciones 20/21.
+                principal = resultado_lotes.codigo_principal_declarado
+                if principal is not None and normalizar_codigo_expediente(
+                    principal.valor
+                ) != normalizar_codigo_expediente(expediente.codigo_expediente):
+                    motivo_revision = _acumular_motivo(
+                        motivo_revision,
+                        f"el documento declara 'EXPEDIENTE PRINCIPAL/ORIGEN' {principal.valor}, distinto del "
+                        f"expediente bajo el que están archivados sus documentos ({expediente.codigo_expediente})",
+                    )
+
+                _eliminar_lote_sentinela_obsoleto(db, expediente.id)
+                lotes, motivo_lotes = _procesar_lotes_declarados(
+                    db, expediente, lotes_declarados, resultado_lotes.documento_id
+                )
                 motivo_revision = _acumular_motivo(motivo_revision, motivo_lotes)
                 _resumir_lotes_en_expediente(expediente, lotes)
+                expediente.lotes_totales_declarados = (
+                    resultado_lotes.lotes_totales_declarados or lotes_totales_pcsp
+                )
+
+                # Cobertura parcial (sesión de identidad de lote, CLAUDE.md
+                # sección 27, encargo explícito del cliente): "un expediente
+                # del que solo conocemos 2 de 13 lotes no puede figurar como
+                # completado". Se compara contra los lotes que SÍ traen dato
+                # real (baja o importe), no solo contra `len(lotes)` -- un
+                # lote mencionado por nombre en la cabecera pero sin ningún
+                # bloque de adjudicación (ninguno de los 15 reales, pero
+                # `_procesar_lotes_declarados` lo modela igual, sección 27)
+                # no cuenta como "conocido" para este cálculo.
+                if expediente.lotes_totales_declarados is not None:
+                    lotes_con_datos = [
+                        l for l in lotes if l.baja_lote is not None or l.importe_adjudicacion is not None
+                    ]
+                    if len(lotes_con_datos) < expediente.lotes_totales_declarados:
+                        identificadores = sorted(
+                            (l.identificador_lote for l in lotes_con_datos), key=lambda x: (len(x), x)
+                        )
+                        motivo_revision = _acumular_motivo(
+                            motivo_revision,
+                            f"cobertura parcial: {len(lotes_con_datos)} de "
+                            f"{expediente.lotes_totales_declarados} lotes declarados tienen baja/importe "
+                            f"(con datos: {', '.join(identificadores) or 'ninguno'})",
+                        )
             else:
                 # Camino de siempre: un único lote implícito (CLAUDE.md,
                 # encargo de esta sesión, punto 1). La falta de importe/baja
@@ -525,6 +648,28 @@ def ejecutar_extraccion_expediente(
                 lote.importe_adjudicacion = importe_adjudicacion
                 db.commit()
                 lotes = [lote]
+
+                expediente.lotes_totales_declarados = lotes_totales_pcsp
+                if lotes_totales_pcsp is not None and lotes_totales_pcsp > 1:
+                    # Caso real más peligroso de la sesión de identidad de
+                    # lote: `6.23/28510.0139` declara "2 lotes" (el propio
+                    # Anuncio PCSP lo confirma, "Nº de Lotes: 2") pero no
+                    # trae ninguna Propuesta LC.27 ni Resolución de la que
+                    # sacar el desglose por lote -- `lote` de arriba es el
+                    # sentinela `LOTE_UNICO`, no un lote identificado por
+                    # número, así que cuenta como 0 lotes conocidos aunque
+                    # haya podido sacar baja/importe de algún otro sitio
+                    # (p.ej. el Contrato): ese valor sería el de un solo
+                    # lote de los 2, presentado sin saber de cuál -- el
+                    # mismo riesgo que ya diagnosticó CLAUDE.md sección 26
+                    # para 6.24/28510.0088, aquí sin ni siquiera un
+                    # documento que lo desglose.
+                    motivo_revision = _acumular_motivo(
+                        motivo_revision,
+                        f"cobertura parcial: 0 de {lotes_totales_pcsp} lotes identificados por número "
+                        "(el expediente no trae ninguna Propuesta LC.27 ni Resolución de Adjudicación "
+                        "que declare la adjudicación lote a lote)",
+                    )
 
             motivo_revision = _acumular_motivo(motivo_revision, asegurar_cruce_codigos(db, expediente))
             db.commit()

@@ -54,6 +54,17 @@ def test_importe_como_decimal_de_campo_ausente_es_none():
     assert importe_como_decimal(None) is None
 
 
+def test_numero_lotes_en_anuncio_sin_desglose_por_lote():
+    # Sesión de identidad de lote (CLAUDE.md sección 27): 6.23/28510.0139 es
+    # el caso más peligroso -- "Nº de Lotes: 2" confirma que la licitación
+    # tiene 2 lotes, pero este mismo documento nunca desglosa cuál es cuál
+    # (eso vive, si vive en algún sitio, en una Propuesta LC.27 o Resolución
+    # que este expediente no tiene). Este campo es la única fuente de
+    # "cuántos lotes" para ese caso.
+    campos = extraer_campos_anuncio_pcsp(extraer_texto(fx.ANUNCIO_PCSP_DOS_LOTES_SIN_DESGLOSE))
+    assert campos.numero_lotes.valor == "2"
+
+
 def test_tipo_contrato_obras_sintetico():
     # Sin fixture PDF real con "Tipo de Contrato Obras" en este corpus
     # (CLAUDE.md sección 26: el único departamento visto, 28510, es

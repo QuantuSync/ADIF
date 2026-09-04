@@ -50,6 +50,14 @@ _TIPO_CONTRATO_RE = re.compile(r"Tipo de Contrato\s+(\S+)", re.IGNORECASE)
 _OBJETO_CONTRATO_RE = re.compile(
     r"Objeto del Contrato:\s*(.+?)\s*\nDescripci[oó]n", re.DOTALL
 )
+# Sesión de identidad de lote (CLAUDE.md sección 27): el "Anuncio de
+# adjudicación" (familia PCSP) trae este campo estructurado incluso cuando
+# el expediente no tiene ninguna Propuesta LC.27 ni Resolución de la que
+# sacar el bloque narrativo por lote (caso real: 6.23/28510.0139, "2 lotes"
+# en el título y "Nº de Lotes: 2" aquí, sin ningún documento que declare
+# baja/importe por lote) -- es la única fuente de "cuántos lotes declara la
+# licitación" para ese caso.
+_NUMERO_LOTES_RE = re.compile(r"N[ºo]\s*de\s+Lotes:\s*(\d+)", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -68,6 +76,7 @@ class CamposAnuncioPcsp:
     adjudicatario: Optional[CampoAnclado] = None
     objeto_contrato: Optional[CampoAnclado] = None
     tipo_contrato: Optional[CampoAnclado] = None
+    numero_lotes: Optional[CampoAnclado] = None
 
 
 def _buscar_en_paginas(paginas: list[PaginaTexto], patron: re.Pattern) -> Optional[CampoAnclado]:
@@ -97,6 +106,7 @@ def extraer_campos_anuncio_pcsp(paginas: list[PaginaTexto]) -> CamposAnuncioPcsp
         adjudicatario=_buscar_en_paginas(paginas, _ADJUDICATARIO_RE),
         objeto_contrato=_buscar_objeto(paginas),
         tipo_contrato=_buscar_en_paginas(paginas, _TIPO_CONTRATO_RE),
+        numero_lotes=_buscar_en_paginas(paginas, _NUMERO_LOTES_RE),
     )
 
 

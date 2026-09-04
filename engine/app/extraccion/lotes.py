@@ -1,41 +1,75 @@
-"""Etapa 2, camino multi-lote (CLAUDE.md sección 2 y encargo de esta
-sesión): un expediente puede subdividirse en varios lotes, cada uno con su
-propia baja, su propio presupuesto y su propio adjudicatario — verificado
-contra el expediente real 6.25/28510.0027 (Resolución de Adjudicación,
-plantilla L9_AF.01-FE, LOTE 1 al 7,13 % y LOTE 3 al 1,18 %, presupuestos
-distintos). `app.extraccion.baja` sigue siendo el camino de un solo lote
-(ningún "LOTE N" en el texto); este módulo es el que reconoce la estructura
-multi-lote cuando existe, y no toca nada si no la encuentra.
+"""Etapa 2, camino multi-lote (CLAUDE.md sección 19 y sección 27 — sesión de
+identidad de lote): un expediente puede subdividirse en varios lotes, cada
+uno con su propia baja, su propio presupuesto, su propio adjudicatario y
+—hallazgo de la sesión de identidad de lote— su propio código de
+expediente en la Plataforma, distinto del "expediente principal" bajo el
+que están archivados los documentos comunes.
 
-La Resolución declara cada lote en un bloque autocontenido dentro de
-"RESUELVE:":
+Reescrito por completo en la sesión de identidad de lote. La versión
+anterior solo reconocía una redacción exacta ("En el LOTE N. ...", la única
+que trae el documento real de `6.25/28510.0027`) y fallaba en silencio para
+los otros 14 expedientes multi-lote reales del corpus, cada uno con una
+redacción distinta: bullet con dos puntos ("- LOTE N: ..., a la empresa"),
+numerado ("1º.- Se eleva propuesta de adjudicación en LOTE N..."), con el
+título completo repetido antes de cada lote ("SUMINISTRO...N LOTES. Nº
+<principal>. LOTE N: ..."), orden baja/importe invertido, etc. Catalogadas
+las 15 variantes reales antes de tocar este módulo (sesión de identidad de
+lote) — nunca generalizado contra una sola.
 
-  "- En el LOTE 1. BASE EN LAS MATAS. EXPEDIENTE Nº 6.25/28510.0099, a la
-  empresa: ÁRIDOS DE VILLACASTÍN, S.A., con NIF: A83964817, con una baja del
-  7,13% aplicable al conjunto de precios unitarios [...] con un importe a
-  adjudicar de: - Base imponible ................ 593.375,00 €"
+Estrategia: en vez de un regex por variante, dos pasadas independientes:
 
-El ancla es la frase literal "En el LOTE N", no cualquier mención suelta de
-"LOTE N" — esa palabra también aparece en la cabecera "DATOS DE LA
-LICITACIÓN" y en la tabla de presupuesto de licitación, sin baja cerca. Un
-`.*?` sin acotar entre "En el LOTE N" y sus datos podría saltar por encima
-del bloque de otro lote; se acota con un lookahead negativo que nunca cruza
-la siguiente ocurrencia de "En el LOTE".
+1. **Ventaneo por "LOTE N"**: cada aparición literal de "LOTE" + número en
+   el documento (con o sin "En el"/"-"/numeración delante — el ancla mínima
+   que comparten las 15 variantes) abre una ventana de texto hasta la
+   siguiente aparición de "LOTE N" (cualquier número) o el final del
+   documento. Todas las páginas se concatenan antes de buscar: un bloque de
+   adjudicación puede partirse por un salto de página (verificado en
+   `6.24/28510.0117`, la baja de LOTE 2 queda en la página siguiente a su
+   importe).
+2. **Sub-extractores genéricos dentro de cada ventana**: baja
+   (`app.extraccion.baja.buscar_baja_en_texto`, ya tolera las tres
+   redacciones y el orden invertido), importe adjudicado ("Base
+   imponible...€", el mismo patrón que ya usa `campos_lc27` para el camino
+   de un único lote) y adjudicatario. El orden baja/importe dentro del
+   texto deja de importar porque cada sub-extractor busca su propio patrón,
+   no una secuencia fija.
 
-El importe de licitación por lote no está en el bloque RESUELVE (ese trae el
-importe *adjudicado*): sale de la tabla "Presupuesto de licitación: BASE
-IMPONIBLE IVA...", con una fila por lote ("LOTE 1 593.375,00 € ..."). Esa
-fila empieza la línea con "LOTE N", a diferencia de las menciones de "En el
-LOTE N" del RESUELVE — son patrones disjuntos por construcción, no hace
-falta desambiguarlos entre sí.
+Una ventana puede no traer nada más que el número de lote y su código
+propio (las apariciones de la cabecera/firma, que solo listan los lotes por
+nombre) — se fusiona con las ventanas del cuerpo que sí traen datos,
+"primer valor no nulo encontrado gana" por campo, igual que el resto de la
+cascada resuelve varias fuentes del mismo hecho.
 
-Nota sobre LC.27 multi-lote: no se ha encontrado en el corpus completo (45
-expedientes) ninguna Propuesta LC.27 con más de un lote — solo la Resolución
-del expediente 6.25/28510.0027 es multi-lote. El mismo patrón ("En el LOTE
-N" + baja + importe) se aplica también a LC.27 por si alguna vez aparece uno
-así, pero **eso está sin verificar contra un documento real** (CLAUDE.md
-sección 16): si aparece una LC.27 multi-lote con una redacción distinta,
-este es el sitio a revisar.
+Un documento de un solo lote (`6.23/28510.0051`, `0066`, `0088`, `0109`,
+`0129`: el cuerpo nunca repite "LOTE N", solo la cabecera lo nombra una
+vez) no necesita ninguna rama especial: su única ventana ya cubre desde esa
+mención hasta el final del documento, así que el sub-extractor de baja e
+importe encuentra los mismos datos que ya extraía el camino de un único
+lote — simplemente ahora quedan etiquetados con el número de lote real de
+la cabecera en vez del sentinela `LOTE_UNICO`.
+
+**Huecos en la numeración, verificados con un caso real
+(`6.25/28510.0028`, licitación de "7 LOTES" cuyo LOTE 5 no aparece en
+ningún sitio del documento, ni en la cabecera ni en el cuerpo — desierto o
+anulado, sin verificar cuál): `lotes_totales_declarados` nunca se usa para
+generar identificadores de lote que falten.** Solo cuenta cuántos lotes se
+conocen por nombre contra cuántos declara el título, nunca inventa el
+hueco.
+
+**Trampa verificada del vocabulario, sesión de identidad de lote:
+`6.24/28510.0094` etiqueta su expediente principal como "Nº EXPEDIENTE
+MATRIZ" — la palabra "matriz" aquí no tiene relación con el acuerdo marco
+de CLAUDE.md sección 2/20 (`codigo_matriz`/`matriz_expediente_id`), es solo
+como esta Propuesta LC.27 concreta llama a "expediente que agrupa los
+lotes". Por eso `codigo_principal_declarado` de este módulo NUNCA se
+escribe en `expediente.codigo_matriz`: hacerlo reintroduciría el bug de
+autorreferencia de la sección 20/21 (una fila etiquetada con el código de
+su propia licitación agrupadora, tratada como si fuera una matriz de
+acuerdo marco). Es la misma ambigüedad de vocabulario que ya documenta la
+sección 27 para la palabra "lote" (categoría de producto en un acuerdo
+marco vs. subdivisión de una licitación en contratos concurrentes) —
+"matriz" aquí es un tercer uso más de una palabra ya sobrecargada en este
+corpus.
 """
 from __future__ import annotations
 
@@ -44,34 +78,83 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Optional
 
-from app.extraccion.normalizacion import parsear_importe_es, parsear_porcentaje_es
+from app.extraccion.baja import buscar_baja_en_texto
+from app.extraccion.campos_pcsp import CODIGO_EXPEDIENTE_RE, CampoAnclado
+from app.extraccion.normalizacion import parsear_importe_es
 from app.extraccion.texto import PaginaTexto
 
-# Icons entre "En el LOTE N" y sus datos: nunca cruza la siguiente aparición
-# de "En el LOTE", así que dos lotes con el mismo texto (baja, importe) no
-# se pueden confundir entre sí aunque el bloque de alguno esté incompleto.
-_NO_CRUZAR_LOTE = r"(?:(?!En el LOTE).)*?"
+# Ancla mínima común a las 15 variantes reales: "LOTE" + número, con o sin
+# "En el"/"-"/"▪"/"•"/numeración ("1º.-") delante. Deliberadamente NO exige
+# ninguno de esos prefijos -- son justo lo que varía entre documentos.
+_LOTE_OCURRENCIA_RE = re.compile(r"LOTE\s*(\d{1,2})\b", re.IGNORECASE)
 
-_BLOQUE_LOTE_RE = re.compile(
-    r"En el LOTE\s*(\d+)\b"
-    + _NO_CRUZAR_LOTE
-    + r"con una baja(?:\s+econ[oó]mica)?(?:\s+ofertada)?\s+del\s+([\d.,]+)\s*%"
-    + _NO_CRUZAR_LOTE
-    + r"Base imponible[^\d\n]{0,40}([\d.,]+)\s*€",
+# Código propio del lote: con etiqueta ("EXPEDIENTE Nº", "Nº DE EXPEDIENTE:")
+# o, verificado en `6.25/28510.0019` (LOTE 1: "...MATERIAL AUXILIAR.
+# 6.25/28510.0039:"), sin ninguna etiqueta -- el código pelado justo después
+# de la descripción y un punto. Se busca solo en los primeros ~250
+# caracteres de la ventana (la descripción del lote nunca es más larga que
+# eso en el corpus real) para no acabar cogiendo un código de otra frase
+# más adelante en la misma ventana.
+_CODIGO_LOTE_ETIQUETA_RE = re.compile(
+    r"(?:EXPEDIENTE\s*N[ºo]\.?:?|N[ºo]\s*DE\s*EXPEDIENTE:?)\s*(" + CODIGO_EXPEDIENTE_RE.pattern + r")",
+    re.IGNORECASE,
+)
+_CODIGO_LOTE_PELADO_RE = re.compile(
+    r"^LOTE\s*\d{1,2}\b[^.]{0,160}?\.\s*(" + CODIGO_EXPEDIENTE_RE.pattern + r")(?=[:\s]|$)",
     re.IGNORECASE | re.DOTALL,
 )
 
-# El adjudicatario es un dato secundario (el Lote lo admite pero no lo exige,
-# CLAUDE.md sección 7): se busca por separado dentro del propio bloque ya
-# capturado, para que una redacción distinta de "a la empresa: X, con NIF:
-# Y" no impida capturar la baja y el importe, que son los datos que sí exige
-# la sección 4 ("se extrae, no se calcula").
-_ADJUDICATARIO_RE = re.compile(r"a la empresa:\s*(.+?),?\s*con\s+NIF", re.IGNORECASE | re.DOTALL)
+# Importe adjudicado del lote: mismo patrón que `campos_lc27
+# ._IMPORTE_ADJUDICACION_RE`, aplicado a la ventana de un lote en vez de al
+# documento entero -- "Base imponible" también aparece como cabecera de
+# columna ("(A) Base Imponible IVA (21%) Total con IVA") pero nunca con un
+# € inmediatamente después del hueco de separadores, así que no hace falta
+# distinguirlas aquí tampoco.
+_IMPORTE_ADJUDICACION_LOTE_RE = re.compile(r"[Bb]ase [Ii]mponible[^\d\n]{0,100}([\d.,]+)\s*€")
 
-# Fila de la tabla "Presupuesto de licitación: BASE IMPONIBLE IVA...": la
-# línea empieza literalmente por "LOTE N", a diferencia de "En el LOTE N"
-# del bloque RESUELVE — no hace falta desambiguar los dos patrones entre sí.
-_TABLA_LICITACION_LOTE_RE = re.compile(r"^LOTE\s*(\d+)\s+([\d.,]+)\s*€", re.MULTILINE)
+# Presupuesto de licitación por lote, cuando el documento lo declara en una
+# tabla con una fila por lote empezando la línea por "LOTE N" (verificado
+# solo en `6.25/28510.0027`, CLAUDE.md sección 19) -- no generalizado más
+# allá de esta forma exacta porque ningún otro de los 15 expedientes trae
+# esta tabla (docs/analisis-corpus.md, sesión de identidad de lote): sin
+# ella, `importe_licitacion` del lote queda `None`, nunca inventado.
+_TABLA_LICITACION_LOTE_RE = re.compile(r"^LOTE\s*(\d{1,2})\s+([\d.,]+)\s*€", re.MULTILINE)
+
+# Adjudicatario: dato secundario (CLAUDE.md sección 7, "no lo exige").
+# Ampliado en la sesión de identidad de lote para cubrir "a la empresa" /
+# "a las empresas", "con NIF" / "con CIF" (`6.23/28510.0051` usa CIF, el
+# resto NIF) y con o sin dos puntos -- si no casa con ninguna variante, se
+# deja en `None` sin bloquear baja ni importe.
+_ADJUDICATARIO_RE = re.compile(
+    r"a\s+la[s]?\s+empresa[s]?:?\s*(.+?),?\s*con\s+(?:NIF|CIF)", re.IGNORECASE | re.DOTALL
+)
+
+# "N LOTES" o "(N LOTES)" del título -- el total que declara la licitación,
+# nunca una secuencia que se vaya a generar (ver docstring del módulo). El
+# número y "LOTES" pueden partirse en líneas de PDF distintas
+# (`6.24/28510.0117`: "(3\nLOTES)"), así que `\s*` sí cruza saltos de línea
+# -- pero el lookahead negativo `(?!\s*\d)` es imprescindible: bug real
+# encontrado verificando contra `6.24/28510.0088`, cuyo código de
+# expediente termina en "...0088" justo antes de "LOTE 1:" (el nombre real
+# del primer lote, en su propia línea) -- sin el lookahead, el regex leía
+# "88" + salto de línea + "LOTE" y devolvía 88 lotes. El lookahead exige
+# que tras "LOTE(S)" NO venga inmediatamente un número (que delataría una
+# mención de "LOTE N" concreto, no el total de la licitación).
+_LOTES_TOTALES_RE = re.compile(r"\(?\s*(\d{1,2})\s*LOTES?\b(?!\s*\d)\)?", re.IGNORECASE)
+
+# Expediente principal: cuatro etiquetas reales distintas para el mismo
+# concepto, dos de ellas con el orden de las palabras invertido entre sí
+# (`6.23/28510.0109`: "EXPEDIENTE ORIGEN Nº"; `6.24/28510.0203`: "Nº
+# EXPEDIENTE ORIGEN:"). "N[ºo] EXPEDIENTE MATRIZ" (`6.24/28510.0094`) es la
+# trampa de vocabulario del docstring del módulo -- se captura aquí solo
+# para contraste/trazabilidad, nunca para `expediente.codigo_matriz`.
+_EXPEDIENTE_PRINCIPAL_RE = re.compile(
+    r"EXPEDIENTE\s+PRINCIPAL\s+N[ºo]\.?:?\s*(" + CODIGO_EXPEDIENTE_RE.pattern + r")"
+    r"|EXPEDIENTE\s+ORIGEN\s+N[ºo]\.?:?\s*(" + CODIGO_EXPEDIENTE_RE.pattern + r")"
+    r"|N[ºo]\s+EXPEDIENTE\s+ORIGEN:?\s*(" + CODIGO_EXPEDIENTE_RE.pattern + r")"
+    r"|N[ºo]\s+EXPEDIENTE\s+MATRIZ:?\s*(" + CODIGO_EXPEDIENTE_RE.pattern + r")",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -81,50 +164,141 @@ class LoteDeclarado:
     importe_licitacion: Optional[Decimal]
     importe_adjudicacion: Optional[Decimal]
     adjudicatario: Optional[str]
+    codigo_expediente_lote: Optional[str]
     pagina: int
     fragmento: str
 
 
-def _importes_licitacion_por_lote(paginas: list[PaginaTexto]) -> dict[str, Decimal]:
-    importes: dict[str, Decimal] = {}
+@dataclass(frozen=True)
+class ResultadoLotes:
+    lotes: list[LoteDeclarado]
+    # Del "N LOTES" del título -- puede ser mayor que `len(lotes)` (algunos
+    # lotes declarados por número no traen ni baja ni importe en ningún
+    # documento disponible, o la numeración tiene huecos, sección 27).
+    lotes_totales_declarados: Optional[int]
+    # Solo para contraste/trazabilidad -- nunca se escribe en
+    # `expediente.codigo_matriz` (ver docstring del módulo).
+    codigo_principal_declarado: Optional[CampoAnclado]
+
+
+def _texto_y_paginas(paginas: list[PaginaTexto]) -> tuple[str, list[tuple[int, int]]]:
+    """Concatena todas las páginas en un único texto (un bloque de
+    adjudicación puede partirse por un salto de página) y devuelve, junto
+    al texto, los límites `(offset_inicio, numero_pagina)` de cada página
+    para poder anclar cada hallazgo a la página donde empieza."""
+    texto = ""
+    limites: list[tuple[int, int]] = []
     for pagina in paginas:
-        for m in _TABLA_LICITACION_LOTE_RE.finditer(pagina.texto):
-            identificador = m.group(1)
-            if identificador not in importes:  # primera aparición gana, igual que el resto de la cascada
-                importes[identificador] = parsear_importe_es(m.group(2))
-    return importes
+        limites.append((len(texto), pagina.numero))
+        texto += pagina.texto + "\n"
+    return texto, limites
 
 
-def extraer_lotes_declarados(paginas: list[PaginaTexto]) -> list[LoteDeclarado]:
-    """Lista vacía si el documento no declara ningún lote por su nombre
-    ("En el LOTE N") — el llamador (orquestador) cae entonces al camino de
-    un único lote implícito (CLAUDE.md, encargo de esta sesión, punto 1:
-    "Cuando el documento no tenga lotes, un único lote implícito")."""
-    importes_licitacion = _importes_licitacion_por_lote(paginas)
+def _pagina_en_offset(limites: list[tuple[int, int]], offset: int) -> int:
+    numero = limites[0][1] if limites else 0
+    for inicio, pagina_numero in limites:
+        if inicio <= offset:
+            numero = pagina_numero
+        else:
+            break
+    return numero
 
-    declarados: list[LoteDeclarado] = []
-    identificadores_vistos: set[str] = set()
-    for pagina in paginas:
-        for m in _BLOQUE_LOTE_RE.finditer(pagina.texto):
-            identificador = m.group(1)
-            if identificador in identificadores_vistos:
-                continue  # el mismo bloque no se repite dentro de un documento
-            identificadores_vistos.add(identificador)
 
-            adjudicatario_match = _ADJUDICATARIO_RE.search(m.group(0))
-            adjudicatario = (
-                re.sub(r"\s+", " ", adjudicatario_match.group(1)).strip() if adjudicatario_match else None
-            )
+def _codigo_propio_lote(ventana: str) -> Optional[str]:
+    m = _CODIGO_LOTE_ETIQUETA_RE.search(ventana[:300])
+    if m:
+        return m.group(1)
+    m = _CODIGO_LOTE_PELADO_RE.match(ventana[:250])
+    if m:
+        return m.group(1)
+    return None
 
-            declarados.append(
-                LoteDeclarado(
-                    identificador=identificador,
-                    baja=parsear_porcentaje_es(m.group(2)),
-                    importe_licitacion=importes_licitacion.get(identificador),
-                    importe_adjudicacion=parsear_importe_es(m.group(3)),
-                    adjudicatario=adjudicatario,
-                    pagina=pagina.numero,
-                    fragmento=re.sub(r"\s+", " ", m.group(0)).strip(),
-                )
-            )
-    return declarados
+
+def _lotes_totales_declarados(texto: str) -> Optional[int]:
+    m = _LOTES_TOTALES_RE.search(texto)
+    if not m:
+        return None
+    return int(m.group(1))
+
+
+def _codigo_principal_declarado(texto: str) -> Optional[CampoAnclado]:
+    m = _EXPEDIENTE_PRINCIPAL_RE.search(texto)
+    if not m:
+        return None
+    valor = next(g for g in m.groups() if g is not None)
+    return CampoAnclado(valor=valor, pagina=0, fragmento=m.group(0).strip())
+
+
+def extraer_lotes_declarados(paginas: list[PaginaTexto]) -> ResultadoLotes:
+    """Lista vacía si el documento no menciona ningún "LOTE N" por su
+    nombre -- el llamador (orquestador) cae entonces al camino de un único
+    lote implícito (CLAUDE.md, sección 19, "un único lote implícito")."""
+    texto, limites = _texto_y_paginas(paginas)
+    ocurrencias = list(_LOTE_OCURRENCIA_RE.finditer(texto))
+    if not ocurrencias:
+        return ResultadoLotes(lotes=[], lotes_totales_declarados=None, codigo_principal_declarado=None)
+
+    importes_licitacion = {
+        m.group(1): parsear_importe_es(m.group(2)) for m in _TABLA_LICITACION_LOTE_RE.finditer(texto)
+    }
+
+    # Acumulador por identificador: primer valor no nulo encontrado gana,
+    # en el orden en que aparecen las ventanas (una ventana de cabecera que
+    # solo trae el código propio no debe borrar la baja/importe que ya
+    # encontró una ventana anterior del cuerpo, ni al revés).
+    datos: dict[str, dict] = {}
+    orden: list[str] = []
+
+    for i, m in enumerate(ocurrencias):
+        identificador = m.group(1)
+        fin = ocurrencias[i + 1].start() if i + 1 < len(ocurrencias) else len(texto)
+        ventana = texto[m.start():fin]
+
+        if identificador not in datos:
+            datos[identificador] = {
+                "baja": None, "fragmento_baja": None,
+                "importe_adjudicacion": None,
+                "adjudicatario": None,
+                "codigo_expediente_lote": None,
+                "offset": m.start(),
+            }
+            orden.append(identificador)
+        entrada = datos[identificador]
+
+        if entrada["codigo_expediente_lote"] is None:
+            entrada["codigo_expediente_lote"] = _codigo_propio_lote(ventana)
+
+        if entrada["baja"] is None:
+            baja_encontrada = buscar_baja_en_texto(ventana)
+            if baja_encontrada is not None:
+                entrada["baja"] = baja_encontrada.baja
+                entrada["fragmento_baja"] = baja_encontrada.fragmento
+
+        if entrada["importe_adjudicacion"] is None:
+            m_imp = _IMPORTE_ADJUDICACION_LOTE_RE.search(ventana)
+            if m_imp:
+                entrada["importe_adjudicacion"] = parsear_importe_es(m_imp.group(1))
+
+        if entrada["adjudicatario"] is None:
+            m_adj = _ADJUDICATARIO_RE.search(ventana)
+            if m_adj:
+                entrada["adjudicatario"] = re.sub(r"\s+", " ", m_adj.group(1)).strip()
+
+    lotes = [
+        LoteDeclarado(
+            identificador=identificador,
+            baja=datos[identificador]["baja"],
+            importe_licitacion=importes_licitacion.get(identificador),
+            importe_adjudicacion=datos[identificador]["importe_adjudicacion"],
+            adjudicatario=datos[identificador]["adjudicatario"],
+            codigo_expediente_lote=datos[identificador]["codigo_expediente_lote"],
+            pagina=_pagina_en_offset(limites, datos[identificador]["offset"]),
+            fragmento=(datos[identificador]["fragmento_baja"] or "").strip() or f"LOTE {identificador}",
+        )
+        for identificador in orden
+    ]
+    return ResultadoLotes(
+        lotes=lotes,
+        lotes_totales_declarados=_lotes_totales_declarados(texto),
+        codigo_principal_declarado=_codigo_principal_declarado(texto),
+    )

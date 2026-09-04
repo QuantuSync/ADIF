@@ -341,6 +341,142 @@ def test_expediente_0027_multi_lote_produce_baja_correcta_por_lote(db_session):
     assert resultado["motivo_revision"] is not None
 
 
+# --- CLAUDE.md sección 27: sesión de identidad de lote ---------------------
+
+
+def test_expediente_0124_lote_2_de_dos_no_usa_sentinela(db_session):
+    """6.24/28510.0124 solo trae la Resolución del LOTE 2 de una licitación
+    de 2 lotes -- el cuerpo nunca repite "LOTE N", así que antes de esta
+    sesión el lote quedaba etiquetado con el sentinela `LOTE_UNICO` ("1"),
+    no con su número real (2). Sin ningún ANEJO en este fixture no hay
+    catálogo que extraer, pero el lote sí debe quedar identificado
+    correctamente y el expediente marcado con cobertura parcial (1 de 2)."""
+    expediente = _crear_expediente_con_documentos(
+        db_session, "6.24/28510.0124", [("ADJUDICACION", fx.RESOLUCION_ADJUDICACION)],
+    )
+    trabajo = SimpleNamespace(expediente_id=expediente.id)
+
+    ejecutar_extraccion_expediente(db_session, _StorageDirecta(), trabajo, model_provider=None)
+
+    db_session.refresh(expediente)
+    lotes = db_session.query(Lote).filter_by(expediente_id=expediente.id).all()
+    assert [l.identificador_lote for l in lotes] == ["2"]
+    assert lotes[0].baja_lote == Decimal("0.0450")
+    assert lotes[0].codigo_expediente_lote == "6.24/28510.0179"
+    assert expediente.lotes_totales_declarados == 2
+    assert expediente.estado == EstadoExpediente.pendiente_revision
+    assert "cobertura parcial: 1 de 2" in expediente.error
+
+
+def test_tres_lotes_completos_no_generan_motivo_de_cobertura_parcial(db_session):
+    # 6.24/28510.0117: los tres lotes de la licitación traen baja/importe en
+    # el mismo documento -- ninguna cobertura parcial que señalar, aunque el
+    # expediente siga en revisión por falta de catálogo (sin ANEJO en este
+    # fixture).
+    expediente = _crear_expediente_con_documentos(
+        db_session, "6.24/28510.0117", [("ADJUDICACION", fx.PROPUESTA_LC27_TRES_LOTES_BAJA_ENTRE_PAGINAS)],
+    )
+    trabajo = SimpleNamespace(expediente_id=expediente.id)
+
+    ejecutar_extraccion_expediente(db_session, _StorageDirecta(), trabajo, model_provider=None)
+
+    db_session.refresh(expediente)
+    assert expediente.lotes_totales_declarados == 3
+    assert "cobertura parcial" not in (expediente.error or "")
+
+
+def test_expediente_0028_con_hueco_en_la_numeracion_marca_cobertura_parcial(db_session):
+    # Encargo explícito del cliente (CLAUDE.md sección 27): 6.25/28510.0028
+    # declara "7 LOTES" pero el LOTE 5 no aparece en ningún sitio del
+    # documento -- el motivo tiene que decir "6 de 7", nunca fabricar un
+    # LOTE 5 vacío para completar la secuencia.
+    expediente = _crear_expediente_con_documentos(
+        db_session, "6.25/28510.0028", [("ADJUDICACION", fx.RESOLUCION_LOTES_CON_HUECO)],
+    )
+    trabajo = SimpleNamespace(expediente_id=expediente.id)
+
+    ejecutar_extraccion_expediente(db_session, _StorageDirecta(), trabajo, model_provider=None)
+
+    db_session.refresh(expediente)
+    identificadores = {l.identificador_lote for l in db_session.query(Lote).filter_by(expediente_id=expediente.id)}
+    assert identificadores == {"1", "2", "3", "4", "6", "7"}
+    assert expediente.lotes_totales_declarados == 7
+    assert "cobertura parcial: 6 de 7" in expediente.error
+
+
+def test_expediente_0139_sin_ningun_desglose_por_lote_marca_cobertura_cero(db_session):
+    """El caso más peligroso de la sesión (encargo explícito del cliente):
+    6.23/28510.0139 confirma "Nº de Lotes: 2" en su Anuncio PCSP pero no
+    trae ninguna Propuesta LC.27 ni Resolución que desglose por lote --
+    antes de esta sesión figuraba `completado` sin haber identificado ni un
+    solo lote de los 2 que el propio documento confirma que existen."""
+    expediente = _crear_expediente_con_documentos(
+        db_session, "6.23/28510.0139", [("ADJUDICACION", fx.ANUNCIO_PCSP_DOS_LOTES_SIN_DESGLOSE)],
+    )
+    trabajo = SimpleNamespace(expediente_id=expediente.id)
+
+    ejecutar_extraccion_expediente(db_session, _StorageDirecta(), trabajo, model_provider=None)
+
+    db_session.refresh(expediente)
+    assert expediente.lotes_totales_declarados == 2
+    assert expediente.estado == EstadoExpediente.pendiente_revision
+    assert "cobertura parcial: 0 de 2" in expediente.error
+
+
+def test_reprocesar_expediente_con_sentinela_previo_lo_sustituye(db_session):
+    """Idempotencia (CLAUDE.md sección 9.9) al migrar al arreglo de
+    identidad de lote: un expediente que ya tenía el lote implícito único
+    (de antes de esta sesión) con líneas de catálogo colgando de él no debe
+    dejarlas conviviendo con los datos correctos una vez que se reprocesa y
+    se detecta que en realidad es multi-lote."""
+    expediente = _crear_expediente_con_documentos(
+        db_session, "6.24/28510.0088",
+        [("ADJUDICACION", fx.PROPUESTA_LC27_UTE), ("ANEJO", fx.ANEJO_PRECIOS_TRAVIESAS)],
+    )
+    lote_sentinela = Lote(expediente_id=expediente.id, identificador_lote=LOTE_UNICO, baja_lote=Decimal("0.9999"))
+    db_session.add(lote_sentinela)
+    db_session.commit()
+    db_session.add(LineaCatalogo(
+        expediente_id=expediente.id, lote_id=lote_sentinela.id,
+        clave_linea="basura", orden_aparicion=0, codigo_precio="P-999", descripcion="basura del sentinela",
+    ))
+    db_session.commit()
+
+    trabajo = SimpleNamespace(expediente_id=expediente.id)
+    ejecutar_extraccion_expediente(db_session, _StorageDirecta(), trabajo, model_provider=None)
+
+    db_session.refresh(expediente)
+    lotes = db_session.query(Lote).filter_by(expediente_id=expediente.id).all()
+    assert [l.identificador_lote for l in lotes] == ["1"]
+    # El valor de baja del sentinela (0,9999) no sobrevive: la fila se
+    # sustituyó por la correcta, no se actualizó encima de la basura.
+    assert lotes[0].baja_lote == Decimal("0.0050")
+    assert lotes[0].codigo_expediente_lote == "6.24/28510.0113"
+    assert db_session.query(LineaCatalogo).filter_by(codigo_precio="P-999").first() is None
+
+
+def test_codigo_principal_declarado_nunca_se_confunde_con_matriz(db_session):
+    """Trampa de vocabulario verificada en 6.24/28510.0094 ("Nº EXPEDIENTE
+    MATRIZ" sin relación con acuerdo marco, CLAUDE.md sección 27): procesar
+    este expediente no debe dejar `codigo_matriz` relleno con el valor que
+    el documento llama "matriz" (que aquí es simplemente su propio
+    expediente principal, el mismo código bajo el que ya está archivado) --
+    eso reintroduciría el bug de autorreferencia de las secciones 20/21."""
+    expediente = _crear_expediente_con_documentos(
+        db_session, "6.24/28510.0094", [("ADJUDICACION", fx.PROPUESTA_LC27_NUMERADA_CON_ETIQUETA_MATRIZ)],
+    )
+    trabajo = SimpleNamespace(expediente_id=expediente.id)
+
+    ejecutar_extraccion_expediente(db_session, _StorageDirecta(), trabajo, model_provider=None)
+
+    db_session.refresh(expediente)
+    assert expediente.codigo_matriz is None
+    lotes = {l.identificador_lote: l for l in db_session.query(Lote).filter_by(expediente_id=expediente.id)}
+    assert set(lotes) == {"1", "2", "3"}
+    assert lotes["1"].codigo_expediente_lote == "6.24/28510.0175"
+    assert expediente.lotes_totales_declarados == 3
+
+
 # --- CLAUDE.md sección 26: criterios de alcance del cliente ----------------
 
 

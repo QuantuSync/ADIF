@@ -138,6 +138,14 @@ class Expediente(Base):
     extraido_en = Column(DateTime(timezone=True), nullable=True)
     version_logica_extraccion = Column(String(32), nullable=True)
     huella_documentos = Column(String(64), nullable=True)
+    # Cuántos lotes declara la licitación en total (del "N LOTES" del título,
+    # o del campo "Nº de Lotes:" del Anuncio PCSP) -- sesión de identidad de
+    # lote, CLAUDE.md sección 27. Puede ser mayor que `len(lotes)`: la
+    # numeración real tiene huecos (lotes desiertos/anulados, verificado con
+    # 6.25/28510.0028 saltando su LOTE 5), así que este número nunca se usa
+    # para generar identificadores de lote que faltan, solo para comparar
+    # "cuántos conocemos" contra "cuántos hay" y detectar cobertura parcial.
+    lotes_totales_declarados = Column(Integer, nullable=True)
     estado = Column(
         Enum(EstadoExpediente, name="estado_expediente"),
         nullable=False,
@@ -187,7 +195,17 @@ class Lote(Base):
     importe_licitacion = Column(Numeric(14, 4), nullable=True)
     importe_adjudicacion = Column(Numeric(14, 4), nullable=True)
     adjudicatario = Column(String(255), nullable=True)
-    numero_contrato = Column(String(64), nullable=True)
+    # Código propio de ESTE lote en la Plataforma (formato de expediente,
+    # p.ej. "6.24/28510.0113"), distinto del expediente principal bajo el
+    # que están archivados los documentos (sesión de identidad de lote,
+    # CLAUDE.md sección 27) -- verificado que coincide siempre con el
+    # "Contrato nº" del Contrato firmado de este lote (de ahí el nombre
+    # anterior de esta columna, `numero_contrato`, renombrada porque el dato
+    # casi siempre se conoce antes, por la Propuesta/Resolución). Atributo
+    # del lote, no una fila de `Expediente` aparte -- decisión explícita de
+    # esa sesión: no complica la web/Excel/idempotencia sin ganancia clara
+    # mientras nadie necesite buscarlo como expediente independiente.
+    codigo_expediente_lote = Column(String(64), nullable=True)
     # True cuando `baja_lote` (y los importes, si los trae) vinieron de la
     # matriz de un pedido derivado de acuerdo marco, no de los propios
     # documentos de este expediente (app.extraccion.herencia_matriz). None

@@ -126,6 +126,51 @@ ANEJO_PRECIOS_LOTE_TIPO_Y_PARTIDA_ALZADA = FIXTURES_DIR / "6.24_28510.0094_CONTR
 # identificador de fila — hilo de contacto, 6.20/28510.0136.
 TABLA_PRECIOS_SOLO_MATRICULA = FIXTURES_DIR / "6.20_28510.0136_ANEJO_3_p3.pdf"
 
+# Sesión de identidad de lote (CLAUDE.md sección 27): expedientes multi-lote
+# reales cuya redacción del bloque de adjudicación por lote NO coincide con
+# la de RESOLUCION_MULTI_LOTE ("En el LOTE N.") -- catalogados antes de
+# generalizar `app.extraccion.lotes` contra las 15 variantes reales del
+# corpus, no contra una sola.
+
+# "4 LOTES", solo LOTE 1 en este documento (BASE DE MANTENIMIENTO DE MORA,
+# expediente propio 6.23/28510.0073): la cabecera declara "EXPEDIENTE
+# PRINCIPAL Nº" + "LOTE 1: ... EXPEDIENTE Nº X", pero el cuerpo nunca repite
+# "LOTE N" -- antes de esta sesión, este caso caía al lote implícito único
+# (`LOTE_UNICO`) y su baja/importe de UN lote de 4 quedaban etiquetados como
+# los del expediente entero.
+PROPUESTA_LC27_UN_LOTE_DE_VARIOS = FIXTURES_DIR / "6.23_28510.0066_ADJUDICACION_1.pdf"
+
+# "3 LOTES", los tres con su propio bloque de adjudicación en el mismo
+# documento ("- LOTE N: <desc>. EXPEDIENTE Nº X: <empresa>, con NIF: Y, con
+# una baja económica del Z% ..."), con el bloque del LOTE 2 partido entre la
+# página 0 (importe) y la página 1 (baja) -- ejercita el ventaneo por "LOTE
+# N" sobre las páginas concatenadas, no una sola.
+PROPUESTA_LC27_TRES_LOTES_BAJA_ENTRE_PAGINAS = FIXTURES_DIR / "6.24_28510.0117_ADJUDICACION_1.pdf"
+
+# "7 LOTES" pero el LOTE 5 no aparece en ningún sitio del documento (ni en
+# la cabecera ni en el cuerpo) -- desierto o anulado, sin verificar cuál
+# (CLAUDE.md sección 27): la numeración real tiene huecos y
+# `lotes_totales_declarados` (7) nunca se usa para generar el lote que
+# falta, solo para contar cuántos de los 7 sí se conocen (6).
+RESOLUCION_LOTES_CON_HUECO = FIXTURES_DIR / "6.25_28510.0028_ADJUDICACION_1.pdf"
+
+# "3 LOTES", los tres con su propio bloque numerado ("1º.-/2º.-/3º.-") en el
+# mismo documento. Etiqueta el expediente principal como "Nº EXPEDIENTE
+# MATRIZ" -- la trampa de vocabulario del docstring de `app.extraccion.lotes`:
+# la palabra "matriz" aquí no tiene ninguna relación con acuerdo marco, es
+# solo cómo esta Propuesta LC.27 concreta llama a "expediente que agrupa los
+# lotes". Documento real que verifica que `codigo_principal_declarado` nunca
+# se escribe en `expediente.codigo_matriz`.
+PROPUESTA_LC27_NUMERADA_CON_ETIQUETA_MATRIZ = FIXTURES_DIR / "6.24_28510.0094_ADJUDICACION_1.pdf"
+
+# Anuncio PCSP ("Anuncio de adjudicación") de una licitación de "2 lotes" y
+# campo estructurado "Nº de Lotes: 2" -- el caso más peligroso de la sesión
+# de identidad de lote: 6.23/28510.0139 no trae ninguna Propuesta LC.27 ni
+# Resolución de la que sacar el desglose por lote, así que antes de esta
+# sesión figuraba `completado` sin haber identificado ni un solo lote de
+# los 2 que el propio documento confirma que existen.
+ANUNCIO_PCSP_DOS_LOTES_SIN_DESGLOSE = FIXTURES_DIR / "6.23_28510.0139_ADJUDICACION_1.pdf"
+
 # El único documento escaneado confirmado del corpus real (186 de 187
 # documentos tienen capa de texto, CLAUDE.md sección 3): recorte de 1 página
 # del anejo de 100 páginas real (`6.20/28510.0136_ANEJO_2.pdf`) — cada página
