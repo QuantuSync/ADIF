@@ -149,6 +149,16 @@ class Expediente(Base):
     # cubre el fallo de un trabajo concreto; este cubre el motivo a nivel de
     # expediente, incluida la revisión sin que ningún trabajo haya fallado.
     error = Column(Text, nullable=True)
+    # CLAUDE.md sección 26 (regresión de 6.24/28510.0088): el documento
+    # firmado (PDF) es el acto administrativo; la instantánea de sindicación
+    # es un volcado de otra fuente, con su propio alcance (a veces el de la
+    # licitación completa de varios lotes, no el de un lote concreto) y su
+    # propia cadencia de actualización -- no tiene la misma autoridad. Un
+    # desajuste entre las dos ya no manda el expediente a revisión (eso
+    # escondía el motivo real de revisión detrás de un ruido de alcance
+    # distinto, o sacaba de completado un expediente correcto): se guarda
+    # aquí como aviso, y `estado`/`error` no se tocan.
+    aviso_sindicacion = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),

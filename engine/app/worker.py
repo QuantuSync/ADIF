@@ -85,21 +85,22 @@ def procesar_extraer_expediente(db, trabajo) -> dict:
 
 
 def _contrastar_con_sindicacion(db, expediente) -> None:
-    """Bloque 2, punto 4 (CLAUDE.md sección 24): dos fuentes que se
-    verifican entre sí. Solo tiene sentido sobre un resultado real de la
-    cascada (`completado` o `pendiente_revision`, nunca `fallido` — ahí no
-    hay un importe fiable que contrastar, y downgradearlo escondería el
-    motivo real del fallo)."""
+    """Bloque 2, punto 4 (CLAUDE.md sección 24), corregido en la sección 26:
+    dos fuentes que se verifican entre sí, pero no con la misma autoridad. El
+    PDF es el acto administrativo; la instantánea de sindicación es un
+    volcado de otra fuente, que puede tener otro alcance (la licitación
+    completa de un expediente con varios lotes, cuando el PDF que tenemos es
+    el de un lote concreto — el caso real que hizo bajar de `completado` a
+    revisión el ejemplo central de CLAUDE.md sección 4, 6.24/28510.0088, sin
+    que la extracción tuviera nada mal) o estar simplemente desactualizada.
+    Un desajuste ya nunca cambia `estado` ni `error` — se guarda como aviso
+    informativo en `aviso_sindicacion`, para que se pueda ver sin que
+    bloquee nada. Solo tiene sentido sobre un resultado real de la cascada
+    (`completado` o `pendiente_revision`, nunca `fallido` — ahí no hay un
+    importe fiable que contrastar)."""
     if expediente.estado not in (EstadoExpediente.completado, EstadoExpediente.pendiente_revision):
         return
-    motivo = contrastar_expediente(db, expediente)
-    if motivo is None:
-        return
-    if expediente.estado == EstadoExpediente.completado:
-        expediente.estado = EstadoExpediente.pendiente_revision
-        expediente.error = motivo
-    else:
-        expediente.error = f"{expediente.error}; {motivo}" if expediente.error else motivo
+    expediente.aviso_sindicacion = contrastar_expediente(db, expediente)
     db.commit()
 
 

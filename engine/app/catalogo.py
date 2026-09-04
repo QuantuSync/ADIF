@@ -10,6 +10,7 @@ from app.extraccion.codigo_material import derivar_codigo_material
 from app.extraccion.normalizacion import (
     limpiar_codigo_celda,
     limpiar_texto_celda,
+    normalizar_guiones,
     parsear_importe_es,
     parsear_numero_es,
 )
@@ -53,6 +54,25 @@ def _es_partida_alzada(texto_normalizado_sin_espacios: str) -> bool:
     # material"), así que el texto no se descarta — se recupera como
     # descripción, nunca como matrícula.
     return texto_normalizado_sin_espacios.startswith("partidaalzada")
+
+
+# Sesión de los 3 expedientes que seguían en revisión tras el criterio de
+# lote laxo del cliente (CLAUDE.md sección 26): un guion suelto en una celda
+# de matrícula/cantidad/precio unitario es la misma convención administrativa
+# que un hueco en blanco ("no aplica a esta fila"), verificado contra las 39
+# filas reales de `6.24/28510.0117` — la propia tabla usa el guion en la
+# celda de matrícula Y en la de código de elemento de la misma fila,
+# sistemáticamente, nunca solo en una fila suelta. No es un dato ilegible que
+# haga falta revisar, es la forma en que el documento dice "vacío" — igual
+# que CLAUDE.md sección 2 ya trata la ausencia de matrícula en el ~34% de las
+# líneas como algo normal, no un error. Distinto de un valor con identificadores
+# de glifo sin decodificar (CID) o de dos valores duplicados que no coinciden:
+# esos sí son ilegibles de verdad y siguen yendo a revisión (ver
+# `parsear_numero_es`).
+def _es_celda_vacia(valor: Optional[str]) -> bool:
+    if valor is None:
+        return False
+    return normalizar_guiones(valor).strip() == "-"
 
 
 def _acumular_motivo(motivo: Optional[str], nuevo: Optional[str]) -> Optional[str]:
@@ -121,7 +141,9 @@ def construir_linea_catalogo(
         clave = normalizar(matricula).replace(" ", "")
         if _es_pie_de_tabla(clave):
             return None
-        if _es_partida_alzada(clave):
+        if _es_celda_vacia(matricula):
+            matricula = None
+        elif _es_partida_alzada(clave):
             # La celda de matrícula de esta fila no existe de verdad (una
             # partida alzada no tiene, CLAUDE.md sección 2): el texto que
             # debía caer en descripción aterrizó aquí porque a esta fila le
@@ -140,7 +162,7 @@ def construir_linea_catalogo(
 
     cantidad_bruta = _valor("cantidad")
     cantidad = None
-    if cantidad_bruta:
+    if cantidad_bruta and not _es_celda_vacia(cantidad_bruta):
         try:
             cantidad = parsear_numero_es(cantidad_bruta)
         except ValueError as exc:
@@ -148,7 +170,7 @@ def construir_linea_catalogo(
 
     precio_bruto = _valor("precio_unitario")
     precio_unitario = None
-    if precio_bruto:
+    if precio_bruto and not _es_celda_vacia(precio_bruto):
         try:
             precio_unitario = parsear_importe_es(precio_bruto)
         except ValueError as exc:

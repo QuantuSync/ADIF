@@ -44,6 +44,10 @@ class ExpedienteOut(BaseModel):
     lotes: list[LoteOut] = []
     estado: str
     error: Optional[str] = None
+    # CLAUDE.md sección 26: desajuste con la instantánea de sindicación,
+    # nunca bloqueante (el PDF es el acto administrativo, la sindicación no
+    # tiene su misma autoridad) — informativo, distinto de `error`.
+    aviso_sindicacion: Optional[str] = None
     created_at: datetime
 
 

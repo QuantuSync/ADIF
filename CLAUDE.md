@@ -411,15 +411,18 @@ suficientes, no ahora.
   reales cuyo anejo de precios nunca se adjuntó a la Plataforma. Sin
   investigar caso a caso — fuera de alcance de la sesión de expedientes sin
   publicar, que se centró en los 14 códigos ya confirmados.
-- **Nuevo, sin resolver (sección 26):** `6.24/28510.0088` (el ejemplo central
-  de la sección 4) y `6.23/28510.0129` retroceden de `completado` a
-  `pendiente_revision` cuando el contraste con sindicación (sección 24) se
-  ejecuta contra ellos por primera vez: el motor extrae el mismo importe de
-  siempre desde el PDF real, pero la instantánea de sindicación de agosto
-  2024 ya guardada declara un importe distinto (el doble, en los dos casos).
-  Sin determinar todavía cuál de las dos fuentes está equivocada — sección
-  26 tiene el detalle completo. No se ha tocado la sección 24 para
-  investigarlo, fuera de alcance de la sesión de criterios del cliente.
+- **Diagnosticado en la sección 26, sin corregir la causa raíz todavía:**
+  `6.24/28510.0088` y `6.23/28510.0129` no son pedidos de un solo lote —
+  son licitaciones de varios lotes (2 y 3 respectivamente) de las que solo
+  tenemos el `ADJUDICACION_1.pdf` de un lote concreto, que declara su propio
+  número de expediente distinto (`6.24/28510.0113`, `6.23/28510.0143`) del
+  código bajo el que están archivados los documentos (`.0088`, `.0129`, el
+  expediente principal). Mismo tipo de problema que la identidad de acuerdo
+  marco (secciones 20-21), variante nueva sin resolver: falta crear los
+  expedientes de lote reales y dejar el expediente principal como lo que es,
+  sin cuadro de precios propio. El síntoma urgente (bajaban de `completado`
+  por el contraste con sindicación) ya está arreglado — sección 26 — pero la
+  identidad de fondo sigue sin separar.
 
 ---
 
@@ -2063,40 +2066,88 @@ Reprocesados los 53 expedientes reales (45 del corpus fijo +
 8 matrices de acuerdo marco descubiertas en la sesión de herencia, sección
 20) contra el stack real -- `docker compose`, sin dobles de test --, con
 `forzar=true` y sindicación desactivada para no volver a contaminar la base
-de datos.
+de datos. Dos reprocesos completos en esta sesión: el primero con los tres
+criterios del cliente (arriba); el segundo, tras el arreglo urgente de
+autoridad de fuentes y el de las 3 celdas con guion suelto (ver más abajo).
 
-| | Antes de esta sesión | Después |
-|---|---:|---:|
-| `completado` | 14 | **16** |
-| `pendiente_revision` | 24 | **22** |
-| `sin_publicar` | 15 | 15 (sin cambio) |
-| Líneas de catálogo | — (no medido antes de reprocesar) | **2.208** |
-| Matrículas en más de un expediente | 13 | **13** (sin cambio) |
+| | Antes de esta sesión | Tras los 3 criterios | Final |
+|---|---:|---:|---:|
+| `completado` | 14 | 16 | **20** |
+| `pendiente_revision` | 24 | 22 | **18** |
+| `sin_publicar` | 15 | 15 | 15 (sin cambio) |
+| Líneas de catálogo | — | 2.208 | **2.208** (sin cambio: los arreglos posteriores no añaden líneas nuevas, solo dejan de descartar campos ya extraídos) |
+| Matrículas en más de un expediente | 13 | 13 | **13** (sin cambio) |
 
-El neto (+2 completado) es más pequeño que el +4 que aporta el criterio 2
-por sí solo, porque el mismo reproceso forzado destapó, sin relación con
-ninguno de los tres criterios de esta sesión, algo aparte:
+Sobre los 45 (excluyendo las 8 matrices, todas `sin_publicar`): completado
+20, pendiente_revision 18, sin_publicar 7 — suma 45.
 
-**Hallazgo nuevo, sin resolver, fuera del alcance de esta sesión: 2
-expedientes retroceden de `completado` a `pendiente_revision` por el
-contraste con sindicación (sección 24), nunca antes ejecutado contra
-ellos.** `6.24/28510.0088` — el ejemplo central de la sección 4 de este
-documento (licitación y adjudicación 1.000.000 €, baja real 0,50%) — y
-`6.23/28510.0129` pasan a revisión con "importe de licitación no cuadra con
-sindicación": el motor extrae 1.000.000 € / 1.180.620 € (igual que siempre,
-verificado contra los PDF reales en sesiones anteriores), pero la
-instantánea de sindicación de agosto 2024 ya guardada en
-`sindicacion_expedientes` declara 2.000.000 € / 2.705.670 € para esos mismos
-dos expedientes. La sección 24 (contraste con sindicación) se añadió
-**después** de que estos dos expedientes se dieran por completados la
-primera vez — este es el primer reproceso forzado completo desde entonces,
-así que es la primera vez que el contraste llega a compararlos. No se ha
-investigado cuál de las dos fuentes es la que está mal (¿una versión
-distinta del mismo expediente en la instantánea de sindicación, sección
-17.1: "un mismo expediente puede aparecer varias veces... quedarse con la
-más reciente"? ¿un error real de extracción que nadie había cruzado hasta
-hoy?) — **queda para una sesión aparte**, no se ha tocado nada de la sección
-24 en esta.
+### Seguimiento urgente: autoridad del PDF sobre la sindicación, y los 3 últimos en revisión
+
+Encargo del cliente tras ver el primer reproceso: `6.24/28510.0088` (el
+ejemplo central de la sección 4) no puede estar en revisión, y el problema
+de fondo es de diseño — sindicación no tiene la misma autoridad que el
+documento firmado.
+
+**Investigado antes de tocar nada (encargo explícito: "dime cuál de las dos
+fuentes tiene razón, con eso decidimos").** Decodificados a mano los dos
+`ADJUDICACION_1.pdf` reales. Ninguna de las dos fuentes está mal — miden
+alcances distintos:
+
+- `6.24/28510.0088`: su propio PDF dice "SUMINISTRO DE TRAVIESAS DE MADERA...
+  **2 LOTES**. EXPEDIENTE Nº 6.24/28510.0088 · **LOTE 1**: TRAVIESAS DE
+  MADERAS EUROPEAS... **EXPEDIENTE Nº 6.24/28510.0113**" — el documento que
+  tenemos archivado bajo `.0088` es la adjudicación del LOTE 1 (expediente
+  propio `.0113`, 1.000.000 €), no la del expediente principal completo (2
+  lotes, 2.000.000 €, que es justo lo que declara sindicación).
+- `6.23/28510.0129`: mismo patrón exacto — "EXPEDIENTE PRINCIPAL Nº
+  6.23/28510.0129 · **LOTE 2**... **EXPEDIENTE Nº 6.23/28510.0143**", con el
+  importe del LOTE 2 (1.180.620 €) coincidiendo con lo que extrae el motor,
+  frente al total de los 3 lotes (2.705.670 €) que declara sindicación.
+
+**No es una cuestión de qué fuente es más fiable ni de qué ZIP es el más
+reciente** (lo segundo, comprobado igualmente: la lógica de
+`descubrir_novedades` ya se queda con la entrada de mayor `<updated>` y
+nunca pisa un dato más nuevo con uno más viejo, sección 24 — no es la causa
+aquí). Es que `6.24/28510.0088` y `6.23/28510.0129`, tal como los tiene
+identificados este sistema, no son pedidos de un solo lote: son licitaciones
+de varios lotes de las que solo tenemos el papel de uno. Mismo tipo de
+problema de identidad que ya se resolvió para acuerdo marco (secciones
+20-21) — "el código bajo el que está archivado un documento no es
+necesariamente el expediente al que pertenece de verdad" —, pero en una
+variante nueva (lote de licitación directa, sin acuerdo marco de por medio)
+que no había aparecido hasta esta sesión. **Separarlo bien de verdad**
+(crear expedientes de lote reales, `.0113`/`.0143`, y dejar `.0088`/`.0129`
+como lo que son —el expediente principal, sin cuadro de precios propio— es
+un cambio de modelo de datos mayor, fuera de alcance de un arreglo urgente:
+queda anotado en la sección "Pendiente de resolver" para una sesión aparte.
+
+**Lo que sí se implementó, urgente, coherente con la propuesta del
+cliente:** el contraste con sindicación ya no cambia `estado` ni `error` de
+ningún expediente — nunca baja uno de `completado`, nunca añade ruido al
+motivo real de uno en revisión. Se guarda como aviso informativo aparte,
+`expedientes.aviso_sindicacion` (columna nueva, migración `0014`),
+recalculado en cada reproceso (`app.worker._contrastar_con_sindicacion`) —
+`contrastar_expediente` (`app.sindicacion.contraste`) sigue detectando el
+desajuste exactamente igual que antes, pero ya no decide qué hacer con él,
+eso es responsabilidad de quien la llama. **Sin exponer todavía en la web**
+(fuera de alcance del arreglo urgente): el campo está en la API
+(`ExpedienteOut.aviso_sindicacion`), falta añadirlo a la pantalla.
+
+**Los 3 expedientes que seguían en revisión tras el criterio de lote laxo,
+mirados uno a uno (encargo: "si son celdas concretas, puede ser barato"):**
+
+- `6.24/28510.0117` (39 líneas) y `6.24/28510.0203` (1 línea): un guion
+  suelto (`-`) en la celda de matrícula o de cantidad, la misma convención
+  administrativa de "no aplica a esta fila" que ya se trata como hueco en
+  blanco en el resto del sistema (columnas fantasma, CLAUDE.md sección 8) —
+  no un valor ilegible. **Barato, arreglado**: `app.catalogo._es_celda_vacia`
+  trata un guion suelto como campo vacío para matrícula, cantidad y precio
+  unitario, sin generar motivo de revisión. Los dos pasan a `completado`.
+- `6.25/28510.0028` (4 líneas): **no era barato.** Las celdas traen
+  identificadores de glifo sin decodificar (`(cid:1005)...`, fuente sin tabla
+  ToUnicode) — es justo el caso de "fuera de alcance sin OCR" de la sección
+  15, no una celda con un valor reconocible. Sigue en revisión, y es
+  correcto que lo esté.
 
 ### Limpieza de la base de datos
 
@@ -2124,9 +2175,16 @@ declarada que no cuadra ya no exige revisión, se da por buena).
 derivado no trae el campo y no revienta, "Obras" sintético lo dispara).
 `tests/extraccion/test_orquestador.py` (3 casos para
 `_detectar_contrato_obra`: marca "Obras", ignora "Suministros", ignora
-documentos que no son `anuncio_pcsp`). Ningún PDF nuevo — todo lo verificado
-contra documentos reales de esta sesión (el PCAP de 93 páginas, las
-portadas administrativas, el par de contratos de `6.23/28510.0051`) se
-inspeccionó directamente sobre el corpus ya descargado en el volumen de
-Docker, sin copiarlo al repositorio (sección 13: no se meten los PDFs
-completos).
+documentos que no son `anuncio_pcsp`). `tests/test_catalogo.py` (2 casos: un
+guion suelto en matrícula no marca revisión, un guion suelto en cantidad
+tampoco — con los datos reales de `6.24/28510.0117` y `6.24/28510.0203`).
+`tests/test_worker.py` (nuevo, 5 casos para `_contrastar_con_sindicacion`:
+un desajuste no baja de `completado` ni toca `error`, un desajuste sobre un
+expediente ya en revisión no pisa su motivo real, sin desajuste el aviso
+queda vacío, un reproceso limpia un aviso que ya no aplica, un expediente
+`fallido` nunca se contrasta). Ningún PDF nuevo — todo lo verificado contra
+documentos reales de esta sesión (el PCAP de 93 páginas, las portadas
+administrativas, el par de contratos de `6.23/28510.0051`, los dos LC.27 de
+lote de `6.24/28510.0088` y `6.23/28510.0129`) se inspeccionó directamente
+sobre el corpus ya descargado en el volumen de Docker, sin copiarlo al
+repositorio (sección 13: no se meten los PDFs completos).

@@ -117,6 +117,46 @@ def test_construir_linea_catalogo_matricula_no_reconocible_se_vacia_y_marca_revi
     assert linea["motivo_revision"] is not None
 
 
+def test_construir_linea_catalogo_guion_suelto_en_matricula_no_marca_revision():
+    # CLAUDE.md sección 26 (arreglo de los 3 que seguían en revisión tras el
+    # criterio de lote laxo): expediente real 6.24/28510.0117, 39 filas
+    # reales con este patrón exacto -- un guion suelto en la celda de
+    # matrícula es la convención del documento para "vacío", no un valor
+    # ilegible que haga falta revisar.
+    mapeo = {
+        "codigo_precio": 0, "matricula": 1, "descripcion": 3,
+        "unidad_medida": 4, "cantidad": 6, "precio_unitario": 7,
+    }
+    fila = ["P-066", "-", "-", "MVI69-104S MODULO COMUNICACIONES 104 para CompactLogix", "UD", "0", "3", "3.015,00 €"]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=5, documento_origen_id=None, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea is not None
+    assert linea["matricula"] is None
+    assert linea["precio_unitario"] == Decimal("3015.00")
+    assert linea["motivo_revision"] is None
+
+
+def test_construir_linea_catalogo_guion_suelto_en_cantidad_no_marca_revision():
+    # Expediente real 6.24/28510.0203: tabla de características técnicas
+    # (CLAUDE.md sección 17.2, "sin columna de precio ni de cantidad" es un
+    # caso ya conocido) donde la celda de cantidad trae un guion en vez de
+    # quedar vacía.
+    mapeo = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": None, "cantidad": 2, "precio_unitario": 3}
+    fila = ["PN09", "Traviesa monobloque de hormigón pretensado singular", "-", "4000,00 €"]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=12, documento_origen_id=None, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea is not None
+    assert linea["cantidad"] is None
+    assert linea["precio_unitario"] == Decimal("4000.00")
+    assert linea["motivo_revision"] is None
+
+
 def test_construir_linea_catalogo_valor_ilegible_no_revienta_marca_revision():
     # CLAUDE.md, sesión de rodaje 2026-09-03: un valor de precio que no se
     # puede interpretar (fuente sin ToUnicode) no debe tirar la fila entera

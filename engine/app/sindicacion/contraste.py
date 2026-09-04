@@ -1,7 +1,11 @@
 """Bloque 2, punto 4 (CLAUDE.md sección 24): "Guárdalos como fuente
 independiente y úsalos para contrastar con lo que extraiga el motor de los
-PDFs. Si no cuadran, a revisión." Dos fuentes que se verifican entre sí, no
-una que sustituye a la otra."""
+PDFs." Dos fuentes que se verifican entre sí, no una que sustituye a la
+otra — pero no con la misma autoridad (CLAUDE.md sección 26): esta función
+solo detecta y describe el desajuste, nunca decide mandar nada a revisión —
+eso es responsabilidad de quien la llama
+(`app.worker._contrastar_con_sindicacion`), y desde la sección 26 nunca lo
+hace."""
 from __future__ import annotations
 
 from decimal import Decimal
