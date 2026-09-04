@@ -219,6 +219,17 @@ export default function ExpedientesPanel({
     ).length,
   };
 
+  // Encargo de esta sesión: un expediente `sin_publicar` no es lo mismo que
+  // uno pendiente — está verificado que no existe en la Plataforma, así que
+  // no hay licitación/adjudicación/baja que mostrar ni descarga/extracción
+  // que lanzar. Antes vivían mezclados en la tabla principal, con las
+  // mismas nueve columnas que un expediente real (la mayoría vacías) y los
+  // mismos dos botones activos — casi un tercio de las 53 filas de esta
+  // base para expedientes que no van a completarse nunca. Se separan en un
+  // grupo aparte, plegado por defecto.
+  const normales = expedientes.filter((e) => e.estado !== "sin_publicar");
+  const noPublicados = expedientes.filter((e) => e.estado === "sin_publicar");
+
   return (
     <div>
       <div className="card" style={{ marginBottom: "1.5rem" }}>
@@ -281,23 +292,19 @@ export default function ExpedientesPanel({
             </tr>
           </thead>
           <tbody>
-            {expedientes.map((exp) => {
+            {normales.map((exp) => {
               const enCurso = exp.estado === "descargando" || exp.estado === "extrayendo";
               // No reprocesar por accidente un expediente ya completado
               // (encargo de la sesión de pulido): hay que borrarlo y crearlo
               // de nuevo si de verdad hace falta relanzarlo.
               const completado = exp.estado === "completado";
-              const noPublicado = exp.estado === "sin_publicar";
               return (
-                <tr
-                  key={exp.id}
-                  className={`row-accent ${accentClaseEstado(exp.estado)}${noPublicado ? " row-muted" : ""}`}
-                >
+                <tr key={exp.id} className={`row-accent ${accentClaseEstado(exp.estado)}`}>
                   <td style={{ fontWeight: 600 }}>{exp.codigo_expediente}</td>
                   <td>{exp.codigo_matriz ?? ""}</td>
                   <td>
                     <EstadoTexto estado={exp.estado} />
-                    {!noPublicado && <ResumenMotivo error={exp.error} />}
+                    <ResumenMotivo error={exp.error} />
                   </td>
                   <td className="num">{formatearImporte(exp.importe_licitacion)}</td>
                   <td className="num">{formatearImporte(exp.importe_adjudicacion)}</td>
@@ -305,11 +312,11 @@ export default function ExpedientesPanel({
                     <CeldaBaja expediente={exp} />
                   </td>
                   <td>
-                    {/* Apiladas, no en fila: dos btn-sm uno junto al otro
-                        empujaban la tabla a desbordar 1280px (encargo de la
-                        sesión de pulido de 1280px) — el ancho de esta
-                        columna era casi tan grande como el de "Estado". */}
-                    <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem", alignItems: "flex-start" }}>
+                    {/* En línea (encargo de esta sesión): con los `sin_publicar`
+                        ya fuera de esta tabla, dos btn-sm uno junto al otro caben
+                        a 1280px con un hueco ajustado — 0.5rem desbordaba la
+                        tabla por ~2px (medido con Playwright), 0.35rem no. */}
+                    <div style={{ display: "flex", flexDirection: "row", gap: "0.35rem" }}>
                       <button
                         onClick={() => lanzarDescarga(exp.id)}
                         disabled={enCurso || completado || lanzando === exp.id}
@@ -335,6 +342,37 @@ export default function ExpedientesPanel({
         </table>
       </div>
       {expedientes.length === 0 && <p className="muted" style={{ marginTop: "1rem" }}>Sin expedientes todavía.</p>}
+
+      {/* Grupo aparte, plegado por defecto (encargo de esta sesión): un
+          expediente `sin_publicar` está verificado que no existe en la
+          Plataforma (CLAUDE.md sección 22) — no hay licitación, adjudicación
+          ni baja que mostrar, ni descarga o extracción que tenga sentido
+          lanzar por defecto. Una fila de una sola línea, sin las columnas
+          vacías de la tabla principal. */}
+      {noPublicados.length > 0 && (
+        <details className="grupo-no-publicados">
+          <summary className="chip">
+            {noPublicados.length} expediente{noPublicados.length === 1 ? "" : "s"} no publicado
+            {noPublicados.length === 1 ? "" : "s"}
+          </summary>
+          <ul className="lista-no-publicados">
+            {noPublicados.map((exp) => (
+              <li key={exp.id} className="fila-no-publicado">
+                <span className="mono">{exp.codigo_expediente}</span>
+                <EstadoTexto estado={exp.estado} />
+                <button
+                  onClick={() => lanzarDescarga(exp.id)}
+                  disabled={lanzando === exp.id}
+                  title="Ya se comprobó que no está en la Plataforma — reintentar solo tiene sentido si ha podido publicarse desde entonces"
+                  className="btn btn-ghost btn-sm"
+                >
+                  Reintentar
+                </button>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
     </div>
   );
 }

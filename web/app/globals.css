@@ -465,6 +465,49 @@ input:focus-visible {
   text-decoration: underline;
 }
 
+/* Grupo plegado de expedientes `sin_publicar` (Expedientes, encargo de esta
+   sesión): ni las columnas ni los botones de la tabla principal tienen
+   sentido para un expediente verificado como no publicado en la
+   Plataforma — una lista compacta, una línea por fila, en vez de una tabla
+   con la mayoría de celdas vacías. */
+.grupo-no-publicados {
+  margin-top: 1.75rem;
+}
+
+.grupo-no-publicados summary {
+  cursor: pointer;
+}
+
+.lista-no-publicados {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.fila-no-publicado {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.6rem 1rem;
+  color: var(--text-faint);
+}
+
+.fila-no-publicado + .fila-no-publicado {
+  border-top: 1px solid var(--border);
+}
+
+.fila-no-publicado .mono {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.fila-no-publicado .btn-ghost {
+  margin-left: auto;
+}
+
 /* Tablas: la página tiene un único scroll. La cabecera se fija bajo la nav;
    el contenedor solo hace scroll horizontal si la tabla no cabe. */
 
