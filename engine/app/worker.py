@@ -11,6 +11,7 @@ from app.interfaces.model_provider import AnthropicModelProvider, CachedModelPro
 from app.mantenimiento.ciclo import TIPO_TRABAJO as TIPO_MANTENIMIENTO_CICLO
 from app.mantenimiento.ciclo import ejecutar_ciclo_mantenimiento
 from app.mantenimiento.frescura import debe_estampar_extraccion, estampar_descarga_exitosa, estampar_extraccion
+from app.mantenimiento.programacion import verificar_y_lanzar_ciclo_programado
 from app.models import Documento, EstadoExpediente, Expediente
 from app.queue import ejecutar_trabajo as ejecutar_trabajo_generico
 from app.queue import reclamar_trabajos_huerfanos, tomar_siguiente_trabajo
@@ -126,6 +127,9 @@ def bucle_principal() -> None:
             reclamados = reclamar_trabajos_huerfanos(db, settings.worker_orphan_threshold_seconds)
             if reclamados:
                 logger.warning("reclamados %s trabajos huerfanos (bloqueado_en vencido)", reclamados)
+            lanzado = verificar_y_lanzar_ciclo_programado(db)
+            if lanzado is not None:
+                logger.info("ciclo de mantenimiento programado encolado (trabajo %s)", lanzado.id)
             trabajo = tomar_siguiente_trabajo(db)
             if trabajo is not None:
                 logger.info("procesando trabajo %s (%s)", trabajo.id, trabajo.tipo)

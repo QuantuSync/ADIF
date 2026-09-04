@@ -7,6 +7,7 @@ const ENLACES = [
   { href: "/", etiqueta: "Expedientes" },
   { href: "/catalogo", etiqueta: "Catálogo" },
   { href: "/revision", etiqueta: "Cola de revisión" },
+  { href: "/mantenimiento", etiqueta: "Mantenimiento" },
 ];
 
 export default function NavLinks() {

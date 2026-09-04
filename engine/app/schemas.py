@@ -144,7 +144,16 @@ class TrabajoOut(BaseModel):
     intentos: int
     max_intentos: int
     expediente_id: Optional[int] = None
+    payload: Optional[dict] = None
     resultado: Optional[dict] = None
     error: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+
+
+class EstadoMantenimientoOut(BaseModel):
+    ultima_ejecucion: Optional[TrabajoOut] = None
+    en_curso: bool
+    proxima_ejecucion: datetime
+    intervalo_segundos: float
+    programado_activo: bool

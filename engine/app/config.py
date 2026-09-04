@@ -82,5 +82,15 @@ class Settings(BaseSettings):
     # variable, nunca tocar código.
     sindicacion_departamentos_adif: str = "28510"
 
+    # Bloque 3, ejecución programada (CLAUDE.md sección 25): cada cuánto se
+    # lanza el ciclo completo de mantenimiento solo, sin intervención.
+    # Semanal por defecto -- el ciclo puede tardar minutos u horas si hay
+    # trabajo real que hacer (secciones 23 y 24), así que no tiene sentido
+    # un intervalo corto por defecto. `mantenimiento_programado_activo` en
+    # `false` desactiva el disparo automático sin tocar código (el botón
+    # manual, `POST /mantenimiento/ejecutar`, sigue funcionando igual).
+    mantenimiento_intervalo_segundos: float = 7 * 24 * 3600.0
+    mantenimiento_programado_activo: bool = True
+
 
 settings = Settings()

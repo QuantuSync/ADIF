@@ -1771,3 +1771,129 @@ descubierto se procesa en el mismo ciclo que lo descubre, un fallo del
 descubrimiento no impide el resto). tests/mantenimiento/test_ciclo.py se
 actualiza para desactivar la sindicación por defecto (sindicacion_
 desactivada: true) — esos tests son del bloque 1, no deben tocar la red.
+
+---
+
+## 25. Mantenimiento automático — bloque 3: ejecución programada (sesión 2026-09-04)
+
+Cierra la sesión de mantenimiento automático (secciones 23 y 24 son los
+bloques 1 y 2, base de este). El ciclo completo — descubrir, descargar lo
+que falte, extraer lo que falte — ya existía como trabajo de la cola
+(`mantenimiento_ciclo`); este bloque lo dispara solo, sin intervención,
+respetando CLAUDE.md sección 10 ("cuatro procesos, ni uno más").
+
+### Dónde vive el planificador: dentro del worker que ya existe
+
+`app.mantenimiento.programacion.verificar_y_lanzar_ciclo_programado` se
+llama en cada vuelta de `app.worker.bucle_principal` (cada
+`WORKER_POLL_INTERVAL_SECONDS`, unos segundos) — no hay un quinto proceso
+"scheduler", ni un cron del sistema operativo, ni Redis. Es una comprobación
+barata (dos `SELECT` contra `trabajos_cola`, nada de red ni de Playwright
+en la propia comprobación):
+
+1. Si ya hay un trabajo `mantenimiento_ciclo` `pendiente` o `en_proceso`
+   (programado **o disparado a mano**, da igual el origen) no se lanza
+   otro — "sin solaparse consigo mismo" (punto 2) sale gratis de la misma
+   cola que ya existía, sin bloqueo nuevo.
+2. Si no, se compara `ahora` contra `última_ejecución.created_at +
+   MANTENIMIENTO_INTERVALO_SEGUNDOS` (semanal por defecto, cualquier
+   trabajo `mantenimiento_ciclo` cuenta como "última ejecución" para este
+   cálculo, sea programado o manual). Si toca, se encola uno nuevo con
+   `payload.disparado_por = "programado"` — el histórico (punto 4)
+   distingue así por qué corrió cada ejecución.
+
+**El histórico es la propia `trabajos_cola`, sin tabla nueva.** CLAUDE.md
+sección 10 ya la describe como "consultable con SQL para la pantalla de
+seguimiento" — duplicar esa información en una tabla aparte solo la
+desincronizaría. `GET /mantenimiento/historial` la expone tal cual, más
+reciente primero; `GET /mantenimiento/estado` añade lo calculado (próxima
+ejecución, si hay una en curso) que no está en ninguna fila por sí sola.
+
+**Límite conocido, no un descuido**: con un único proceso `worker`
+(arquitectura de cuatro procesos de la sección 10), la comprobación no
+compite consigo misma. Si algún día hubiera varias réplicas del worker, dos
+podrían decidir lanzar en la misma vuelta antes de que ninguna llegue a
+insertar — no se ha construido un bloqueo distribuido para un caso que la
+arquitectura actual no tiene.
+
+### Web: `/mantenimiento`
+
+Página nueva (`web/app/mantenimiento/`), enlazada en la barra de
+navegación. Muestra la frecuencia configurada, cuándo fue la última
+ejecución (y quién la disparó), si hay una en curso ahora mismo, cuándo
+tocaría la próxima, un resumen de lo que encontró la última ejecución
+(nuevos, descargas, extracciones, y el resumen de sindicación si lo trae) y
+el botón "Lanzar ciclo ahora" (`POST /mantenimiento/ejecutar`, el mismo
+endpoint que dispara la programación en sí, solo que `disparado_por` queda
+como `"manual"`) — y la tabla de histórico completa. Sondeo cada 4 s, mismo
+patrón que el resto de la web (CLAUDE.md, encargo de la sesión de
+identidad, "Expedientes").
+
+### Verificación contra el stack real, intervalo corto
+
+`MANTENIMIENTO_INTERVALO_SEGUNDOS=45` (frente al valor de producción,
+604800 = una semana) durante ~9 minutos, contra la base de datos real de
+desarrollo (59 expedientes de las sesiones de los bloques 1 y 2, sin
+limpiar). **Cuatro ejecuciones programadas seguidas, ninguna solapada,
+histórico correcto de principio a fin** — verificado con el propio
+`GET /mantenimiento/historial` sondeado cada 20 s, no solo mirando la base
+de datos:
+
+| Trabajo | Encolado | Terminado | Duración |
+|---|---|---:|---:|
+| 369 | 04:56:34 | 04:58:43 | 129 s |
+| 372 | 04:58:46 (3 s después de que 369 terminara) | 05:01:55 | 189 s |
+| 375 | 05:01:58 (3 s después de que 372 terminara) | — | — |
+| 378 | 05:05:16 (tras 375) | — | — |
+
+**Cada ciclo real tardó entre 2 y 3 minutos** — muy por encima del
+intervalo de prueba de 45 s — porque cada uno descarga de verdad el ZIP de
+sindicación del mes en curso (~23 MB, periodo `202609` parcial) antes de
+evaluar frescura. El mecanismo de "sin solaparse" hizo exactamente lo que
+tenía que hacer en ese caso: en vez de lanzar un ciclo cada 45 s y
+amontonarlos, cada ejecución programada arrancó **inmediatamente después**
+de que terminara la anterior (siempre a los 3 s, el intervalo de sondeo del
+worker) — la cadencia real queda acotada por abajo por cuánto tarda el
+propio ciclo, nunca por debajo de eso, sin necesitar ninguna lógica
+adicional para conseguirlo. Ninguna de las cuatro ejecuciones duplicó
+trabajo: `descubrimiento.expedientes_nuevos` fue `0` en las tres que
+llegaron a completarse (los 4 expedientes del departamento 28510 del
+periodo en curso ya eran conocidos desde antes de empezar esta prueba).
+
+**Hallazgo real de paso, no un fallo de este bloque**: las tres ejecuciones
+completadas relanzaron la descarga del mismo expediente
+(`6.24/28510.0106`) en cada pasada. Verificado en base de datos: es un
+pedido derivado de acuerdo marco (`codigo_matriz = 6.20/28510.0136`,
+`matriz_expediente_id` resuelto) sin ningún documento propio — sus
+importes vienen heredados de la matriz (CLAUDE.md sección 20), así que
+`app.mantenimiento.frescura.debe_descargar` lo reintenta en cada ciclo
+exactamente como está diseñado (bloque 1: "sin documentos propios, merece
+un intento nuevo"). Coste real, no gratis: un intento de scraping real
+contra la Plataforma por ciclo hasta que se resuelva o quede
+`sin_publicar` — esperable para este patrón, ya documentado, no nuevo de
+esta sesión.
+
+**Recuperación de trabajo huérfano, verificada en vivo por segunda vez en
+esta sesión** (la primera fue en el bloque 2): al reconstruir el
+contenedor del worker para volver al intervalo de producción, el trabajo
+que estaba `en_proceso` en ese instante quedó huérfano y
+`reclamar_trabajos_huerfanos` lo recuperó solo pasado el umbral — sin
+intervención manual.
+
+225 tests en verde (218 del bloque 2 + 7 de este bloque —
+`tests/mantenimiento/test_programacion.py`: nunca corrió lanza ahora, no
+lanza antes de tiempo, lanza cuando toca, no solapa con uno en curso
+propio ni con uno disparado a mano, desactivado nunca lanza, `obtener_
+estado` refleja lo real), dentro del contenedor.
+
+### Variables de entorno nuevas
+
+`MANTENIMIENTO_INTERVALO_SEGUNDOS` (segundos, 604800 por defecto) y
+`MANTENIMIENTO_PROGRAMADO_ACTIVO` (`true`/`false`) — **añadidas tanto al
+servicio `worker` (quien decide) como al servicio `api`** (quien las
+expone en `GET /mantenimiento/estado`): un descuido real de esta sesión,
+detectado en la propia verificación en vivo, fue añadirlas solo al
+`worker` y dejar que la API siguiera leyendo el valor por defecto de
+`app/config.py` — la web habría mostrado "semanal" aunque el worker
+estuviera de verdad lanzando cada 45 segundos. Corregido antes de dar el
+bloque por cerrado, no después.

@@ -31,6 +31,13 @@ services:
       # esta API desde fuera de la red de Docker, en el origen donde corre
       # "web". Lista separada por comas si hace falta más de uno.
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
+      # Bloque 3 (CLAUDE.md sección 25): solo el worker decide cuándo lanzar
+      # el ciclo programado, pero la API también lee estos dos valores para
+      # que GET /mantenimiento/estado muestre la frecuencia real, no el
+      # valor por defecto de app/config.py -- deben coincidir con los del
+      # servicio "worker".
+      MANTENIMIENTO_INTERVALO_SEGUNDOS: ${MANTENIMIENTO_INTERVALO_SEGUNDOS:-604800}
+      MANTENIMIENTO_PROGRAMADO_ACTIVO: ${MANTENIMIENTO_PROGRAMADO_ACTIVO:-true}
     volumes:
       - documentos:/data/documentos
     ports:
@@ -65,6 +72,15 @@ services:
       # Ver comentario en el servicio "api": mismo cruce, el worker lo
       # rellena al terminar la extracción de cada expediente.
       CODIGOS_PROYECTO_PATH: ${CODIGOS_PROYECTO_PATH:-}
+      # Bloque 2, descubrimiento por sindicación (CLAUDE.md sección 24):
+      # departamentos de ADIF que se dan de alta solos. "28510" por defecto
+      # -- el único que usa el corpus de hoy. Lista separada por comas.
+      SINDICACION_DEPARTAMENTOS_ADIF: ${SINDICACION_DEPARTAMENTOS_ADIF:-28510}
+      # Bloque 3, ejecución programada (CLAUDE.md sección 25): cada cuánto
+      # se lanza el ciclo completo solo. Semanal por defecto; "false" en
+      # MANTENIMIENTO_PROGRAMADO_ACTIVO lo desactiva sin tocar código.
+      MANTENIMIENTO_INTERVALO_SEGUNDOS: ${MANTENIMIENTO_INTERVALO_SEGUNDOS:-604800}
+      MANTENIMIENTO_PROGRAMADO_ACTIVO: ${MANTENIMIENTO_PROGRAMADO_ACTIVO:-true}
     volumes:
       - documentos:/data/documentos
       - ./engine/.cache_modelo_dev:/app/.cache_modelo_dev
