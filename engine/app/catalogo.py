@@ -81,6 +81,87 @@ def _acumular_motivo(motivo: Optional[str], nuevo: Optional[str]) -> Optional[st
     return f"{motivo}; {nuevo}" if motivo else nuevo
 
 
+def _valor_en(fila: list[Optional[str]], indice: Optional[int]) -> Optional[str]:
+    if indice is None or indice < 0 or indice >= len(fila):
+        return None
+    return fila[indice]
+
+
+# Sesión de filas fantasma (2026-09-04): una fila cuya descripción y precio
+# unitario salen vacíos del mapeo normal no siempre es una fila de relleno
+# (pie de tabla, fragmento de una descripción envuelta) — a veces es una
+# línea real cuyo `fragmento` trae código, descripción, cantidad y precio,
+# pero el mapeo de cabecera y los datos de esa tabla concreta quedan
+# desplazados una columna entre sí (hallazgo real, `6.24/28510.0187_ANEJO_1.pdf`
+# p.11: `pdfplumber` coloca el texto de cabecera, centrado, en una columna
+# física distinta de donde cae el texto de los datos, alineado a la
+# izquierda, dentro del mismo grupo de columnas). Verificado que el
+# desplazamiento es uniforme para toda la fila, nunca solo en un campo.
+_LETRA_RE = re.compile(r"[A-Za-zÀ-ÿ]")
+
+
+def _parece_descripcion_recuperable(texto: Optional[str]) -> bool:
+    limpio = limpiar_texto_celda(texto)
+    if not limpio or len(limpio) < 3 or not _LETRA_RE.search(limpio):
+        return False
+    clave = normalizar(limpio).replace(" ", "")
+    return not _es_pie_de_tabla(clave)
+
+
+def _parece_precio_recuperable(texto: Optional[str]) -> bool:
+    if not texto or _es_celda_vacia(texto):
+        return False
+    try:
+        parsear_importe_es(texto)
+    except ValueError:
+        return False
+    return True
+
+
+def _mapeo_desplazado(
+    mapeo: dict[str, Optional[int]], offset: int, longitud_fila: int
+) -> dict[str, Optional[int]]:
+    desplazado: dict[str, Optional[int]] = {}
+    for campo, indice in mapeo.items():
+        if indice is None:
+            desplazado[campo] = None
+            continue
+        nuevo = indice + offset
+        desplazado[campo] = nuevo if 0 <= nuevo < longitud_fila else None
+    return desplazado
+
+
+def _intentar_recuperar_desalineacion(
+    fila: list[Optional[str]], mapeo: dict[str, Optional[int]]
+) -> Optional[dict]:
+    """Solo se llama cuando el mapeo normal deja descripción y precio unitario
+    vacíos. Prueba a desplazar el mapeo entero (nunca solo esos dos campos,
+    para no mezclar columnas de campos distintos) una posición a cada lado, y
+    solo acepta el desplazamiento si recupera a la vez una descripción y un
+    precio con pinta real. Nunca se aplica a ciegas ni se guarda como el
+    mapeo bueno de la cabecera (`cache_mapeo_cabecera` no se toca): la línea
+    recuperada siempre lleva `motivo_revision` para que un humano la
+    confirme antes de darla por buena."""
+    if mapeo.get("descripcion") is None or mapeo.get("precio_unitario") is None:
+        return None  # la cabecera nunca declaró estos campos: no hay nada que desplazar
+    for offset in (-1, 1):
+        desplazado = _mapeo_desplazado(mapeo, offset, len(fila))
+        if not _parece_descripcion_recuperable(_valor_en(fila, desplazado.get("descripcion"))):
+            continue
+        if not _parece_precio_recuperable(_valor_en(fila, desplazado.get("precio_unitario"))):
+            continue
+        estado, campos = _construir_campos(fila, desplazado)
+        if estado != "ok" or not campos["descripcion"] or campos["precio_unitario"] is None:
+            continue
+        campos["motivo_revision"] = _acumular_motivo(
+            campos["motivo_revision"],
+            f"cabecera desalineada con los datos (columnas desplazadas {offset:+d}): "
+            "mapeo corregido automáticamente, confirmar antes de dar por buena",
+        )
+        return campos
+    return None
+
+
 def calcular_clave_linea(codigo_precio, matricula, descripcion, orden_aparicion):
     """Clave no nula para una línea de catálogo dentro de un lote.
     Prioridad: codigo_precio > matricula > hash(descripcion + orden de aparición).
@@ -94,40 +175,23 @@ def calcular_clave_linea(codigo_precio, matricula, descripcion, orden_aparicion)
     return hashlib.sha256(base.encode("utf-8")).hexdigest()
 
 
-def construir_linea_catalogo(
-    fila: list[Optional[str]],
-    mapeo: dict[str, Optional[int]],
-    pagina: int,
-    documento_origen_id: Optional[int],
-    expediente_id: int,
-    baja_lote: Optional[Decimal],
-    orden_aparicion: int,
-) -> Optional[dict]:
-    """Etapa 6 (normalización + derivación, CLAUDE.md secciones 4 y 8): una
-    fila cruda de tabla + el mapeo de columnas de la etapa 5 -> los campos de
-    una `LineaCatalogo`. `precio_adjudicado` se deriva aquí, no se busca en
-    ningún documento (CLAUDE.md sección 4: "no existe una tabla de precios
-    adjudicados").
+def _construir_campos(
+    fila: list[Optional[str]], mapeo: dict[str, Optional[int]]
+) -> tuple[str, Optional[dict]]:
+    """Núcleo de la etapa 6, sin el envoltorio de `LineaCatalogo` ni la
+    decisión de fila fantasma (ver `construir_linea_catalogo`): aplica un
+    mapeo de columnas a una fila cruda. Se factoriza aparte porque
+    `_intentar_recuperar_desalineacion` necesita ejecutar esta misma lógica
+    con un mapeo desplazado, no solo con el original.
 
-    `expediente_id` viaja en la línea desde este punto (encargo de esta
-    sesión, punto 3): una línea cuya tabla de origen no se pudo asociar a un
-    único lote sin ambigüedad se guarda igualmente, con `lote_id=None` —
-    huérfana pero trazable hasta su expediente.
-
-    Devuelve `None` cuando la fila es un pie de tabla (CLAUDE.md sección 2,
-    sesión de rodaje 2026-09-03): no es una línea de material, es un resumen
-    ("PRESUPUESTO DE LICITACIÓN", "IVA", "TOTAL CON IVA") que el mapeo de
-    cabecera no distingue de una fila de datos. Nunca lanza por un valor de
-    `cantidad`/`precio_unitario` ilegible (identificadores de glifo sin
-    decodificar, celdas con el valor duplicado que no coinciden entre sí):
-    ese campo queda en `None` y la línea lleva `motivo_revision` explicando
-    por qué, en vez de tirar la tabla entera por una fila."""
+    Devuelve `("pie_de_tabla", None)` cuando la fila es un resumen de tabla
+    (CLAUDE.md sección 2, sesión de rodaje 2026-09-03) y `("ok", campos)` en
+    cualquier otro caso — `campos["descripcion"]` puede ser `""` y
+    `campos["precio_unitario"]` puede ser `None`, eso lo decide el
+    llamador."""
 
     def _valor(campo: str) -> Optional[str]:
-        indice = mapeo.get(campo)
-        if indice is None or indice >= len(fila):
-            return None
-        return fila[indice]
+        return _valor_en(fila, mapeo.get(campo))
 
     matricula_bruta = _valor("matricula")
     codigo_precio = limpiar_codigo_celda(_valor("codigo_precio"))
@@ -140,7 +204,7 @@ def construir_linea_catalogo(
     if matricula is not None and not _MATRICULA_VALIDA_RE.match(matricula):
         clave = normalizar(matricula).replace(" ", "")
         if _es_pie_de_tabla(clave):
-            return None
+            return "pie_de_tabla", None
         if _es_celda_vacia(matricula):
             matricula = None
         elif _es_partida_alzada(clave):
@@ -176,27 +240,90 @@ def construir_linea_catalogo(
         except ValueError as exc:
             motivo_revision = _acumular_motivo(motivo_revision, f"precio unitario no interpretable: {exc}")
 
+    return "ok", {
+        "codigo_precio": codigo_precio,
+        "matricula": matricula,
+        "descripcion": descripcion,
+        "unidad_medida": unidad_medida,
+        "cantidad": cantidad,
+        "precio_unitario": precio_unitario,
+        "motivo_revision": motivo_revision,
+    }
+
+
+def construir_linea_catalogo(
+    fila: list[Optional[str]],
+    mapeo: dict[str, Optional[int]],
+    pagina: int,
+    documento_origen_id: Optional[int],
+    expediente_id: int,
+    baja_lote: Optional[Decimal],
+    orden_aparicion: int,
+) -> Optional[dict]:
+    """Etapa 6 (normalización + derivación, CLAUDE.md secciones 4 y 8): una
+    fila cruda de tabla + el mapeo de columnas de la etapa 5 -> los campos de
+    una `LineaCatalogo`. `precio_adjudicado` se deriva aquí, no se busca en
+    ningún documento (CLAUDE.md sección 4: "no existe una tabla de precios
+    adjudicados").
+
+    `expediente_id` viaja en la línea desde este punto (encargo de esta
+    sesión, punto 3): una línea cuya tabla de origen no se pudo asociar a un
+    único lote sin ambigüedad se guarda igualmente, con `lote_id=None` —
+    huérfana pero trazable hasta su expediente.
+
+    Devuelve `None` cuando la fila es un pie de tabla (CLAUDE.md sección 2,
+    sesión de rodaje 2026-09-03): no es una línea de material, es un resumen
+    ("PRESUPUESTO DE LICITACIÓN", "IVA", "TOTAL CON IVA") que el mapeo de
+    cabecera no distingue de una fila de datos. Nunca lanza por un valor de
+    `cantidad`/`precio_unitario` ilegible (identificadores de glifo sin
+    decodificar, celdas con el valor duplicado que no coinciden entre sí):
+    ese campo queda en `None` y la línea lleva `motivo_revision` explicando
+    por qué, en vez de tirar la tabla entera por una fila.
+
+    También devuelve `None` cuando la fila sale sin descripción y sin precio
+    unitario (sesión de filas fantasma, 2026-09-04): filas de separación o
+    relleno del cuadro de precios (pies de tabla sin etiqueta reconocible,
+    fragmentos de una descripción envuelta entre páginas, matrículas
+    huérfanas) que el mapeo de cabecera toma por una fila de datos. Antes de
+    descartarla se prueba `_intentar_recuperar_desalineacion`: si el
+    `fragmento` sí trae una descripción y un precio reales, solo
+    desplazados de columna respecto al mapeo, la línea se conserva con
+    `motivo_revision` en vez de perderse — no toda fila vacía es relleno."""
+    estado, campos = _construir_campos(fila, mapeo)
+    if estado == "pie_de_tabla":
+        return None
+
+    if not campos["descripcion"] and campos["precio_unitario"] is None:
+        recuperados = _intentar_recuperar_desalineacion(fila, mapeo)
+        if recuperados is None:
+            return None
+        campos = recuperados
+
+    precio_unitario = campos["precio_unitario"]
     precio_adjudicado = None
     if precio_unitario is not None and baja_lote is not None:
         precio_adjudicado = precio_unitario * (Decimal("1") - baja_lote)
 
+    descripcion = campos["descripcion"]
     return {
-        "clave_linea": calcular_clave_linea(codigo_precio, matricula, descripcion, orden_aparicion),
+        "clave_linea": calcular_clave_linea(
+            campos["codigo_precio"], campos["matricula"], descripcion, orden_aparicion
+        ),
         "expediente_id": expediente_id,
         "orden_aparicion": orden_aparicion,
-        "codigo_precio": codigo_precio,
-        "matricula": matricula,
+        "codigo_precio": campos["codigo_precio"],
+        "matricula": campos["matricula"],
         "descripcion": descripcion,
         "codigo_material": derivar_codigo_material(descripcion),
-        "unidad_medida": unidad_medida,
-        "cantidad": cantidad,
+        "unidad_medida": campos["unidad_medida"],
+        "cantidad": campos["cantidad"],
         "precio_unitario": precio_unitario,
         "baja_lote": baja_lote,
         "precio_adjudicado": precio_adjudicado,
         "documento_origen_id": documento_origen_id,
         "pagina": pagina,
         "fragmento": " | ".join((celda or "").strip() for celda in fila),
-        "motivo_revision": motivo_revision,
+        "motivo_revision": campos["motivo_revision"],
     }
 
 

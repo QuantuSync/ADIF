@@ -175,6 +175,111 @@ def test_construir_linea_catalogo_valor_ilegible_no_revienta_marca_revision():
     assert "no interpretable" in linea["motivo_revision"]
 
 
+def test_construir_linea_catalogo_descarta_fila_totales_de_pie_de_tabla():
+    # Sesión de filas fantasma (2026-09-04), expediente real 6.23/28510.0066
+    # (ANEJO_1, cuadro de balasto por lote): la fila TOTALES de pie de tabla
+    # ("CODIFICACIÓN DEL PRECIO", "DESCRIPCIÓN", "UNIDADES", "CANTIDADES...",
+    # "PRECIO...", "TOTALES") no trae etiqueta reconocible por
+    # `_ETIQUETAS_PIE_TABLA` -- solo un importe en la sexta columna, que
+    # ninguna cabecera mapea a `precio_unitario`. No es una línea de
+    # material: sin ninguna descripción real en la fila, no hay nada que
+    # recuperar, y se descarta tal como pedía el encargo original.
+    mapeo = {
+        "codigo_precio": 0, "matricula": None, "descripcion": 1,
+        "unidad_medida": 2, "cantidad": 3, "precio_unitario": 4,
+    }
+    fila = [None, None, None, None, None, "960.480,00 €"]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=17, documento_origen_id=None, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea is None
+
+
+def test_construir_linea_catalogo_fragmento_wrap_sin_precio_se_descarta():
+    # Expediente real 6.20/28510.0136 (ANEJO_3, hilo de contacto): fila de
+    # continuación de una descripción envuelta entre filas de `pdfplumber`
+    # -- el fragmento de texto ("120MM2 DE") cae en la columna 3, una
+    # posición a la derecha de donde la cabecera sitúa "descripción" (2),
+    # pero la fila no trae ningún precio en ninguna posición cercana. Sin la
+    # pareja descripción+precio en el mismo desplazamiento, no es
+    # recuperable: es relleno, se descarta como pedía el encargo original.
+    mapeo = {
+        "codigo_precio": None, "matricula": 0, "descripcion": 2,
+        "unidad_medida": None, "cantidad": 8, "precio_unitario": 7,
+    }
+    fila = [None, None, None, "120MM2 DE", None, None, None, None, None]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=4, documento_origen_id=None, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea is None
+
+
+def test_construir_linea_catalogo_recupera_cabecera_desalineada_con_los_datos():
+    # Hallazgo real de la sesión de filas fantasma (2026-09-04),
+    # 6.24/28510.0187_ANEJO_1.pdf página 11: el modelo mapeó "descripción" a
+    # la columna 4 y "precio_unitario" a la 13 porque ahí está el TEXTO de la
+    # cabecera (centrado), pero los DATOS de esa misma tabla caen alineados a
+    # la izquierda, una columna antes (3 y 12). El mapeo normal deja la línea
+    # con descripción y precio vacíos pese a que la fila trae los dos datos
+    # reales -- antes de esta sesión, esto se guardaba como fila fantasma
+    # (o se habría descartado sin más con el filtro nuevo del punto 1). Debe
+    # recuperarse desplazando el mapeo entero, nunca solo un campo, y debe
+    # quedar marcada para que un humano la confirme.
+    mapeo = {
+        "codigo_precio": 1, "matricula": None, "descripcion": 4,
+        "unidad_medida": 7, "cantidad": 10, "precio_unitario": 13,
+    }
+    fila = [
+        "P01", None, None, "Tapa de canaleta prefabricada de hormigón\narmado", None, None,
+        "dm3", None, None, "411000", None, None, "0,90 €", None, None,
+    ]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=11, documento_origen_id=None, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea is not None
+    assert linea["codigo_precio"] == "P01"
+    assert linea["descripcion"] == "Tapa de canaleta prefabricada de hormigón armado"
+    assert linea["unidad_medida"] == "dm3"
+    assert linea["cantidad"] == Decimal("411000")
+    assert linea["precio_unitario"] == Decimal("0.90")
+    assert linea["motivo_revision"] is not None
+    assert "desalineada" in linea["motivo_revision"]
+
+
+def test_construir_linea_catalogo_recupera_partida_alzada_desalineada():
+    # Segunda fila real del mismo documento (P02): sin cantidad, con la
+    # descripción empezando literalmente por "Partida alzada" -- confirma
+    # que la recuperación no confunde esto con el camino de
+    # `_es_partida_alzada` (que solo actúa sobre la celda de matrícula) y
+    # que una cantidad ausente en la posición desplazada no bloquea la
+    # recuperación del precio.
+    mapeo = {
+        "codigo_precio": 1, "matricula": None, "descripcion": 4,
+        "unidad_medida": 7, "cantidad": 10, "precio_unitario": 13,
+    }
+    fila = [
+        "P02", None, None, "Partida alzada para suministro de tapas de canaleta singulares", None, None,
+        None, None, None, None, None, None, "41.100,00\n€", None, None,
+    ]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=11, documento_origen_id=None, expediente_id=1, baja_lote=None, orden_aparicion=1
+    )
+
+    assert linea is not None
+    assert linea["matricula"] is None
+    assert linea["cantidad"] is None
+    assert linea["descripcion"] == "Partida alzada para suministro de tapas de canaleta singulares"
+    assert linea["precio_unitario"] == Decimal("41100.00")
+    assert linea["motivo_revision"] is not None
+
+
 def test_construir_lineas_desde_tabla_filtra_pies_de_tabla():
     mapeo = {"codigo_precio": None, "matricula": 0, "descripcion": None, "unidad_medida": None, "cantidad": None, "precio_unitario": 1}
     tabla = TablaExtraida(

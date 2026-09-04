@@ -2557,3 +2557,149 @@ Las cuatro pantallas reconstruidas contra el stack real
 `/mnt/c/dev/ADIF`) y medidas con Playwright a 1280×900: `scrollWidth -
 clientWidth = 0` en las cuatro. `npx tsc --noEmit` sin errores. Sin tests
 de `engine` afectados — ningún cambio de esta sesión toca `engine/`.
+
+---
+
+## 29. Filas fantasma del catálogo, ruido de la columna de revisión, orden de
+    expedientes y limpieza del clon viejo (sesión 2026-09-04)
+
+### 1. Filas fantasma: no todas eran relleno — una era un bug de mapeo real
+
+Encargo inicial: descartar en la extracción cualquier fila sin descripción
+**y** sin precio (variante silenciosa del problema ya resuelto con los pies
+de tabla, CLAUDE.md sección 3), contar cuántas había en base de datos y
+limpiarlas. **Contadas 21** antes de tocar nada
+(`descripcion` vacía y `precio_unitario` nulo).
+
+Antes de aplicar el filtro a ciegas se investigaron las 21 una a una (nunca
+a bulto): **19 eran relleno real** — continuaciones de una descripción
+envuelta entre "filas" de `pdfplumber` (expediente `6.20/28510.0136`) y
+filas TOTALES de pie de tabla sin ninguna etiqueta que
+`_ETIQUETAS_PIE_TABLA` reconociera (expedientes `6.23/28510.0066` y
+`6.23/28510.0109`, cuadro de balasto por lote) — pero **2 no lo eran**
+(`6.24/28510.0187_ANEJO_1.pdf`, página 11, lote de tapas de canaleta): su
+`fragmento` traía código, descripción, cantidad y precio reales (0,90 €/dm3
+y 41.100,00 €), con todos los campos estructurados en `NULL`. Causa raíz
+verificada reproduciendo la extracción real con `pdfplumber` dentro del
+contenedor: el modelo mapeó `descripción`/`precio_unitario` a la columna
+donde cae el TEXTO de la cabecera (centrado), pero en esa tabla concreta los
+DATOS caen alineados a la izquierda, una columna antes, dentro del mismo
+grupo de columnas — un desplazamiento de exactamente `-1` en las 5 columnas
+semánticas a la vez, consistente para toda la fila. Aplicar el filtro tal
+cual habría borrado dos líneas de catálogo reales y habría escondido un bug
+de mapeo distinto detrás de una limpieza de datos — parada explícita a
+pedir confirmación antes de seguir (memoria: no doblar en silencio un
+hallazgo que cambia el planteamiento).
+
+**Arreglo implementado** (`app/catalogo.py`, no se tocó
+`app/extraccion/mapeo_cabecera.py` ni `tabla.py`): en vez de un parche al
+motor de mapeo (arriesgado — verificado que el mismo desplazamiento, dentro
+de la misma tabla del expediente `6.20/28510.0136`, varía fila a fila y no
+siempre es `-1`, así que "corregir la cabecera" de forma general no es
+seguro), la recuperación ocurre **por fila, en el punto de construir la
+línea**: `_intentar_recuperar_desalineacion` solo se llama cuando
+descripción y precio salen vacíos, prueba a desplazar el mapeo entero (nunca
+solo esos dos campos, para no mezclar columnas de campos distintos) una
+posición a cada lado, y solo acepta el desplazamiento si recupera a la vez
+una descripción con pinta real (`_parece_descripcion_recuperable`: tiene
+letras, no es un pie de tabla) y un precio parseable
+(`_parece_precio_recuperable`). Si no hay señal de las dos cosas a la vez —
+el caso de las 19 de relleno real, que no tienen ninguna descripción
+recuperable en ninguna columna vecina — la fila se descarta como pedía el
+encargo original. La línea recuperada **nunca se da por buena en
+silencio**: siempre lleva `motivo_revision` explicando el desplazamiento
+aplicado, para que un humano la confirme antes de exportarla al cliente.
+`cache_mapeo_cabecera` no se toca — la corrección es por fila, no se
+propaga como si fuera el mapeo bueno de esa cabecera.
+
+**Verificado contra el stack real**, no solo con tests: reconstruidas las
+imágenes de `api`/`worker`, reprocesados los 5 expedientes afectados
+(`6.20/28510.0136`, `6.23/28510.0051`, `6.23/28510.0066`,
+`6.23/28510.0109`, `6.24/28510.0187`) vía
+`POST /mantenimiento/ejecutar` con `forzar_expedientes` (sindicación
+desactivada, para no tocar el resto del corpus). Las dos líneas de
+`6.24/28510.0187` reaparecieron con sus datos reales
+(`P01`/`Tapa de canaleta prefabricada de hormigón armado`/`0,90 €` y
+`P02`/`Partida alzada.../41.100,00 €`) y `motivo_revision` explícito;
+verificado también en la web filtrando por ese expediente. Las 14 filas
+fantasma que sobrevivieron al reproceso sin cambiar (12 de
+`6.20/28510.0136`, cuyo lote no se reconstruye entre reprocesos — su clave
+de fila es un hash de `descripción + orden`, y con descripción vacía ya no
+se genera en absoluto, así que la fila vieja queda huérfana; 2 rastros del
+propio `6.24/28510.0187`, con clave distinta a las 2 nuevas recuperadas
+porque antes no tenían `codigo_precio`) se borraron a mano con un `DELETE`
+acotado a la misma condición (`descripción` vacía y `precio_unitario`
+nulo), verificado a 0 filas después. **Catálogo: de 3.018 a 3.000 líneas**
+(-14 fantasma borradas a mano, -6 más que desaparecieron solas como efecto
+colateral de que `6.23/28510.0066`/`6.23/28510.0109` reconstruyen sus
+`lotes` con id nuevo en cada reproceso de un expediente multi-lote — sin
+investigar más, es comportamiento preexistente no tocado por esta sesión —,
++2 líneas reales recuperadas).
+
+### 2. La columna de revisión, en blanco por defecto
+
+`estado_revision` es `sin_revisar` para las 3.018 (ahora 3.000) líneas del
+catálogo — nunca pasa a `pendiente` automáticamente, solo a mano vía
+`POST /catalogo/lineas/{id}/confirmar` o al corregir en la cola de revisión
+(`app/routers/revision.py`). La columna repetía "Sin confirmar" en cada
+fila sin distinguir una línea con un problema real de una que nunca tuvo
+ninguno — la señal real de "esto necesita ojos" es `motivo_revision`
+(ya expuesto por la API, `LineaCatalogoOut.motivo_revision`, pero sin usar
+en `CatalogoPanel.tsx`), no `estado_revision`.
+
+`web/app/catalogo/CatalogoPanel.tsx`: `celdaRevision` — `confirmado`/
+`corregido` muestran una insignia de acento (buena noticia, mismo criterio
+que `ui.tsx`), `descartado` una insignia atenuada, una línea con
+`motivo_revision` (el `title` del elemento lleva el texto completo) muestra
+"Revisar" en tinta de atención, y **cualquier otra cosa — el caso por
+defecto, casi todas las filas — no muestra nada**: mismo principio ya
+documentado en `ui.tsx` ("un valor ausente se deja en blanco: un guion
+suelto es ruido visual, no información"), aplicado aquí por primera vez a
+esta columna. No se tocó `RevisionPanel.tsx`: ahí "Sin confirmar" sigue
+siendo información real (es la cola de revisión, no el catálogo completo).
+
+### 3. Orden de expedientes: por actividad reciente, no por fecha de alta
+
+Antes: `ORDER BY id`, que en esta base pone primero los ~14 pedidos de
+acuerdo marco `esperando_matriz`/`sin_publicar` de las secciones 20-22 (los
+primeros ids de la base) — sin baja, sin nada que hacer con ellos todavía,
+dando la impresión de que el catálogo arranca vacío.
+
+Elegido `COALESCE(extraido_en, descargado_en) DESC NULLS LAST, id DESC`
+(`app/routers/expedientes.py`) sobre la alternativa "completados primero":
+`extraido_en`/`descargado_en` (frescura, CLAUDE.md sección 23) ya
+distinguen "se tocó de verdad" de "nunca se ha podido procesar", así que
+ordenar por el más reciente de los dos pone arriba lo que tiene actividad
+real — recién completado, o en curso ahora mismo — y hunde al fondo, sin
+necesitar una regla aparte, lo que nunca se ha podido tocar
+(`esperando_matriz`/`sin_publicar`). "Completados primero" habría enterrado
+un expediente `extrayendo` ahora mismo detrás de uno `completado` hace
+semanas, peor para una pantalla de seguimiento en vivo (CLAUDE.md sección
+11.3). Verificado en la web: los 5 expedientes reprocesados en el punto 1
+de esta sesión (los tocados más recientemente del corpus) aparecen en las
+primeras filas.
+
+### 4. Clon viejo en WSL, borrado
+
+`/home/lucas/adif` (visto por primera vez en la sesión de pulido a 1280px,
+sección 28) no era un repositorio git (`fatal: not a git repository`, sin
+`.git`), solo el esqueleto de la sección 14 (56 ficheros, sin
+`catalogo/`/`revision/`/`mantenimiento/`) — comprobado antes de borrar que
+no había nada que rescatar. Borrado con `rm -rf`. El stack real sigue
+construyéndose desde `/mnt/c/dev/ADIF` sin cambios.
+
+### Verificación
+
+261 tests en verde dentro del contenedor `api` reconstruido (257 previos +
+4 nuevos de `tests/test_catalogo.py`, sección 1 de esta sesión).
+`docker compose build api worker web` + `docker compose up -d api worker
+web` — **verificado con `md5sum` que el contenedor realmente corría el
+código nuevo antes de fiarse de ningún resultado de test** (primer intento
+de reconstruir sin recrear los contenedores dejó `adif-api-1` sirviendo
+todavía la imagen vieja; los tests "en verde" de ese momento eran el
+archivo de tests viejo sin mis casos nuevos, no una verificación real).
+Playwright headless a 1280×900 contra el stack real: `/catalogo` filtrado
+por `6.24/28510.0187` muestra las dos líneas recuperadas con "Revisar";
+`/` (Expedientes) muestra los 5 expedientes reprocesados arriba; sin
+desbordamiento horizontal en ninguna de las dos páginas
+(`scrollWidth - clientWidth = 0`).

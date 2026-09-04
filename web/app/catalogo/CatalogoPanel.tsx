@@ -24,11 +24,35 @@ type LineaCatalogo = {
   precio_adjudicado: string | null;
   comentarios: string | null;
   estado_revision: string;
+  motivo_revision: string | null;
   documento_origen_id: number | null;
   documento_origen_nombre: string | null;
   pagina: number | null;
   fragmento: string | null;
 };
+
+// Encargo de esta sesión: "sin confirmar" es el estado por defecto de las
+// 3.018 líneas, así que repetirlo en cada fila es ruido, no información —
+// mismo principio que ya sigue `ui.tsx` ("un valor ausente se deja en
+// blanco"). La columna solo habla cuando hay algo que decir: una línea ya
+// confirmada/corregida (buena noticia, acento) o una que trae un motivo de
+// revisión real (exige atención humana) — cualquier otra cosa, en blanco.
+function celdaRevision(linea: LineaCatalogo) {
+  if (linea.estado_revision === "confirmado" || linea.estado_revision === "corregido") {
+    return <span className="status status-ok">{linea.estado_revision === "confirmado" ? "Confirmado" : "Corregido"}</span>;
+  }
+  if (linea.estado_revision === "descartado") {
+    return <span className="status status-faint">Descartado</span>;
+  }
+  if (linea.motivo_revision) {
+    return (
+      <span className="status status-attn" title={linea.motivo_revision}>
+        Revisar
+      </span>
+    );
+  }
+  return null;
+}
 
 type RespuestaCatalogo = {
   total: number;
@@ -193,11 +217,7 @@ export default function CatalogoPanel({ apiUrl }: { apiUrl: string }) {
                     <td className="num">{formatearNumero(linea.cantidad, 2)}</td>
                     <td className="num">{formatearNumero(linea.precio_unitario)}</td>
                     <td className="num">{formatearNumero(linea.precio_adjudicado)}</td>
-                    <td>
-                      <span className={linea.estado_revision === "confirmado" ? "status status-ok" : "status"}>
-                        {linea.estado_revision === "confirmado" ? "Confirmado" : "Sin confirmar"}
-                      </span>
-                    </td>
+                    <td>{celdaRevision(linea)}</td>
                   </tr>
                 ))}
               </tbody>
