@@ -2,6 +2,29 @@
 
 import { useEffect, useState } from "react";
 import { EstadoTexto, accentClaseEstado, formatearImporte, formatearPorcentaje } from "./ui";
+import { interpretarMotivos } from "./motivos";
+
+const LARGO_MOTIVO_LISTA = 88;
+
+// El motivo técnico acumulado (varios documentos, varias páginas, "; "
+// entre cada uno) puede llegar a cientos de caracteres — volcado tal cual
+// rompía la altura de la fila (mismo problema que las descripciones largas
+// del catálogo). Aquí solo cabe un resumen: el primer motivo, en lenguaje
+// llano, recortado — el detalle completo vive en la cola de revisión.
+function ResumenMotivo({ error }: { error: string | null }) {
+  if (!error) return null;
+  const primerMotivo = interpretarMotivos(error)[0];
+  if (!primerMotivo) return null;
+  const texto =
+    primerMotivo.texto.length > LARGO_MOTIVO_LISTA
+      ? `${primerMotivo.texto.slice(0, LARGO_MOTIVO_LISTA)}…`
+      : primerMotivo.texto;
+  return (
+    <span className="status-note" title={primerMotivo.texto}>
+      {texto}
+    </span>
+  );
+}
 
 export type Lote = {
   id: number;
@@ -97,7 +120,7 @@ function TablaLotes({ lotes }: { lotes: Lote[] }) {
             <td className="num">{formatearPorcentaje(lote.baja_lote)}</td>
             <td className="num">{formatearImporte(lote.importe_licitacion)}</td>
             <td className="num">{formatearImporte(lote.importe_adjudicacion)}</td>
-            <td>{lote.adjudicatario ?? "—"}</td>
+            <td>{lote.adjudicatario ?? ""}</td>
           </tr>
         ))}
       </tbody>
@@ -271,10 +294,10 @@ export default function ExpedientesPanel({
                   className={`row-accent ${accentClaseEstado(exp.estado)}${noPublicado ? " row-muted" : ""}`}
                 >
                   <td style={{ fontWeight: 600 }}>{exp.codigo_expediente}</td>
-                  <td>{exp.codigo_matriz ?? "—"}</td>
+                  <td>{exp.codigo_matriz ?? ""}</td>
                   <td>
                     <EstadoTexto estado={exp.estado} />
-                    {exp.error && !noPublicado && <span className="status-note">{exp.error}</span>}
+                    {!noPublicado && <ResumenMotivo error={exp.error} />}
                   </td>
                   <td className="num">{formatearImporte(exp.importe_licitacion)}</td>
                   <td className="num">{formatearImporte(exp.importe_adjudicacion)}</td>

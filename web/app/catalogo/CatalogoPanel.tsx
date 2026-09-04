@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { formatearImporte, formatearNumero, formatearPorcentaje } from "../ui";
+import { DescripcionCelda, formatearImporte, formatearNumero, formatearPorcentaje } from "../ui";
 
 type LineaCatalogo = {
   id: number;
@@ -87,48 +87,69 @@ export default function CatalogoPanel({ apiUrl }: { apiUrl: string }) {
 
   return (
     <div>
-      {/* Búsqueda por matrícula: la pregunta que ADIF realmente tiene — cómo
-          evoluciona el precio de un material a través de todos los
-          expedientes — así que va primera y más grande. */}
-      <div>
-        <label className="section-label" htmlFor="buscar-matricula">
-          Buscar por matrícula, en todos los expedientes
-        </label>
-        <input
-          id="buscar-matricula"
-          value={matricula}
-          onChange={(e) => actualizarFiltro(setMatricula)(e.target.value)}
-          placeholder="697500900"
-          className="input input-lg"
-          style={{ maxWidth: "32rem" }}
-        />
-      </div>
+      {/* Búsqueda unificada: un solo bloque. La matrícula es la pregunta que
+          ADIF realmente tiene — cómo evoluciona el precio de un material a
+          través de todos los expedientes — así que ocupa la fila principal,
+          con su etiqueta siempre encima del campo. Los otros tres filtros
+          conviven en la misma tarjeta, no en una zona aparte. */}
+      <div className="search-panel">
+        <div className="search-primary field field-primary">
+          <label className="field-label" htmlFor="buscar-matricula">
+            Buscar por matrícula
+          </label>
+          <span className="field-hint">En todos los expedientes del catálogo</span>
+          <input
+            id="buscar-matricula"
+            value={matricula}
+            onChange={(e) => actualizarFiltro(setMatricula)(e.target.value)}
+            placeholder="p. ej. 697500900"
+            className="input input-hero"
+          />
+        </div>
 
-      <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", margin: "2.25rem 0 1.25rem" }}>
-        <input
-          value={expediente}
-          onChange={(e) => actualizarFiltro(setExpediente)(e.target.value)}
-          placeholder="Filtrar por expediente"
-          className="input"
-          style={{ minWidth: "14rem", width: "auto" }}
-        />
-        <input
-          value={lote}
-          onChange={(e) => actualizarFiltro(setLote)(e.target.value)}
-          placeholder="Lote"
-          className="input"
-          style={{ minWidth: "8rem", width: "auto" }}
-        />
-        <input
-          value={q}
-          onChange={(e) => actualizarFiltro(setQ)(e.target.value)}
-          placeholder="Buscar en descripción / código"
-          className="input"
-          style={{ minWidth: "16rem", width: "auto" }}
-        />
-        <a href={`${apiUrl}/catalogo/exportar.xlsx`} className="btn btn-primary" style={{ marginLeft: "auto" }}>
-          Exportar Excel
-        </a>
+        <div className="search-secondary">
+          <div className="field">
+            <label className="field-label" htmlFor="filtro-expediente">
+              Expediente
+            </label>
+            <input
+              id="filtro-expediente"
+              value={expediente}
+              onChange={(e) => actualizarFiltro(setExpediente)(e.target.value)}
+              placeholder="6.24/28510.0088"
+              className="input"
+            />
+          </div>
+          <div className="field">
+            <label className="field-label" htmlFor="filtro-lote">
+              Lote
+            </label>
+            <input
+              id="filtro-lote"
+              value={lote}
+              onChange={(e) => actualizarFiltro(setLote)(e.target.value)}
+              placeholder="LOTE 1"
+              className="input"
+            />
+          </div>
+          <div className="field">
+            <label className="field-label" htmlFor="filtro-texto">
+              Descripción o código
+            </label>
+            <input
+              id="filtro-texto"
+              value={q}
+              onChange={(e) => actualizarFiltro(setQ)(e.target.value)}
+              placeholder="brida, P-014…"
+              className="input"
+            />
+          </div>
+          <div className="field field-action">
+            <a href={`${apiUrl}/catalogo/exportar.xlsx`} className="btn btn-primary">
+              Exportar Excel
+            </a>
+          </div>
+        </div>
       </div>
 
       {error && <p className="error-banner">Error al conectar con la API: {error}</p>}
@@ -138,7 +159,7 @@ export default function CatalogoPanel({ apiUrl }: { apiUrl: string }) {
           <p className="muted" style={{ marginBottom: "0.6rem" }}>
             {cargando ? "Cargando…" : `${datos.total} línea(s) de catálogo`}
           </p>
-          <div className="table-scroll" style={{ maxHeight: "70vh", overflowY: "auto" }}>
+          <div className="table-scroll">
             <table className="table">
               <thead>
                 <tr>
@@ -163,10 +184,12 @@ export default function CatalogoPanel({ apiUrl }: { apiUrl: string }) {
                     <td>{linea.codigo_expediente}</td>
                     <td>{linea.identificador_lote}</td>
                     <td style={{ fontWeight: 700 }} className="mono">
-                      {linea.matricula ?? "—"}
+                      {linea.matricula ?? ""}
                     </td>
-                    <td className="mono">{linea.codigo_precio ?? "—"}</td>
-                    <td>{linea.descripcion}</td>
+                    <td className="mono">{linea.codigo_precio ?? ""}</td>
+                    <td>
+                      <DescripcionCelda texto={linea.descripcion} />
+                    </td>
                     <td className="num">{formatearNumero(linea.cantidad, 2)}</td>
                     <td className="num">{formatearNumero(linea.precio_unitario)}</td>
                     <td className="num">{formatearNumero(linea.precio_adjudicado)}</td>
@@ -270,7 +293,7 @@ export default function CatalogoPanel({ apiUrl }: { apiUrl: string }) {
                   {seleccion.pagina && ` · página ${seleccion.pagina}`}
                 </a>
               ) : (
-                <span className="muted">—</span>
+                <span className="muted">Sin documento de origen registrado.</span>
               )}
               {seleccion.fragmento && <code className="fragment" style={{ marginTop: "0.75rem" }}>{seleccion.fragmento}</code>}
             </div>

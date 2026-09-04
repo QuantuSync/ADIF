@@ -1,8 +1,13 @@
+"use client";
+
 // Kit compartido por las cuatro pantallas (CLAUDE.md; rediseño visual
-// 2026-09-03): formateadores y el componente de estado, para no repetir la
-// misma regla de formato ni la misma distinción tipográfica en cada panel.
-// Los estados se distinguen por tipografía y color reservado a lo urgente
-// (CLAUDE.md, encargo de esta sesión) — no hay badges ni iconos decorativos.
+// 2026-09-04): formateadores y los componentes de estado y descripción, para
+// no repetir la misma regla de formato ni la misma distinción tipográfica en
+// cada panel. Los estados se distinguen por tipografía, peso y un punto de
+// estado — nunca por una insignia de color. Un valor ausente se deja en
+// blanco: un guion suelto es ruido visual, no información.
+
+import { useState } from "react";
 
 export type EstadoExpediente =
   | "pendiente"
@@ -27,9 +32,10 @@ export const ETIQUETA_ESTADO: Record<string, string> = {
   sin_publicar: "No publicado",
 };
 
-// "ok": resuelto. "attn": exige revisión humana — el único caso que usa el
-// color de acento. "faint": fuera de alcance, deliberadamente atenuado.
-// "muted": en curso, sin urgencia todavía.
+// "ok": resuelto — el único estado que usa el acento (es, de verdad, una
+// buena noticia). "attn": exige revisión humana — tinta, no color, para no
+// competir con el acento. "faint": fuera de alcance, deliberadamente
+// atenuado. "muted": en curso, sin urgencia todavía.
 type NivelEstado = "ok" | "attn" | "faint" | "muted";
 
 const NIVEL_ESTADO: Record<string, NivelEstado> = {
@@ -63,12 +69,12 @@ export function accentClaseEstado(estado: string): string {
 }
 
 export function formatearPorcentaje(valor: string | number | null): string {
-  if (valor === null) return "—";
+  if (valor === null) return "";
   return `${(Number(valor) * 100).toFixed(2)} %`;
 }
 
 export function formatearImporte(valor: string | number | null): string {
-  if (valor === null) return "—";
+  if (valor === null) return "";
   return `${Number(valor).toLocaleString("es-ES", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
@@ -76,6 +82,34 @@ export function formatearImporte(valor: string | number | null): string {
 }
 
 export function formatearNumero(valor: string | number | null, maxDecimales = 4): string {
-  if (valor === null) return "—";
+  if (valor === null) return "";
   return Number(valor).toLocaleString("es-ES", { maximumFractionDigits: maxDecimales });
+}
+
+const LARGO_TRUNCADO = 64;
+
+// Descripción de línea de catálogo: trunca a una sola línea para no romper
+// la altura de la fila, con un control explícito para ver el texto entero.
+// stopPropagation evita disparar la selección de fila (trazabilidad) al
+// pulsar el propio control.
+export function DescripcionCelda({ texto }: { texto: string }) {
+  const [expandida, setExpandida] = useState(false);
+  const esLarga = texto.length > LARGO_TRUNCADO;
+  return (
+    <div className={`descripcion${expandida ? " descripcion-expandida" : ""}`}>
+      <span>{texto}</span>
+      {esLarga && (
+        <button
+          type="button"
+          className="descripcion-toggle"
+          onClick={(e) => {
+            e.stopPropagation();
+            setExpandida((v) => !v);
+          }}
+        >
+          {expandida ? "ver menos" : "ver completo"}
+        </button>
+      )}
+    </div>
+  );
 }

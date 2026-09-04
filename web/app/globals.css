@@ -1,39 +1,49 @@
-/* Identidad visual — sesión de rediseño 2026-09-03.
-   Grises cálidos, un único acento (terracota), sin azul ni degradados.
-   Distinción por tipografía, posición y espacio — no por color. */
+/* Identidad visual — rediseño 2026-09-04.
+   Blanco, negro y grises fríos. Verde corporativo ADIF como único acento,
+   reservado a lo positivo/activo/primario — nunca como fondo de bloques
+   grandes. Estados por tipografía, peso y un punto de estado, no por
+   badges de color. Geometría de palo seco en toda la interfaz, sin serif.
+   Números tabulares, alineados a la derecha, en fuente monoespaciada. */
 
 :root {
-  /* Escala de grises cálidos, hueso a carbón */
-  --stone-50: #faf7f2;
-  --stone-100: #f2ebe0;
-  --stone-150: #ece2d3;
-  --stone-200: #e1d5c2;
-  --stone-300: #cabaa0;
+  --white: #ffffff;
+  --gray-50: #f6f7f8;
+  --gray-100: #edeff1;
+  --gray-150: #e4e7ea;
+  --gray-200: #d9dde1;
+  --gray-300: #bfc5cb;
+  --gray-400: #97a0a8;
+  --gray-500: #6d7680;
+  --gray-600: #4c545d;
+  --gray-700: #343a40;
+  --gray-800: #202428;
+  --ink: #12151a;
 
-  --ink: #241f18;
-  --ink-muted: #7c6f5c;
-  --ink-faint: #a99b84;
-
-  --paper: #fffdfa;
-  --bg: #f6f1e8;
-  --bg-panel: #fffdfa;
-  --line: #e1d5c2;
-  --line-strong: #cabaa0;
-
-  /* El único acento: terracota apagado, reservado para lo que exige
-     atención inmediata (revisión, error, selección activa). */
-  --accent: #a1402a;
-  --accent-soft: #f1e2da;
+  --bg: var(--white);
+  --bg-subtle: var(--gray-50);
+  --panel: var(--white);
+  --border: var(--gray-200);
+  --border-strong: var(--gray-300);
 
   --text: var(--ink);
-  --text-muted: var(--ink-muted);
-  --border: var(--line);
-  --bg-subtle: var(--stone-50);
-  --focus-ring: rgba(161, 64, 42, 0.22);
-  --radius: 3px;
+  --text-muted: var(--gray-600);
+  --text-faint: var(--gray-400);
 
-  --font-serif: "Iowan Old Style", "Palatino Linotype", Georgia, "Times New Roman", serif;
-  --font-sans: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  /* Verde corporativo ADIF — el único acento del sistema. */
+  --accent: #00754f;
+  --accent-strong: #00532f;
+  --accent-soft: #e2f2ea;
+  --focus-ring: rgba(0, 117, 79, 0.28);
+
+  --radius-sm: 2px;
+  --radius: 4px;
+
+  --nav-h: 64px;
+  --thead-h: 44px;
+
+  --font-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "Public Sans", "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, monospace;
 }
 
 * {
@@ -47,9 +57,9 @@ body {
 }
 
 body {
-  font-family: var(--font-sans);
-  font-size: 17px;
-  line-height: 1.6;
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.55;
   color: var(--text);
   background: var(--bg);
 }
@@ -70,44 +80,67 @@ table {
   border-collapse: collapse;
 }
 
+a:focus-visible,
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 /* Layout */
 
 .app-nav {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  height: var(--nav-h);
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 2.25rem;
-  padding: 1.35rem 3rem;
+  padding: 0 2rem;
   background: var(--bg);
-  border-bottom: 1px solid var(--line-strong);
+  border-bottom: 1px solid var(--border);
 }
 
 .app-brand {
-  font-family: var(--font-serif);
+  display: flex;
+  align-items: baseline;
+  gap: 0.7rem;
+  font-family: var(--font-display);
   color: var(--ink);
-  font-weight: 600;
-  font-size: 1.3rem;
+  font-weight: 800;
+  font-size: 1.05rem;
   letter-spacing: 0.01em;
-  margin-right: 0.5rem;
+  text-transform: uppercase;
+  margin-right: 0.25rem;
   white-space: nowrap;
 }
 
 .app-brand small {
-  display: block;
-  font-family: var(--font-sans);
+  font-family: var(--font-body);
   font-weight: 500;
-  font-size: 0.68rem;
-  color: var(--ink-faint);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  margin-top: 0.2rem;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  letter-spacing: 0;
+  text-transform: none;
+  padding-left: 0.7rem;
+  border-left: 1px solid var(--border-strong);
 }
 
 .nav-link {
-  color: var(--ink-muted);
+  font-family: var(--font-body);
+  color: var(--text-muted);
   text-decoration: none;
-  font-size: 1rem;
-  font-weight: 500;
-  padding: 0.15rem 0;
+  font-size: 0.92rem;
+  font-weight: 600;
+  padding: 0.2rem 0 0.35rem;
   border-bottom: 2px solid transparent;
 }
 
@@ -121,47 +154,48 @@ table {
 }
 
 .app-body {
-  padding: 3rem 3rem 6rem;
-  max-width: 1400px;
+  padding: 2.5rem 2rem 6rem;
+  max-width: 1440px;
   margin: 0 auto;
 }
 
 .page-title {
-  font-family: var(--font-serif);
-  font-size: 2.1rem;
-  font-weight: 500;
+  font-family: var(--font-display);
+  font-size: 1.9rem;
+  font-weight: 700;
   letter-spacing: -0.01em;
   color: var(--ink);
-  margin: 0 0 0.5rem;
+  margin: 0 0 0.4rem;
+  text-wrap: balance;
 }
 
 .page-subtitle {
   color: var(--text-muted);
-  margin: 0 0 2.75rem;
-  font-size: 1.05rem;
-  max-width: 46rem;
+  margin: 0 0 2.5rem;
+  font-size: 1rem;
+  max-width: 44rem;
 }
 
 /* Cards */
 
 .card {
-  background: var(--bg-panel);
-  border: 1px solid var(--line);
+  background: var(--panel);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 1.75rem 2rem;
+  padding: 1.6rem 1.85rem;
 }
 
 .card + .card {
-  margin-top: 1.75rem;
+  margin-top: 1.5rem;
 }
 
 .section-label {
   font-size: 0.75rem;
-  font-weight: 600;
+  font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.07em;
-  color: var(--ink-muted);
-  margin: 0 0 0.9rem;
+  color: var(--text-muted);
+  margin: 0 0 0.85rem;
 }
 
 /* Buttons */
@@ -170,21 +204,22 @@ table {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  font-size: 0.95rem;
+  font-size: 0.88rem;
   font-weight: 600;
-  padding: 0.55rem 1.1rem;
-  border-radius: var(--radius);
+  padding: 0.58rem 1.05rem;
+  border-radius: var(--radius-sm);
   border: 1px solid transparent;
   cursor: pointer;
-  background: var(--bg-panel);
+  background: var(--white);
   white-space: nowrap;
   line-height: 1.2;
   text-decoration: none;
+  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
 
 .btn:disabled {
   cursor: not-allowed;
-  opacity: 0.45;
+  opacity: 0.4;
 }
 
 .btn:focus-visible {
@@ -193,19 +228,19 @@ table {
 }
 
 .btn-primary {
-  background: var(--ink);
-  border-color: var(--ink);
-  color: var(--paper);
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--white);
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: #3a3226;
-  border-color: #3a3226;
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
 }
 
 .btn-secondary {
   background: transparent;
-  border-color: var(--line-strong);
+  border-color: var(--border-strong);
   color: var(--ink);
 }
 
@@ -216,7 +251,7 @@ table {
 .btn-ghost {
   background: transparent;
   border-color: transparent;
-  color: var(--ink-muted);
+  color: var(--text-muted);
   padding: 0.4rem 0.5rem;
 }
 
@@ -226,26 +261,42 @@ table {
 }
 
 .btn-sm {
-  font-size: 0.85rem;
-  padding: 0.38rem 0.75rem;
+  font-size: 0.8rem;
+  padding: 0.42rem 0.75rem;
 }
 
-/* Inputs */
+/* Campos */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
 
 .field-label {
   display: block;
-  font-size: 0.82rem;
-  font-weight: 600;
-  color: var(--ink-muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
   margin-bottom: 0.35rem;
 }
 
+.field-hint {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--text-faint);
+  margin: -0.15rem 0 0.6rem;
+}
+
 .input {
-  padding: 0.6rem 0.8rem;
-  font-size: 1rem;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius);
-  background: var(--paper);
+  padding: 0.58rem 0.8rem;
+  font-size: 0.96rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--white);
+  color: var(--text);
   width: 100%;
 }
 
@@ -255,58 +306,130 @@ table {
   box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
-/* Búsqueda protagonista del catálogo: sin caja, solo una regla inferior —
-   para que no compita en peso con los demás campos de filtro. */
-.input-lg {
+.input::placeholder {
+  color: var(--gray-400);
+}
+
+/* Búsqueda protagonista del catálogo: campo grande, geométrico, con etiqueta
+   siempre encima — nunca en la misma línea que el valor. */
+.field-primary .field-label {
+  font-size: 0.85rem;
+  margin-bottom: 0.2rem;
+}
+
+.input-hero {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1.85rem;
+  letter-spacing: -0.01em;
   border: none;
-  border-bottom: 2px solid var(--line-strong);
+  border-bottom: 2px solid var(--border-strong);
   border-radius: 0;
   background: transparent;
-  padding: 0.5rem 0.1rem 0.7rem;
-  font-family: var(--font-serif);
-  font-size: 1.7rem;
+  padding: 0.3rem 0.1rem 0.55rem;
   width: 100%;
 }
 
-.input-lg:focus {
+.input-hero:focus {
+  outline: none;
   box-shadow: none;
-  border-bottom-color: var(--ink);
+  border-bottom-color: var(--accent);
 }
 
-.input-lg::placeholder {
-  color: var(--ink-faint);
+.input-hero::placeholder {
+  color: var(--gray-300);
+  font-weight: 500;
 }
 
-/* Estado, sin badges — tipografía y color reservado a lo urgente */
+/* Panel de búsqueda unificado (catálogo): un solo bloque, matrícula como
+   campo principal arriba, filtros secundarios abajo — nunca dos zonas
+   compitiendo por atención. */
+
+.search-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.75rem 2rem 1.6rem;
+  margin-bottom: 1.75rem;
+}
+
+.search-primary {
+  padding-bottom: 1.5rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 1.4rem;
+}
+
+.search-secondary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 1.25rem;
+  align-items: end;
+}
+
+.field-action {
+  display: flex;
+}
+
+/* Estado: un punto (relleno, hueco o ausente) más peso tipográfico — nunca
+   una insignia de color. El acento verde queda para "completado", el único
+   estado que es de verdad una buena noticia. */
 
 .status {
-  font-size: 0.95rem;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
   font-weight: 600;
-  color: var(--ink-muted);
+  color: var(--text-muted);
   white-space: nowrap;
+}
+
+.status::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: transparent;
+  border: 1.5px solid var(--gray-400);
 }
 
 .status-ok {
   color: var(--ink);
 }
 
+.status-ok::before {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
 .status-attn {
-  color: var(--accent);
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.status-attn::before {
+  background: var(--ink);
+  border-color: var(--ink);
 }
 
 .status-faint {
-  color: var(--ink-faint);
+  color: var(--text-faint);
   font-weight: 500;
-  font-style: italic;
+}
+
+.status-faint::before {
+  border-color: var(--gray-300);
 }
 
 .status-note {
   display: block;
-  font-size: 0.85rem;
+  font-size: 0.84rem;
   font-weight: 400;
-  color: var(--ink-muted);
-  margin-top: 0.3rem;
-  max-width: 26rem;
+  color: var(--text-muted);
+  margin: 0.3rem 0 0 1.15rem;
+  max-width: 28rem;
 }
 
 .chip {
@@ -315,7 +438,7 @@ table {
   gap: 0.3rem;
   font-size: 0.85rem;
   font-weight: 600;
-  color: var(--ink-muted);
+  color: var(--text-muted);
   background: none;
   border: none;
   cursor: pointer;
@@ -327,61 +450,80 @@ table {
   text-decoration: underline;
 }
 
-/* Tables */
+/* Tablas: la página tiene un único scroll. La cabecera se fija bajo la nav;
+   el contenedor solo hace scroll horizontal si la tabla no cabe. */
 
 .table-scroll {
-  overflow-x: auto;
-  border: 1px solid var(--line);
+  /* Sin overflow propio a propósito: cualquier valor de overflow-x distinto
+     de "visible" convierte este contenedor en el ancla de `position:
+     sticky` de la cabecera (aunque nunca llegue a necesitar su propio
+     scroll) en vez de la página — resucitaría el scroll interno que esta
+     sesión pide quitar. La página es el único scroll; ver el breakpoint de
+     980px para el caso de pantalla estrecha, donde la cabecera deja de
+     fijarse y este contenedor sí gana su propio scroll horizontal. */
+  border: 1px solid var(--border);
   border-radius: var(--radius);
 }
 
 .table {
   width: 100%;
-  font-size: 0.95rem;
+  font-size: 0.94rem;
   border-collapse: separate;
   border-spacing: 0;
 }
 
-.table thead th {
+.table thead {
+  /* Sticky en el grupo de fila, no en cada <th>: aplicado por celda, varios
+     motores calculan mal la posición "en reposo" de la celda (queda
+     desplazada hacia abajo, tapando la primera fila, incluso sin haber
+     hecho scroll todavía). En el grupo de fila se ancla a la página de
+     forma fiable. */
   position: sticky;
-  top: 0;
-  z-index: 1;
+  top: var(--nav-h);
+  z-index: 5;
+}
+
+.table thead th {
   text-align: left;
-  background: var(--stone-100);
-  color: var(--ink-muted);
-  font-size: 0.74rem;
+  background: var(--gray-50);
+  color: var(--text-muted);
+  font-size: 0.72rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  font-weight: 600;
-  padding: 0.8rem 1rem;
+  font-weight: 700;
+  padding: 0.75rem 1rem;
   white-space: nowrap;
-  border-bottom: 1px solid var(--line-strong);
+  border-bottom: 1px solid var(--border-strong);
 }
 
 .table thead th.num {
   text-align: right;
 }
 
-.table tbody td {
-  padding: 0.85rem 1rem;
-  border-top: 1px solid var(--line);
-  vertical-align: top;
+.table tbody tr {
+  /* La cabecera de tabla y la barra de navegación quedan fijas al hacer
+     scroll (una sola barra de scroll, sin la caja interna de antes); sin
+     este margen, saltar a una fila (scrollIntoView, un enlace con ancla)
+     la deja tapada a medias bajo ambas. */
+  scroll-margin-top: calc(var(--nav-h) + var(--thead-h) + 0.5rem);
 }
 
-.table tbody tr:nth-child(even) {
-  background: var(--stone-50);
+.table tbody td {
+  padding: 0.8rem 1rem;
+  border-top: 1px solid var(--border);
+  vertical-align: top;
 }
 
 .table tbody tr.clickable {
   cursor: pointer;
 }
 
-.table tbody tr.clickable:hover {
-  background: var(--stone-100);
+.table tbody tr.clickable:hover td {
+  background: var(--gray-50);
 }
 
-.table tbody tr.selected {
-  background: var(--stone-150);
+.table tbody tr.selected td {
+  background: var(--accent-soft);
 }
 
 .table tbody tr.selected > td:first-child {
@@ -391,37 +533,88 @@ table {
 .table .num {
   text-align: right;
   font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
   white-space: nowrap;
 }
 
 .table .mono {
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
-/* Expedientes: acento a la izquierda solo cuando hace falta atención humana.
-   El borde va en la primera celda, no en <tr>: en el modelo de bordes
-   "separate" los navegadores ignoran border-* puesto directamente en
-   table-row (CSS2.1 §17.6.2) — solo se pinta el fondo, nunca el borde. */
+/* Expedientes: marca al margen solo cuando hace falta atención humana — en
+   tinta, no en el acento (el verde queda reservado a lo positivo). El borde
+   va en la primera celda, no en <tr>: en el modelo de bordes "separate" los
+   navegadores ignoran border-* puesto directamente en table-row (CSS2.1
+   §17.6.2) — solo se pinta el fondo, nunca el borde. */
 
 .row-accent > td:first-child {
   box-shadow: inset 3px 0 0 transparent;
 }
 
 .row-accent-attn > td:first-child {
-  box-shadow: inset 3px 0 0 var(--accent);
+  box-shadow: inset 3px 0 0 var(--ink);
 }
 
 .row-muted td {
-  color: var(--text-muted);
+  color: var(--text-faint);
 }
 
-/* Cola de revisión: motivos como lista dividida, no cajas de color */
+/* Descripciones largas: truncadas a una línea, con un control explícito
+   para ver el texto completo — nunca rompiendo la altura de la fila. */
+
+.descripcion {
+  display: flex;
+  align-items: baseline;
+  gap: 0.65rem;
+  max-width: 30rem;
+}
+
+.descripcion span {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.descripcion-expandida {
+  max-width: none;
+  white-space: normal;
+}
+
+.descripcion-expandida span {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.descripcion-toggle {
+  flex: none;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.descripcion-toggle:hover {
+  color: var(--accent-strong);
+}
+
+/* Cola de revisión: motivos como lista dividida, en lenguaje llano — nunca
+   cajas de color. El punto negro marca lo que el propio documento
+   contradice; lo demás es un límite conocido del sistema. */
 
 .reason-card {
   display: flex;
-  gap: 1.25rem;
+  gap: 1.5rem;
   padding: 1.1rem 0;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--border);
 }
 
 .reason-card:first-child {
@@ -431,22 +624,32 @@ table {
 
 .reason-kind {
   flex: none;
-  width: 11rem;
-  font-size: 0.72rem;
+  width: 10.5rem;
+  font-size: 0.7rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--ink-muted);
-  padding-top: 0.15rem;
+  color: var(--text-muted);
+  padding-top: 0.2rem;
 }
 
 .reason-card--contradiccion .reason-kind {
-  color: var(--accent);
+  color: var(--ink);
+}
+
+.reason-card--contradiccion .reason-kind::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 0.5rem;
+  background: var(--ink);
+  vertical-align: middle;
 }
 
 .reason-text {
   color: var(--ink);
-  font-size: 1.02rem;
+  font-size: 1rem;
   flex: 1;
 }
 
@@ -464,36 +667,40 @@ table {
   display: block;
   margin-top: 0.4rem;
   padding: 0.6rem 0.75rem;
-  background: var(--stone-50);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  font-size: 0.82rem;
+  background: var(--gray-50);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
   white-space: pre-wrap;
-  color: var(--ink-muted);
+  color: var(--text-muted);
 }
 
-/* Trazabilidad */
+/* Trazabilidad — el borde superior en acento marca "este es el panel
+   activo", el único otro uso del acento aparte de la acción primaria. */
 
 .trace-panel {
-  border: 1px solid var(--line);
-  border-top: 3px solid var(--ink);
+  border: 1px solid var(--border);
+  border-top: 3px solid var(--accent);
   border-radius: var(--radius);
-  background: var(--bg-panel);
+  background: var(--panel);
   overflow: hidden;
 }
 
 .trace-header {
-  padding: 1.25rem 1.75rem;
-  border-bottom: 1px solid var(--line);
+  padding: 1.15rem 1.75rem;
+  border-bottom: 1px solid var(--border);
   display: flex;
   justify-content: space-between;
   align-items: baseline;
+  gap: 1rem;
 }
 
-.trace-header h2 {
-  font-family: var(--font-serif);
-  font-weight: 500;
-  font-size: 1.3rem;
+.trace-header h2,
+.detail-title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.25rem;
   color: var(--ink);
   margin: 0;
 }
@@ -515,13 +722,17 @@ table {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-muted);
-  font-weight: 600;
-  margin: 0 0 0.25rem;
+  font-weight: 700;
+  margin: 0 0 0.28rem;
 }
 
 .trace-field dd {
   margin: 0;
-  font-size: 1.05rem;
+  font-size: 1.02rem;
+}
+
+.trace-field dd.mono {
+  font-family: var(--font-mono);
 }
 
 .formula {
@@ -529,16 +740,18 @@ table {
   align-items: center;
   gap: 0.6rem;
   flex-wrap: wrap;
-  background: var(--stone-50);
-  border: 1px solid var(--line);
+  background: var(--gray-50);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 0.9rem 1.1rem;
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: 1.1rem;
+  font-size: 1.05rem;
 }
 
 .formula .op {
   color: var(--text-muted);
+  font-family: var(--font-body);
 }
 
 .formula .result {
@@ -548,18 +761,17 @@ table {
 
 .fragment {
   display: block;
-  background: var(--stone-50);
-  border-left: 3px solid var(--ink-faint);
+  background: var(--gray-50);
+  border-left: 3px solid var(--gray-300);
   padding: 0.85rem 1.1rem;
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   white-space: pre-wrap;
-  font-family: var(--font-serif);
-  font-style: italic;
-  font-size: 0.98rem;
-  color: var(--ink-muted);
+  font-family: var(--font-mono);
+  font-size: 0.86rem;
+  color: var(--gray-600);
 }
 
-/* Revisión: layout de dos columnas con PDF embebido */
+/* Revisión: layout de dos columnas con el PDF embebido, nunca un enlace */
 
 .revision-layout {
   display: grid;
@@ -579,22 +791,24 @@ table {
   width: 100%;
   text-align: left;
   padding: 0.9rem 1rem;
-  border-radius: var(--radius);
-  border: 1px solid var(--line);
-  background: var(--bg-panel);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--panel);
   cursor: pointer;
+  scroll-margin-top: calc(var(--nav-h) + 0.5rem);
 }
 
 .revision-item:hover {
-  border-color: var(--line-strong);
+  border-color: var(--border-strong);
 }
 
 .revision-item.active {
-  background: var(--stone-100);
-  border-color: var(--ink);
+  background: var(--accent-soft);
+  border-color: var(--accent);
 }
 
 .revision-item .code {
+  font-family: var(--font-mono);
   font-weight: 700;
   color: var(--ink);
   display: block;
@@ -618,7 +832,7 @@ table {
   gap: 1.25rem;
   flex-wrap: wrap;
   margin-bottom: 0.8rem;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--border);
 }
 
 .pdf-tab {
@@ -629,34 +843,38 @@ table {
   border-bottom: 2px solid transparent;
   background: none;
   cursor: pointer;
-  color: var(--ink-muted);
+  color: var(--text-muted);
   margin-bottom: -1px;
+}
+
+.pdf-tab:hover {
+  color: var(--ink);
 }
 
 .pdf-tab.active {
   color: var(--ink);
-  border-bottom-color: var(--ink);
+  border-bottom-color: var(--accent);
 }
 
 .pdf-frame-wrap {
   position: sticky;
-  top: 1.5rem;
-  border: 1px solid var(--line);
+  top: calc(var(--nav-h) + 1.5rem);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
-  background: var(--stone-50);
+  background: var(--gray-100);
 }
 
 .pdf-frame {
   width: 100%;
-  height: 78vh;
+  height: max(420px, calc(100vh - var(--nav-h) - 3rem));
   border: none;
   display: block;
-  background: #55504a;
+  background: #383d42;
 }
 
 .pdf-empty {
-  height: 78vh;
+  height: max(420px, calc(100vh - var(--nav-h) - 3rem));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -667,10 +885,9 @@ table {
 }
 
 .empty-state {
-  padding: 2.5rem 0;
+  padding: 2.25rem 0;
   color: var(--text-muted);
-  font-size: 1.02rem;
-  font-style: italic;
+  font-size: 1rem;
 }
 
 .muted {
@@ -678,13 +895,13 @@ table {
 }
 
 .error-banner {
-  background: var(--stone-50);
-  border-left: 3px solid var(--accent);
+  background: var(--gray-50);
+  border-left: 3px solid var(--ink);
   color: var(--ink);
   padding: 0.8rem 1.1rem;
   border-radius: 0 var(--radius) var(--radius) 0;
   margin-bottom: 1.5rem;
-  font-size: 0.95rem;
+  font-size: 0.92rem;
 }
 
 .field-grid {
@@ -701,16 +918,23 @@ table {
 
 .hr {
   border: none;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--border);
   margin: 1.75rem 0;
 }
 
 @media (max-width: 980px) {
   .revision-layout,
-  .revision-detail-grid {
+  .revision-detail-grid,
+  .search-secondary {
     grid-template-columns: 1fr;
   }
   .pdf-frame-wrap {
     position: static;
+  }
+  .table thead {
+    position: static;
+  }
+  .table-scroll {
+    overflow-x: auto;
   }
 }

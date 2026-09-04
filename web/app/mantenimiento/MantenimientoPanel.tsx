@@ -41,11 +41,11 @@ function formatearIntervalo(segundos: number): string {
 
 function disparadoPor(trabajo: Trabajo): string {
   const valor = trabajo.payload?.disparado_por;
-  return valor === "programado" ? "Programado" : valor === "manual" ? "Manual" : "—";
+  return valor === "programado" ? "Programado" : valor === "manual" ? "Manual" : "";
 }
 
 function ResumenCiclo({ resultado }: { resultado: Record<string, unknown> | null }) {
-  if (!resultado) return <span className="muted">—</span>;
+  if (!resultado) return null;
   const descubrimiento = resultado.descubrimiento as Record<string, unknown> | null | undefined;
   return (
     <div style={{ fontSize: "0.85rem" }}>
@@ -179,7 +179,7 @@ export default function MantenimientoPanel({ apiUrl }: { apiUrl: string }) {
         <table className="table">
           <thead>
             <tr>
-              <th>#</th>
+              <th className="num">#</th>
               <th>Origen</th>
               <th>Estado</th>
               <th>Lanzado</th>
@@ -190,7 +190,7 @@ export default function MantenimientoPanel({ apiUrl }: { apiUrl: string }) {
           <tbody>
             {historial.map((trabajo) => (
               <tr key={trabajo.id} className={trabajo.error ? "row-accent row-accent-attn" : "row-accent"}>
-                <td>{trabajo.id}</td>
+                <td className="num">{trabajo.id}</td>
                 <td>{disparadoPor(trabajo)}</td>
                 <td>
                   <span className={`status ${trabajo.estado === "completado" ? "status-ok" : trabajo.estado === "fallido" ? "status-attn" : ""}`}>
@@ -198,7 +198,7 @@ export default function MantenimientoPanel({ apiUrl }: { apiUrl: string }) {
                   </span>
                 </td>
                 <td>{formatearFecha(trabajo.created_at)}</td>
-                <td>{trabajo.estado === "pendiente" || trabajo.estado === "en_proceso" ? "—" : formatearFecha(trabajo.updated_at)}</td>
+                <td>{trabajo.estado === "pendiente" || trabajo.estado === "en_proceso" ? "" : formatearFecha(trabajo.updated_at)}</td>
                 <td>
                   <ResumenCiclo resultado={trabajo.resultado} />
                   {trabajo.error && <div className="status-note">{trabajo.error}</div>}

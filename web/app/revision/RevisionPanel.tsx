@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { formatearNumero } from "../ui";
+import { DescripcionCelda, formatearNumero } from "../ui";
 import { interpretarMotivoLinea, interpretarMotivos } from "../motivos";
 
 type ExpedienteResumen = {
@@ -191,7 +191,7 @@ export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
 
       {detalle && (
         <div>
-          <h2 style={{ fontFamily: "var(--font-serif)", fontWeight: 500, fontSize: "1.6rem", color: "var(--ink)", margin: "0 0 0.25rem" }}>
+          <h2 className="detail-title" style={{ fontSize: "1.6rem", margin: "0 0 0.25rem" }}>
             {detalle.expediente.codigo_expediente}
           </h2>
           {detalle.expediente.nombre_proyecto && <p className="muted" style={{ margin: "0 0 1.5rem" }}>{detalle.expediente.nombre_proyecto}</p>}
@@ -276,9 +276,11 @@ export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
                         const aviso = interpretarMotivoLinea(linea.motivo_revision);
                         return (
                           <tr key={linea.id}>
-                            <td className="mono">{linea.codigo_precio ?? "—"}</td>
-                            <td className="mono">{linea.matricula ?? "—"}</td>
-                            <td>{linea.descripcion}</td>
+                            <td className="mono">{linea.codigo_precio ?? ""}</td>
+                            <td className="mono">{linea.matricula ?? ""}</td>
+                            <td>
+                              <DescripcionCelda texto={linea.descripcion} />
+                            </td>
                             <td className="num">{formatearNumero(linea.precio_unitario)}</td>
                             <td>
                               <span className={linea.estado_revision === "confirmado" ? "status status-ok" : "status"}>
