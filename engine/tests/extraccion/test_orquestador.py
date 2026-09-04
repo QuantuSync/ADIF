@@ -12,7 +12,8 @@ from types import SimpleNamespace
 import openpyxl
 
 from app.config import settings
-from app.extraccion.orquestador import LOTE_UNICO, ejecutar_extraccion_expediente
+from app.extraccion.orquestador import LOTE_UNICO, _Documento, _detectar_contrato_obra, ejecutar_extraccion_expediente
+from app.extraccion.texto import PaginaTexto
 from app.interfaces.document_storage import DocumentStorage
 from app.models import Documento, EstadoExpediente, Expediente, Lote, LineaCatalogo, TipoDocumento, TrazaOrigen
 from tests import fixtures as fx
@@ -338,3 +339,37 @@ def test_expediente_0027_multi_lote_produce_baja_correcta_por_lote(db_session):
     assert expediente.error is not None
     assert resultado["lotes"] == ["1", "3"]
     assert resultado["motivo_revision"] is not None
+
+
+# --- CLAUDE.md sección 26: criterios de alcance del cliente ----------------
+
+
+def test_detectar_contrato_obra_marca_tipo_contrato_obras():
+    # Sin fixture PDF real con "Tipo de Contrato Obras" (ningún expediente
+    # de este corpus lo es, CLAUDE.md sección 26) -- se prueba a nivel del
+    # helper, con `_Documento` sintético, igual que ya hace `docstring`.
+    paginas = [PaginaTexto(numero=1, texto="Tipo de Contrato Obras\n")]
+    doc = SimpleNamespace(id=1, nombre_archivo="anuncio.pdf")
+    item = _Documento(documento=doc, tipo=TipoDocumento.anuncio_pcsp, paginas=paginas)
+    campo = _detectar_contrato_obra([item])
+    assert campo is not None
+    assert campo.valor == "Obras"
+
+
+def test_detectar_contrato_obra_ignora_suministros():
+    paginas = [PaginaTexto(numero=1, texto="Tipo de Contrato Suministros\n")]
+    doc = SimpleNamespace(id=1, nombre_archivo="anuncio.pdf")
+    item = _Documento(documento=doc, tipo=TipoDocumento.anuncio_pcsp, paginas=paginas)
+    assert _detectar_contrato_obra([item]) is None
+
+
+def test_detectar_contrato_obra_ignora_documentos_que_no_son_anuncio_pcsp():
+    # El campo "Tipo de Contrato" también aparece en el "Documento de
+    # Pliegos" (misma familia de formulario, CLAUDE.md sección 3), pero solo
+    # se mira en documentos ya clasificados como `anuncio_pcsp` -- no hace
+    # falta más para el corpus real y evita depender de un tipo que además
+    # puede saltarse por `es_pliego_sin_precios`.
+    paginas = [PaginaTexto(numero=1, texto="Tipo de Contrato Obras\n")]
+    doc = SimpleNamespace(id=1, nombre_archivo="documento_de_pliegos.pdf")
+    item = _Documento(documento=doc, tipo=TipoDocumento.pliego, paginas=paginas)
+    assert _detectar_contrato_obra([item]) is None

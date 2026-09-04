@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from app.extraccion.clasificador import clasificar
+from app.extraccion.clasificador import clasificar, es_pliego_sin_precios
 from app.extraccion.texto import PaginaTexto, extraer_texto
 from app.models import TipoDocumento
 from tests import fixtures as fx
@@ -72,6 +72,39 @@ def test_anejo_suelto_criterios_tecnicos():
     paginas = _paginas("CRITERIOS TÉCNICOS PARA EL SUMINISTRO DE GUANTES CONTRA RIESGO ELECTRICO\n")
     r = clasificar(paginas)
     assert r.tipo == TipoDocumento.anejo
+
+
+# --- es_pliego_sin_precios (CLAUDE.md sección 26, criterio del cliente) ----
+
+
+def test_pliego_tecnico_real_no_se_marca_sin_precios():
+    # El pliego técnico (ANEJO_1 real, trae el cuadro de precios) es
+    # justo el que NUNCA debe saltarse -- verificado contra el corpus real
+    # antes de aplicar el criterio del cliente (CLAUDE.md sección 26).
+    r_guantes = clasificar(extraer_texto(fx.ANEJO_PRECIOS_GUANTES))
+    r_traviesas = clasificar(extraer_texto(fx.ANEJO_PRECIOS_TRAVIESAS))
+    assert es_pliego_sin_precios(r_guantes) is False
+    assert es_pliego_sin_precios(r_traviesas) is False
+
+
+def test_pliego_documento_de_pliegos_se_marca_sin_precios():
+    paginas = _paginas("Documento de Pliegos\nNúmero de Expediente 6.24/28510.0008\n")
+    r = clasificar(paginas)
+    assert es_pliego_sin_precios(r) is True
+
+
+def test_pliego_clausulas_administrativas_se_marca_sin_precios():
+    paginas = _paginas(
+        "Pliego de Clausulas Administrativas Particulares para la contratacion de suministros\n"
+    )
+    r = clasificar(paginas)
+    assert r.tipo == TipoDocumento.pliego
+    assert es_pliego_sin_precios(r) is True
+
+
+def test_documento_no_pliego_nunca_se_marca_sin_precios():
+    r = clasificar(extraer_texto(fx.CONTRATO_PRECIOS_UNITARIOS))
+    assert es_pliego_sin_precios(r) is False
 
 
 def test_resolucion_sin_verbo_resuelve_tiene_menos_confianza():

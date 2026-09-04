@@ -37,8 +37,8 @@ from app.extraccion.campos_lc27 import (
     extraer_importe_licitacion_lc27,
     extraer_objeto_contrato_lc27,
 )
-from app.extraccion.campos_pcsp import extraer_campos_anuncio_pcsp, importe_como_decimal
-from app.extraccion.clasificador import clasificar
+from app.extraccion.campos_pcsp import CampoAnclado, extraer_campos_anuncio_pcsp, importe_como_decimal
+from app.extraccion.clasificador import clasificar, es_pliego_sin_precios
 from app.extraccion.cruce_codigos import asegurar_cruce_codigos
 from app.extraccion.herencia_matriz import (
     EstadoResolucionMatriz,
@@ -96,6 +96,12 @@ class _Documento:
     # `es_documento_escaneado`) en vez de intentar procesarlo como si tuviera
     # texto.
     escaneado: bool = False
+    # CLAUDE.md sección 26 (criterio del cliente sobre pliegos, verificado
+    # contra el corpus real): un pliego administrativo o PCAP nunca trae
+    # cuadro de precios -- se salta la localización/extracción de tabla
+    # entera, nunca un `pliego de prescripciones tecnicas` (ver
+    # `app.extraccion.clasificador.es_pliego_sin_precios`).
+    pliego_sin_precios: bool = False
 
 
 def _traza(
@@ -160,9 +166,12 @@ def _clasificar_documentos(db: Session, storage: DocumentStorage, documentos: li
         # que le asignó el scraper (CLAUDE.md sección 3 y docstring de
         # app.extraccion.clasificador).
         tipo = clasificacion.tipo if clasificacion is not None else TipoDocumento.otro
+        sin_precios = clasificacion is not None and es_pliego_sin_precios(clasificacion)
         doc.tipo_documento = tipo
         doc.paginas = len(paginas)
-        resultado.append(_Documento(documento=doc, tipo=tipo, paginas=paginas, escaneado=escaneado))
+        resultado.append(
+            _Documento(documento=doc, tipo=tipo, paginas=paginas, escaneado=escaneado, pliego_sin_precios=sin_precios)
+        )
     db.commit()
     return resultado
 
@@ -187,6 +196,25 @@ def _extraer_lotes_declarados_del_expediente(
         return [], None
     candidatos.sort(key=lambda c: c[0])
     return candidatos[0][1], candidatos[0][2]
+
+
+_TIPOS_CONTRATO_OBRA = ("obras", "obra")
+
+
+def _detectar_contrato_obra(documentos: list[_Documento]) -> Optional[CampoAnclado]:
+    """CLAUDE.md sección 26, criterio del cliente: el campo "Tipo de
+    Contrato" del Anuncio PCSP (misma etiqueta fija que ya lee
+    `extraer_campos_anuncio_pcsp`) dice "Suministros", "Obras" o "Servicios".
+    Ninguno de los dos expedientes reales de este corpus (todos "Suministros",
+    departamento 28510) lo dispara -- es una guarda para cuando aparezca uno,
+    no algo que hoy cambie ningún resultado."""
+    for item in documentos:
+        if item.tipo != TipoDocumento.anuncio_pcsp:
+            continue
+        campo = extraer_campos_anuncio_pcsp(item.paginas).tipo_contrato
+        if campo is not None and campo.valor.strip().lower() in _TIPOS_CONTRATO_OBRA:
+            return campo
+    return None
 
 
 def _extraer_campos_expediente(
@@ -366,6 +394,7 @@ def ejecutar_extraccion_expediente(
         return {
             "expediente": expediente.codigo_expediente,
             "documentos_procesados": 0,
+            "documentos_pliego_omitidos": 0,
             "tablas_procesadas": 0,
             "lineas_creadas": 0,
             "lineas_actualizadas": 0,
@@ -389,6 +418,8 @@ def ejecutar_extraccion_expediente(
         estado_especial: Optional[EstadoExpediente] = None
         lineas_creadas = lineas_actualizadas = tablas_procesadas = llamadas_modelo = 0
         documentos_procesados = 0
+        documentos_pliego_omitidos: list[str] = []
+        campo_obra: Optional[CampoAnclado] = None
         lotes: list[Lote] = []
         lotes_declarados: list[LoteDeclarado] = []
         sin_documentos = not documentos
@@ -416,6 +447,17 @@ def ejecutar_extraccion_expediente(
         else:
             items = _clasificar_documentos(db, storage, list(documentos))
             documentos_procesados = len(items)
+
+            # CLAUDE.md sección 26, criterio del cliente: solo bajas de
+            # material por lotes, un contrato de obra queda fuera de alcance.
+            # Se detecta pronto (mismo campo de etiqueta fija que ya lee
+            # `_extraer_campos_expediente`, sección 2 de la cascada) para no
+            # confundir "es una obra" con "falló la extracción" -- se
+            # sobrescribe el motivo al final, después de que el resto de esta
+            # rama termine, para que gane sobre cualquier motivo que el
+            # intento de leer un cuadro de precios que no existe hubiera
+            # dejado por el camino.
+            campo_obra = _detectar_contrato_obra(items)
 
             # Identidad del expediente (CLAUDE.md sección 20): antes de anclar
             # cualquier otro dato a este expediente, corrige su
@@ -502,6 +544,14 @@ def ejecutar_extraccion_expediente(
             documentos_con_error: list[str] = []
             documentos_escaneados: list[str] = []
             for item in items:
+                if item.pliego_sin_precios:
+                    # CLAUDE.md sección 26: pliego administrativo o PCAP,
+                    # verificado sin cuadro de precios en todo el corpus real
+                    # -- ni localizar páginas candidatas ni extraer tabla
+                    # gastan tiempo en él. No es un error ni algo que mandar a
+                    # revisión, así que no toca `motivo_revision`.
+                    documentos_pliego_omitidos.append(item.documento.nombre_archivo)
+                    continue
                 if item.escaneado:
                     # Sin capa de texto no hay páginas candidatas que buscar
                     # ni cabecera que mapear (CLAUDE.md sección 3): intentar
@@ -626,6 +676,16 @@ def ejecutar_extraccion_expediente(
         if motivo_revision is None and not any(l.baja_lote is not None for l in lotes):
             motivo_revision = motivo_baja_diferido or "no se pudo determinar la baja de ningún lote"
 
+        if campo_obra is not None:
+            # Gana sobre cualquier motivo que el intento de leer un cuadro de
+            # precios que no existe (porque el expediente es de obra, no de
+            # material) hubiera dejado por el camino -- CLAUDE.md sección 26.
+            estado_especial = EstadoExpediente.fuera_de_alcance
+            motivo_revision = (
+                f'contrato de obra ("Tipo de Contrato: {campo_obra.valor}"), fuera de alcance del motor de '
+                "materiales (criterio del cliente, CLAUDE.md sección 26)"
+            )
+
         if estado_especial is not None:
             expediente.estado = estado_especial
             expediente.error = motivo_revision
@@ -643,6 +703,7 @@ def ejecutar_extraccion_expediente(
         return {
             "expediente": expediente.codigo_expediente,
             "documentos_procesados": documentos_procesados,
+            "documentos_pliego_omitidos": len(documentos_pliego_omitidos),
             "tablas_procesadas": tablas_procesadas,
             "lineas_creadas": lineas_creadas,
             "lineas_actualizadas": lineas_actualizadas,

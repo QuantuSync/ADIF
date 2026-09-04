@@ -27,6 +27,17 @@ def test_anuncio_con_matriz_extrae_los_dos_codigos():
     assert campos.adjudicatario.pagina == 2
 
 
+def test_tipo_contrato_ausente_en_pedido_derivado_no_revienta():
+    # CLAUDE.md sección 26, criterio del cliente sobre obra: este fixture real
+    # es un pedido derivado de acuerdo marco (CLAUDE.md sección 20) -- declara
+    # "Sistema de Contratación: Contrato basado en un Acuerdo Marco", no el
+    # campo "Tipo de Contrato" de un anuncio de licitación directa. Ausente es
+    # el resultado correcto aquí, no un fallo del patrón (ver el caso
+    # sintético de más abajo para el campo cuando sí aparece).
+    campos = extraer_campos_anuncio_pcsp(extraer_texto(fx.ANUNCIO_PCSP_CON_MATRIZ))
+    assert campos.tipo_contrato is None
+
+
 def test_anuncio_sin_matriz_no_inventa_una():
     # CLAUDE.md sección 7: "El sistema nunca inventa una matriz."
     paginas = extraer_texto(fx.ANUNCIO_PCSP_SIN_MATRIZ)
@@ -41,3 +52,14 @@ def test_anuncio_sin_matriz_no_inventa_una():
 
 def test_importe_como_decimal_de_campo_ausente_es_none():
     assert importe_como_decimal(None) is None
+
+
+def test_tipo_contrato_obras_sintetico():
+    # Sin fixture PDF real con "Tipo de Contrato Obras" en este corpus
+    # (CLAUDE.md sección 26: el único departamento visto, 28510, es
+    # "Suministros") -- caso sintético para no dejar la rama sin probar.
+    from app.extraccion.texto import PaginaTexto
+
+    paginas = [PaginaTexto(numero=1, texto="Número de Expediente 6.24/28510.9999\nTipo de Contrato Obras\n")]
+    campos = extraer_campos_anuncio_pcsp(paginas)
+    assert campos.tipo_contrato.valor == "Obras"

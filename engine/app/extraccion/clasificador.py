@@ -38,6 +38,16 @@ recoge:
   plantilla de Dirección Técnica, con el marcador en la posición 265, 607 y
   1662 respectivamente). La regla de pliego exige que el marcador aparezca
   cerca del principio de la página — una mención de pasada no cuenta.
+- `TipoDocumento.pliego` mezcla tres documentos reales distintos, distinguibles
+  solo por el marcador que los clasificó (CLAUDE.md sección 26, criterio del
+  cliente sobre pliegos, verificado contra el corpus real antes de aplicarlo):
+  "documento de pliegos" (portada administrativa PCSP, 4-7 páginas, sin cuadro
+  de precios) y "pliego de clausulas administrativas" (PCAP, decenas de
+  páginas de cláusulas legales, sin cuadro de precios tampoco) son ambos
+  descartables sin abrir sus páginas de datos; "pliego de prescripciones
+  tecnicas" es el Pliego Técnico completo (típicamente `*_ANEJO_1.pdf`) y
+  **sí** trae el cuadro de precios como sección interna — nunca se salta.
+  `es_pliego_sin_precios` es la función que distingue los tres.
 """
 from __future__ import annotations
 
@@ -170,3 +180,20 @@ def clasificar(paginas: list[PaginaTexto]) -> ResultadoClasificacion:
         return ResultadoClasificacion(TipoDocumento.anejo, Decimal("0.8"), hallazgo[1], hallazgo[0])
 
     return ResultadoClasificacion(TipoDocumento.otro, Decimal("0"), "", None)
+
+
+# Marcadores de `TipoDocumento.pliego` que, verificado contra el corpus real
+# (CLAUDE.md sección 26), nunca traen cuadro de precios: la portada
+# administrativa PCSP ("documento de pliegos") y el Pliego de Cláusulas
+# Administrativas Particulares ("pliego de clausulas administrativas"). El
+# tercer marcador posible, "pliego de prescripciones tecnicas", es justo el
+# que sí trae la tabla (docstring del módulo) y por eso no está en esta lista.
+_MARCADORES_PLIEGO_SIN_PRECIOS = frozenset({"documento de pliegos", "pliego de clausulas administrativas"})
+
+
+def es_pliego_sin_precios(resultado: ResultadoClasificacion) -> bool:
+    """CLAUDE.md sección 26: criterio del cliente ("los pliegos no tienen
+    contenido, se pueden ignorar") aplicado solo a la parte del corpus real
+    que lo confirma. Etapas 3-4 de la cascada pueden saltarse enteras para
+    estos documentos -- nunca para un `pliego de prescripciones tecnicas`."""
+    return resultado.tipo == TipoDocumento.pliego and resultado.marcador in _MARCADORES_PLIEGO_SIN_PRECIOS

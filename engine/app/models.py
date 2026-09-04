@@ -45,6 +45,14 @@ class EstadoExpediente(str, enum.Enum):
     # `pendiente_revision`: no hace falta un humano, no es trabajo pendiente,
     # es un expediente fuera de alcance del sistema.
     sin_publicar = "sin_publicar"
+    # CLAUDE.md sección 26, criterio del cliente: solo bajas de material por
+    # lotes; un contrato de obra (campo "Tipo de Contrato" del Anuncio PCSP
+    # distinto de "Suministros") no es un fallo de extracción, es un tipo de
+    # contrato que este motor no está pensado para leer. Distinto de
+    # `sin_publicar` (ahí no hay expediente que leer) y de `pendiente_revision`
+    # (ahí sí hace falta un humano decidiendo sobre datos reales) -- aquí no
+    # hay nada que decidir, está fuera de alcance por diseño.
+    fuera_de_alcance = "fuera_de_alcance"
 
 
 class TipoDocumento(str, enum.Enum):

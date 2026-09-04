@@ -9,9 +9,18 @@ error que este módulo existe para no cometer (ejemplo real, CLAUDE.md sección
 4: expediente 6.24/28510.0088, 1.000.000 € en ambos importes, baja real
 0,50 %).
 
-Fuera de ese caso, la baja se puede seguir derivando de los importes; si
-además hay una baja declarada en texto, las dos deben cuadrar (sección 12) o
-el expediente va a la cola de revisión — no se corrige solo.
+Fuera de ese caso, la baja se puede seguir derivando de los importes.
+
+CLAUDE.md sección 26, criterio del cliente sobre el mínimo exigible para dar
+por buena una baja de lote ("la palabra lote, un número de expediente y la
+baja"): una baja declarada en texto ya no tiene que cuadrar con la que
+resulta de los importes para darse por buena. Antes de esta sesión, un
+desajuste mandaba el expediente a revisión (sección 12, "lo que no cuadra no
+se corrige solo"); con el criterio nuevo, más laxo, la baja declarada gana
+siempre que exista — el desajuste queda en el motivo devuelto por trazabilidad,
+pero no exige revisión. Solo sigue exigiéndose revisión cuando no hay ninguna
+baja de la que partir (el caso de precios unitarios sin baja declarada, más
+abajo).
 """
 from __future__ import annotations
 
@@ -66,10 +75,11 @@ def calcular_baja_efectiva(
         return BajaEfectiva(
             baja=baja_declarada,
             caso_precios_unitarios=False,
-            requiere_revision=True,
+            requiere_revision=False,
             motivo=(
-                f"la baja declarada ({baja_declarada:.4%}) no cuadra con la baja que resulta de los importes "
-                f"({baja_por_importes:.4%}); posible error de transcripción o de cruce de documentos"
+                f"baja declarada ({baja_declarada:.4%}) usada tal cual; no cuadra con la baja que resulta de "
+                f"los importes ({baja_por_importes:.4%}), pero el criterio del cliente (CLAUDE.md sección 26) "
+                "no exige que cuadren: lote, expediente y baja declarada bastan"
             ),
         )
 

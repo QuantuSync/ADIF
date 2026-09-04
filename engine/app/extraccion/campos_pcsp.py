@@ -37,6 +37,13 @@ _IMPORTE_ADJUDICACION_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 _ADJUDICATARIO_RE = re.compile(r"^Adjudicatario\s*$\n([^\n]+)", re.MULTILINE)
+# CLAUDE.md sección 26, criterio del cliente ("solo bajas de material por
+# lotes; las de obra quedan fuera de alcance"): el mismo formulario PCSP que
+# ya se lee por etiqueta fija trae este campo ("Tipo de Contrato Suministros"
+# / "... Obras" / "... Servicios"), verificado en los documentos reales de
+# este corpus (todos "Suministros", CLAUDE.md sección 26) -- no hace falta
+# adivinar la palabra por CPV ni por el objeto del contrato.
+_TIPO_CONTRATO_RE = re.compile(r"Tipo de Contrato\s+(\S+)", re.IGNORECASE)
 # "Objeto del Contrato: <texto, a veces partido en varias líneas>\nDescripción"
 # — la etiqueta "Descripción" que sigue siempre repite el mismo texto sin la
 # etiqueta, así que sirve de límite fiable de dónde termina el objeto.
@@ -60,6 +67,7 @@ class CamposAnuncioPcsp:
     importe_adjudicacion: Optional[CampoAnclado] = None
     adjudicatario: Optional[CampoAnclado] = None
     objeto_contrato: Optional[CampoAnclado] = None
+    tipo_contrato: Optional[CampoAnclado] = None
 
 
 def _buscar_en_paginas(paginas: list[PaginaTexto], patron: re.Pattern) -> Optional[CampoAnclado]:
@@ -88,6 +96,7 @@ def extraer_campos_anuncio_pcsp(paginas: list[PaginaTexto]) -> CamposAnuncioPcsp
         importe_adjudicacion=_buscar_en_paginas(paginas, _IMPORTE_ADJUDICACION_RE),
         adjudicatario=_buscar_en_paginas(paginas, _ADJUDICATARIO_RE),
         objeto_contrato=_buscar_objeto(paginas),
+        tipo_contrato=_buscar_en_paginas(paginas, _TIPO_CONTRATO_RE),
     )
 
 

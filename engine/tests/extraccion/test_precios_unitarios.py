@@ -51,14 +51,17 @@ def test_caso_normal_con_baja_declarada_que_cuadra():
     assert r.baja == Decimal("0.20")
 
 
-def test_baja_declarada_que_no_cuadra_va_a_revision():
+def test_baja_declarada_que_no_cuadra_se_da_por_buena():
+    # CLAUDE.md sección 26, criterio del cliente: lote + expediente + baja
+    # declarada bastan, ya no se exige que cuadre con la baja por importes.
     r = calcular_baja_efectiva(
         importe_licitacion=Decimal("100000"),
         importe_adjudicacion=Decimal("80000"),
-        baja_declarada=Decimal("0.50"),  # muy lejos del 20% real
+        baja_declarada=Decimal("0.50"),  # muy lejos del 20% que dan los importes
     )
-    assert r.requiere_revision is True
+    assert r.requiere_revision is False
     assert r.caso_precios_unitarios is False
+    assert r.baja == Decimal("0.50")
 
 
 def test_importe_licitacion_cero_es_error_no_caso_especial():
