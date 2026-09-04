@@ -1,12 +1,18 @@
 import logging
 import time
 
+from sqlalchemy import select
+
 from app.config import settings
 from app.db import SessionLocal
 from app.extraccion.orquestador import ejecutar_extraccion_expediente
 from app.interfaces.document_storage import LocalDiskStorage
 from app.interfaces.model_provider import AnthropicModelProvider, CachedModelProvider
-from app.models import EstadoTrabajo
+from app.mantenimiento.ciclo import TIPO_TRABAJO as TIPO_MANTENIMIENTO_CICLO
+from app.mantenimiento.ciclo import ejecutar_ciclo_mantenimiento
+from app.mantenimiento.frescura import debe_estampar_extraccion, estampar_descarga_exitosa, estampar_extraccion
+from app.models import Documento, Expediente
+from app.queue import ejecutar_trabajo as ejecutar_trabajo_generico
 from app.queue import reclamar_trabajos_huerfanos, tomar_siguiente_trabajo
 from app.scraping.job import ejecutar_scraping_expediente
 
@@ -41,47 +47,54 @@ def procesar_ping(db, trabajo) -> dict:
 
 
 def procesar_descargar_expediente(db, trabajo) -> dict:
-    return ejecutar_scraping_expediente(db, storage, trabajo)
+    """Envuelve `ejecutar_scraping_expediente` (sin tocarla, CLAUDE.md
+    encargo de esta sesión: "no toques el motor de extracción" — esto
+    tampoco es el motor, pero por la misma razón se deja intacto) para
+    estampar `descargado_en` (bloque 1, CLAUDE.md sección 23) solo cuando la
+    descarga termina con éxito. Si falla, o el expediente resulta
+    `sin_publicar`, la excepción se propaga antes de llegar aquí y no se
+    estampa nada — coherente con `app.mantenimiento.frescura.debe_descargar`,
+    que solo mira si el expediente ya tiene documentos."""
+    resultado = ejecutar_scraping_expediente(db, storage, trabajo)
+    expediente = db.get(Expediente, trabajo.expediente_id)
+    if expediente is not None:
+        estampar_descarga_exitosa(db, expediente)
+    return resultado
 
 
 def procesar_extraer_expediente(db, trabajo) -> dict:
-    return ejecutar_extraccion_expediente(db, storage, trabajo, model_provider=model_provider)
+    """Envuelve `ejecutar_extraccion_expediente` (sin tocarla) para estampar
+    frescura (bloque 1) en un `finally`, para que quede registrada tanto si
+    el intento termina en éxito/revisión como si termina en `fallido` — un
+    intento que sí corrió la cascada, aunque acabara mal, no hace falta
+    repetirlo hasta que cambien los documentos o la versión de la lógica
+    (ver `app.mantenimiento.frescura.debe_estampar_extraccion` para las dos
+    excepciones: `esperando_matriz` y `sin_publicar`)."""
+    try:
+        return ejecutar_extraccion_expediente(db, storage, trabajo, model_provider=model_provider)
+    finally:
+        expediente = db.get(Expediente, trabajo.expediente_id) if trabajo.expediente_id else None
+        if expediente is not None and debe_estampar_extraccion(expediente):
+            documentos = db.execute(
+                select(Documento).where(Documento.expediente_id == expediente.id)
+            ).scalars().all()
+            estampar_extraccion(db, expediente, documentos)
+
+
+def procesar_mantenimiento_ciclo(db, trabajo) -> dict:
+    return ejecutar_ciclo_mantenimiento(db, storage, model_provider, MANEJADORES, trabajo)
 
 
 MANEJADORES = {
     "ping": procesar_ping,
     "descargar_expediente": procesar_descargar_expediente,
     "extraer_expediente": procesar_extraer_expediente,
+    TIPO_MANTENIMIENTO_CICLO: procesar_mantenimiento_ciclo,
 }
 
 
 def ejecutar_trabajo(db, trabajo) -> None:
-    manejador = MANEJADORES.get(trabajo.tipo)
-    if manejador is None:
-        trabajo.estado = EstadoTrabajo.fallido
-        trabajo.error = f"tipo de trabajo desconocido: {trabajo.tipo}"
-        db.commit()
-        return
-    trabajo_id = trabajo.id  # capturado antes del try: sigue legible aunque la sesión quede rota
-    try:
-        resultado = manejador(db, trabajo)
-        trabajo.estado = EstadoTrabajo.completado
-        trabajo.resultado = resultado
-        trabajo.error = None
-    except Exception as exc:  # noqa: BLE001
-        # Un fallo a mitad de `manejador` (p.ej. un INSERT que viola una
-        # constraint) deja la transacción de `db` en estado "necesita
-        # rollback": cualquier acceso a un atributo expirado de `trabajo`
-        # -incluido leerlo para este mismo log- dispara un
-        # PendingRollbackError que tapaba el error real y mataba el proceso
-        # entero del worker en vez de marcar el trabajo como fallido.
-        db.rollback()
-        logger.exception("fallo procesando trabajo %s", trabajo_id)
-        trabajo.estado = (
-            EstadoTrabajo.pendiente if trabajo.intentos < trabajo.max_intentos else EstadoTrabajo.fallido
-        )
-        trabajo.error = str(exc)
-    db.commit()
+    ejecutar_trabajo_generico(db, trabajo, MANEJADORES)
 
 
 def bucle_principal() -> None:

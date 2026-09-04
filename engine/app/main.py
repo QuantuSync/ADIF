@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routers import catalogo, documentos, expedientes, health, revision, trabajos
+from app.routers import catalogo, documentos, expedientes, health, mantenimiento, revision, trabajos
 
 app = FastAPI(title="ADIF - Catalogo de materiales")
 
@@ -22,3 +22,4 @@ app.include_router(trabajos.router)
 app.include_router(catalogo.router)
 app.include_router(revision.router)
 app.include_router(documentos.router)
+app.include_router(mantenimiento.router)

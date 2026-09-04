@@ -1453,3 +1453,127 @@ la guarda de regresión del intento revertido), `test_baja.py` (7 casos),
 `test_herencia_matriz.py` (2 casos), `tests/scraping/test_job.py` (nuevo,
 2 casos: `sin_publicar` agota intentos, un error genérico no). Ningún PDF
 nuevo de más de 2 páginas.
+
+---
+
+## 23. Mantenimiento automático — bloque 1: ejecución incremental (sesión 2026-09-04)
+
+Cambia el objetivo del sistema: de herramienta que se lanza a mano a sistema
+que se mantiene solo. Este bloque es la base de los otros dos (descubrimiento
+por sindicación y ejecución programada): sin ejecución incremental, un ciclo
+periódico rehace el trabajo de todos los expedientes cada vez que corre, lo
+que lo vuelve inviable en la práctica (CLAUDE.md sección 17: la Plataforma es
+lenta y frágil; una extracción completa de ~40 expedientes reales tarda del
+orden de 25 minutos, medido en esta misma sesión — ver más abajo).
+
+### Modelo y decisión
+
+Cuatro columnas nuevas en `expedientes` (migración `0011`):
+`descargado_en`, `extraido_en`, `version_logica_extraccion`,
+`huella_documentos`. Las estampa **`app.worker`** (`procesar_descargar_expediente`
+/ `procesar_extraer_expediente`), nunca `app.scraping.job` ni
+`app.extraccion.orquestador` — ninguno de los dos se toca en esta sesión
+(encargo explícito: "no toques el motor de extracción"). Los dos manejadores
+envuelven las funciones ya existentes sin modificarlas: llaman, y después (o
+en un `finally`, para la extracción) estampan frescura solo si de verdad
+hubo un intento real — ver docstrings de `app.mantenimiento.frescura.
+debe_estampar_extraccion` para las dos excepciones (`esperando_matriz`,
+`sin_publicar`, CLAUDE.md secciones 20 y 22).
+
+`app.mantenimiento.frescura` (puro, sin I/O salvo los dos `estampar_*` con
+`db.commit()`) decide:
+
+- **`debe_descargar(expediente, documentos)`**: `True` solo si el expediente
+  no tiene ningún documento. Deliberadamente **sin** parámetro `forzar`: el
+  punto 4 del encargo ("lo necesito yo para desarrollo") es casi siempre
+  forzar la RE-EXTRACCIÓN tras un cambio de código, no volver a golpear la
+  Plataforma real para un expediente que ya tiene sus documentos íntegros —
+  forzar eso contradiría el propio punto 2 del encargo ("cada descarga
+  evitada cuenta"). Forzar una redescarga real sigue disponible a mano, sin
+  tocar nada, con el endpoint ya existente `POST /expedientes/{id}/descargar`.
+- **`debe_extraer(expediente, documentos, forzar)`**: `True` si `forzar`, si
+  `extraido_en` es `None` (nunca se extrajo, o se quedó `esperando_matriz` —
+  ver arriba, así un pedido derivado de acuerdo marco se reintenta solo en
+  cada ciclo hasta que su matriz esté lista, sin regla aparte), si
+  `version_logica_extraccion` no coincide con la constante vigente
+  (`VERSION_LOGICA_EXTRACCION`, que un desarrollador sube a mano cuando un
+  cambio en `app.extraccion.*` deba forzar reproceso general), o si
+  `huella_documentos` (hash del conjunto de `Documento.hash`, sección 17:
+  la ruta de almacenamiento ya va por hash de contenido) no coincide con la
+  huella actual. Deliberadamente **no** mira si el expediente tiene
+  documentos: un pedido derivado sin ningún documento propio también
+  necesita que se intente su extracción — es su único camino para cruzar
+  con el Excel de códigos y heredar de su matriz (secciones 3 y 20).
+
+### El ciclo como trabajo de la cola, no como script
+
+`app.mantenimiento.ciclo.ejecutar_ciclo_mantenimiento` es un tipo de trabajo
+más (`mantenimiento_ciclo`, CLAUDE.md sección 10: "no un script suelto"),
+encolable por `POST /mantenimiento/ejecutar` (payload opcional `{"forzar":
+bool, "forzar_expedientes": [id, ...]}`). Por cada expediente (excepto
+`sin_publicar`, fuera de alcance por diseño desde la sección 22) decide y
+**encola** `descargar_expediente`/`extraer_expediente` con la misma
+`encolar_trabajo` de siempre — y después **drena la cola de forma síncrona**
+(`app.queue.ejecutar_trabajo`, extraído de `app.worker` a un despachador
+genérico parametrizado por una tabla de manejadores, para que el worker y el
+drenaje del ciclo compartan una sola implementación) hasta vaciarla. El
+drenaje recoge también la extracción que `app.scraping.job` encadena solo al
+terminar una descarga con éxito, así que el bucle de decisión nunca la
+encola por duplicado: si un expediente no tenía documentos, su extracción se
+deja a la cadena existente en vez de repetirla (comentario en
+`ejecutar_ciclo_mantenimiento`). `tomar_siguiente_trabajo` gana un parámetro
+`excluir_tipos` para que este drenaje nunca se recoja a sí mismo (evita
+recursión); el bucle normal del worker no lo pasa, que es como llegan a
+ejecutarse los ciclos programados del bloque 3.
+
+### Verificación contra el stack real (dos ejecuciones seguidas)
+
+Migración `0011` aplicada sobre la base de datos real de desarrollo (53
+expedientes acumulados de sesiones anteriores, 14 de ellos ya `sin_publicar`
+— más de los 45/31 del corpus fijo de `docs/analisis-corpus.md` porque esta
+base lleva varias sesiones de pruebas manuales encima; no se ha limpiado,
+no es el objeto de esta sesión). Con las cuatro columnas nuevas a `NULL` en
+las 53 filas, dos ejecuciones seguidas de `POST /mantenimiento/ejecutar`:
+
+| | 1ª ejecución | 2ª ejecución |
+|---|---:|---:|
+| Duración de pared (creación del trabajo → `completado`) | **1567 s (~26 min)** | **3,5 s** |
+| Duración interna del ciclo (`resultado.duracion_segundos`) | 1531,7 s | **0,005 s** |
+| Expedientes evaluados | 39 | 38 |
+| Descargas lanzadas | 1 | 0 |
+| Extracciones lanzadas | 38 | 0 |
+| Saltados (descarga / extracción) | 0 / 0 | 38 / 38 |
+| Trabajos drenados | 39 | 0 |
+
+La 1ª ejecución hizo el trabajo real: reextrajo los 38 expedientes con
+documentos (estableciendo su huella y versión por primera vez) e intentó
+descargar el único expediente sin documentos que no estaba ya marcado
+`sin_publicar` — el intento falló (`ExpedienteNoPublicadoError`, sección 22:
+no encontrado en la Plataforma por ninguna variante de búsqueda) y lo dejó
+`sin_publicar`, sin encadenar ninguna extracción (coherente:
+`app.scraping.job` solo encadena tras una descarga con éxito) — por eso
+`trabajos_drenados` es 39 y no 40, y por eso la 2ª ejecución evalúa 38
+expedientes, no 39 (ese ya queda excluido por estar `sin_publicar`). La 2ª
+ejecución, con las cuatro columnas ya estampadas y sin ningún documento ni
+versión cambiados, no encoló nada: terminó en milisegundos de trabajo real,
+con los ~3,5 s de pared explicados casi enteros por el intervalo de sondeo
+del worker (`WORKER_POLL_INTERVAL_SECONDS=3`), no por trabajo hecho.
+Verificado también que los 199 tests (176 anteriores + 23 de este bloque)
+pasan igual dentro del contenedor `api`, no solo en local.
+
+### Fixtures de regresión
+
+`engine/tests/mantenimiento/test_frescura.py` (17 casos: huella estable
+frente al orden, cambia si cambia el conjunto de documentos, las cuatro
+ramas de `debe_extraer`, `debe_descargar` sin y con documentos,
+`debe_estampar_extraccion` en los tres estados terminales y en las dos
+excepciones, los dos `estampar_*`) y
+`engine/tests/mantenimiento/test_ciclo.py` (5 casos, con manejadores falsos
+— sin scraping ni modelo reales, igual que el resto de esta cascada: la
+extracción encadenada por una descarga se drena sin duplicarse, un
+expediente al día no lanza nada, `forzar` global reprocesa aunque todo
+coincida, `sin_publicar` queda fuera del ciclo, un segundo trabajo de ciclo
+pendiente no se recoge a sí mismo). `tests/test_queue.py` gana 3 casos para
+`excluir_tipos` y el despachador genérico `ejecutar_trabajo`. Ningún PDF
+nuevo — este bloque no toca la cascada de extracción, solo decide cuándo
+llamarla.

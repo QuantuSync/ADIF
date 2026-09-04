@@ -117,6 +117,19 @@ class Expediente(Base):
     # una de las dos en silencio (encargo de la sesión de herencia de
     # acuerdo marco, requisito 1 — "si discrepan, a revisión").
     matriz_conflicto = Column(Boolean, nullable=True)
+    # Frescura para la ejecución incremental (CLAUDE.md sección 23, bloque 1):
+    # cuándo se descargó y cuándo se extrajo por última vez con éxito, y con
+    # qué versión de la lógica de extracción (`app.mantenimiento.frescura.
+    # VERSION_LOGICA_EXTRACCION`). Los estampa `app.worker` (nunca
+    # `app.scraping.job` ni `app.extraccion.orquestador`, que esta sesión no
+    # toca) al terminar cada intento real. `huella_documentos` es un hash del
+    # conjunto de `Documento.hash` de este expediente en el momento de la
+    # última extracción: si cambia (documento añadido, quitado o sustituido),
+    # el ciclo de mantenimiento sabe que hay que reextraer sin releer nada.
+    descargado_en = Column(DateTime(timezone=True), nullable=True)
+    extraido_en = Column(DateTime(timezone=True), nullable=True)
+    version_logica_extraccion = Column(String(32), nullable=True)
+    huella_documentos = Column(String(64), nullable=True)
     estado = Column(
         Enum(EstadoExpediente, name="estado_expediente"),
         nullable=False,

@@ -5,7 +5,7 @@ porque `tomar_siguiente_trabajo` solo mira `estado = pendiente`."""
 from datetime import datetime, timedelta, timezone
 
 from app.models import EstadoTrabajo, TrabajoCola
-from app.queue import reclamar_trabajos_huerfanos, tomar_siguiente_trabajo
+from app.queue import ejecutar_trabajo, encolar_trabajo, reclamar_trabajos_huerfanos, tomar_siguiente_trabajo
 
 
 def _crear_en_proceso(db_session, *, hace_segundos, intentos=1, max_intentos=3):
@@ -68,3 +68,49 @@ def test_trabajo_reclamado_puede_volver_a_tomarse(db_session):
     assert tomado is not None
     assert tomado.estado == EstadoTrabajo.en_proceso
     assert tomado.intentos == 2
+
+
+def test_tomar_siguiente_trabajo_excluye_tipos(db_session):
+    """Bloque 1 del ciclo de mantenimiento (app.mantenimiento.ciclo): su
+    drenaje síncrono nunca debe recoger otro trabajo de su propio tipo."""
+    encolar_trabajo(db_session, tipo="mantenimiento_ciclo")
+    ping = encolar_trabajo(db_session, tipo="ping")
+
+    tomado = tomar_siguiente_trabajo(db_session, excluir_tipos={"mantenimiento_ciclo"})
+
+    assert tomado is not None
+    assert tomado.id == ping.id
+
+
+def test_ejecutar_trabajo_generico_completa_con_manejador(db_session):
+    trabajo = encolar_trabajo(db_session, tipo="ping")
+    manejadores = {"ping": lambda db, t: {"ok": True}}
+
+    ejecutar_trabajo(db_session, trabajo, manejadores)
+
+    assert trabajo.estado == EstadoTrabajo.completado
+    assert trabajo.resultado == {"ok": True}
+
+
+def test_ejecutar_trabajo_generico_tipo_desconocido_falla(db_session):
+    trabajo = encolar_trabajo(db_session, tipo="tipo-inventado")
+
+    ejecutar_trabajo(db_session, trabajo, manejadores={})
+
+    assert trabajo.estado == EstadoTrabajo.fallido
+    assert "tipo de trabajo desconocido" in trabajo.error
+
+
+def test_ejecutar_trabajo_generico_reintenta_si_quedan_intentos(db_session):
+    trabajo = encolar_trabajo(db_session, tipo="ping")
+    trabajo.intentos = 1
+    trabajo.max_intentos = 3
+    db_session.commit()
+
+    def falla(db, t):
+        raise RuntimeError("boom")
+
+    ejecutar_trabajo(db_session, trabajo, manejadores={"ping": falla})
+
+    assert trabajo.estado == EstadoTrabajo.pendiente
+    assert trabajo.error == "boom"
