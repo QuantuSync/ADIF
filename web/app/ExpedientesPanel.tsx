@@ -1,8 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { EstadoTexto, accentClaseEstado, formatearImporte, formatearPorcentaje } from "./ui";
+import { DatoVacio, EstadoTexto, accentClaseEstado, formatearImporte, formatearPorcentaje } from "./ui";
 import { interpretarMotivos } from "./motivos";
+
+// Un expediente todavía en curso (no ha terminado de descargar/extraer)
+// puede no tener importe/baja por simple falta de tiempo, no porque el
+// sistema no lo encontrara — distinto de un expediente ya resuelto que se
+// quedó sin ese dato de verdad (CLAUDE.md bloque 3).
+const ESTADOS_EN_CURSO = ["pendiente", "descargando", "descargado", "extrayendo", "esperando_matriz"];
 
 const LARGO_MOTIVO_LISTA = 88;
 
@@ -47,6 +53,11 @@ export type Expediente = {
   // con baja distinta, `baja_global` es null a propósito y este campo lo
   // explica — nunca se muestra un "—" mudo que parezca un fallo.
   baja_variable_por_lote: boolean | null;
+  // True cuando el Anuncio PCSP propio y la columna MATRIZ del Excel de
+  // códigos declaran una matriz distinta entre sí (CLAUDE.md sección 7): un
+  // `codigo_matriz` vacío con esto en `true` es un conflicto sin resolver,
+  // no un expediente que simplemente no depende de un acuerdo marco.
+  matriz_conflicto: boolean | null;
   lotes: Lote[];
   estado: string;
   error: string | null;
@@ -90,23 +101,67 @@ function esCasoPreciosUnitarios(exp: Expediente): boolean {
   return (baja !== null && baja > 0) || exp.baja_variable_por_lote === true;
 }
 
+// Matriz vacía: la inmensa mayoría de los expedientes no son un pedido
+// derivado de un acuerdo marco, así que no declaran matriz — "no aplica",
+// definitivo. Solo cuando el propio sistema ya detectó un conflicto entre
+// el Anuncio PCSP y el Excel de códigos (CLAUDE.md sección 7) el hueco es
+// en realidad un "no consta" sin resolver, no una ausencia estructural.
+function celdaMatriz(expediente: Expediente) {
+  if (expediente.codigo_matriz) return expediente.codigo_matriz;
+  if (expediente.matriz_conflicto) {
+    return (
+      <DatoVacio
+        motivo="no-consta"
+        titulo="El Anuncio PCSP propio y el Excel de códigos declaran una matriz distinta entre sí — el sistema no elige una en silencio, hay que confirmarla a mano."
+      />
+    );
+  }
+  return (
+    <DatoVacio motivo="na" titulo="Este expediente no es un pedido derivado de un acuerdo marco — no tiene matriz que declarar." />
+  );
+}
+
+// Importe vacío: mientras el expediente sigue en curso (descargando o
+// extrayendo todavía) es simple falta de tiempo, no un hueco definitivo —
+// distinto de un expediente ya resuelto (completado o en revisión) que se
+// quedó sin este dato de verdad.
+function celdaImporte(expediente: Expediente, valor: string | null) {
+  const texto = formatearImporte(valor);
+  if (texto) return texto;
+  if (ESTADOS_EN_CURSO.includes(expediente.estado)) {
+    return <DatoVacio motivo="pendiente" titulo="El expediente todavía se está procesando." />;
+  }
+  return <DatoVacio motivo="no-consta" titulo="No se pudo determinar este importe en los documentos de este expediente." />;
+}
+
+// Baja vacía (fuera del caso "varía por lote", que ya se explica solo):
+// mismo criterio pendiente/no consta que el resto de importes.
+function celdaBajaTexto(expediente: Expediente) {
+  const texto = formatearPorcentaje(expediente.baja_global);
+  if (texto) return <strong>{texto}</strong>;
+  if (ESTADOS_EN_CURSO.includes(expediente.estado)) {
+    return <DatoVacio motivo="pendiente" titulo="El expediente todavía se está procesando." />;
+  }
+  return <DatoVacio motivo="no-consta" titulo="No se pudo determinar la baja de este expediente en sus documentos." />;
+}
+
 function CeldaBaja({ expediente }: { expediente: Expediente }) {
   const cuerpo =
     expediente.lotes.length <= 1 ? (
-      <strong>{formatearPorcentaje(expediente.baja_global)}</strong>
+      celdaBajaTexto(expediente)
     ) : !expediente.baja_variable_por_lote ? (
       <details>
         <summary className="chip" style={{ display: "inline-flex" }}>
-          <strong>{formatearPorcentaje(expediente.baja_global)}</strong>
+          {celdaBajaTexto(expediente)}
         </summary>
-        <TablaLotes lotes={expediente.lotes} />
+        <TablaLotes lotes={expediente.lotes} estadoExpediente={expediente.estado} />
       </details>
     ) : (
       <details>
         <summary className="chip" style={{ display: "inline-flex" }}>
           <strong className="status-attn">Varía por lote</strong>
         </summary>
-        <TablaLotes lotes={expediente.lotes} />
+        <TablaLotes lotes={expediente.lotes} estadoExpediente={expediente.estado} />
       </details>
     );
 
@@ -125,7 +180,18 @@ function CeldaBaja({ expediente }: { expediente: Expediente }) {
   );
 }
 
-function TablaLotes({ lotes }: { lotes: Lote[] }) {
+// Mismo criterio pendiente/no consta de arriba, a nivel de lote: un lote
+// hereda el estado general del expediente (no se procesa por separado).
+function celdaLote(estadoExpediente: string, valor: string | null, formatear: (v: string | null) => string) {
+  const texto = formatear(valor);
+  if (texto) return texto;
+  if (ESTADOS_EN_CURSO.includes(estadoExpediente)) {
+    return <DatoVacio motivo="pendiente" titulo="El expediente todavía se está procesando." />;
+  }
+  return <DatoVacio motivo="no-consta" titulo="No se pudo determinar este dato para este lote en los documentos del expediente." />;
+}
+
+function TablaLotes({ lotes, estadoExpediente }: { lotes: Lote[]; estadoExpediente: string }) {
   return (
     <table className="table" style={{ marginTop: "0.5rem", width: "auto", fontSize: "0.85rem" }}>
       <thead>
@@ -141,10 +207,14 @@ function TablaLotes({ lotes }: { lotes: Lote[] }) {
         {lotes.map((lote) => (
           <tr key={lote.id}>
             <td>{lote.identificador_lote}</td>
-            <td className="num">{formatearPorcentaje(lote.baja_lote)}</td>
-            <td className="num">{formatearImporte(lote.importe_licitacion)}</td>
-            <td className="num">{formatearImporte(lote.importe_adjudicacion)}</td>
-            <td>{lote.adjudicatario ?? ""}</td>
+            <td className="num">{celdaLote(estadoExpediente, lote.baja_lote, formatearPorcentaje)}</td>
+            <td className="num">{celdaLote(estadoExpediente, lote.importe_licitacion, formatearImporte)}</td>
+            <td className="num">{celdaLote(estadoExpediente, lote.importe_adjudicacion, formatearImporte)}</td>
+            <td>
+              {lote.adjudicatario ?? (
+                <DatoVacio motivo="no-consta" titulo="El documento de adjudicación no declara el adjudicatario de este lote." />
+              )}
+            </td>
           </tr>
         ))}
       </tbody>
@@ -366,13 +436,13 @@ export default function ExpedientesPanel({
               return (
                 <tr key={exp.id} className={`row-accent ${accentClaseEstado(exp.estado)}`}>
                   <td style={{ fontWeight: 600 }}>{exp.codigo_expediente}</td>
-                  <td>{exp.codigo_matriz ?? ""}</td>
+                  <td>{celdaMatriz(exp)}</td>
                   <td>
                     <EstadoTexto estado={exp.estado} />
                     <ResumenMotivo error={exp.error} />
                   </td>
-                  <td className="num">{formatearImporte(exp.importe_licitacion)}</td>
-                  <td className="num">{formatearImporte(exp.importe_adjudicacion)}</td>
+                  <td className="num">{celdaImporte(exp, exp.importe_licitacion)}</td>
+                  <td className="num">{celdaImporte(exp, exp.importe_adjudicacion)}</td>
                   <td className="num">
                     <CeldaBaja expediente={exp} />
                   </td>

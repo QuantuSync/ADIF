@@ -28,7 +28,7 @@ from app.models import Documento, EstadoExpediente, Expediente, LineaCatalogo
 # este tipo a lo largo del proyecto). Comparado contra
 # `Expediente.version_logica_extraccion`; cualquier cadena sirve, no hace
 # falta que sea un número — una fecha de sesión es una convención razonable.
-VERSION_LOGICA_EXTRACCION = "2026-09-04.1"
+VERSION_LOGICA_EXTRACCION = "2026-09-06.1"
 
 
 def huella_documentos(documentos: Iterable[Documento]) -> str:

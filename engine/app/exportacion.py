@@ -12,6 +12,33 @@ from openpyxl import Workbook
 from sqlalchemy.orm import Session
 
 from app.catalogo_consulta import consultar_catalogo
+from app.models import LineaCatalogo
+
+# Ninguna celda vacía sin explicación (CLAUDE.md bloque 3): mismos tres
+# motivos que en la web (`app/ui.tsx`, `DatoVacio`) — no aplica, no consta,
+# pendiente —, pero en texto liso entre paréntesis: el Excel es la entrega
+# al cliente, sin tipografía distinta posible entre variantes, así que un
+# paréntesis en vez de un valor es toda la distinción que hace falta, más
+# sobria que el `title` y el tono tipográfico de la web.
+_MARCADOR_NA = "(no aplica)"
+_MARCADOR_NO_CONSTA = "(no consta)"
+
+
+def _es_partida_alzada_descripcion(descripcion: str) -> bool:
+    return descripcion.strip().lower().startswith("partida alzada")
+
+
+def _celda_matricula(linea: LineaCatalogo) -> str | None:
+    if linea.matricula:
+        return linea.matricula
+    if _es_partida_alzada_descripcion(linea.descripcion):
+        return _MARCADOR_NA
+    return _MARCADOR_NO_CONSTA
+
+
+def _celda_no_consta_si_vacio(valor) -> object:
+    return valor if valor is not None else _MARCADOR_NO_CONSTA
+
 
 COLUMNAS = [
     "Código interno",
@@ -57,12 +84,12 @@ def generar_excel_catalogo(db: Session) -> bytes:
                 expediente.codigo_expediente if cruzado else None,
                 expediente.codigo_matriz,
                 expediente.nombre_proyecto,
-                linea.matricula,
+                _celda_matricula(linea),
                 linea.descripcion,
-                linea.codigo_material,
-                float(linea.cantidad) if linea.cantidad is not None else None,
-                float(linea.precio_unitario) if linea.precio_unitario is not None else None,
-                lote.identificador_lote if lote else None,
+                _celda_no_consta_si_vacio(linea.codigo_material),
+                _celda_no_consta_si_vacio(float(linea.cantidad) if linea.cantidad is not None else None),
+                _celda_no_consta_si_vacio(float(linea.precio_unitario) if linea.precio_unitario is not None else None),
+                _celda_no_consta_si_vacio(lote.identificador_lote if lote else None),
                 linea.comentarios,
             ])
         if pagina * _TAMANO_LOTE >= resultado.total:

@@ -1,18 +1,28 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { DescripcionCelda, esPartidaAlzada, formatearImporte, formatearNumero, formatearPorcentaje } from "../ui";
+import {
+  DatoVacio,
+  DescripcionCelda,
+  esPartidaAlzada,
+  formatearImporte,
+  formatearNumero,
+  formatearPorcentaje,
+} from "../ui";
 
 type LineaCatalogo = {
   id: number;
-  lote_id: number;
+  lote_id: number | null;
   expediente_id: number;
   codigo_expediente: string;
   codigo_matriz: string | null;
   nombre_proyecto: string | null;
   codigo_interno: string | null;
   codigos_cruzados: boolean | null;
-  identificador_lote: string;
+  // Huérfana (CLAUDE.md sección 2): la tabla de origen no se pudo asociar a
+  // un lote sin ambigüedad. Existe y se puede revisar, pero no cuelga de
+  // ningún lote -- `null`, no una cadena vacía.
+  identificador_lote: string | null;
   codigo_precio: string | null;
   matricula: string | null;
   descripcion: string;
@@ -78,19 +88,13 @@ function celdaConCausaDeVacio(valor: string | null, esPartida: boolean, tituloNo
   if (valor) return valor;
   if (esPartida) {
     return (
-      <span
-        className="dato-vacio dato-vacio--na"
-        title="Partida alzada: es una reserva presupuestaria, no un artículo de almacén — no lleva este dato."
-      >
-        No aplica
-      </span>
+      <DatoVacio
+        motivo="na"
+        titulo="Partida alzada: es una reserva presupuestaria, no un artículo de almacén — no lleva este dato."
+      />
     );
   }
-  return (
-    <span className="dato-vacio dato-vacio--no-consta" title={tituloNoConsta}>
-      No consta
-    </span>
-  );
+  return <DatoVacio motivo="no-consta" titulo={tituloNoConsta} />;
 }
 
 // Precio adjudicado = precio unitario × (1 − baja de lote) — CLAUDE.md
@@ -102,15 +106,85 @@ function celdaPrecioAdjudicado(linea: LineaCatalogo) {
   if (texto) return texto;
   if (linea.precio_unitario && !linea.baja_lote) {
     return (
-      <span
-        className="dato-vacio dato-vacio--pendiente"
-        title="El expediente todavía no tiene baja de lote declarada. En cuanto se registre, se calcula solo."
-      >
-        Pendiente
-      </span>
+      <DatoVacio
+        motivo="pendiente"
+        titulo="El expediente todavía no tiene baja de lote declarada. En cuanto se registre, se calcula solo."
+      />
     );
   }
   return "";
+}
+
+// Lote vacío (huérfana, CLAUDE.md sección 2): la tabla de origen no se pudo
+// asociar a un único lote sin ambigüedad -- `linea.motivo_revision` ya trae
+// el detalle exacto (banda vacía, varias cabeceras LOTE N en la misma
+// franja...); esta celda solo señala que el hueco tiene una causa conocida
+// y remite a él, en vez de dejarlo en blanco como si fuera un dato
+// cualquiera sin extraer.
+function celdaLote(linea: LineaCatalogo) {
+  if (linea.identificador_lote) return linea.identificador_lote;
+  return (
+    <DatoVacio
+      motivo="no-consta"
+      titulo={
+        linea.motivo_revision ??
+        "No se pudo asociar esta línea a un único lote sin ambigüedad (ver el motivo de revisión del expediente)."
+      }
+    />
+  );
+}
+
+// Código de precio vacío: el cuadro de precios de origen no trae un
+// identificador de línea distinto para esta fila (CLAUDE.md sección 2, la
+// matrícula es la única clave alternativa cuando falta). Definitivo, nada
+// que recuperar -- distinto de un valor descartado por formato irreconocible
+// (eso ya lleva su propio `motivo_revision`, con el valor bruto).
+function celdaCodigoPrecio(linea: LineaCatalogo) {
+  if (linea.codigo_precio) return linea.codigo_precio;
+  return (
+    <DatoVacio
+      motivo="no-consta"
+      titulo={
+        linea.motivo_revision ??
+        "El cuadro de precios de origen no trae un código de línea distinto para esta fila."
+      }
+    />
+  );
+}
+
+// Cantidad vacía: verificado contra el corpus real (bloque 3, sesión
+// 2026-09-06, docs/inventario-celdas-vacias.md) que la mayoría de los casos
+// son catálogos de acuerdo marco de muchos lotes que fijan solo el precio
+// unitario, sin comprometer una cantidad hasta el pedido futuro concreto --
+// no un hueco de extracción. Un caso real donde el número sí estaba en el
+// documento y no se leía (columna fantasma en la cabecera) ya se corrige en
+// el motor (`app.catalogo._recuperar_cantidad_columna_fantasma`), no aquí.
+function celdaCantidad(linea: LineaCatalogo) {
+  const texto = formatearNumero(linea.cantidad, 2);
+  if (texto) return texto;
+  return (
+    <DatoVacio
+      motivo="no-consta"
+      titulo="El cuadro de precios de origen no fija una cantidad para esta línea (frecuente en catálogos de acuerdo marco de muchos lotes, donde la cantidad se decide pedido a pedido)."
+    />
+  );
+}
+
+// Precio unitario vacío: siempre un hueco real de extracción (a diferencia
+// de cantidad, ningún cuadro de precios licita sin precio) -- verificado
+// contra el corpus real que casi todos los casos ya se recuperan solos en
+// el motor (`app.catalogo._recuperar_precio_columna_fantasma`); lo que
+// queda es la minoría genuina sin precio interpretable, con su propio
+// motivo_revision.
+function celdaPrecioUnitario(linea: LineaCatalogo) {
+  const texto = formatearNumero(linea.precio_unitario);
+  if (texto) return texto;
+  return (
+    <DatoVacio
+      motivo="no-consta"
+      titulo={linea.motivo_revision ?? "No se pudo interpretar el precio unitario de esta línea en el documento de origen."}
+    />
+  );
 }
 
 type RespuestaCatalogo = {
@@ -269,7 +343,7 @@ export default function CatalogoPanel({ apiUrl }: { apiUrl: string }) {
                       }`}
                     >
                       <td>{linea.codigo_expediente}</td>
-                      <td>{linea.identificador_lote}</td>
+                      <td>{celdaLote(linea)}</td>
                       <td style={linea.matricula ? { fontWeight: 700 } : undefined} className="mono">
                         {celdaConCausaDeVacio(
                           linea.matricula,
@@ -277,12 +351,12 @@ export default function CatalogoPanel({ apiUrl }: { apiUrl: string }) {
                           "El cuadro de precios de origen no trae matrícula para esta línea (pasa en aproximadamente un tercio del catálogo)."
                         )}
                       </td>
-                      <td className="mono">{linea.codigo_precio ?? ""}</td>
+                      <td className="mono">{celdaCodigoPrecio(linea)}</td>
                       <td>
                         <DescripcionCelda texto={linea.descripcion} />
                       </td>
-                      <td className="num">{formatearNumero(linea.cantidad, 2)}</td>
-                      <td className="num">{formatearNumero(linea.precio_unitario)}</td>
+                      <td className="num">{celdaCantidad(linea)}</td>
+                      <td className="num">{celdaPrecioUnitario(linea)}</td>
                       <td className="num">{celdaPrecioAdjudicado(linea)}</td>
                       <td>{celdaRevision(linea)}</td>
                     </tr>

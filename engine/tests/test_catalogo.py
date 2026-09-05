@@ -492,6 +492,106 @@ def test_guardar_lineas_catalogo_huerfana_sin_lote_no_se_duplica_al_reprocesar(d
     assert len(huerfanas) == 1
 
 
+# --- Inventario de celdas vacías (2026-09-06, bloque 3): cantidad recuperada
+# de una columna fantasma en la cabecera --- (docs/inventario-celdas-vacias.md)
+
+
+def test_construir_linea_catalogo_recupera_cantidad_de_columna_fantasma():
+    # Expediente real 6.25/28510.0019, ANEJO_1 página 28 (verificado con
+    # pdfplumber directamente sobre el PDF real, no solo con el dato ya
+    # guardado): la cabecera es ["CÓDIGO DEL PRECIO", "Nº MATRÍCULA",
+    # "DESCRIPCIÓN", "UNIDAD DE MEDIDA", None, "CANTIDADES ESTIMADAS DE
+    # REFERENCIA", "PRECIO DE REFERENCIA"] -- el mapeo determinista ata
+    # "cantidad" a la columna 5 (la que trae ese texto), pero en TODAS las
+    # filas de datos de esta tabla el número real cae en la columna 4
+    # (fantasma sin etiquetar en la cabecera), y la 5 sale siempre vacía.
+    mapeo = {
+        "codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": 3,
+        "cantidad": 5, "precio_unitario": 6,
+    }
+    fila = ["P-431", "", "Tirante TI-22-D-AT1", "UN", "10", None, "3.270,00 €"]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=28, documento_origen_id=170, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea is not None
+    assert linea["cantidad"] == Decimal("10")
+    assert linea["precio_unitario"] == Decimal("3270.00")
+    assert linea["motivo_revision"] is not None
+    assert "cantidad recuperada" in linea["motivo_revision"]
+
+
+def test_construir_linea_catalogo_no_recupera_cantidad_si_la_columna_anterior_no_es_numerica():
+    # La columna anterior a "cantidad" puede ser una matrícula vacía de
+    # verdad, no una columna fantasma con el número desplazado -- no se
+    # inventa una cantidad de una celda que no parece serlo.
+    mapeo = {"codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": None, "cantidad": 1, "precio_unitario": 3}
+    fila = ["P-001", "", "Balasto", "24,00"]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=1, documento_origen_id=None, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea is not None
+    assert linea["cantidad"] is None
+
+
+def test_construir_linea_catalogo_no_recupera_cantidad_si_la_cabecera_no_declara_ese_campo():
+    # Sin columna de cantidad en el mapeo (la cabecera de esta tabla no la
+    # trae en absoluto, distinto del caso de arriba), no hay nada que
+    # recuperar -- sigue siendo un hueco "no consta", no un fallo.
+    mapeo = {"codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": 3, "cantidad": None, "precio_unitario": 4}
+    fila = ["P-001", "", "Balasto", "UN", "24,00"]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=1, documento_origen_id=None, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea is not None
+    assert linea["cantidad"] is None
+
+
+def test_construir_linea_catalogo_recupera_precio_unitario_de_columna_fantasma():
+    # Expediente real 6.23/28510.0051, CONTRATO_1 página 112 (verificado con
+    # pdfplumber sobre el PDF real): mismo fenómeno que la cantidad de
+    # arriba, pero con la columna fantasma al otro lado -- la cabecera es
+    # ["CÓDIGO DEL ELEMENTO", "Nº MATRÍCULA", "DESCRIPCIÓN", "UNIDAD DE
+    # MEDIDA", "CANTIDADES ESTIMADAS DE REFERENCIA", None, "PRECIO UNITARIO
+    # DE REFERENCIA"] -- "precio_unitario" queda atado a la columna 6, pero
+    # en las filas de datos el importe real cae en la 5 (fantasma), y la 6
+    # sale siempre vacía.
+    mapeo = {
+        "codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": 3,
+        "cantidad": 4, "precio_unitario": 6,
+    }
+    fila = ["P-0014", "619260075", "DIMDH-G-60-500-0,071-CR-TC-D", "UD.", "0", "259.439,64 €", None]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=112, documento_origen_id=39, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea is not None
+    assert linea["cantidad"] == Decimal("0")
+    assert linea["precio_unitario"] == Decimal("259439.64")
+    assert linea["motivo_revision"] is not None
+    assert "precio unitario recuperado" in linea["motivo_revision"]
+
+
+def test_construir_linea_catalogo_no_recupera_precio_unitario_si_ninguna_columna_vecina_es_numerica():
+    # Los dos vecinos de "precio_unitario" (descripción a la izquierda, nada
+    # a la derecha) ya están en uso o no existen -- no se inventa un precio.
+    mapeo = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": None, "cantidad": None, "precio_unitario": 2}
+    fila = ["P-001", "Balasto", ""]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=1, documento_origen_id=None, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea is not None
+    assert linea["precio_unitario"] is None
+
+
 def test_guardar_lineas_catalogo_huerfana_con_clave_sufijada_no_se_duplica_al_reprocesar(db_session):
     # Auditoría 2026-09-05 (docs/correccion-defectos-auditoria.md): una
     # huérfana real trae `clave_linea` con el sufijo de página/franja que

@@ -86,6 +86,27 @@ export function formatearNumero(valor: string | number | null, maxDecimales = 4)
   return Number(valor).toLocaleString("es-ES", { maximumFractionDigits: maxDecimales });
 }
 
+// Ninguna celda vacía sin explicación (CLAUDE.md bloque 3): solo hay tres
+// motivos por los que un dato no aparece — no aplica a este tipo de línea,
+// no consta en el documento de origen, o está pendiente de otro dato. Un
+// único componente para las cuatro pantallas, para que el mismo hueco se
+// lea siempre igual sin inventar una variante tipográfica por columna.
+export type MotivoVacio = "na" | "no-consta" | "pendiente";
+
+const ETIQUETA_VACIO: Record<MotivoVacio, string> = {
+  na: "No aplica",
+  "no-consta": "No consta",
+  pendiente: "Pendiente",
+};
+
+export function DatoVacio({ motivo, titulo }: { motivo: MotivoVacio; titulo: string }) {
+  return (
+    <span className={`dato-vacio dato-vacio--${motivo}`} title={titulo}>
+      {ETIQUETA_VACIO[motivo]}
+    </span>
+  );
+}
+
 // Réplica en el cliente de `app.catalogo._es_partida_alzada` (motor, no se
 // toca desde aquí): una partida alzada es una reserva presupuestaria, no un
 // artículo de almacén — CLAUDE.md sección 2 la define "sin matrícula ni

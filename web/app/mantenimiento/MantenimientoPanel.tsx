@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { DatoVacio } from "../ui";
 
 type Trabajo = {
   id: number;
@@ -247,7 +248,13 @@ export default function MantenimientoPanel({ apiUrl }: { apiUrl: string }) {
                     </span>
                   </td>
                   <td>{formatearFecha(trabajo.created_at)}</td>
-                  <td>{trabajo.estado === "pendiente" || trabajo.estado === "en_proceso" ? "" : formatearFecha(trabajo.updated_at)}</td>
+                  <td>
+                    {trabajo.estado === "pendiente" || trabajo.estado === "en_proceso" ? (
+                      <DatoVacio motivo="pendiente" titulo="Todavía no ha terminado." />
+                    ) : (
+                      formatearFecha(trabajo.updated_at)
+                    )}
+                  </td>
                   <td>
                     <ResumenCiclo resultado={trabajo.resultado} />
                     {trabajo.error && (

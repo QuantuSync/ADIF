@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { DescripcionCelda, formatearNumero } from "../ui";
+import { DatoVacio, DescripcionCelda, esPartidaAlzada, formatearNumero } from "../ui";
 import { interpretarMotivoLinea, interpretarMotivos } from "../motivos";
 
 type ExpedienteResumen = {
@@ -53,6 +53,51 @@ const ETIQUETA_ESTADO_LINEA: Record<string, string> = {
   descartado: "Descartado",
   pendiente: "Pendiente de consulta",
 };
+
+// Ninguna celda vacía sin explicación (CLAUDE.md bloque 3) -- mismo criterio
+// y mismo componente que CatalogoPanel, aplicado a las dos columnas que
+// pueden quedar vacías en esta tabla.
+function celdaCodigoPrecio(linea: LineaCatalogo) {
+  if (linea.codigo_precio) return linea.codigo_precio;
+  return (
+    <DatoVacio
+      motivo="no-consta"
+      titulo={
+        linea.motivo_revision ??
+        "El cuadro de precios de origen no trae un código de línea distinto para esta fila."
+      }
+    />
+  );
+}
+
+function celdaPrecioUnitario(linea: LineaCatalogo) {
+  const texto = formatearNumero(linea.precio_unitario);
+  if (texto) return texto;
+  return (
+    <DatoVacio
+      motivo="no-consta"
+      titulo={linea.motivo_revision ?? "No se pudo interpretar el precio unitario de esta línea en el documento de origen."}
+    />
+  );
+}
+
+function celdaMatricula(linea: LineaCatalogo) {
+  if (linea.matricula) return linea.matricula;
+  if (esPartidaAlzada(linea.descripcion)) {
+    return (
+      <DatoVacio
+        motivo="na"
+        titulo="Partida alzada: es una reserva presupuestaria, no un artículo de almacén — no lleva este dato."
+      />
+    );
+  }
+  return (
+    <DatoVacio
+      motivo="no-consta"
+      titulo="El cuadro de precios de origen no trae matrícula para esta línea (pasa en aproximadamente un tercio del catálogo)."
+    />
+  );
+}
 
 type DetalleRevision = {
   expediente: ExpedienteResumen;
@@ -443,12 +488,12 @@ export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
                         return (
                           <Fragment key={linea.id}>
                             <tr>
-                              <td className="mono">{linea.codigo_precio ?? ""}</td>
-                              <td className="mono">{linea.matricula ?? ""}</td>
+                              <td className="mono">{celdaCodigoPrecio(linea)}</td>
+                              <td className="mono">{celdaMatricula(linea)}</td>
                               <td>
                                 <DescripcionCelda texto={linea.descripcion} />
                               </td>
-                              <td className="num">{formatearNumero(linea.precio_unitario)}</td>
+                              <td className="num">{celdaPrecioUnitario(linea)}</td>
                               <td>
                                 <span
                                   className={linea.estado_revision === "confirmado" ? "status status-ok" : "status"}

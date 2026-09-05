@@ -2,7 +2,7 @@ import hashlib
 import re
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Optional
+from typing import Callable, Optional
 
 from sqlalchemy.orm import Session
 
@@ -258,6 +258,39 @@ def _recuperar_descripcion_columna_fantasma(
     return limpiar_texto_celda(candidata)
 
 
+# Sesión de inventario de celdas vacías (2026-09-06, bloque 3): antes de
+# etiquetar la cantidad vacía como "no consta" en toda la web, se verificó
+# contra el documento real detrás del mayor concentrador de nulos
+# (`6.25/28510.0019_ANEJO_1.pdf`, página 28) con la propia cascada
+# (`pdfplumber` + `extraer_tablas_pagina`) en vez de fiarse del dato ya
+# guardado. Hallazgo real: la cabecera de esa tabla es
+# `["CÓDIGO DEL PRECIO", "Nº MATRÍCULA", "DESCRIPCIÓN", "UNIDAD DE MEDIDA",
+# None, "CANTIDADES ESTIMADAS DE REFERENCIA", "PRECIO DE REFERENCIA"]` — el
+# mapeo determinista, correctamente, ata `cantidad` a la columna que trae el
+# texto "CANTIDADES ESTIMADAS DE REFERENCIA" (índice 5). Pero en las FILAS
+# de datos de esa misma tabla, el valor numérico real cae sistemáticamente
+# en la columna fantasma sin etiquetar que la precede (índice 4): `['P-431',
+# '', 'Tirante TI-22-D-AT1', 'UN', '10', None, '3.270,00 €']` — la columna 5
+# (la que "cantidad" señala) es SIEMPRE `None` en cada fila, y la 4 (fantasma
+# en la cabecera) trae siempre el número real. `pdfplumber` particiona la fila
+# de cabecera con un límite de columna que no coincide con el de las filas de
+# datos, mismo fenómeno que ya cubren `_recuperar_descripcion_columna_fantasma`
+# y `_intentar_recuperar_desalineacion` para descripción/precio, pero ninguna
+# de esas dos se dispara aquí (descripción y precio_unitario salen bien en su
+# columna de siempre, la fila no cae ni en pie de tabla ni en fragmento
+# huérfano) — sin este recorte, esas líneas se etiquetarían como "no consta"
+# en la web cuando el dato SÍ está en el documento, uno de los "falsos
+# huecos" que el bloque 3 pedía verificar antes de dar por buenos.
+def _parece_cantidad_recuperable(texto: Optional[str]) -> bool:
+    if not texto or _es_celda_vacia(texto):
+        return False
+    try:
+        parsear_numero_es(texto)
+    except ValueError:
+        return False
+    return True
+
+
 def _parece_precio_recuperable(texto: Optional[str]) -> bool:
     if not texto or _es_celda_vacia(texto):
         return False
@@ -266,6 +299,59 @@ def _parece_precio_recuperable(texto: Optional[str]) -> bool:
     except ValueError:
         return False
     return True
+
+
+# Mismo hallazgo, un segundo caso real (sesión de inventario de celdas
+# vacías, bloque 3): `6.23/28510.0051_CONTRATO_1.pdf`, página 112 — la
+# cabecera trae el mismo patrón de columna fantasma, pero esta vez la
+# fantasma va DESPUÉS de "PRECIO UNITARIO DE REFERENCIA" en vez de antes de
+# "CANTIDADES...":
+# `['CÓDIGO DEL ELEMENTO', 'Nº MATRÍCULA', 'DESCRIPCIÓN', 'UNIDAD DE MEDIDA',
+#   'CANTIDADES ESTIMADAS DE REFERENCIA', None, 'PRECIO UNITARIO DE REFERENCIA']`
+# En las filas de datos, el precio real cae en la columna 5 (la fantasma) y
+# la 6 (la que "precio_unitario" señala) sale siempre `None`:
+# `['P-0014', '619260075', 'DIMDH-G-60-500-...', 'UD.', '0', '259.439,64 €', None]`.
+# Mismo mecanismo que `cantidad` arriba, generalizado: la columna fantasma
+# puede caer antes O después del campo que la cabecera etiqueta, así que la
+# recuperación prueba la anterior primero (el caso ya conocido) y, si no
+# encuentra nada recuperable ahí, la siguiente.
+def _recuperar_columna_fantasma(
+    fila: list[Optional[str]],
+    mapeo: dict[str, Optional[int]],
+    campo: str,
+    parece_recuperable: Callable[[Optional[str]], bool],
+) -> Optional[str]:
+    """Solo se llama cuando el mapeo normal identificó una columna para
+    `campo` (la cabecera SÍ declara ese campo) pero esa columna sale vacía
+    en esta fila concreta. Prueba la columna inmediatamente anterior y,
+    si no, la siguiente — igual que `_recuperar_descripcion_columna_fantasma`
+    prueba solo un lado, pero aquí hace falta cubrir los dos casos reales
+    verificados contra el corpus — y solo si ningún otro campo del mapeo ya
+    la reclama: así nunca le quita un valor legítimo a otro campo que de
+    verdad viva ahí."""
+    indice = mapeo.get(campo)
+    if indice is None:
+        return None
+    otros_indices = {i for c, i in mapeo.items() if c != campo}
+    for candidato_indice in (indice - 1, indice + 1):
+        if candidato_indice < 0 or candidato_indice in otros_indices:
+            continue
+        candidata = _valor_en(fila, candidato_indice)
+        if parece_recuperable(candidata):
+            return limpiar_texto_celda(candidata)
+    return None
+
+
+def _recuperar_cantidad_columna_fantasma(
+    fila: list[Optional[str]], mapeo: dict[str, Optional[int]]
+) -> Optional[str]:
+    return _recuperar_columna_fantasma(fila, mapeo, "cantidad", _parece_cantidad_recuperable)
+
+
+def _recuperar_precio_columna_fantasma(
+    fila: list[Optional[str]], mapeo: dict[str, Optional[int]]
+) -> Optional[str]:
+    return _recuperar_columna_fantasma(fila, mapeo, "precio_unitario", _parece_precio_recuperable)
 
 
 def _mapeo_desplazado(
@@ -381,6 +467,23 @@ def _construir_campos(
             cantidad = parsear_numero_es(cantidad_bruta)
         except ValueError as exc:
             motivo_revision = _acumular_motivo(motivo_revision, f"cantidad no interpretable: {exc}")
+    elif descripcion and mapeo.get("cantidad") is not None:
+        # Exige `descripcion` ya resuelta en su columna de siempre (igual que
+        # el guard de `precio_unitario` un poco más abajo): si descripción
+        # TAMBIÉN está vacía, esto no es un desplazamiento de una sola
+        # columna sino de la fila entera, y toca `_intentar_recuperar_desalineacion`
+        # más abajo, no este recorte de una sola celda -- sin esta condición,
+        # una recuperación coincidente aquí podía "arreglar" cantidad sola y
+        # dejar la fila con pinta de resuelta antes de que la desalineación
+        # completa llegara a intentarse.
+        recuperada = _recuperar_cantidad_columna_fantasma(fila, mapeo)
+        if recuperada is not None:
+            cantidad = parsear_numero_es(recuperada)
+            motivo_revision = _acumular_motivo(
+                motivo_revision,
+                "cantidad recuperada de una columna fantasma sin etiquetar junto a \"cantidad\" en la "
+                "cabecera de esta tabla, confirmar antes de dar por buena",
+            )
 
     precio_bruto = _valor("precio_unitario")
     precio_unitario = None
@@ -389,6 +492,19 @@ def _construir_campos(
             precio_unitario = parsear_importe_es(precio_bruto)
         except ValueError as exc:
             motivo_revision = _acumular_motivo(motivo_revision, f"precio unitario no interpretable: {exc}")
+    elif descripcion and mapeo.get("precio_unitario") is not None:
+        # Mismo guard que arriba, mismo motivo: sin `descripcion` ya resuelta,
+        # esto puede ser una fila con la cabecera entera desplazada, no solo
+        # el precio -- se deja para `_intentar_recuperar_desalineacion`, que
+        # desplaza el mapeo completo en vez de una sola celda.
+        recuperado = _recuperar_precio_columna_fantasma(fila, mapeo)
+        if recuperado is not None:
+            precio_unitario = parsear_importe_es(recuperado)
+            motivo_revision = _acumular_motivo(
+                motivo_revision,
+                "precio unitario recuperado de una columna fantasma sin etiquetar junto a \"precio "
+                "unitario\" en la cabecera de esta tabla, confirmar antes de dar por buena",
+            )
 
     if not descripcion and matricula is None and precio_unitario is not None:
         # Exige precio_unitario ya interpretado en su columna de siempre: sin

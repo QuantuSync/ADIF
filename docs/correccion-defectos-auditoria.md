@@ -171,3 +171,66 @@ creció, añade un motivo a `Expediente.error` y — si el expediente había
 quedado `completado` — lo baja a `pendiente_revision`, para que la próxima
 duplicación silenciosa se detecte sola en vez de esperar a la próxima
 auditoría manual.
+
+### Addenda: segunda ola de limpieza, provocada por el propio despliegue del arreglo (2026-09-06)
+
+La comprobación permanente de arriba se puso a prueba nada más subir
+`VERSION_LOGICA_EXTRACCION` para forzar el reproceso del corpus completo
+con el arreglo de cantidad (sección de bloque 3, más abajo en
+`docs/inventario-celdas-vacias.md`): saltó para los mismos siete
+expedientes, con el catálogo pasando de 3.060 a 4.168 líneas.
+
+**No era una recaída del defecto.** Verificado con la misma comprobación de
+duplicados exactos de la sección 1 (`ROW_NUMBER() OVER (PARTITION BY
+expediente_id, documento_origen_id, pagina, orden_aparicion)`): cero grupos
+con más de una fila. El crecimiento eran 1.108 parejas, cada una con
+exactamente 2 filas de contenido idéntico, una con `clave_linea` sin
+sufijo (`"P-018"`, creada el 2026-09-04, antes del arreglo) y otra con
+sufijo (`"P-018@p19y106"`, creada en este ciclo). Explicación: la limpieza
+original de la sección 1 colapsó los grupos de duplicados exactos
+**conservando la fila de menor `id`** — y esa fila superviviente, en la
+mayoría de los grupos, ya tenía la clave "canonicalizada" (sin sufijo) por
+el propio defecto que se estaba arreglando. El arreglo evita que esto
+vuelva a pasar a partir de ahora, pero no reescribe con carácter
+retroactivo la clave ya guardada de una fila superviviente vieja — el
+primer reproceso con el código nuevo, inevitablemente, la vuelve a calcular
+CON sufijo, no encuentra la fila vieja (sigue sin él) y crea una copia
+más, esta vez ya con la clave buena.
+
+Verificado antes de borrar (mismo criterio que la sección 1): las 1.108
+parejas tenían exactamente 1 variante de contenido cada una (ninguna
+difería en `codigo_precio`/`matricula`/`descripcion`/`precio_unitario`
+entre sus dos copias), las 2.216 filas estaban `sin_revisar` sin
+comentarios, y en ningún caso la copia nueva (con sufijo) perdía un valor
+de `cantidad` que sí tuviera la vieja. Colapsadas conservando siempre la
+copia con sufijo (la única con la clave estable de cara al futuro):
+1.108 filas borradas, catálogo de vuelta a **3.060 líneas** — el mismo
+número exacto de antes del ciclo, confirmando que no era crecimiento real.
+Reprocesados después, aparte, los siete expedientes uno a uno: 0 grupos de
+duplicados, mismo recuento antes y después — idempotencia confirmada de
+verdad, no solo esperada.
+
+**Lección para la próxima vez que se corrija una clave**: colapsar
+duplicados conservando "la fila más antigua" asume que la más antigua es
+la más correcta — cuando el propio defecto que se corrige podría haber
+corrompido justo esa fila más antigua, hay que preferir explícitamente la
+copia que ya lleva la clave/formato correcto, no la de menor `id` a
+ciegas.
+
+**Tercera ola, más pequeña, con la comprobación correcta esta vez**: al
+reprocesar seis expedientes más para recuperar `precio_unitario` (sección 2
+de `docs/inventario-celdas-vacias.md`), reaparecieron 24 filas del mismo
+patrón para `6.24/28510.0094` — no una recaída, sino una fila vieja
+(`clave_linea` sin sufijo, de antes de cualquiera de los dos arreglos) que
+en las dos rondas de limpieza anteriores no tenía todavía una pareja
+sufijada con la que formar un "grupo de duplicados", así que la
+comprobación de esa vez (`GROUP BY ... HAVING count(*) > 1`) no podía
+verla — solo se hizo visible en cuanto ESTE reproceso creó su gemela.
+Comprobación más robusta, que no depende de que la pareja ya exista:
+`WHERE lote_id IS NULL AND codigo_precio IS NOT NULL AND clave_linea NOT
+LIKE '%@p%'` — cualquier huérfana con código de precio debería llevar
+sufijo por diseño actual, así que su ausencia sola ya es la señal, sin
+esperar a la duplicación. Verificado con esta consulta sobre el catálogo
+entero tras la limpieza: **cero** huérfanas sin sufijo en ningún
+expediente — no queda ninguna fila "dormida" de este tipo por descubrir en
+un futuro reproceso. Recuento final: **3.036 líneas** (3.060 − 24).
