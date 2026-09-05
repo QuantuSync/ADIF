@@ -190,6 +190,60 @@ def _parece_descripcion_recuperable(texto: Optional[str]) -> bool:
     return not _es_pie_de_tabla(clave)
 
 
+# Sesión de duplicados de partidas alzadas (2026-09-05, expediente
+# 6.20/28510.0054): un contrato firmado puede incluir, como anejo propio,
+# una copia íntegra del mismo cuadro de precios que ya existe como documento
+# `anejo` independiente del expediente — legítimo (el contrato adjunta su
+# anejo firmado), no un error de scraping. Verificado contra el PDF real:
+# `CONTRATO_b77dfe4d8c537500.pdf` páginas 114-126 reproducen palabra por
+# palabra el "LISTADO DE MATERIALES A SUMINISTRAR" de `ANEJO_6ab4839cc...pdf`.
+#
+# El defecto: en varias páginas de esa copia dentro del contrato,
+# `pdfplumber` intercala una columna en blanco extra entre la matrícula y la
+# designación que no existe en el anejo independiente — la cabecera
+# combinada (`_combinar_filas_cabecera`) sale idéntica en ambos documentos
+# (la columna fantasma está vacía también en las filas de cabecera), así que
+# la firma de cabecera y su mapeo cacheado coinciden, pero aplicado a las
+# filas de datos del contrato deja la celda de descripción vacía y el texto
+# real cae en la columna siguiente, no mapeada.
+#
+# Para una fila con matrícula esto pasa inadvertido: `calcular_clave_linea`
+# prioriza la matrícula (que sí sale bien, en su columna de siempre) como
+# clave, así que las dos copias de la misma fila material se funden en una
+# sola por clave exacta sin que importe cuál trajo la descripción vacía. Pero
+# una partida alzada (CLAUDE.md sección 2: nunca trae matrícula) cae en el
+# `hash(descripción + orden_aparicion)` de `calcular_clave_linea` — con la
+# descripción vacía en la copia del contrato y presente en la del anejo, el
+# hash sale distinto para lo que es la misma línea real, y las dos copias se
+# guardan como filas separadas en vez de fundirse.
+def _recuperar_descripcion_columna_fantasma(
+    fila: list[Optional[str]], mapeo: dict[str, Optional[int]]
+) -> Optional[str]:
+    """Solo se llama cuando la fila no tiene matrícula (huérfana: partida
+    alzada u otra fila sin matrícula ni código de precio) y su descripción
+    salió vacía con el mapeo normal. A diferencia de
+    `_intentar_recuperar_desalineacion`, que desplaza el mapeo entero, aquí
+    solo se prueba la columna inmediatamente posterior a la de descripción —
+    desplazar el mapeo entero perdería la matrícula en una fila que sí la
+    trajera, y esta función nunca se llama para esas.
+
+    No se acepta la recuperación si esa columna siguiente ya la usa otro
+    campo del mapeo (p. ej. cuando descripción y unidad de medida son
+    columnas contiguas de verdad): ahí la celda no es una columna fantasma,
+    es el dato legítimo de otro campo, y copiarlo como descripción sería
+    inventar un valor que no es tal."""
+    indice_descripcion = mapeo.get("descripcion")
+    if indice_descripcion is None:
+        return None
+    indice_siguiente = indice_descripcion + 1
+    if indice_siguiente in {indice for campo, indice in mapeo.items() if campo != "descripcion"}:
+        return None
+    candidata = _valor_en(fila, indice_siguiente)
+    if not _parece_descripcion_recuperable(candidata):
+        return None
+    return limpiar_texto_celda(candidata)
+
+
 def _parece_precio_recuperable(texto: Optional[str]) -> bool:
     if not texto or _es_celda_vacia(texto):
         return False
@@ -321,6 +375,26 @@ def _construir_campos(
             precio_unitario = parsear_importe_es(precio_bruto)
         except ValueError as exc:
             motivo_revision = _acumular_motivo(motivo_revision, f"precio unitario no interpretable: {exc}")
+
+    if not descripcion and matricula is None and precio_unitario is not None:
+        # Exige precio_unitario ya interpretado en su columna de siempre: sin
+        # esto, una fila de relleno real (fragmento de descripción envuelta
+        # entre páginas, sin precio en ninguna posición cercana) se recuperaría
+        # como si fuera una fila de datos legítima solo por tener texto en la
+        # columna siguiente (`test_construir_linea_catalogo_fragmento_wrap_sin_precio_se_descarta`).
+        # El caso real que motiva esta recuperación (partida alzada del
+        # contrato, ver docstring de `_recuperar_descripcion_columna_fantasma`)
+        # siempre trae su precio bien interpretado; solo la descripción se
+        # desplaza.
+        recuperada = _recuperar_descripcion_columna_fantasma(fila, mapeo)
+        if recuperada:
+            descripcion = recuperada
+            motivo_revision = _acumular_motivo(
+                motivo_revision,
+                "descripción recuperada de la columna siguiente: la cabecera de esta tabla trae "
+                "una columna en blanco de más antes de la descripción en este documento, confirmar "
+                "antes de dar por buena",
+            )
 
     return "ok", {
         "codigo_precio": codigo_precio,

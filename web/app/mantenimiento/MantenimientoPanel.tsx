@@ -134,33 +134,40 @@ export default function MantenimientoPanel({ apiUrl }: { apiUrl: string }) {
       <div className="card" style={{ marginBottom: "1.5rem" }}>
         <p className="section-label">Ejecución programada</p>
         {estado ? (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "2rem", alignItems: "center" }}>
-            <div>
-              <div className="muted">Frecuencia</div>
-              <strong>
-                {estado.programado_activo ? formatearIntervalo(estado.intervalo_segundos) : "desactivada"}
-              </strong>
-            </div>
-            <div>
-              <div className="muted">Última ejecución</div>
-              <strong>
-                {estado.ultima_ejecucion ? formatearFecha(estado.ultima_ejecucion.created_at) : "nunca"}
-              </strong>
-              {estado.ultima_ejecucion && (
-                <span className="status-note"> {disparadoPor(estado.ultima_ejecucion)}</span>
-              )}
-            </div>
-            <div>
-              <div className="muted">Próxima ejecución</div>
-              <strong>
-                {estado.en_curso ? (
-                  <span className="status status-attn">en curso ahora mismo</span>
-                ) : (
-                  formatearFecha(estado.proxima_ejecucion)
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center" }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "2rem", alignItems: "flex-start", flex: "1 1 auto" }}>
+              <div>
+                <div className="muted">Frecuencia</div>
+                <strong>
+                  {estado.programado_activo ? formatearIntervalo(estado.intervalo_segundos) : "desactivada"}
+                </strong>
+              </div>
+              <div>
+                <div className="muted">Última ejecución</div>
+                <strong>
+                  {estado.ultima_ejecucion ? formatearFecha(estado.ultima_ejecucion.created_at) : "nunca"}
+                </strong>
+                {estado.ultima_ejecucion && (
+                  <span className="status-note status-note-inline"> {disparadoPor(estado.ultima_ejecucion)}</span>
                 )}
-              </strong>
+              </div>
+              <div>
+                <div className="muted">Próxima ejecución</div>
+                <strong>
+                  {estado.en_curso ? (
+                    <span className="status status-attn">en curso ahora mismo</span>
+                  ) : (
+                    formatearFecha(estado.proxima_ejecucion)
+                  )}
+                </strong>
+              </div>
             </div>
-            <button onClick={lanzarAhora} disabled={lanzando || estado.en_curso} className="btn btn-primary">
+            <button
+              onClick={lanzarAhora}
+              disabled={lanzando || estado.en_curso}
+              className="btn btn-primary"
+              style={{ marginLeft: "2rem" }}
+            >
               {lanzando ? "Lanzando…" : "Lanzar ciclo ahora"}
             </button>
           </div>

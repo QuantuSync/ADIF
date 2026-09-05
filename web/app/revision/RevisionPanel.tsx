@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { DescripcionCelda, formatearNumero } from "../ui";
 import { interpretarMotivoLinea, interpretarMotivos } from "../motivos";
 
@@ -171,6 +171,48 @@ export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
 
   const motivos = useMemo(() => interpretarMotivos(detalle?.expediente.error), [detalle]);
 
+  // La tabla de líneas vive en `.table-scroll--panel` (scroll horizontal
+  // propio, no el de la página — CLAUDE.md, comentario de esa clase en
+  // globals.css: comparte columna con el visor de PDF, que no puede
+  // desplazarse). Dos defectos de esta sesión, encargo del cliente:
+  //
+  // 1. Al cambiar de expediente seleccionado, React reutiliza el mismo
+  //    contenedor <div> (no cambia de posición en el árbol), así que
+  //    conservaba el scroll horizontal del caso anterior — el nuevo caso
+  //    "arrancaba desplazado" con la primera columna ya fuera de vista.
+  //    Se resetea a 0 cada vez que cambia el expediente seleccionado.
+  // 2. La barra de scroll nativa de ese contenedor queda al final de sus
+  //    filas (puede haber más de 40), inalcanzable sin bajar antes del
+  //    todo. Una segunda barra arriba, sincronizada con la de abajo, la
+  //    hace accesible sin bajar — el ancho real de la tabla se mide tras
+  //    cada carga de líneas para que ambas compartan el mismo scrollWidth.
+  const scrollTablaRef = useRef<HTMLDivElement | null>(null);
+  const scrollSuperiorRef = useRef<HTMLDivElement | null>(null);
+  const tablaLineasRef = useRef<HTMLTableElement | null>(null);
+  const sincronizandoRef = useRef<"superior" | "tabla" | null>(null);
+  const [anchoTablaLineas, setAnchoTablaLineas] = useState(0);
+
+  useEffect(() => {
+    if (scrollTablaRef.current) scrollTablaRef.current.scrollLeft = 0;
+    if (scrollSuperiorRef.current) scrollSuperiorRef.current.scrollLeft = 0;
+  }, [seleccionId]);
+
+  useEffect(() => {
+    setAnchoTablaLineas(tablaLineasRef.current?.scrollWidth ?? 0);
+  }, [detalle?.lineas]);
+
+  function sincronizarDesde(origen: "superior" | "tabla", scrollLeft: number) {
+    if (sincronizandoRef.current === origen) {
+      sincronizandoRef.current = null;
+      return;
+    }
+    const destino = origen === "superior" ? scrollTablaRef.current : scrollSuperiorRef.current;
+    if (destino) {
+      sincronizandoRef.current = origen === "superior" ? "tabla" : "superior";
+      destino.scrollLeft = scrollLeft;
+    }
+  }
+
   return (
     <div className="revision-layout">
       <div>
@@ -276,8 +318,20 @@ export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
                   Este expediente todavía no tiene ninguna línea de catálogo — no hay tabla de precios que mostrar.
                 </p>
               ) : (
-                <div className="table-scroll table-scroll--panel">
-                  <table className="table">
+                <>
+                  <div
+                    className="table-scroll-superior"
+                    ref={scrollSuperiorRef}
+                    onScroll={(e) => sincronizarDesde("superior", e.currentTarget.scrollLeft)}
+                  >
+                    <div style={{ width: anchoTablaLineas, height: 1 }} />
+                  </div>
+                  <div
+                    className="table-scroll table-scroll--panel"
+                    ref={scrollTablaRef}
+                    onScroll={(e) => sincronizarDesde("tabla", e.currentTarget.scrollLeft)}
+                  >
+                  <table className="table" ref={tablaLineasRef}>
                     <thead>
                       <tr>
                         <th>Código</th>
@@ -305,13 +359,12 @@ export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
                                 {linea.estado_revision === "confirmado" ? "Confirmado" : "Sin confirmar"}
                               </span>
                             </td>
-                            <td style={{ maxWidth: "18rem" }}>
+                            <td className="col-aviso">
                               {aviso && (
                                 <span
                                   className={aviso.categoria === "contradiccion" ? "status-note status-attn" : "status-note"}
-                                  title={aviso.texto}
                                 >
-                                  {aviso.texto.length > 60 ? `${aviso.texto.slice(0, 60)}…` : aviso.texto}
+                                  {aviso.texto}
                                 </span>
                               )}
                             </td>
@@ -327,7 +380,8 @@ export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
                       })}
                     </tbody>
                   </table>
-                </div>
+                  </div>
+                </>
               )}
             </div>
 

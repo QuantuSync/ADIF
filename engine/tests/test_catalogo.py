@@ -105,6 +105,49 @@ def test_construir_linea_catalogo_recupera_partida_alzada_mal_alineada():
     assert linea["motivo_revision"] is None
 
 
+def test_construir_linea_catalogo_recupera_descripcion_de_columna_fantasma():
+    # Expediente real 6.20/28510.0054 (sesión de duplicados de partidas
+    # alzadas, 2026-09-05): el contrato firmado incluye como anejo propio una
+    # copia íntegra del mismo cuadro de precios que ya trae el documento
+    # `anejo` independiente. En esa copia, `pdfplumber` intercala una columna
+    # en blanco de más entre matrícula y descripción -- la celda de
+    # descripción sale vacía y el texto real cae en la columna siguiente, sin
+    # mapear. Sin matrícula que perder (partida alzada, CLAUDE.md sección 2),
+    # se recupera de esa columna en vez de perderse -- de lo contrario, la
+    # misma partida alzada del documento `anejo` (con descripción) y esta
+    # copia (sin ella) generan claves distintas (`calcular_clave_linea` cae al
+    # hash de descripción+orden para filas sin matrícula ni código de precio)
+    # y quedan como dos filas duplicadas en vez de fundirse en una.
+    mapeo = {"codigo_precio": None, "matricula": 0, "descripcion": 1, "unidad_medida": 3, "cantidad": 5, "precio_unitario": 4}
+    fila = ["", "", "PARTIDA ALZADA A JUSTIFICAR PARA IMPREVISTOS", None, "161.999,04 €", "1"]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=120, documento_origen_id=231, expediente_id=1, baja_lote=None, orden_aparicion=174
+    )
+
+    assert linea is not None
+    assert linea["matricula"] is None
+    assert linea["descripcion"] == "PARTIDA ALZADA A JUSTIFICAR PARA IMPREVISTOS"
+    assert linea["precio_unitario"] == Decimal("161999.04")
+    assert linea["motivo_revision"] is not None
+
+
+def test_construir_linea_catalogo_no_recupera_descripcion_si_la_columna_siguiente_esta_en_uso():
+    # Cuando descripción y el siguiente campo del mapeo son columnas
+    # contiguas de verdad (no hay ninguna columna fantasma), esa celda es el
+    # dato legítimo de otro campo -- copiarla como descripción inventaría un
+    # valor que no es tal. Una descripción vacía aquí no se recupera.
+    mapeo = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": 2, "cantidad": None, "precio_unitario": 3}
+    fila = ["P-050", "", "UD", "100.000,00 €"]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=18, documento_origen_id=None, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea is not None
+    assert linea["descripcion"] == ""
+
+
 def test_construir_linea_catalogo_matricula_no_reconocible_se_vacia_y_marca_revision():
     mapeo = {"codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": None, "cantidad": None, "precio_unitario": 3}
     fila = ["P-016", "ifireV", "PÉRTIGA VERIFICADORA", "2.298,82 €"]

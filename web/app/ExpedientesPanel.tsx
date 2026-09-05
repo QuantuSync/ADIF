@@ -39,6 +39,7 @@ export type Expediente = {
   id: number;
   codigo_expediente: string;
   codigo_matriz: string | null;
+  nombre_proyecto: string | null;
   importe_licitacion: string | null;
   importe_adjudicacion: string | null;
   baja_global: string | null;
@@ -52,6 +53,29 @@ export type Expediente = {
 };
 
 const INTERVALO_SONDEO_MS = 3000;
+
+// Encargo de esta sesión: con 53 expedientes ya incómodo de repasar a ojo, y
+// el sistema pensado para descubrirlos solo (serán cientos), hace falta
+// filtrar por estado y buscar por código o nombre — separado a propósito del
+// formulario "Añadir expediente" (mismo aspecto de campo+botón, riesgo real
+// de que alguien dé de alta un expediente creyendo que está buscando uno).
+type FiltroEstado = "todos" | "completado" | "revision" | "sin_publicar";
+
+function coincideEstado(exp: Expediente, filtro: FiltroEstado): boolean {
+  if (filtro === "todos") return true;
+  if (filtro === "completado") return exp.estado === "completado";
+  if (filtro === "revision") return exp.estado === "pendiente_revision" || exp.estado === "fallido";
+  return exp.estado === "sin_publicar";
+}
+
+function coincideBusqueda(exp: Expediente, busqueda: string): boolean {
+  const q = busqueda.trim().toLowerCase();
+  if (!q) return true;
+  return (
+    exp.codigo_expediente.toLowerCase().includes(q) ||
+    (exp.nombre_proyecto ?? "").toLowerCase().includes(q)
+  );
+}
 
 // El hallazgo central del proyecto (CLAUDE.md sección 4): en el modelo de
 // "baja única por lote", licitación y adjudicación son a menudo el mismo
@@ -141,6 +165,8 @@ export default function ExpedientesPanel({
   const [matrizNuevo, setMatrizNuevo] = useState("");
   const [creando, setCreando] = useState(false);
   const [lanzando, setLanzando] = useState<number | null>(null);
+  const [busqueda, setBusqueda] = useState("");
+  const [filtroEstado, setFiltroEstado] = useState<FiltroEstado>("todos");
 
   async function recargar() {
     try {
@@ -227,8 +253,12 @@ export default function ExpedientesPanel({
   // mismos dos botones activos — casi un tercio de las 53 filas de esta
   // base para expedientes que no van a completarse nunca. Se separan en un
   // grupo aparte, plegado por defecto.
-  const normales = expedientes.filter((e) => e.estado !== "sin_publicar");
-  const noPublicados = expedientes.filter((e) => e.estado === "sin_publicar");
+  const filtrados = expedientes.filter(
+    (e) => coincideEstado(e, filtroEstado) && coincideBusqueda(e, busqueda)
+  );
+  const normales = filtrados.filter((e) => e.estado !== "sin_publicar");
+  const noPublicados = filtrados.filter((e) => e.estado === "sin_publicar");
+  const hayFiltroActivo = filtroEstado !== "todos" || busqueda.trim() !== "";
 
   return (
     <div>
@@ -265,12 +295,47 @@ export default function ExpedientesPanel({
         </form>
       </div>
 
-      <p className="muted" style={{ marginBottom: "1.75rem" }}>
+      <p className="muted" style={{ marginBottom: "1.25rem" }}>
         {expedientes.length} expediente{expedientes.length === 1 ? "" : "s"} · {resumen.completado} completado
         {resumen.completado === 1 ? "" : "s"} · {resumen.revision} en revisión · {resumen.sinPublicar} no publicado
         {resumen.sinPublicar === 1 ? "" : "s"}
         {resumen.enCurso > 0 && ` · ${resumen.enCurso} en curso`}
       </p>
+
+      <div className="buscador-expedientes">
+        <input
+          className="input"
+          value={busqueda}
+          onChange={(e) => setBusqueda(e.target.value)}
+          placeholder="Buscar por código o nombre de proyecto…"
+          aria-label="Buscar expedientes"
+        />
+        <div className="filtro-estado-grupo" role="group" aria-label="Filtrar por estado">
+          {(
+            [
+              ["todos", "Todos"],
+              ["completado", "Completado"],
+              ["revision", "En revisión"],
+              ["sin_publicar", "No publicado"],
+            ] as [FiltroEstado, string][]
+          ).map(([valor, etiqueta]) => (
+            <button
+              key={valor}
+              type="button"
+              onClick={() => setFiltroEstado(valor)}
+              className={`filtro-estado${filtroEstado === valor ? " active" : ""}`}
+            >
+              {etiqueta}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {hayFiltroActivo && (
+        <p className="muted" style={{ marginBottom: "1.25rem", fontSize: "0.88rem" }}>
+          {filtrados.length} resultado{filtrados.length === 1 ? "" : "s"} con este filtro.
+        </p>
+      )}
 
       {errorConexion && (
         <p className="error-banner">
@@ -342,6 +407,9 @@ export default function ExpedientesPanel({
         </table>
       </div>
       {expedientes.length === 0 && <p className="muted" style={{ marginTop: "1rem" }}>Sin expedientes todavía.</p>}
+      {expedientes.length > 0 && filtrados.length === 0 && (
+        <p className="muted" style={{ marginTop: "1rem" }}>Ningún expediente coincide con este filtro.</p>
+      )}
 
       {/* Grupo aparte, plegado por defecto (encargo de esta sesión): un
           expediente `sin_publicar` está verificado que no existe en la

@@ -259,6 +259,47 @@ export function interpretarMotivos(motivo: string | null | undefined): MotivoInt
 // varios), así que se interpreta directo.
 export function interpretarMotivoLinea(motivo: string | null | undefined): MotivoInterpretado | null {
   if (!motivo) return null;
+  if (motivo.startsWith("codigo_precio recuperado tras descartar ruido de pie de página")) {
+    const m = motivo.match(/->\s*'([^']*)'\)$/);
+    return {
+      categoria: "contradiccion",
+      texto: `El código de esta línea traía pegado un fragmento del sello de verificación del documento; se ha limpiado a "${
+        m?.[1] ?? "su valor correcto"
+      }". Confírmalo antes de darlo por bueno.`,
+      tecnico: motivo,
+    };
+  }
+  if (motivo.startsWith("codigo_precio descartado: pie de página")) {
+    return {
+      categoria: "contradiccion",
+      texto: "El código de esta línea es en realidad el sello de verificación del documento colado en esa celda, sin ningún código real dentro; se ha dejado en blanco.",
+      tecnico: motivo,
+    };
+  }
+  if (motivo.startsWith("codigo_precio con formato no reconocido")) {
+    const m = motivo.match(/dar por bueno: '([^']*)'$/);
+    return {
+      categoria: "contradiccion",
+      texto: `El código de esta línea ("${
+        m?.[1] ?? "ver mensaje técnico"
+      }") no sigue ningún formato conocido en este tipo de documento. Puede ser válido y solo nuevo para el sistema, o un error de lectura: confírmalo antes de darlo por bueno.`,
+      tecnico: motivo,
+    };
+  }
+  if (motivo.startsWith("cabecera desalineada con los datos")) {
+    return {
+      categoria: "contradiccion",
+      texto: "En este documento, la cabecera de la tabla no coincidía con la posición real de los datos; el sistema ha recolocado las columnas automáticamente. Confirma esta línea antes de darla por buena.",
+      tecnico: motivo,
+    };
+  }
+  if (motivo.startsWith("descripción recuperada de la columna siguiente")) {
+    return {
+      categoria: "contradiccion",
+      texto: "La descripción de esta línea no estaba en su columna habitual en este documento; se ha recuperado de la columna de al lado. Confírmala antes de darla por buena.",
+      tecnico: motivo,
+    };
+  }
   if (motivo.startsWith("valor de matrícula no reconocible")) {
     const m = motivo.match(/descartado: (.+)$/);
     return {

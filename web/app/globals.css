@@ -447,6 +447,17 @@ input:focus-visible {
   max-width: 13rem;
 }
 
+/* Modificador para usar `.status-note` pegado a la misma línea que lo
+   precede (Mantenimiento, "Manual"/"Programado" junto a la fecha): el
+   `display: block` de `.status-note` es intencional en el resto de usos
+   (envuelve bajo la etiqueta de una fila de tabla), pero aquí lo dejaba
+   colgando en su propia línea, suelto, en vez de junto a la fecha que
+   describe. */
+.status-note-inline {
+  display: inline;
+  margin: 0 0 0 0.4rem;
+}
+
 .chip {
   display: inline-flex;
   align-items: center;
@@ -1036,6 +1047,54 @@ input:focus-visible {
   margin: 1.75rem 0;
 }
 
+/* Buscador de Expedientes (encargo de esta sesión): a propósito sin la caja
+   con borde ("card") del formulario "Añadir expediente" que vive justo
+   encima — mismo par campo+botón, y con 53 expedientes ya incómodos de
+   repasar a ojo alguien iba a dar de alta un expediente creyendo que
+   buscaba uno. Sin borde propio, fuera de cualquier <form>, y por delante
+   del resto de controles para que se lea como una herramienta de lista, no
+   como un paso más del alta. */
+.buscador-expedientes {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.buscador-expedientes .input {
+  flex: 1 1 18rem;
+  min-width: 14rem;
+}
+
+.filtro-estado-grupo {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.filtro-estado {
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 0.4rem 0.85rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.filtro-estado:hover {
+  border-color: var(--border-strong);
+  color: var(--ink);
+}
+
+.filtro-estado.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--ink);
+}
+
 /* Tabla de líneas dentro del panel de revisión (columna izquierda de
    `.revision-detail-grid`, junto al PDF): a diferencia de las tablas de
    página completa, esta vive en una columna angosta que puede terminar
@@ -1052,6 +1111,31 @@ input:focus-visible {
 
 .table-scroll--panel .table thead {
   position: static;
+}
+
+/* Segunda barra de scroll horizontal, encima de la tabla de líneas (encargo
+   de la sesión de correcciones de interfaz): `.table-scroll--panel` tiene su
+   propio scroll porque no puede propagarlo a la página entera (comentario de
+   arriba), pero eso deja su barra nativa al final de las filas — con más de
+   40, nadie llega a bajar hasta ahí para descubrir que la tabla se puede
+   desplazar. Este div no contiene la tabla, solo un espaciador con el mismo
+   ancho (`anchoTablaLineas` en RevisionPanel.tsx), para que su única función
+   sea mostrar una barra de scroll utilizable desde arriba, sincronizada con
+   la de abajo. */
+.table-scroll-superior {
+  overflow-x: auto;
+  overflow-y: hidden;
+  min-width: 0;
+}
+
+/* Columna "Aviso" de la tabla de líneas (RevisionPanel): antes truncaba el
+   texto a 60 caracteres en JS dentro de una celda de 18rem — para un
+   mensaje en lenguaje de ADIF (más largo que la jerga técnica que
+   sustituye, `app/motivos.ts`), eso lo partía en varias líneas y encima lo
+   cortaba a mitad de frase. Sin truncar en JS, con espacio de sobra para
+   dos o tres líneas legibles. */
+.col-aviso {
+  max-width: 22rem;
 }
 
 @media (max-width: 980px) {
