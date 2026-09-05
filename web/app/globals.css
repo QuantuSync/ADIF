@@ -598,6 +598,13 @@ input:focus-visible {
 .table .mono {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
+  /* Hallazgo suelto de la sesión de claridad visual, no de esta sesión: un
+     `codigo_precio` corrupto del corpus real (auditoría previa, commit
+     "codigo_precio corrupto") puede llegar sin ningún espacio — sin este
+     corte, esa única celda fuerza el ancho de toda la tabla por encima de
+     1280px. No arregla el dato (el motor no se toca desde aquí), solo evita
+     que una fila mala rompa el layout de las demás. */
+  overflow-wrap: anywhere;
 }
 
 /* Expedientes: marca al margen solo cuando hace falta atención humana — en
@@ -616,6 +623,41 @@ input:focus-visible {
 
 .row-muted td {
   color: var(--text-faint);
+}
+
+/* Catálogo (encargo de la sesión de claridad visual): una celda vacía no
+   dice si el dato no aplica, si no existe en el documento de origen, o si
+   solo está pendiente de otro dato — hoy las tres se ven igual de "en
+   blanco" y ADIF las lee como tres fallos del sistema. Se distinguen por
+   tono tipográfico, nunca por color fuerte ni icono (misma regla que
+   `.status` de arriba). El `title` de cada uno lleva la explicación larga. */
+
+.dato-vacio {
+  font-size: 0.86rem;
+  white-space: nowrap;
+}
+
+/* No aplica: definitivo y correcto (partida alzada — CLAUDE.md sección 2).
+   Mismo tono que `.status-faint`: "fuera de alcance a propósito". */
+.dato-vacio--na {
+  color: var(--text-faint);
+  font-weight: 500;
+}
+
+/* No existe en el documento de origen: definitivo, nada que recuperar. La
+   cursiva es la única marca que lo separa de "no aplica" sin añadir color. */
+.dato-vacio--no-consta {
+  color: var(--text-faint);
+  font-style: italic;
+  font-weight: 400;
+}
+
+/* Pendiente de otro dato (la baja del lote): temporal, se resolverá solo en
+   cuanto llegue ese dato — tinta más oscura que las otras dos porque, a
+   diferencia de ellas, sí vale la pena volver a mirar esta fila más tarde. */
+.dato-vacio--pendiente {
+  color: var(--text-muted);
+  font-style: italic;
 }
 
 /* Descripciones largas: truncadas a una línea, con un control explícito

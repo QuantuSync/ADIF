@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { DescripcionCelda, formatearImporte, formatearNumero, formatearPorcentaje } from "../ui";
+import { DescripcionCelda, esPartidaAlzada, formatearImporte, formatearNumero, formatearPorcentaje } from "../ui";
 
 type LineaCatalogo = {
   id: number;
@@ -52,6 +52,65 @@ function celdaRevision(linea: LineaCatalogo) {
     );
   }
   return null;
+}
+
+// Fila que de verdad exige atención humana (mismo criterio que la etiqueta
+// "Revisar" de arriba) — encargo de esta sesión: con 4.195 líneas, la
+// etiqueta sola en la última columna se pierde al recorrer la tabla. El
+// acento al margen (mismo patrón que Expedientes) la hace visible sin
+// necesidad de llegar hasta esa columna.
+function necesitaRevision(linea: LineaCatalogo): boolean {
+  return (
+    linea.estado_revision !== "confirmado" &&
+    linea.estado_revision !== "corregido" &&
+    linea.estado_revision !== "descartado" &&
+    Boolean(linea.motivo_revision)
+  );
+}
+
+// Matrícula vacía (CLAUDE.md sección 2 y encargo de esta sesión): distingue
+// "no aplica" (partida alzada — reserva presupuestaria, no un artículo de
+// almacén, hueco correcto y definitivo) de "no existe en el documento" (el
+// cuadro de precios de origen no la traía en ~1/3 de las líneas, tampoco
+// hay nada que recuperar) — hoy ambas se veían igual de "en blanco" que un
+// dato realmente pendiente.
+function celdaConCausaDeVacio(valor: string | null, esPartida: boolean, tituloNoConsta: string) {
+  if (valor) return valor;
+  if (esPartida) {
+    return (
+      <span
+        className="dato-vacio dato-vacio--na"
+        title="Partida alzada: es una reserva presupuestaria, no un artículo de almacén — no lleva este dato."
+      >
+        No aplica
+      </span>
+    );
+  }
+  return (
+    <span className="dato-vacio dato-vacio--no-consta" title={tituloNoConsta}>
+      No consta
+    </span>
+  );
+}
+
+// Precio adjudicado = precio unitario × (1 − baja de lote) — CLAUDE.md
+// sección 4. Cuando falta, casi siempre es porque el expediente todavía no
+// tiene baja de lote declarada, no porque el sistema no supiera calcularlo:
+// distinto de un simple hueco, se resuelve solo en cuanto llegue ese dato.
+function celdaPrecioAdjudicado(linea: LineaCatalogo) {
+  const texto = formatearNumero(linea.precio_adjudicado);
+  if (texto) return texto;
+  if (linea.precio_unitario && !linea.baja_lote) {
+    return (
+      <span
+        className="dato-vacio dato-vacio--pendiente"
+        title="El expediente todavía no tiene baja de lote declarada. En cuanto se registre, se calcula solo."
+      >
+        Pendiente
+      </span>
+    );
+  }
+  return "";
 }
 
 type RespuestaCatalogo = {
@@ -199,27 +258,36 @@ export default function CatalogoPanel({ apiUrl }: { apiUrl: string }) {
                 </tr>
               </thead>
               <tbody>
-                {datos.lineas.map((linea) => (
-                  <tr
-                    key={linea.id}
-                    onClick={() => setSeleccion(linea)}
-                    className={`clickable${seleccion?.id === linea.id ? " selected" : ""}`}
-                  >
-                    <td>{linea.codigo_expediente}</td>
-                    <td>{linea.identificador_lote}</td>
-                    <td style={{ fontWeight: 700 }} className="mono">
-                      {linea.matricula ?? ""}
-                    </td>
-                    <td className="mono">{linea.codigo_precio ?? ""}</td>
-                    <td>
-                      <DescripcionCelda texto={linea.descripcion} />
-                    </td>
-                    <td className="num">{formatearNumero(linea.cantidad, 2)}</td>
-                    <td className="num">{formatearNumero(linea.precio_unitario)}</td>
-                    <td className="num">{formatearNumero(linea.precio_adjudicado)}</td>
-                    <td>{celdaRevision(linea)}</td>
-                  </tr>
-                ))}
+                {datos.lineas.map((linea) => {
+                  const partida = esPartidaAlzada(linea.descripcion);
+                  return (
+                    <tr
+                      key={linea.id}
+                      onClick={() => setSeleccion(linea)}
+                      className={`clickable row-accent${necesitaRevision(linea) ? " row-accent-attn" : ""}${
+                        seleccion?.id === linea.id ? " selected" : ""
+                      }`}
+                    >
+                      <td>{linea.codigo_expediente}</td>
+                      <td>{linea.identificador_lote}</td>
+                      <td style={linea.matricula ? { fontWeight: 700 } : undefined} className="mono">
+                        {celdaConCausaDeVacio(
+                          linea.matricula,
+                          partida,
+                          "El cuadro de precios de origen no trae matrícula para esta línea (pasa en aproximadamente un tercio del catálogo)."
+                        )}
+                      </td>
+                      <td className="mono">{linea.codigo_precio ?? ""}</td>
+                      <td>
+                        <DescripcionCelda texto={linea.descripcion} />
+                      </td>
+                      <td className="num">{formatearNumero(linea.cantidad, 2)}</td>
+                      <td className="num">{formatearNumero(linea.precio_unitario)}</td>
+                      <td className="num">{celdaPrecioAdjudicado(linea)}</td>
+                      <td>{celdaRevision(linea)}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

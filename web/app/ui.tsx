@@ -86,6 +86,18 @@ export function formatearNumero(valor: string | number | null, maxDecimales = 4)
   return Number(valor).toLocaleString("es-ES", { maximumFractionDigits: maxDecimales });
 }
 
+// Réplica en el cliente de `app.catalogo._es_partida_alzada` (motor, no se
+// toca desde aquí): una partida alzada es una reserva presupuestaria, no un
+// artículo de almacén — CLAUDE.md sección 2 la define "sin matrícula ni
+// código de material", y el motor la guarda así, con el texto en
+// `descripcion`. Sirve para explicar por qué la matrícula está vacía
+// (encargo de la sesión de claridad visual) en vez de dejarla en blanco sin
+// más, que es indistinguible de una matrícula que el documento simplemente
+// no traía.
+export function esPartidaAlzada(descripcion: string): boolean {
+  return descripcion.trimStart().toLowerCase().startsWith("partida alzada");
+}
+
 const LARGO_TRUNCADO = 64;
 
 // Descripción de línea de catálogo: trunca a una sola línea para no romper
