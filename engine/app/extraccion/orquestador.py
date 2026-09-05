@@ -48,6 +48,7 @@ from app.extraccion.herencia_matriz import (
 )
 from app.extraccion.identidad_expediente import corregir_identidad_expediente
 from app.extraccion.lotes import LoteDeclarado, ResultadoLotes, extraer_lotes_declarados
+from app.extraccion.modelo_precio_indexado import detectar_modelo_precio_indexado
 from app.extraccion.normalizacion import parsear_importe_es
 from app.extraccion.pipeline_anejo import procesar_anejo
 from app.extraccion.precios_unitarios import calcular_baja_efectiva
@@ -60,6 +61,7 @@ from app.models import (
     Expediente,
     LineaCatalogo,
     Lote,
+    ModeloPrecio,
     TipoDocumento,
     TrabajoCola,
     TrazaOrigen,
@@ -484,6 +486,10 @@ def ejecutar_extraccion_expediente(
         lineas_creadas = lineas_actualizadas = tablas_procesadas = llamadas_modelo = 0
         documentos_procesados = 0
         documentos_pliego_omitidos: list[str] = []
+        documentos_escaneados: list[str] = []
+        motivo_escaneados: Optional[str] = None
+        documentos_escaneados_sin_bloquear: Optional[str] = None
+        nota_modelo_precio_indexado: Optional[str] = None
         campo_obra: Optional[CampoAnclado] = None
         lotes: list[Lote] = []
         lotes_declarados: list[LoteDeclarado] = []
@@ -615,8 +621,23 @@ def ejecutar_extraccion_expediente(
                 # baja" solo se compone al final, después de intentarlo.
                 importe_licitacion, importe_adjudicacion, baja_preferida = _extraer_campos_expediente(db, expediente, items)
 
+                # Segunda familia de baja (migración 0016, sesión de trabajo
+                # pendiente real 2026-09-05): antes de intentar la baja
+                # única de lote, comprobar si el propio expediente declara
+                # el modelo de precio indexado por pedido -- si lo hace, ni
+                # `calcular_baja_efectiva` ni la baja declarada en texto
+                # aplican, porque ese modelo no tiene una baja única que
+                # extraer (ver docstring de `ModeloPrecio` en app.models).
+                modelo_indexado = None
+                for item in items:
+                    modelo_indexado = detectar_modelo_precio_indexado(item.paginas)
+                    if modelo_indexado is not None:
+                        break
+
                 baja_efectiva: Optional[Decimal] = None
-                if importe_licitacion is not None and importe_adjudicacion is not None:
+                if modelo_indexado is not None:
+                    pass  # baja_efectiva se queda en None a propósito
+                elif importe_licitacion is not None and importe_adjudicacion is not None:
                     resultado_baja = calcular_baja_efectiva(
                         importe_licitacion, importe_adjudicacion,
                         baja_preferida.baja if baja_preferida is not None else None,
@@ -646,6 +667,22 @@ def ejecutar_extraccion_expediente(
                 lote.baja_lote = baja_efectiva
                 lote.importe_licitacion = importe_licitacion
                 lote.importe_adjudicacion = importe_adjudicacion
+                if modelo_indexado is not None:
+                    lote.modelo_precio = ModeloPrecio.indexado_por_pedido
+                    lote.coeficiente_transformacion = modelo_indexado.coeficiente_transformacion
+                    nota_modelo_precio_indexado = (
+                        "modelo de precio indexado por pedido (Acuerdo Marco, no baja única de lote): "
+                        "la baja no existe todavía en la licitación, se fija en cada pedido futuro contra "
+                        "el Acuerdo Marco junto con un índice de actualización de precios (Kt); no es un "
+                        "dato que el sistema no haya encontrado"
+                    )
+                else:
+                    # Idempotencia (CLAUDE.md sección 9): un reproceso que ya
+                    # no detecte el marcador (documento corregido, o el
+                    # propio marcador dejó de estar) no debe dejar un
+                    # `indexado_por_pedido` obsoleto de una ejecución previa.
+                    lote.modelo_precio = ModeloPrecio.fijo
+                    lote.coeficiente_transformacion = None
                 db.commit()
                 lotes = [lote]
 
@@ -687,7 +724,6 @@ def ejecutar_extraccion_expediente(
             # extraídas de los demás — CLAUDE.md sección 12, "lo que no cuadra
             # va a la cola de revisión", no revienta el expediente entero.
             documentos_con_error: list[str] = []
-            documentos_escaneados: list[str] = []
             for item in items:
                 if item.pliego_sin_precios:
                     # CLAUDE.md sección 26: pliego administrativo o PCAP,
@@ -761,18 +797,16 @@ def ejecutar_extraccion_expediente(
                 motivo_revision = _acumular_motivo(motivo_revision, motivo_documentos)
 
             if documentos_escaneados:
-                # Motivo aparte y explícito (CLAUDE.md sección 3): distinto
-                # de "no se pudo extraer el cuadro de precios" (ese documento
-                # sí tiene texto, solo falló su tabla) y de "no se extrajo
-                # ninguna línea de catálogo" (ese expediente sí tiene
-                # documentos legibles, solo no traían cuadro de precios).
-                # Este dice que el documento no se puede leer en absoluto con
-                # las herramientas actuales.
+                # Texto calculado aquí, pero incorporado a `motivo_revision`
+                # más abajo -- una vez que se sepa si el resto del
+                # expediente (líneas, cobertura de lotes, baja) quedó
+                # completo sin este documento o no (sesión de trabajo
+                # pendiente real, 2026-09-05, ver el bloque que usa esta
+                # variable).
                 motivo_escaneados = (
                     "documento(s) escaneado(s), sin capa de texto (fuera de alcance sin OCR o modelo "
                     "multimodal, CLAUDE.md sección 15): " + "; ".join(documentos_escaneados)
                 )
-                motivo_revision = _acumular_motivo(motivo_revision, motivo_escaneados)
 
         total_lineas = lineas_creadas + lineas_actualizadas
 
@@ -813,13 +847,77 @@ def ejecutar_extraccion_expediente(
                 db.commit()
 
         if motivo_revision is None and total_lineas == 0:
-            motivo_revision = (
-                "extracción encolada sin documentos descargados para este expediente"
-                if sin_documentos
-                else "no se extrajo ninguna línea de catálogo de los documentos descargados"
-            )
-        if motivo_revision is None and not any(l.baja_lote is not None for l in lotes):
+            if sin_documentos:
+                motivo_revision = "extracción encolada sin documentos descargados para este expediente"
+            elif motivo_escaneados is not None:
+                # Motivo aparte y explícito (CLAUDE.md sección 3): distinto
+                # de "no se pudo extraer el cuadro de precios" (ese documento
+                # sí tiene texto, solo falló su tabla) y de "no se extrajo
+                # ninguna línea de catálogo" (ese expediente sí tiene
+                # documentos legibles, solo no traían cuadro de precios).
+                # Este dice que el documento no se puede leer en absoluto con
+                # las herramientas actuales -- y aquí sí es la única
+                # explicación posible de por qué no hay líneas, porque
+                # `total_lineas` es 0 y no hubo ningún otro documento que
+                # aportara nada.
+                motivo_revision = motivo_escaneados
+                motivo_escaneados = None  # ya incorporado, que no se repita más abajo
+            elif not any(
+                item.tipo in (TipoDocumento.anejo, TipoDocumento.pliego) and not item.pliego_sin_precios
+                for item in items
+            ):
+                # Sesión de expedientes sin cuadro de precios (2026-09-05,
+                # `6.24/28510.0025` y `6.24/28510.0193`): verificado en vivo
+                # contra la Plataforma real que la ficha de estos dos
+                # expedientes solo publica Adjudicación y Contrato -- ningún
+                # Anejo ni Pliego técnico, ni como fila propia ni embebido en
+                # el pliego (`pliego_embedded_urls`). El propio Contrato
+                # remite el cuadro de precios a "el Anejo 1 del PPT", un
+                # documento que la Plataforma nunca llegó a publicar para
+                # este expediente -- no es un fallo del scraper ni del
+                # localizador de tablas, es una ausencia real de la fuente.
+                # No se generaliza a cualquier expediente sin líneas: se
+                # restringe a los que ni siquiera tienen un Anejo/Pliego con
+                # posibilidad de traer precios, el único patrón verificado
+                # contra la Plataforma real hasta ahora.
+                tipos = sorted({item.tipo.value for item in items})
+                motivo_revision = (
+                    "no se extrajo ninguna línea de catálogo: el expediente no trae ningún Anejo ni "
+                    f"Pliego técnico con posible cuadro de precios, solo {', '.join(tipos)} — "
+                    "verificar en la Plataforma si existe un Anejo/PPT no publicado o no adjuntado, "
+                    "antes de asumir que es un expediente sin cuadro de precios"
+                )
+            else:
+                motivo_revision = "no se extrajo ninguna línea de catálogo de los documentos descargados"
+        if motivo_revision is None and not any(
+            l.baja_lote is not None or l.modelo_precio == ModeloPrecio.indexado_por_pedido for l in lotes
+        ):
             motivo_revision = motivo_baja_diferido or "no se pudo determinar la baja de ningún lote"
+
+        if motivo_escaneados is not None:
+            # Sesión de trabajo pendiente real (2026-09-05, `6.20/28510.0136`):
+            # antes, un documento escaneado mandaba el expediente entero a
+            # revisión sin condición, aunque el resto de documentos ya
+            # hubiera resuelto baja, importes y cobertura completa de lotes
+            # -- ese es justo el caso real de `0136` (verificado a mano,
+            # muestreo visual de 11 páginas del propio `ANEJO_2`: es el
+            # Pliego de Cláusulas Administrativas, la misma familia que
+            # CLAUDE.md sección 26 ya confirmó sin cuadro de precios en 93
+            # páginas reales de otro expediente; el cuadro de precios real
+            # de este expediente ya sale de `ANEJO_3`, con capa de texto).
+            # Si llegamos aquí es porque `total_lineas` no era 0 (si lo
+            # fuera, el bloque de arriba ya habría consumido este motivo) --
+            # si `motivo_revision` sigue vacío, ningún otro chequeo
+            # (cobertura parcial, baja) encontró un hueco tampoco: el
+            # documento no legible no impidió nada, y forzar revisión de
+            # todas formas solo por su existencia sería más cauto de lo que
+            # los propios datos justifican. Si en cambio ya hay otro motivo,
+            # el documento escaneado se deja como posible causa a mano,
+            # igual que antes.
+            if motivo_revision is not None:
+                motivo_revision = _acumular_motivo(motivo_revision, motivo_escaneados)
+            else:
+                documentos_escaneados_sin_bloquear = motivo_escaneados
 
         if campo_obra is not None:
             # Gana sobre cualquier motivo que el intento de leer un cuadro de
@@ -857,6 +955,8 @@ def ejecutar_extraccion_expediente(
             "baja_global": str(expediente.baja_global) if expediente.baja_global is not None else None,
             "estado": expediente.estado.value,
             "motivo_revision": motivo_revision,
+            "aviso_documento_escaneado": documentos_escaneados_sin_bloquear,
+            "nota_modelo_precio_indexado": nota_modelo_precio_indexado,
         }
     except Exception as exc:  # noqa: BLE001
         # Igual que en app.worker.ejecutar_trabajo: una excepción a mitad de

@@ -937,3 +937,122 @@ actualiza para reflejar que el episodio queda explicado, no que "no se
 reprodujo" — es una conclusión más fuerte que la de la auditoría previa,
 alcanzada por tener, esta vez, un episodio real que diagnosticar en vivo en
 lugar de solo su ausencia.
+
+---
+
+## 31. Trabajo pendiente real de la auditoría previa: los cuatro casos
+     restantes (sesión 2026-09-05)
+
+Ataca por separado los cuatro casos de `pendiente_revision` que
+`docs/auditoria-previa.md` bloque 3 parte B señalaba como trabajo pendiente
+real (excluido `6.24/28510.0116`, a la espera de una decisión del cliente
+sobre bajas contradictorias). Verificado contra el stack real
+(`docker exec`, Postgres real, PDFs reales del volumen de desarrollo, y una
+consulta en vivo a la Plataforma real vía Playwright headless para el caso
+31.1) antes de tocar código, con reproceso real posterior para confirmar el
+efecto.
+
+### 31.1 `6.24/28510.0025` y `6.24/28510.0193`: sin cuadro de precios,
+     confirmado, no un fallo del scraper
+
+Ambos expedientes solo tienen 2 documentos: `ADJUDICACION` (Anuncio
+PCSP, 3 páginas) y `CONTRATO` (114/121 páginas). El propio Contrato de
+`0025` dice, literalmente: *"Los precios unitarios de referencia de los
+artículos que componen el objeto del presente contrato, se encuentran
+contenidos en el Anejo 1 del PPT"* — un documento que nunca llegó a
+descargarse.
+
+**Verificado en vivo contra la Plataforma real** (no solo contra lo ya
+descargado): un script de diagnóstico de una sola vez, usando las mismas
+funciones de `app.scraping.pcsp` que ya usa el scraper real
+(`try_open` + `load_doc_rows`, sin descargar nada, solo listar), confirma
+que la ficha PCSP de ambos expedientes trae exactamente 3 filas de
+documento: `Adjudicación`, `Formalización` y `Documento Contractual` —
+**ninguna fila de Pliego ni de Anejo**, ni suelta ni embebida en un pliego
+(`pliego_embedded_urls` no tiene de dónde tirar porque no hay pliego
+descargado). No es un fallo del scraper: la Plataforma nunca publicó ese
+Anejo 1 del PPT para estos dos expedientes.
+
+**Arreglo**: `app.extraccion.orquestador.ejecutar_extraccion_expediente`
+distingue ahora este patrón exacto (cero líneas Y ningún documento
+clasificado como `anejo`/`pliego` con posibilidad de traer precios) del
+resto de casos de "no se extrajo ninguna línea", con un motivo propio que
+dice explícitamente que hay que comprobar en la Plataforma si existe un
+Anejo/PPT no publicado antes de asumir que el expediente no tiene cuadro de
+precios — no se marca automáticamente como resuelto, porque sigue siendo
+una ausencia de origen que un humano debería poder escalar a ADIF, no una
+sentencia definitiva como `sin_publicar`. Sigue en `pendiente_revision`,
+pero con un motivo que ya no parece un fallo de extracción.
+
+**Deliberadamente no generalizado a cualquier expediente sin líneas**: el
+chequeo solo se dispara cuando ni un solo documento del expediente es de
+tipo `anejo`/`pliego` con posibilidad de traer precios — el único patrón
+verificado contra la Plataforma real hasta ahora. Un expediente que sí trae
+un Anejo pero cuya tabla no se pudo localizar/mapear sigue cayendo en el
+motivo genérico de siempre.
+
+### 31.2 `6.20/28510.0136`: el documento escaneado, evaluado y descartado
+     para OCR — y un defecto real corregido de paso
+
+**Coste/beneficio de montar OCR, sin implementarlo**: `ANEJO_2` (100
+páginas, único documento sin capa de texto de los 187 del corpus, CLAUDE.md
+sección 3) se inspeccionó visualmente, página a página vía
+`pdfplumber.to_image()` sobre 11 páginas repartidas por todo el documento
+(1, 2, 5, 50, 60, 70, 80, 90, 95, 99, 100). Las 11 son Pliego de Cláusulas
+Administrativas Particulares (cuadro de características, penalidades,
+solvencia) más anejos de formularios en blanco para que el licitador los
+rellene (Anejo Nº 5 "Relación de suministros similares realizados", anejo
+de requisitos de seguridad/RGPD) — la misma familia de documento que
+CLAUDE.md sección 26 ya verificó sin cuadro de precios en 93 páginas reales
+de otro expediente (`6.23/28510.0018_ANEJO_2.pdf`, el PCAP). El cuadro de
+precios real de este expediente ya sale de `6.20_28510.0136_ANEJO_3.pdf`
+(con capa de texto, 40 líneas de catálogo). **Beneficio estimado de OCR: 0
+líneas de catálogo nuevas, contra el coste de montar un pipeline
+multimodal nuevo que hoy no usa ningún otro caso del corpus** — no se
+implementa. Decisión del cliente, con este dato ya en la mesa.
+
+**Defecto real corregido, encontrado al investigar por qué seguía en
+revisión pese a tener su cuadro de precios ya capturado**: antes de esta
+sesión, `app.extraccion.orquestador` mandaba a `pendiente_revision`
+**cualquier** expediente con al menos un documento escaneado, sin condición
+— aunque el resto de documentos ya hubiera resuelto baja, importes y
+cobertura completa de lotes. Ese es justo el caso de `0136`: baja e
+importes completos, líneas de catálogo completas, y aun así bloqueado solo
+por la existencia de un documento no legible que, verificado a mano, no
+aportaba nada. El chequeo se movió al final de
+`ejecutar_extraccion_expediente`, después de que el resto de comprobaciones
+(cobertura de lotes, baja) ya se hayan resuelto: si en ese punto no hay
+ningún otro motivo, el documento escaneado se registra como aviso
+informativo (`aviso_documento_escaneado` en el resultado del trabajo, mismo
+espíritu que `aviso_sindicacion`, CLAUDE.md sección 12) sin bloquear
+`completado`; si sí hay otro motivo, se sigue añadiendo como antes, como
+posible causa a mano. Test de regresión:
+`test_documento_escaneado_no_bloquea_si_el_resto_ya_resolvio_el_expediente`
+en `tests/extraccion/test_orquestador.py`. Verificado con reproceso real:
+`6.20/28510.0136` pasa a `completado`.
+
+### 31.3 `6.26/28510.0016`: formato de `codigo_precio` "PARTIDA", verificado
+     y añadido
+
+Expediente nuevo del corpus (no estaba en la auditoría previa), en
+revisión por 41 líneas con `codigo_precio` "con formato no reconocido":
+valores `'1'`, `'2'`, ..., `'41'`, sin ningún prefijo de letra. Verificado
+contra el PDF real (`ANEJO_1`, página 10): la cabecera de la tabla dice
+literalmente **"PARTIDA"**, no "Código de precio" — una quinta variante
+real del identificador de línea de CLAUDE.md sección 2, un número
+secuencial sin prefijo en vez de "P-001". Verificado sin colisiones: las 41
+líneas tienen valores únicos 1..41 dentro del lote.
+
+**Arreglo**: `app.catalogo._CODIGO_PRECIO_BARE_RE` (`^\d{1,4}$`) añadido
+como formato válido en `_normalizar_codigo_precio`, aparte de
+`_CODIGO_PRECIO_NUCLEO_RE` (ese sigue sin tocar, porque también se usa para
+aislar un código real en medio de ruido de pie de página — un dígito suelto
+ahí recuperaría números sueltos de cualquier ruido, no solo de este formato
+verificado). Verificado con reproceso real: `6.26/28510.0016` pasa a
+`completado`.
+
+### 31.4 Recuento tras los cuatro arreglos
+
+Ver `docs/identidad-expediente.md` sección 28 para el quinto caso (segunda
+familia de baja, cambio de esquema) y el recuento final conjunto de la
+sesión.

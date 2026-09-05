@@ -435,14 +435,23 @@ suficientes, no ahora.
 
 ## 16. Pendiente de resolver
 
-- **Segunda familia de baja, sin diseñar todavía.** Al menos 3 expedientes
-  reales del corpus (`6.23/28510.0018`, `0102`, `6.25/28510.0016`) usan la
-  fórmula `Ct = Oferta × Kt × Coeficiente de baja` por línea, no una baja
-  única de lote (sección 4). No hay un valor único que extraer — es un
-  modelo de cálculo distinto, sin construir. Puede haber más casos sin
-  identificar: no lo des por supuesto. Ver `docs/identidad-expediente.md`
-  sección 22 y `docs/decisiones-cliente.md` sección 26 para dónde
-  aparecieron.
+- **Segunda familia de baja: diseñada e implementada de forma acotada**
+  (sesión 2026-09-05). Los 3 expedientes conocidos (`6.23/28510.0018`,
+  `0102`, `6.25/28510.0016`, todos Acuerdo Marco de carril, ArcelorMittal)
+  usan `P(t) = Precio_ofertado × Kt × Coeficiente de baja` por pedido futuro,
+  no una baja única de lote (sección 4). Ni `Kt` (índices IPRI de energía y
+  acero) ni el Coeficiente de baja existen en ningún documento de la
+  licitación — se fijan pedido a pedido, en el futuro. Implementado:
+  `lotes.modelo_precio` (`fijo`/`indexado_por_pedido`, migración `0016`),
+  `lotes.coeficiente_transformacion` (el único parámetro real que sí está en
+  la licitación), detector por marcador literal
+  (`app.extraccion.modelo_precio_indexado`), y los 3 expedientes pasan a
+  `completado` con `baja_lote` `NULL` por diseño. Deliberadamente sin
+  implementar: extracción de los pesos de `Kt`/grupos IPRI, ni cálculo de
+  `Kt` en sí (exigiría consultar al INE en vivo). Puede haber más casos de
+  esta familia u otras variantes (p. ej. el hilo de cobre indexado a LME de
+  `6.20/28510.0136`) sin identificar: no lo des por supuesto. Ver
+  `docs/identidad-expediente.md` sección 28.
 - **Confirmar con el cliente si `Precio unitario` en el catálogo es el
   licitado o el adjudicado.** Sigue usándose el licitado — decisión de
   sesión, no confirmación del cliente (`docs/hallazgos-extraccion.md`
@@ -461,12 +470,15 @@ suficientes, no ahora.
   Resolución de Adjudicación, no por evidencia — si aparece una LC.27
   multi-lote real con redacción distinta, revisar ese módulo antes de
   confiar en el resultado.
-- **`6.24/28510.0025` y `6.24/28510.0193`: exactamente 2 documentos
-  (`anuncio_pcsp` + `contrato`), sin `anejo` ni `pliego`.** Mismo síntoma
-  estructural que los pedidos derivados de acuerdo marco, pero con código
-  normal, no de MATRIZ. Sin investigar si son pedidos derivados con una
-  matriz sin identificar o contratos cuyo anejo de precios nunca se
-  adjuntó.
+- **`6.24/28510.0025` y `6.24/28510.0193`: confirmado sin cuadro de precios
+  publicado en la Plataforma, no un fallo del scraper** (sesión 2026-09-05,
+  `docs/hallazgos-extraccion.md` sección 31.1). Verificado en vivo contra la
+  Plataforma real: la ficha de ambos solo publica Adjudicación y Contrato,
+  ningún Anejo ni Pliego — el propio Contrato remite el cuadro de precios a
+  "el Anejo 1 del PPT", nunca publicado para estos dos expedientes. Siguen
+  en `pendiente_revision` con un motivo que ya lo dice explícitamente
+  (posible ausencia de origen a escalar a ADIF, no un valor que este sistema
+  pueda inventar).
 - **Rendimiento de `6.23/28510.0051`: explicado, cerrado.** Auditoría previa
   (`docs/auditoria-previa.md` bloque 1, sesión 2026-09-04): una tanda de 38
   expedientes completó en 21,6 min sin cuelgue, `0051` dentro de su baseline

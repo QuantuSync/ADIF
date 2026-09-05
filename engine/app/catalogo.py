@@ -87,6 +87,19 @@ def _es_celda_vacia(valor: Optional[str]) -> bool:
 _CODIGO_PRECIO_NUCLEO_RE = re.compile(r"(?:P|PN|PA)-?\d{1,4}|L\d{1,2}-T\d{1,2}")
 _CODIGO_PRECIO_VALIDO_RE = re.compile(rf"^(?:{_CODIGO_PRECIO_NUCLEO_RE.pattern})$")
 
+# Quinto formato, sesión de expedientes en revisión (2026-09-05),
+# `6.26/28510.0016`: la cabecera real de esa tabla dice literalmente
+# "PARTIDA", no "Código de precio", y numera las filas 1..41 sin ningún
+# prefijo de letra -- verificado que son únicas dentro del lote (sin
+# colisión), igual de identificador de línea dentro del documento que
+# "P-001" (CLAUDE.md sección 2), solo que sin prefijo. Aparte de
+# `_CODIGO_PRECIO_NUCLEO_RE` (no dentro): ese patrón también se usa para
+# aislar el código real en medio de ruido de pie de página
+# (`_normalizar_codigo_precio` más abajo), y un dígito suelto ahí
+# recuperaría números sueltos de cualquier ruido, no solo de este formato
+# verificado.
+_CODIGO_PRECIO_BARE_RE = re.compile(r"^\d{1,4}$")
+
 # El pie de página de verificación CSV del documento (una URL del tipo
 # "https://sede.adif.gob.es/csv/valida.jsp") se cuela invertido carácter a
 # carácter en la celda del código cuando el sello de verificación se solapa
@@ -104,8 +117,9 @@ def _normalizar_codigo_precio(bruto: Optional[str]) -> tuple[Optional[str], Opti
     espacios/guiones (`limpiar_codigo_celda`). Devuelve `(codigo,
     motivo_revision)`:
 
-    - Formato conocido (`_CODIGO_PRECIO_VALIDO_RE`) -> se guarda tal cual,
-      sin motivo.
+    - Formato conocido (`_CODIGO_PRECIO_VALIDO_RE` o `_CODIGO_PRECIO_BARE_RE`,
+      un número suelto bajo cabecera "PARTIDA") -> se guarda tal cual, sin
+      motivo.
     - Ruido de pie de página con el código real todavía aislable dentro de
       la cadena -> se recupera el código limpio, con motivo — igual que la
       recuperación de cabecera desalineada (`_intentar_recuperar_desalineacion`):
@@ -123,7 +137,7 @@ def _normalizar_codigo_precio(bruto: Optional[str]) -> tuple[Optional[str], Opti
     limpio = limpiar_codigo_celda(bruto)
     if limpio is None:
         return None, None
-    if _CODIGO_PRECIO_VALIDO_RE.match(limpio):
+    if _CODIGO_PRECIO_VALIDO_RE.match(limpio) or _CODIGO_PRECIO_BARE_RE.match(limpio):
         return limpio, None
 
     coincidencias = list(_CODIGO_PRECIO_NUCLEO_RE.finditer(limpio))

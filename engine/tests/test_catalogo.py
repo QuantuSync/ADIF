@@ -516,6 +516,15 @@ def test_normalizar_codigo_precio_formato_conocido_pasa_sin_motivo():
     assert _normalizar_codigo_precio("P01") == ("P01", None)
 
 
+def test_normalizar_codigo_precio_numero_suelto_bajo_cabecera_partida():
+    # Caso real, 6.26/28510.0016 (sesión de trabajo pendiente real,
+    # 2026-09-05): la cabecera de la tabla dice literalmente "PARTIDA", no
+    # "Código de precio" -- 41 filas numeradas 1..41 sin ningún prefijo de
+    # letra, verificadas únicas dentro del lote.
+    assert _normalizar_codigo_precio("1") == ("1", None)
+    assert _normalizar_codigo_precio("41") == ("41", None)
+
+
 def test_normalizar_codigo_precio_recupera_pie_de_pagina_csv_al_final():
     # Caso real, 6.24/28510.0180 (uno de los 7 `completado`): el pie de
     # verificación CSV invertido queda pegado delante del código.

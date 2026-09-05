@@ -738,3 +738,131 @@ mirados uno a uno (encargo: "si son celdas concretas, puede ser barato"):**
   ToUnicode) — es justo el caso de "fuera de alcance sin OCR" de CLAUDE.md
   sección 15, no una celda con un valor reconocible. Sigue en revisión, y es
   correcto que lo esté.
+
+---
+
+## 28. Segunda familia de baja: modelo de precio indexado por pedido
+     (sesión de trabajo pendiente real, 2026-09-05)
+
+Diseña y implementa una versión acotada de lo pendiente en CLAUDE.md sección
+16 ("segunda familia de baja, sin diseñar todavía"), tras verificar los tres
+documentos reales de los tres expedientes conocidos (`6.23/28510.0018`,
+`6.23/28510.0102`, `6.25/28510.0016`) — los tres son Acuerdo Marco de
+"SUMINISTRO DE CARRIL NUEVO PARA LAS NECESIDADES DE LA RED FERROVIARIA DE
+INTERÉS GENERAL", mismo adjudicatario (ArcelorMittal España), texto de
+fórmula idéntico carácter a carácter entre los tres.
+
+### La fórmula real, verificada
+
+```
+P-1(t)      = P-1(Oferta presentada por el licitador) × Kt × Coeficiente de baja
+P-i(t)      = P-i indicado en el PPT × Coeficiente de transformación ofertado × Kt × Coeficiente de baja   (i = 2..13)
+Kt          = 0,26 · (Et / E0) + 0,33 · (St / S0) + 0,41
+```
+
+- `Et`/`E0`: índice IPRI (INE) del grupo 351 (energía eléctrica), en el
+  momento del pedido / en el momento de publicación de la licitación.
+- `St`/`S0`: índice IPRI del grupo 241 (acero), mismos momentos.
+- **Coeficiente de baja**: ofertado por el licitador **en cada pedido**,
+  ≤ 1. **No está en ningún documento de la licitación** — se fija en el
+  futuro, pedido a pedido, cuando ADIF solicita oferta al adjudicatario del
+  Acuerdo Marco y le facilita los valores de `Et`/`St` de ese momento.
+- **Coeficiente de transformación**: sí está fijado en la licitación —
+  verificado en los tres casos: **1,276**, declarado en la Propuesta de
+  Adjudicación y en el Contrato ("con un coeficiente de transformación para
+  el P-1 de 1,276 y con un coeficiente de transformación para P-2 a P-13 de
+  1,276"). `6.25/28510.0016` trae además un ejemplo numérico real firmado
+  por el adjudicatario en su Proposición Económica: PPT 99,55 €/m × 1,276 =
+  127,03 €/m ofertado.
+
+**Consecuencia central**: `precio_adjudicado` de este modelo **no es
+calculable desde los documentos de la licitación, nunca** — no porque falte
+un dato que buscar mejor, sino porque el valor no existe hasta que se cursa
+un pedido real contra el Acuerdo Marco, con datos (índices IPRI del momento,
+oferta del licitador para ese pedido) que no están en ningún PDF del
+expediente. Distinto de "no se encontró la baja" (sección 4: ahí el dato
+existe en algún documento y toca buscarlo mejor) — aquí el dato
+estructuralmente no existe todavía.
+
+### Qué se implementó (acotado, encargo explícito de esta sesión)
+
+- **`lotes.modelo_precio`** (migración `0016`, enum `fijo` /
+  `indexado_por_pedido`, `ModeloPrecio` en `app.models`): señal explícita y
+  auditable de por qué `baja_lote`/`precio_adjudicado` se quedan `NULL` en
+  un lote — no un motivo de texto suelto que se pierde en el histórico de
+  `trabajos_cola`.
+- **`lotes.coeficiente_transformacion`** (`Numeric(8,4)`, nullable): el
+  único parámetro real de la fórmula que sí está en la licitación.
+- **`app.extraccion.modelo_precio_indexado.detectar_modelo_precio_indexado`**:
+  busca el marcador literal "Coeficiente de baja: Ofertado por el licitador
+  para cada pedido" (idéntico en los tres reales, ancla específica que no
+  dispara con nada ajeno a este modelo) y, si lo encuentra, el "coeficiente
+  de transformación para el P-1 de N" en cualquier página del mismo
+  expediente. Una llamada de regex, sin modelo — la frase es literal y fija
+  en la plantilla, no varía de redacción entre los tres casos vistos.
+- **`app.extraccion.orquestador`**: en el camino de lote único implícito
+  (CLAUDE.md, "camino de siempre"), si se detecta el modelo indexado, se
+  salta `calcular_baja_efectiva` entero (esa función no aplica: no hay baja
+  que cuadrar ni derivar) y el lote queda con `baja_lote = NULL`,
+  `modelo_precio = indexado_por_pedido`, sin que el chequeo final de "no se
+  pudo determinar la baja de ningún lote" lo marque como incompleto.
+  Idempotente: un reproceso que ya no detecte el marcador revierte el lote a
+  `modelo_precio = fijo` en vez de dejar un valor obsoleto.
+- **Respuesta a si esto es `pendiente_revision` o `completado`**: se decidió
+  que sea **`completado`** cuando el resto del expediente (importes,
+  cobertura de lotes) está resuelto. Razón: el modelo aplicado correctamente
+  no deja nada que un humano pueda decidir — no hay una baja que buscar
+  mejor ni un valor que confirmar, es una propiedad estructural del tipo de
+  contrato, igual que un pedido derivado de acuerdo marco sin cuadro de
+  precios propio (sección 20) es `completado` tras heredar, no
+  `pendiente_revision`. Un texto explicativo en lenguaje llano viaja en el
+  resultado del trabajo (`nota_modelo_precio_indexado`, mismo mecanismo que
+  `aviso_documento_escaneado` de `docs/hallazgos-extraccion.md` sección
+  31.2) para que quede claro, si alguien lo mira, que `baja_lote` vacío aquí
+  es a propósito, no un hueco sin explicar.
+- Tests: `tests/extraccion/test_modelo_precio_indexado.py` (4 casos: detecta
+  el marcador, extrae el coeficiente de otra página, tolera el espacio
+  suelto real de `6.25/28510.0016` ("de 1, 276"), no detecta nada sin el
+  marcador). Verificado además con reproceso real de los tres expedientes
+  contra el stack completo (Postgres real, PDFs reales) — no solo con los
+  tests aislados.
+
+### Qué NO se implementó, y por qué (encargo explícito: "no implementes la
+     extracción estructurada de los pesos Kt ni de los grupos IPRI")
+
+- **Los pesos de `Kt`** (0,26 energía / 0,33 acero / 0,41 constante) y los
+  **grupos IPRI de referencia** (351 energía, 241 acero) no se extraen ni se
+  guardan en ninguna columna. Son constantes de la plantilla de contrato,
+  iguales en los tres casos vistos — extraerlas no cambia ningún resultado
+  hoy, y nadie las consume.
+- **`Kt` no es calculable ni con estos pesos**: hace falta consultar al INE
+  los índices IPRI reales del grupo 351/241 en dos momentos concretos (fecha
+  de publicación de la licitación, fecha de solicitud de cada pedido) — una
+  fuente de datos externa, viva, fuera del alcance de una extracción de PDF
+  y de las invariantes de arquitectura (CLAUDE.md sección 9, "nada
+  específico de un proveedor" no aplica aquí, pero sí el principio general:
+  no se construye una integración nueva sin un caso de uso real que la
+  necesite).
+- **Si en el futuro hace falta calcular un precio real de un pedido
+  concreto** (no solo el precio de referencia del PPT, que ya se captura
+  como `precio_unitario` de siempre): la vía prevista, sin construir, sería
+  una pantalla o endpoint aparte que reciba los índices IPRI del momento
+  (introducidos a mano o vía una integración con el INE, decisión de
+  cliente) y el "Coeficiente de baja" de ese pedido concreto, y calcule
+  `P(t)` bajo demanda — nunca algo que el catálogo acumulativo intente
+  precomputar, porque el resultado cambia con cada pedido y con cada
+  publicación de índice IPRI.
+- **Otras posibles variantes de esta familia sin verificar**: los tres casos
+  conocidos son todos del mismo contrato-tipo de carril. Si aparece un
+  Acuerdo Marco de otro material con una fórmula de indexación distinta (por
+  ejemplo, el "hilo de cobre" de `6.20/28510.0136_ANEJO_2.pdf`, que declara
+  una fórmula ligada a la cotización LME del cobre — ver
+  `docs/hallazgos-extraccion.md` sección 31.2, sin cuadro de precios propio
+  en ese documento así que sin verificar más a fondo), el marcador literal
+  de este detector no lo va a reconocer, y caerá en el motivo genérico de
+  siempre. No generalizar el detector sin un caso real que lo confirme.
+
+### Recuento final de la sesión
+
+Ver `docs/hallazgos-extraccion.md` sección 31.4 para el recuento conjunto de
+los cinco casos atacados en esta sesión.

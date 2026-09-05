@@ -139,6 +139,31 @@ def test_expediente_sin_documentos_va_a_revision_no_a_fallido(db_session):
     assert resultado["motivo_revision"] is not None
 
 
+def test_expediente_sin_anejo_ni_pliego_da_motivo_especifico_de_cuadro_ausente(db_session):
+    # Caso real, 6.24/28510.0025 y 6.24/28510.0193 (sesión de trabajo
+    # pendiente real, 2026-09-05, docs/hallazgos-extraccion.md sección
+    # 31.1): solo Adjudicación y Contrato, sin ningún Anejo/Pliego con
+    # posibilidad de traer precios -- el motivo debe decirlo, distinto del
+    # genérico "no se extrajo ninguna línea" que suena a fallo del
+    # localizador de tablas cuando en realidad el documento nunca existió.
+    expediente = _crear_expediente_con_documentos(
+        db_session,
+        "6.24/28510.0025",
+        [
+            ("ADJUDICACION", fx.PROPUESTA_LC27_PRECIOS_UNITARIOS),
+            ("CONTRATO", fx.CONTRATO_PRECIOS_UNITARIOS),
+        ],
+    )
+    trabajo = SimpleNamespace(expediente_id=expediente.id)
+
+    resultado = ejecutar_extraccion_expediente(db_session, _StorageDirecta(), trabajo, model_provider=None)
+
+    db_session.refresh(expediente)
+    assert expediente.estado == EstadoExpediente.pendiente_revision
+    assert "no trae ningún Anejo ni" in resultado["motivo_revision"]
+    assert resultado["lineas_creadas"] == 0
+
+
 def test_expediente_con_documento_escaneado_va_a_revision_con_motivo_distinto(db_session):
     # CLAUDE.md sección 3: un documento escaneado (sin capa de texto) no
     # aporta ninguna línea, pero el motivo debe decirlo explícitamente en vez
@@ -159,6 +184,45 @@ def test_expediente_con_documento_escaneado_va_a_revision_con_motivo_distinto(db
 
     doc = db_session.query(Documento).filter_by(expediente_id=expediente.id).one()
     assert doc.procesado_en is None  # nunca se intentó procesar su tabla
+
+
+def test_documento_escaneado_no_bloquea_si_el_resto_ya_resolvio_el_expediente(db_session):
+    # Sesión de trabajo pendiente real (2026-09-05), caso real
+    # `6.20/28510.0136`: el documento escaneado (Pliego de Cláusulas
+    # Administrativas, verificado a mano sin cuadro de precios, misma
+    # familia que CLAUDE.md sección 26) convive con otros documentos reales
+    # que ya dan baja, importes y líneas completas -- forzar revisión solo
+    # por la existencia del escaneado sería más cauto de lo que los propios
+    # datos justifican. Antes de esta sesión, cualquier documento escaneado
+    # bloqueaba `completado` sin condición.
+    expediente = _crear_expediente_con_documentos(
+        db_session,
+        "6.20/28510.0136",
+        [
+            ("ADJUDICACION", fx.PROPUESTA_LC27_PRECIOS_UNITARIOS),
+            ("ANEJO", fx.ANEJO_PRECIOS_GUANTES),
+            ("CONTRATO", fx.CONTRATO_PRECIOS_UNITARIOS),
+            ("ANEJO_ESCANEADO", fx.DOCUMENTO_ESCANEADO_SIN_TEXTO),
+        ],
+    )
+    trabajo = SimpleNamespace(expediente_id=expediente.id)
+
+    resultado = ejecutar_extraccion_expediente(db_session, _StorageDirecta(), trabajo, model_provider=None)
+
+    db_session.refresh(expediente)
+    assert expediente.estado == EstadoExpediente.completado
+    assert expediente.error is None
+    assert resultado["motivo_revision"] is None
+    # El aviso queda registrado aparte, sin bloquear el estado (mismo
+    # espíritu que `aviso_sindicacion`, CLAUDE.md sección 12).
+    assert "escaneado" in resultado["aviso_documento_escaneado"]
+
+    doc_escaneado = (
+        db_session.query(Documento)
+        .filter_by(expediente_id=expediente.id, nombre_archivo=fx.DOCUMENTO_ESCANEADO_SIN_TEXTO.name)
+        .one()
+    )
+    assert doc_escaneado.procesado_en is None  # nunca se intentó procesar su tabla
 
 
 def test_expediente_0008_cruza_codigo_interno_del_excel_de_referencia(db_session, tmp_path, monkeypatch):

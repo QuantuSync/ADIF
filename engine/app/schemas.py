@@ -4,6 +4,8 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict
 
+from app.models import ModeloPrecio
+
 
 class LoteOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -18,6 +20,14 @@ class LoteOut(BaseModel):
     # acuerdo marco, no de los propios documentos de este expediente
     # (app.extraccion.herencia_matriz).
     baja_heredada_de_matriz: Optional[bool] = None
+    # Migración 0016 (sesión de trabajo pendiente real, 2026-09-05, ver
+    # docs/identidad-expediente.md sección 28): `indexado_por_pedido` explica
+    # por qué `baja_lote` es `None` a propósito, no por fallo -- ese modelo
+    # fija la baja en cada pedido futuro contra un Acuerdo Marco, no en la
+    # licitación. Sin exponer todavía en la web (mismo pendiente menor que
+    # `aviso_sindicacion`, `docs/decisiones-cliente.md` sección 26).
+    modelo_precio: ModeloPrecio = ModeloPrecio.fijo
+    coeficiente_transformacion: Optional[Decimal] = None
 
 
 class ExpedienteOut(BaseModel):

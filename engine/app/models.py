@@ -87,6 +87,19 @@ class EstadoTrabajo(str, enum.Enum):
     fallido = "fallido"
 
 
+class ModeloPrecio(str, enum.Enum):
+    # `fijo`: modelo de siempre (CLAUDE.md sección 4), una baja porcentual
+    # única por lote. `indexado_por_pedido`: segunda familia (migración
+    # 0016, sesión de trabajo pendiente real 2026-09-05) -- el precio de
+    # cada pedido futuro contra un Acuerdo Marco depende de índices IPRI
+    # publicados por el INE y de un "Coeficiente de baja" que ADIF fija
+    # pedido a pedido, ninguno de los dos presente en la licitación:
+    # `baja_lote`/`precio_adjudicado` se quedan NULL a propósito para este
+    # modelo, nunca por fallo de extracción.
+    fijo = "fijo"
+    indexado_por_pedido = "indexado_por_pedido"
+
+
 class Expediente(Base):
     __tablename__ = "expedientes"
 
@@ -211,6 +224,16 @@ class Lote(Base):
     # documentos de este expediente (app.extraccion.herencia_matriz). None
     # cuando no aplica.
     baja_heredada_de_matriz = Column(Boolean, nullable=True)
+    # Migración 0016 (sesión de trabajo pendiente real, 2026-09-05): ver
+    # docstring de `ModeloPrecio`. `coeficiente_transformacion` solo tiene
+    # valor cuando `modelo_precio == indexado_por_pedido` -- es el único
+    # parámetro de la fórmula de ese modelo que sí está en la licitación
+    # (los demás, índices IPRI y Coeficiente de baja, no existen todavía en
+    # ningún documento).
+    modelo_precio = Column(
+        Enum(ModeloPrecio, name="modelo_precio"), nullable=False, default=ModeloPrecio.fijo
+    )
+    coeficiente_transformacion = Column(Numeric(8, 4), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),
