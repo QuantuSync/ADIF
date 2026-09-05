@@ -1,6 +1,7 @@
 """Pruebas de la API de catálogo, revisión y documentos (CLAUDE.md, encargo
 de esta sesión, puntos 1 a 4): sobre `TestClient` con SQLite en memoria, sin
 Postgres levantado — mismo patrón que `db_session` de conftest.py."""
+import io
 from decimal import Decimal
 
 import openpyxl
@@ -278,6 +279,86 @@ def test_confirmar_linea_catalogo(cliente, db_session):
 
     assert resp.status_code == 200
     assert resp.json()["estado_revision"] == "confirmado"
+
+
+def test_descartar_linea_catalogo_exige_motivo(cliente, db_session):
+    _expediente, _lote, _doc, linea = _sembrar_catalogo(db_session)
+
+    resp = cliente.post(f"/catalogo/lineas/{linea.id}/descartar", json={"motivo": ""})
+
+    assert resp.status_code == 422
+
+
+def test_descartar_linea_catalogo(cliente, db_session):
+    # CLAUDE.md bloque 2: una línea que no es material real, o no se puede
+    # determinar, se saca del catálogo con un motivo -- nunca se borra.
+    _expediente, _lote, _doc, linea = _sembrar_catalogo(db_session)
+
+    resp = cliente.post(
+        f"/catalogo/lineas/{linea.id}/descartar",
+        json={"motivo": "es el epígrafe de la tabla, no una línea de material"},
+    )
+
+    assert resp.status_code == 200
+    datos = resp.json()
+    assert datos["estado_revision"] == "descartado"
+    assert "es el epígrafe de la tabla" in datos["comentarios"]
+
+
+def test_marcar_linea_pendiente_exige_nota(cliente, db_session):
+    _expediente, _lote, _doc, linea = _sembrar_catalogo(db_session)
+
+    resp = cliente.post(f"/catalogo/lineas/{linea.id}/pendiente", json={"nota": ""})
+
+    assert resp.status_code == 422
+
+
+def test_marcar_linea_pendiente(cliente, db_session):
+    _expediente, _lote, _doc, linea = _sembrar_catalogo(db_session)
+
+    resp = cliente.post(
+        f"/catalogo/lineas/{linea.id}/pendiente",
+        json={"nota": "consultar con compras si esta matrícula sigue vigente"},
+    )
+
+    assert resp.status_code == 200
+    datos = resp.json()
+    assert datos["estado_revision"] == "pendiente"
+    assert "consultar con compras" in datos["comentarios"]
+
+
+def test_descartar_y_pendiente_acumulan_comentarios_sin_perder_los_anteriores(cliente, db_session):
+    _expediente, _lote, _doc, linea = _sembrar_catalogo(db_session)
+    cliente.patch(f"/catalogo/lineas/{linea.id}", json={"comentarios": "nota original"})
+
+    resp = cliente.post(f"/catalogo/lineas/{linea.id}/pendiente", json={"nota": "nota nueva"})
+
+    datos = resp.json()
+    assert "nota original" in datos["comentarios"]
+    assert "nota nueva" in datos["comentarios"]
+
+
+def test_exportar_catalogo_excluye_lineas_descartadas(cliente, db_session, monkeypatch):
+    monkeypatch.setattr(settings, "codigos_proyecto_path", None)
+    _expediente, _lote, _doc, linea = _sembrar_catalogo(db_session)
+    cliente.post(f"/catalogo/lineas/{linea.id}/descartar", json={"motivo": "no es material real"})
+
+    resp = cliente.get("/catalogo/exportar.xlsx")
+
+    libro = openpyxl.load_workbook(io.BytesIO(resp.content))
+    hoja = libro.active
+    assert hoja.max_row == 1  # solo la cabecera: la única línea del catálogo estaba descartada
+
+
+def test_catalogo_sigue_mostrando_lineas_descartadas(cliente, db_session):
+    # A diferencia del Excel, la pantalla de catálogo/revisión no oculta las
+    # descartadas -- CLAUDE.md bloque 2 solo pide excluirlas de la entrega.
+    _expediente, _lote, _doc, linea = _sembrar_catalogo(db_session)
+    cliente.post(f"/catalogo/lineas/{linea.id}/descartar", json={"motivo": "no es material real"})
+
+    resp = cliente.get("/catalogo")
+
+    assert resp.json()["total"] == 1
 
 
 def test_descargar_documento_sirve_los_bytes_reales(cliente, db_session, tmp_path, monkeypatch):

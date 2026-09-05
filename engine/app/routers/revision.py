@@ -13,10 +13,21 @@ from app.schemas import (
     ExpedienteOut,
     ExpedienteRevisionOut,
     LineaCatalogoCorreccion,
+    LineaCatalogoDescartar,
     LineaCatalogoOut,
+    LineaCatalogoPendiente,
 )
 
 router = APIRouter()
+
+
+def _acumular_comentario(comentarios: str | None, nuevo: str) -> str:
+    """Añade una nota nueva sin perder las que ya hubiera (CLAUDE.md sección
+    7: `comentarios` es la única columna de notas humanas, y varias
+    acciones de la cola de revisión -- descartar, dejar pendiente, una
+    corrección con nota -- pueden escribir en ella para la misma línea a lo
+    largo del tiempo)."""
+    return f"{comentarios}\n{nuevo}" if comentarios else nuevo
 
 
 @router.get("/revision", response_model=list[ExpedienteOut])
@@ -126,9 +137,7 @@ def corregir_linea_catalogo(
     3): solo toca los campos que trae `correccion`, nunca borra un valor ya
     conocido con uno ausente — mismo criterio de `guardar_lineas_catalogo`
     (CLAUDE.md sección 9.9)."""
-    linea = db.get(LineaCatalogo, linea_id)
-    if linea is None:
-        raise HTTPException(status_code=404, detail="línea de catálogo no encontrada")
+    linea = _linea_o_404(db, linea_id)
 
     datos = correccion.model_dump(exclude_unset=True, exclude_none=True)
     for campo, valor in datos.items():
@@ -140,15 +149,7 @@ def corregir_linea_catalogo(
         linea.estado_revision = EstadoRevisionLinea.corregido
 
     db.commit()
-
-    fila = db.execute(
-        select(LineaCatalogo, Lote, Expediente, Documento)
-        .join(Expediente, LineaCatalogo.expediente_id == Expediente.id)
-        .outerjoin(Lote, LineaCatalogo.lote_id == Lote.id)
-        .outerjoin(Documento, LineaCatalogo.documento_origen_id == Documento.id)
-        .where(LineaCatalogo.id == linea_id)
-    ).one()
-    return LineaCatalogoOut(**fila_a_dict(*fila))
+    return _fila_linea(db, linea_id)
 
 
 @router.post("/catalogo/lineas/{linea_id}/confirmar", response_model=LineaCatalogoOut)
@@ -157,12 +158,20 @@ def confirmar_linea_catalogo(
     db: Session = Depends(get_db),
     usuario: Usuario = Depends(get_current_user),
 ):
+    linea = _linea_o_404(db, linea_id)
+    linea.estado_revision = EstadoRevisionLinea.confirmado
+    db.commit()
+    return _fila_linea(db, linea_id)
+
+
+def _linea_o_404(db: Session, linea_id: int) -> LineaCatalogo:
     linea = db.get(LineaCatalogo, linea_id)
     if linea is None:
         raise HTTPException(status_code=404, detail="línea de catálogo no encontrada")
-    linea.estado_revision = EstadoRevisionLinea.confirmado
-    db.commit()
+    return linea
 
+
+def _fila_linea(db: Session, linea_id: int) -> LineaCatalogoOut:
     fila = db.execute(
         select(LineaCatalogo, Lote, Expediente, Documento)
         .join(Expediente, LineaCatalogo.expediente_id == Expediente.id)
@@ -171,3 +180,40 @@ def confirmar_linea_catalogo(
         .where(LineaCatalogo.id == linea_id)
     ).one()
     return LineaCatalogoOut(**fila_a_dict(*fila))
+
+
+@router.post("/catalogo/lineas/{linea_id}/descartar", response_model=LineaCatalogoOut)
+def descartar_linea_catalogo(
+    linea_id: int,
+    cuerpo: LineaCatalogoDescartar,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    """CLAUDE.md bloque 2: una línea que no es material real o no se puede
+    determinar sale del catálogo entregado (`app.exportacion.
+    generar_excel_catalogo` la excluye), pero se queda en base de datos con
+    su motivo -- nunca se borra, para no perder la traza de por qué el
+    documento producía esta fila (CLAUDE.md sección 9.10)."""
+    linea = _linea_o_404(db, linea_id)
+    linea.estado_revision = EstadoRevisionLinea.descartado
+    linea.comentarios = _acumular_comentario(linea.comentarios, f"Descartada: {cuerpo.motivo}")
+    db.commit()
+    return _fila_linea(db, linea_id)
+
+
+@router.post("/catalogo/lineas/{linea_id}/pendiente", response_model=LineaCatalogoOut)
+def marcar_linea_pendiente(
+    linea_id: int,
+    cuerpo: LineaCatalogoPendiente,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    """CLAUDE.md bloque 2: para cuando quien revisa necesita consultarlo con
+    otra persona antes de confirmar, corregir o descartar -- la línea sigue
+    en el catálogo (a diferencia de `descartar_linea_catalogo`) mientras se
+    resuelve."""
+    linea = _linea_o_404(db, linea_id)
+    linea.estado_revision = EstadoRevisionLinea.pendiente
+    linea.comentarios = _acumular_comentario(linea.comentarios, f"Pendiente: {cuerpo.nota}")
+    db.commit()
+    return _fila_linea(db, linea_id)

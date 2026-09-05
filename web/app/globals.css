@@ -1138,6 +1138,21 @@ input:focus-visible {
   max-width: 22rem;
 }
 
+/* Panel de acción de una línea de la cola de revisión (RevisionPanel,
+   CLAUDE.md bloque 2: corregir/descartar/dejar pendiente, no solo
+   confirmar) — una fila propia bajo la línea, con el mismo fondo sutil que
+   distingue una zona secundaria del resto de la tabla. */
+.table tbody td.linea-accion-panel {
+  background: var(--bg-subtle);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  padding: 1rem 1.25rem;
+}
+
+.linea-accion-panel textarea.input {
+  resize: vertical;
+}
+
 @media (max-width: 980px) {
   .revision-layout,
   .revision-detail-grid,

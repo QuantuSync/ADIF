@@ -2,7 +2,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models import ModeloPrecio
 
@@ -128,6 +128,22 @@ class LineaCatalogoCorreccion(BaseModel):
     precio_unitario: Optional[Decimal] = None
     unidad_medida: Optional[str] = None
     comentarios: Optional[str] = None
+
+
+class LineaCatalogoDescartar(BaseModel):
+    # CLAUDE.md bloque 2 ("descartar la línea con motivo"): el motivo es
+    # obligatorio -- una línea que sale del catálogo entregado al cliente
+    # (`app.exportacion.generar_excel_catalogo`) sin dejar dicho por qué no
+    # se puede auditar después.
+    motivo: str = Field(min_length=1)
+
+
+class LineaCatalogoPendiente(BaseModel):
+    # CLAUDE.md bloque 2 ("dejarla pendiente con una nota"): igual que el
+    # motivo de descarte, la nota es obligatoria -- es el único rastro de
+    # por qué esta línea se dejó para consultar con otra persona en vez de
+    # confirmarse o corregirse ya.
+    nota: str = Field(min_length=1)
 
 
 class ExpedienteCorreccion(BaseModel):

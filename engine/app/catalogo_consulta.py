@@ -12,7 +12,7 @@ from typing import Optional
 from sqlalchemy import Select, func, or_, select
 from sqlalchemy.orm import Session
 
-from app.models import Documento, Expediente, LineaCatalogo, Lote
+from app.models import Documento, EstadoRevisionLinea, Expediente, LineaCatalogo, Lote
 
 
 def _aplicar_filtros(
@@ -21,7 +21,16 @@ def _aplicar_filtros(
     lote: Optional[str],
     matricula: Optional[str],
     q: Optional[str],
+    excluir_descartadas: bool = False,
 ) -> Select:
+    if excluir_descartadas:
+        # CLAUDE.md bloque 2: una línea descartada en la cola de revisión
+        # (no es material real, o no se pudo determinar) sale del catálogo
+        # entregado al cliente -- pero sigue en base de datos con su
+        # motivo, y sigue apareciendo en `/catalogo` y en la propia cola de
+        # revisión, para no perder la traza de por qué el documento la
+        # produjo (CLAUDE.md sección 9.10).
+        stmt = stmt.where(LineaCatalogo.estado_revision != EstadoRevisionLinea.descartado)
     if expediente:
         stmt = stmt.where(Expediente.codigo_expediente.ilike(f"%{expediente}%"))
     if lote:
@@ -57,6 +66,7 @@ def consultar_catalogo(
     q: Optional[str] = None,
     pagina: int = 1,
     tamano_pagina: int = 50,
+    excluir_descartadas: bool = False,
 ) -> PaginaCatalogo:
     # `Lote` es outerjoin: una línea huérfana (CLAUDE.md, encargo de esta
     # sesión, punto 3 — su tabla de origen no se pudo asociar a un lote sin
@@ -70,13 +80,13 @@ def consultar_catalogo(
         .outerjoin(Lote, LineaCatalogo.lote_id == Lote.id)
         .outerjoin(Documento, LineaCatalogo.documento_origen_id == Documento.id)
     )
-    base = _aplicar_filtros(base, expediente, lote, matricula, q)
+    base = _aplicar_filtros(base, expediente, lote, matricula, q, excluir_descartadas)
 
     conteo_stmt = _aplicar_filtros(
         select(func.count(LineaCatalogo.id))
         .join(Expediente, LineaCatalogo.expediente_id == Expediente.id)
         .outerjoin(Lote, LineaCatalogo.lote_id == Lote.id),
-        expediente, lote, matricula, q,
+        expediente, lote, matricula, q, excluir_descartadas,
     )
     total = db.execute(conteo_stmt).scalar_one()
 

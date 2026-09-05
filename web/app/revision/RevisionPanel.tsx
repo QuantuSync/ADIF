@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { DescripcionCelda, formatearNumero } from "../ui";
 import { interpretarMotivoLinea, interpretarMotivos } from "../motivos";
 
@@ -33,9 +33,25 @@ type LineaCatalogo = {
   precio_adjudicado: string | null;
   estado_revision: string;
   motivo_revision: string | null;
+  comentarios: string | null;
   documento_origen_id: number | null;
   documento_origen_nombre: string | null;
   pagina: number | null;
+};
+
+// Las tres salidas de una línea que hoy solo se podía confirmar (CLAUDE.md
+// bloque 2): corregir el dato a mano, descartarla del catálogo con motivo, o
+// dejarla pendiente con una nota para consultar. Cada una abre su propio
+// panel bajo la fila -- nunca más de uno a la vez, para no competir con la
+// tabla por atención.
+type TipoAccionLinea = "corregir" | "descartar" | "pendiente";
+
+const ETIQUETA_ESTADO_LINEA: Record<string, string> = {
+  sin_revisar: "Sin confirmar",
+  confirmado: "Confirmado",
+  corregido: "Corregido",
+  descartado: "Descartado",
+  pendiente: "Pendiente de consulta",
 };
 
 type DetalleRevision = {
@@ -167,6 +183,82 @@ export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
   async function confirmarLinea(lineaId: number) {
     await fetch(`${apiUrl}/catalogo/lineas/${lineaId}/confirmar`, { method: "POST" });
     if (seleccionId !== null) await cargarDetalle(seleccionId);
+  }
+
+  // Panel de acción abierto bajo una fila de línea (corregir/descartar/
+  // pendiente): como mucho uno a la vez, con su propio formulario.
+  const [panelAccion, setPanelAccion] = useState<{ lineaId: number; tipo: TipoAccionLinea } | null>(null);
+  const [formCorreccion, setFormCorreccion] = useState({
+    matricula: "", cantidad: "", precio_unitario: "", comentarios: "",
+  });
+  const [textoMotivo, setTextoMotivo] = useState("");
+  const [guardandoAccion, setGuardandoAccion] = useState(false);
+  const [errorAccion, setErrorAccion] = useState<string | null>(null);
+
+  function abrirAccionLinea(linea: LineaCatalogo, tipo: TipoAccionLinea) {
+    setErrorAccion(null);
+    if (panelAccion?.lineaId === linea.id && panelAccion.tipo === tipo) {
+      setPanelAccion(null);
+      return;
+    }
+    setPanelAccion({ lineaId: linea.id, tipo });
+    setTextoMotivo("");
+    if (tipo === "corregir") {
+      setFormCorreccion({
+        matricula: linea.matricula ?? "",
+        cantidad: linea.cantidad ?? "",
+        precio_unitario: linea.precio_unitario ?? "",
+        comentarios: linea.comentarios ?? "",
+      });
+    }
+  }
+
+  async function guardarCorreccionLinea(lineaId: number) {
+    setGuardandoAccion(true);
+    setErrorAccion(null);
+    try {
+      const cuerpo: Record<string, string> = {};
+      if (formCorreccion.matricula) cuerpo.matricula = formCorreccion.matricula;
+      if (formCorreccion.cantidad) cuerpo.cantidad = formCorreccion.cantidad;
+      if (formCorreccion.precio_unitario) cuerpo.precio_unitario = formCorreccion.precio_unitario;
+      if (formCorreccion.comentarios) cuerpo.comentarios = formCorreccion.comentarios;
+      const res = await fetch(`${apiUrl}/catalogo/lineas/${lineaId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(cuerpo),
+      });
+      if (!res.ok) throw new Error(`la API respondió ${res.status}`);
+      setPanelAccion(null);
+      if (seleccionId !== null) await cargarDetalle(seleccionId);
+    } catch (e) {
+      setErrorAccion(e instanceof Error ? e.message : String(e));
+    } finally {
+      setGuardandoAccion(false);
+    }
+  }
+
+  async function guardarAccionConTexto(lineaId: number, tipo: "descartar" | "pendiente") {
+    if (!textoMotivo.trim()) {
+      setErrorAccion(tipo === "descartar" ? "El motivo es obligatorio." : "La nota es obligatoria.");
+      return;
+    }
+    setGuardandoAccion(true);
+    setErrorAccion(null);
+    try {
+      const campo = tipo === "descartar" ? "motivo" : "nota";
+      const res = await fetch(`${apiUrl}/catalogo/lineas/${lineaId}/${tipo}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [campo]: textoMotivo.trim() }),
+      });
+      if (!res.ok) throw new Error(`la API respondió ${res.status}`);
+      setPanelAccion(null);
+      if (seleccionId !== null) await cargarDetalle(seleccionId);
+    } catch (e) {
+      setErrorAccion(e instanceof Error ? e.message : String(e));
+    } finally {
+      setGuardandoAccion(false);
+    }
   }
 
   const motivos = useMemo(() => interpretarMotivos(detalle?.expediente.error), [detalle]);
@@ -346,36 +438,165 @@ export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
                     <tbody>
                       {detalle.lineas.map((linea) => {
                         const aviso = interpretarMotivoLinea(linea.motivo_revision);
+                        const panelAbierto = panelAccion?.lineaId === linea.id ? panelAccion.tipo : null;
+                        const esFinal = linea.estado_revision === "confirmado" || linea.estado_revision === "descartado";
                         return (
-                          <tr key={linea.id}>
-                            <td className="mono">{linea.codigo_precio ?? ""}</td>
-                            <td className="mono">{linea.matricula ?? ""}</td>
-                            <td>
-                              <DescripcionCelda texto={linea.descripcion} />
-                            </td>
-                            <td className="num">{formatearNumero(linea.precio_unitario)}</td>
-                            <td>
-                              <span className={linea.estado_revision === "confirmado" ? "status status-ok" : "status"}>
-                                {linea.estado_revision === "confirmado" ? "Confirmado" : "Sin confirmar"}
-                              </span>
-                            </td>
-                            <td className="col-aviso">
-                              {aviso && (
+                          <Fragment key={linea.id}>
+                            <tr>
+                              <td className="mono">{linea.codigo_precio ?? ""}</td>
+                              <td className="mono">{linea.matricula ?? ""}</td>
+                              <td>
+                                <DescripcionCelda texto={linea.descripcion} />
+                              </td>
+                              <td className="num">{formatearNumero(linea.precio_unitario)}</td>
+                              <td>
                                 <span
-                                  className={aviso.categoria === "contradiccion" ? "status-note status-attn" : "status-note"}
+                                  className={linea.estado_revision === "confirmado" ? "status status-ok" : "status"}
                                 >
-                                  {aviso.texto}
+                                  {ETIQUETA_ESTADO_LINEA[linea.estado_revision] ?? linea.estado_revision}
                                 </span>
-                              )}
-                            </td>
-                            <td>
-                              {linea.estado_revision !== "confirmado" && (
-                                <button onClick={() => confirmarLinea(linea.id)} className="btn btn-ghost btn-sm">
-                                  Confirmar línea
-                                </button>
-                              )}
-                            </td>
-                          </tr>
+                              </td>
+                              <td className="col-aviso">
+                                {aviso && (
+                                  <span
+                                    className={aviso.categoria === "contradiccion" ? "status-note status-attn" : "status-note"}
+                                  >
+                                    {aviso.texto}
+                                  </span>
+                                )}
+                                {linea.comentarios && (
+                                  <span className="status-note" title={linea.comentarios}>
+                                    {linea.comentarios.length > 80
+                                      ? `${linea.comentarios.slice(0, 80)}…`
+                                      : linea.comentarios}
+                                  </span>
+                                )}
+                              </td>
+                              <td>
+                                <div className="button-row">
+                                  {linea.estado_revision !== "confirmado" && (
+                                    <button onClick={() => confirmarLinea(linea.id)} className="btn btn-ghost btn-sm">
+                                      Confirmar
+                                    </button>
+                                  )}
+                                  {!esFinal && (
+                                    <>
+                                      <button
+                                        onClick={() => abrirAccionLinea(linea, "corregir")}
+                                        className="btn btn-ghost btn-sm"
+                                      >
+                                        Corregir
+                                      </button>
+                                      <button
+                                        onClick={() => abrirAccionLinea(linea, "pendiente")}
+                                        className="btn btn-ghost btn-sm"
+                                      >
+                                        Pendiente
+                                      </button>
+                                      <button
+                                        onClick={() => abrirAccionLinea(linea, "descartar")}
+                                        className="btn btn-ghost btn-sm"
+                                      >
+                                        Descartar
+                                      </button>
+                                    </>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                            {panelAbierto && (
+                              <tr>
+                                <td colSpan={7} className="linea-accion-panel">
+                                  {panelAbierto === "corregir" && (
+                                    <div className="field-grid">
+                                      <label>
+                                        <span className="field-label">Matrícula</span>
+                                        <input
+                                          className="input"
+                                          value={formCorreccion.matricula}
+                                          onChange={(e) =>
+                                            setFormCorreccion({ ...formCorreccion, matricula: e.target.value })
+                                          }
+                                        />
+                                      </label>
+                                      <label>
+                                        <span className="field-label">Cantidad</span>
+                                        <input
+                                          className="input"
+                                          value={formCorreccion.cantidad}
+                                          onChange={(e) =>
+                                            setFormCorreccion({ ...formCorreccion, cantidad: e.target.value })
+                                          }
+                                        />
+                                      </label>
+                                      <label>
+                                        <span className="field-label">Precio unitario</span>
+                                        <input
+                                          className="input"
+                                          value={formCorreccion.precio_unitario}
+                                          onChange={(e) =>
+                                            setFormCorreccion({ ...formCorreccion, precio_unitario: e.target.value })
+                                          }
+                                        />
+                                      </label>
+                                      <label style={{ gridColumn: "1 / -1" }}>
+                                        <span className="field-label">Comentarios</span>
+                                        <textarea
+                                          className="input"
+                                          rows={2}
+                                          value={formCorreccion.comentarios}
+                                          onChange={(e) =>
+                                            setFormCorreccion({ ...formCorreccion, comentarios: e.target.value })
+                                          }
+                                        />
+                                      </label>
+                                    </div>
+                                  )}
+                                  {(panelAbierto === "descartar" || panelAbierto === "pendiente") && (
+                                    <label>
+                                      <span className="field-label">
+                                        {panelAbierto === "descartar" ? "Motivo del descarte" : "Nota"}
+                                      </span>
+                                      <textarea
+                                        className="input"
+                                        rows={2}
+                                        value={textoMotivo}
+                                        onChange={(e) => setTextoMotivo(e.target.value)}
+                                        placeholder={
+                                          panelAbierto === "descartar"
+                                            ? "Por qué esta línea no es material real o no se puede determinar"
+                                            : "Qué hace falta consultar antes de decidir"
+                                        }
+                                      />
+                                    </label>
+                                  )}
+                                  {errorAccion && <p className="error-banner">{errorAccion}</p>}
+                                  <div className="button-row" style={{ marginTop: "0.75rem" }}>
+                                    <button
+                                      onClick={() => setPanelAccion(null)}
+                                      disabled={guardandoAccion}
+                                      className="btn btn-secondary btn-sm"
+                                    >
+                                      Cancelar
+                                    </button>
+                                    <button
+                                      onClick={() =>
+                                        panelAbierto === "corregir"
+                                          ? guardarCorreccionLinea(linea.id)
+                                          : guardarAccionConTexto(linea.id, panelAbierto)
+                                      }
+                                      disabled={guardandoAccion}
+                                      className="btn btn-primary btn-sm"
+                                    >
+                                      {panelAbierto === "corregir" && "Guardar corrección"}
+                                      {panelAbierto === "descartar" && "Descartar línea"}
+                                      {panelAbierto === "pendiente" && "Dejar pendiente"}
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </Fragment>
                         );
                       })}
                     </tbody>

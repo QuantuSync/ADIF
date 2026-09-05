@@ -42,7 +42,10 @@ def generar_excel_catalogo(db: Session) -> bytes:
 
     pagina = 1
     while True:
-        resultado = consultar_catalogo(db, pagina=pagina, tamano_pagina=_TAMANO_LOTE)
+        # CLAUDE.md bloque 2: una línea descartada en la cola de revisión no
+        # sale en el Excel que se entrega al cliente, aunque siga en base de
+        # datos con su motivo.
+        resultado = consultar_catalogo(db, pagina=pagina, tamano_pagina=_TAMANO_LOTE, excluir_descartadas=True)
         for linea, lote, expediente, _documento in resultado.filas:
             # "El sistema nunca inventa una matriz. Si no cruza, se deja
             # vacío" (CLAUDE.md sección 7): código interno y código de
