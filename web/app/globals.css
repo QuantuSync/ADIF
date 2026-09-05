@@ -1077,7 +1077,7 @@ input:focus-visible {
   font-size: 0.85rem;
   font-weight: 600;
   padding: 0.4rem 0.85rem;
-  border-radius: 999px;
+  border-radius: var(--radius);
   border: 1px solid var(--border);
   background: var(--panel);
   color: var(--text-muted);
