@@ -75,6 +75,88 @@ def _es_celda_vacia(valor: Optional[str]) -> bool:
     return normalizar_guiones(valor).strip() == "-"
 
 
+# Sesión de defectos de auditoría (2026-09-05, docs/correccion-defectos-
+# auditoria.md): formatos de codigo_precio verificados contra el corpus real
+# y contra `tests/test_catalogo.py` / `tests/fixtures/__init__.py`. CLAUDE.md
+# sección 3 solo menciona "P-001, P-067"; el corpus real trae más variantes,
+# todas confirmadas: "P-001" (con guion), "P1"/"P01" (sin guion, 1-2
+# dígitos), "PN001"/"PN09" (prefijo de señalización), "PA-01" (partida
+# alzada numerada), "L01-T01" (lote+tipo, traviesas). Un codigo_precio que no
+# encaje aquí no se guarda en silencio (encargo de esta sesión, punto 1):
+# ver `_normalizar_codigo_precio`.
+_CODIGO_PRECIO_NUCLEO_RE = re.compile(r"(?:P|PN|PA)-?\d{1,4}|L\d{1,2}-T\d{1,2}")
+_CODIGO_PRECIO_VALIDO_RE = re.compile(rf"^(?:{_CODIGO_PRECIO_NUCLEO_RE.pattern})$")
+
+# El pie de página de verificación CSV del documento (una URL del tipo
+# "https://sede.adif.gob.es/csv/valida.jsp") se cuela invertido carácter a
+# carácter en la celda del código cuando el sello de verificación se solapa
+# en coordenadas con esa columna — hallazgo real, `6.23/28510.0042` (21
+# líneas) y `6.24/28510.0180` (7 líneas), verificado en
+# docs/correccion-defectos-auditoria.md: el ruido resultante es siempre
+# letras y los símbolos de una URL invertida (`/`, `.`, `:`), nunca dígitos,
+# así que el código real siempre se puede aislar como el único fragmento que
+# encaja en `_CODIGO_PRECIO_NUCLEO_RE` dentro de la cadena corrupta.
+_RUIDO_PIE_PAGINA_RE = re.compile(r"^[A-Za-zÀ-ÿ/.:]+$")
+
+
+def _normalizar_codigo_precio(bruto: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    """Valida y, si hace falta, recupera el código de precio ya limpio de
+    espacios/guiones (`limpiar_codigo_celda`). Devuelve `(codigo,
+    motivo_revision)`:
+
+    - Formato conocido (`_CODIGO_PRECIO_VALIDO_RE`) -> se guarda tal cual,
+      sin motivo.
+    - Ruido de pie de página con el código real todavía aislable dentro de
+      la cadena -> se recupera el código limpio, con motivo — igual que la
+      recuperación de cabecera desalineada (`_intentar_recuperar_desalineacion`):
+      el dato se conserva, pero marcado para que un humano lo confirme.
+    - Ruido de pie de página sin ningún código aislable (la celda entera es
+      el pie de página, no trae código) -> se descarta (`None`), con
+      motivo. El resto de la línea (matrícula, descripción, precio) no se ve
+      afectado y puede seguir siendo una línea de catálogo válida.
+    - Cualquier otro valor que no encaje en ningún formato conocido del
+      corpus (comprobación general del encargo, no solo el caso del pie de
+      página) -> se conserva tal cual, porque podría ser un formato
+      legítimo todavía no catalogado, pero NUNCA en silencio: siempre con
+      `motivo_revision`.
+    """
+    limpio = limpiar_codigo_celda(bruto)
+    if limpio is None:
+        return None, None
+    if _CODIGO_PRECIO_VALIDO_RE.match(limpio):
+        return limpio, None
+
+    coincidencias = list(_CODIGO_PRECIO_NUCLEO_RE.finditer(limpio))
+    if len(coincidencias) == 1:
+        nucleo = coincidencias[0]
+        resto = limpio[: nucleo.start()] + limpio[nucleo.end() :]
+        # Mínimo 2 caracteres de ruido, no 1 (hallazgo real, sesión
+        # 2026-09-05, `6.24/28510.0185`): "P-001b"/"P-002b"... son códigos
+        # DISTINTOS de "P-001"/"P-002" (mismo material, precio distinto —
+        # dos tablas de precios reales del mismo documento, no ruido), y una
+        # sola letra de cola encaja en el mismo patrón que el ruido real de
+        # pie de página. Los 31 casos reales de pie de página verificados
+        # (`6.23/28510.0042`, `6.24/28510.0180`) traen siempre 2 o más
+        # caracteres de ruido — nunca uno solo — así que exigir el mínimo no
+        # deja de recuperar ningún caso real y evita fundir dos códigos
+        # legítimos y distintos en uno.
+        if len(resto) >= 2 and _RUIDO_PIE_PAGINA_RE.match(resto):
+            return nucleo.group(), (
+                "codigo_precio recuperado tras descartar ruido de pie de página colado en la celda "
+                f"({limpio!r} -> {nucleo.group()!r})"
+            )
+
+    if _RUIDO_PIE_PAGINA_RE.match(limpio):
+        return None, (
+            f"codigo_precio descartado: pie de página de verificación colado en la celda, "
+            f"sin código recuperable ({limpio!r})"
+        )
+
+    return limpio, (
+        f"codigo_precio con formato no reconocido en el corpus, revisar antes de dar por bueno: {limpio!r}"
+    )
+
+
 def _acumular_motivo(motivo: Optional[str], nuevo: Optional[str]) -> Optional[str]:
     if not nuevo:
         return motivo
@@ -194,12 +276,12 @@ def _construir_campos(
         return _valor_en(fila, mapeo.get(campo))
 
     matricula_bruta = _valor("matricula")
-    codigo_precio = limpiar_codigo_celda(_valor("codigo_precio"))
+    codigo_precio, motivo_codigo_precio = _normalizar_codigo_precio(_valor("codigo_precio"))
     matricula = limpiar_codigo_celda(matricula_bruta)
     descripcion = limpiar_texto_celda(_valor("descripcion")) or ""
     unidad_medida = limpiar_texto_celda(_valor("unidad_medida"))
 
-    motivo_revision: Optional[str] = None
+    motivo_revision: Optional[str] = motivo_codigo_precio
 
     if matricula is not None and not _MATRICULA_VALIDA_RE.match(matricula):
         clave = normalizar(matricula).replace(" ", "")
@@ -353,23 +435,84 @@ class ResultadoGuardadoCatalogo:
     actualizadas: int
 
 
-def _combinar_por_clave(lineas: list[dict]) -> list[dict]:
+def _firma_material(datos: dict) -> Optional[tuple]:
+    """Firma de "misma pieza física" para detectar una línea real repetida
+    en dos tablas del mismo documento con distinta completitud de columnas
+    (defecto de duplicados de la auditoría 2026-09-05, ver
+    docs/correccion-defectos-auditoria.md): una segunda tabla de
+    características técnicas puede repetir el material con su mismo precio
+    pero sin columna de `codigo_precio` propia — verificado contra el corpus
+    real, `6.23/28510.0018` lote 1, matrícula `601020180`, mismo precio
+    58,43 € en páginas 12 (con `codigo_precio="P-02"`) y 16 (sin código).
+    `calcular_clave_linea` les asigna claves distintas (codigo_precio vs.
+    matrícula) precisamente porque prioriza codigo_precio cuando existe, así
+    que ninguna fusión por clave exacta las ve nunca como la misma fila sin
+    esta firma aparte.
+
+    Solo se activa cuando la matrícula, la descripción y el precio unitario
+    están los tres presentes: es el único triplete que sigue identificando
+    la misma pieza física con o sin código de precio. Sin matrícula, dos
+    filas con la misma descripción y precio bien pueden ser materiales
+    distintos que coinciden por casualidad (líneas huérfanas, códigos
+    genéricos) — no se fusionan por firma."""
+    matricula = datos.get("matricula")
+    descripcion = datos.get("descripcion")
+    precio_unitario = datos.get("precio_unitario")
+    if not matricula or not descripcion or precio_unitario is None:
+        return None
+    return (matricula, descripcion, precio_unitario)
+
+
+def _combinar_por_clave(lineas: list[dict], permitir_fusion_material: bool = True) -> list[dict]:
     """El mismo cuadro de precios puede reaparecer varias veces dentro de un
     único documento (CLAUDE.md sección 3 y docstring de `guardar_lineas_catalogo`),
     así que `lineas` puede traer la misma `clave_linea` repetida antes de tocar
     la base de datos. Doblarlas aquí, en Python, con la misma regla de fusión
     que ya aplica `guardar_lineas_catalogo` fila a fila (un valor `None` nunca
     pisa uno ya conocido) — no depender de que la sesión autoflushee entre
-    iteraciones, que `SessionLocal` (app/db.py) desactiva a propósito."""
+    iteraciones, que `SessionLocal` (app/db.py) desactiva a propósito.
+
+    `permitir_fusion_material=False` desactiva además la fusión por
+    `_firma_material` (mismo triplete matrícula+descripción+precio bajo
+    `clave_linea` distinta): `guardar_lineas_catalogo` lo hace para las
+    líneas huérfanas (`lote_id is None`), porque ahí `clave_linea` ya lleva
+    un sufijo de página a propósito (`app.extraccion.pipeline_anejo`) para
+    no fundir tablas ambiguas de lotes distintos que comparten
+    `codigo_precio` — fusionar también por matrícula ahí arriesgaría
+    confundir el mismo material ofertado en dos lotes distintos con una
+    única fila.
+
+    La clave canónica de cada firma prefiere siempre la que trae
+    `codigo_precio`, sin importar en qué orden aparecen las tablas
+    (`6.24/28510.0116`: la tabla sin código está en la página 18, la que sí
+    lo trae en la 22 — si se quedara con "la primera vista" a secas, la
+    fila fundida heredaría la clave de matrícula pese a conocerse ya el
+    código)."""
+    clave_por_firma: dict[tuple, tuple[str, bool]] = {}
+    if permitir_fusion_material:
+        for datos in lineas:
+            firma = _firma_material(datos)
+            if firma is None:
+                continue
+            tiene_codigo = bool(datos.get("codigo_precio"))
+            actual = clave_por_firma.get(firma)
+            if actual is None or (tiene_codigo and not actual[1]):
+                clave_por_firma[firma] = (datos["clave_linea"], tiene_codigo)
+
     combinadas: dict[str, dict] = {}
     for datos in lineas:
-        existente = combinadas.get(datos["clave_linea"])
+        firma = _firma_material(datos) if permitir_fusion_material else None
+        clave = clave_por_firma[firma][0] if firma is not None else datos["clave_linea"]
+        existente = combinadas.get(clave)
         if existente is None:
-            combinadas[datos["clave_linea"]] = dict(datos)
+            nuevo = dict(datos)
+            nuevo["clave_linea"] = clave
+            combinadas[clave] = nuevo
         else:
             for campo, valor in datos.items():
                 if valor is not None:
                     existente[campo] = valor
+            existente["clave_linea"] = clave
     return list(combinadas.values())
 
 
@@ -401,21 +544,101 @@ def guardar_lineas_catalogo(
     entre expedientes distintos) en dos expedientes distintos colisionarían
     entre sí, porque Postgres no deduplica `NULL` en la constraint UNIQUE de
     `lote_id`: aquí la idempotencia de las huérfanas la garantiza este
-    filtro explícito, no la constraint de base de datos."""
+    filtro explícito, no la constraint de base de datos.
+
+    Cuando `lote_id` no es huérfano, la búsqueda de la línea existente cae
+    además a `_firma_material` (defecto de duplicados de la auditoría
+    2026-09-05, docs/hallazgos-extraccion.md sección 30.2): la segunda tabla
+    que repite un material sin `codigo_precio` propio puede vivir en OTRO
+    documento del mismo expediente (`6.23/28510.0102` y `6.25/28510.0016`:
+    la tabla con código está en `ANEJO_1`, la que repite sin código está en
+    `ANEJO_3` — dos llamadas a esta función completamente distintas, así
+    que `_combinar_por_clave` en memoria nunca las ve juntas), o incluso
+    puede llevar YA guardada como dos filas sueltas de una sesión anterior
+    a este arreglo (`6.24/28510.0116`, lote 25, "P-01" — ver la fila
+    `duplicado_por_firma` de abajo). La búsqueda por firma se hace SIEMPRE
+    que hay firma, no solo cuando la búsqueda exacta falla: el orden en que
+    `_combinar_por_clave` ve las tablas del documento no está garantizado
+    (una puede procesarse antes que otra), así que la clave exacta podía
+    encontrar cualquiera de las dos filas heredadas — absorber la otra pase
+    lo que pase es lo único que no depende de ese orden. Nunca se hace para
+    huérfanas, por la misma razón que `_combinar_por_clave` tampoco fusiona
+    por firma ahí."""
     creadas = 0
     actualizadas = 0
-    for datos in _combinar_por_clave(lineas):
+    fusion_material = lote_id is not None
+    for datos in _combinar_por_clave(lineas, permitir_fusion_material=fusion_material):
         existente = (
             db.query(LineaCatalogo)
             .filter_by(lote_id=lote_id, expediente_id=datos["expediente_id"], clave_linea=datos["clave_linea"])
             .one_or_none()
         )
+
+        # Todas las filas que comparten firma con esta, no solo la primera:
+        # un material puede llevar heredadas más de dos filas sueltas de
+        # antes de este arreglo (`6.23/28510.0042`, matrícula `643480020` —
+        # la búsqueda por clave exacta de la propia página que se está
+        # guardando puede aterrizar en cualquiera de ellas según el orden en
+        # que se procesan los documentos, así que quedarse solo con
+        # `.first()` antes de saber cuál es `existente` podía dejar la
+        # tercera fila sin visitar nunca).
+        duplicados_por_firma: list[LineaCatalogo] = []
+        if fusion_material:
+            firma = _firma_material(datos)
+            if firma is not None:
+                matricula, descripcion, precio_unitario = firma
+                consulta = db.query(LineaCatalogo).filter_by(
+                    lote_id=lote_id,
+                    expediente_id=datos["expediente_id"],
+                    matricula=matricula,
+                    descripcion=descripcion,
+                    precio_unitario=precio_unitario,
+                )
+                if existente is not None:
+                    consulta = consulta.filter(LineaCatalogo.id != existente.id)
+                duplicados_por_firma = consulta.order_by(LineaCatalogo.id).all()
+
+        if existente is None and duplicados_por_firma:
+            existente = duplicados_por_firma.pop(0)
+
         if existente is None:
             db.add(LineaCatalogo(lote_id=lote_id, **datos))
             creadas += 1
         else:
+            # `clave_linea` se recalcula aparte, más abajo: cuando la fila
+            # existente se encontró por firma (no por clave exacta),
+            # `datos["clave_linea"]` puede ser justo la clave *distinta* que
+            # disparó esa búsqueda — fundirla aquí a ciegas, como cualquier
+            # otro campo, la downgradearía de vuelta a la clave de matrícula
+            # si esta llamada es la que no trae `codigo_precio`.
             for campo, valor in datos.items():
-                if valor is not None:
+                if campo != "clave_linea" and valor is not None:
                     setattr(existente, campo, valor)
+            for duplicado in duplicados_por_firma:
+                # Filas heredadas de antes de este arreglo para la misma
+                # pieza física: se absorben en `existente` (los campos que
+                # le falten se rellenan desde cada una) y se borran, en vez
+                # de dejarlas como duplicados que ningún reproceso futuro
+                # vuelve a mirar.
+                for campo in LineaCatalogo.__table__.columns.keys():
+                    if campo in ("id", "lote_id", "clave_linea"):
+                        continue
+                    valor_heredado = getattr(duplicado, campo)
+                    if valor_heredado is not None and getattr(existente, campo) is None:
+                        setattr(existente, campo, valor_heredado)
+                db.delete(duplicado)
+            if existente.codigo_precio:
+                # Prioridad de `calcular_clave_linea` aplicada de nuevo tras
+                # la fusión: si el código de precio ya se conoce (propio o
+                # recién fundido desde la otra tabla), esa es la clave
+                # canónica, gane quien gane la carrera de documentos. Ya no
+                # puede colisionar con la fila absorbida justo arriba, pero
+                # sí, en teoría, con una tercera fila totalmente ajena que
+                # comparta el mismo `codigo_precio` sin compartir matrícula
+                # -- un problema de datos real que conviene que reviente
+                # aquí, no que se disimule.
+                clave_ideal = existente.codigo_precio.strip()
+                if clave_ideal:
+                    existente.clave_linea = clave_ideal
             actualizadas += 1
     return ResultadoGuardadoCatalogo(creadas=creadas, actualizadas=actualizadas)

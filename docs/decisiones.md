@@ -130,3 +130,96 @@ Las cuatro pantallas reconstruidas contra el stack real
 `/mnt/c/dev/ADIF`) y medidas con Playwright a 1280×900: `scrollWidth -
 clientWidth = 0` en las cuatro. `npx tsc --noEmit` sin errores. Sin tests
 de `engine` afectados — ningún cambio de esta sesión toca `engine/`.
+
+---
+
+## 31. Herencia de lote entre páginas: la premisa de "cero casos" ya no
+    aplica, pero el dato real desaconseja implementarla tal como estaba
+    planteada (sesión 2026-09-05)
+
+CLAUDE.md sección 19 (y `app/extraccion/lote_tabla.py`) documentaba una
+decisión explícita de no implementar herencia de lote entre páginas cuando
+la franja que precede a una tabla está vacía de texto, basada en una
+medición de **cero casos** en el corpus de entonces. La auditoría previa
+(`docs/auditoria-previa.md`, hallazgo 5) midió **797 líneas** con motivo
+"banda vacía" sobre el corpus multi-lote actual, el 72% (656) concentradas
+en un único expediente, `6.25/28510.0019` (9 lotes). Encargo de esta sesión:
+revisar la decisión con el dato nuevo, sin implementar nada todavía.
+
+### Qué pasa hoy con las 797 líneas
+
+Van a huérfanas (`lote_id = NULL`) con `motivo_revision = "banda vacía:
+posible continuación de tabla partida entre páginas, sin inferir"` — el
+expediente entero ya está en `pendiente_revision` por cobertura parcial de
+lotes (CLAUDE.md sección 27), así que no bloquean nada nuevo, pero
+tampoco aparecen en el catálogo con su lote correcto.
+
+### Lo que se encontró al revisar `6.25/28510.0019` fila a fila
+
+Verificado con `SELECT` reales agrupando por página y `documento_origen_id`
+(no solo el conteo agregado de la auditoría): las 656 líneas de este
+expediente **no son una tabla dividida por el límite de una página que ya
+tenía su lote resuelto** — son un cuadro de precios técnico, de
+`ANEJO_1.pdf` (clasificado `pliego`), que se extiende de forma continua
+durante **18 páginas** (20-47) sin que en ninguna de sus franjas aparezca
+jamás una cabecera "LOTE N": la primera tabla de cada tramo cae como
+"ninguna cabecera encontrada" (hay texto en la franja, pero no es un
+marcador de lote — probablemente la cabecera de columnas repetida), y
+**todas las páginas siguientes del mismo tramo, sin excepción, caen como
+"banda vacía"** porque son la continuación directa de esa misma tabla sin
+lote. Es decir: **no hay ningún lote ya resuelto del que heredar** al
+principio de la cadena — la tabla nunca tuvo un lote identificado, ni en la
+página 20 ni en ninguna posterior.
+
+Verificado además que buena parte de esas 656 líneas son la **misma tabla
+repetida entre documentos**: `CONTRATO_2.pdf` (pág. 111-139) incluye una
+copia casi completa del mismo cuadro de precios de `ANEJO_1.pdf` (los
+recuentos de líneas por página coinciden exactamente entre ambos
+documentos), entremezclada además con la tabla de Resolución por lote (que
+sí resuelve lotes 1-9 correctamente en ese mismo rango de páginas). Esta
+duplicación es del mismo tipo que el mecanismo B de
+`docs/hallazgos-extraccion.md` sección 30.2 (segunda tabla que repite
+contenido sin columna de lote/código propia), solo que aquí las líneas
+quedan huérfanas (`lote_id = NULL`) en vez de en un lote conocido — por
+diseño, el arreglo de fusión por firma de material de esta sesión
+**no se aplica a huérfanas** (para no fundir el mismo material ofertado en
+lotes distintos), así que esta duplicación concreta sigue sin resolverse.
+
+### Por qué la herencia, tal como está planteada, no resolvería la mayoría
+
+El mecanismo original (`app/extraccion/lote_tabla.py`, "heredar el lote de
+la tabla anterior cuando la franja está vacía") asume una cadena que
+**empieza** con un lote ya identificado y solo pierde la cabecera en
+páginas de continuación. El dato real de `0019` no encaja en esa forma: la
+cadena entera (18 páginas) nunca tuvo cabecera de lote, así que no habría
+nada válido que propagar — implementar la herencia tal cual dejaría estas
+656 líneas exactamente igual de huérfanas (heredarían "ningún lote" de la
+tabla anterior, que tampoco tenía uno).
+
+Peor: en las páginas donde SÍ hay un lote resuelto cerca (111-123, la tabla
+de Resolución), la tabla sin lote de `ANEJO_1`/`CONTRATO_2` aparece
+**intercalada en las mismas páginas** — una herencia ciega ("usa el lote de
+la tabla inmediatamente anterior en orden de lectura") podría atribuir
+incorrectamente estas líneas al lote resuelto más próximo, que es el de una
+tabla estructuralmente distinta. Eso sería un dato incorrecto con
+apariencia de resuelto, peor que dejarlo huérfano para revisión manual —
+exactamente el riesgo que CLAUDE.md sección 19 ya anticipaba ("puede fallar
+de formas silenciosas"), ahora confirmado con un caso real en vez de
+hipotético.
+
+### Recomendación (sin implementar)
+
+1. **No implementar la herencia "hereda de la tabla anterior" tal como
+   estaba diseñada** — el caso real mayoritario (656/797) no tiene ningún
+   lote válido del que heredar, y el resto arriesga una atribución cruzada
+   entre tablas distintas que comparten página.
+2. El hueco real y accionable es la **duplicación entre documentos** de
+   este mismo cuadro de precios (`ANEJO_1` vs. `CONTRATO_2`): antes de tocar
+   la herencia, valdría la pena medir cuántas de las 797 líneas huérfanas
+   coinciden en matrícula+descripción+precio con una línea **ya resuelta**
+   en un lote conocido del mismo expediente — esas sí podrían descartarse
+   con seguridad (son la misma línea que ya está en el catálogo con su lote
+   correcto), sin el riesgo de fundir materiales de lotes distintos que hizo
+   excluir a las huérfanas del arreglo de la sección 30.2.
+3. Sesión propuesta, aparte: medir ese solape sobre el corpus completo
+   (no solo `0019`) antes de decidir si construir el mecanismo del punto 2.

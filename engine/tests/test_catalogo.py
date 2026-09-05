@@ -2,6 +2,7 @@ from decimal import Decimal
 
 from app.catalogo import (
     _combinar_por_clave,
+    _normalizar_codigo_precio,
     calcular_clave_linea,
     construir_linea_catalogo,
     construir_lineas_desde_tabla,
@@ -460,3 +461,259 @@ def test_construir_lineas_desde_tabla_usa_orden_inicial():
     lineas = construir_lineas_desde_tabla(tabla, mapeo, None, 1, None, orden_inicial=5)
 
     assert [l["orden_aparicion"] for l in lineas] == [5, 6]
+
+
+# --- Auditoría 2026-09-05: codigo_precio corrupto por pie de página CSV ---
+# (docs/correccion-defectos-auditoria.md, encargo de esta sesión punto 1)
+
+
+def test_normalizar_codigo_precio_formato_conocido_pasa_sin_motivo():
+    assert _normalizar_codigo_precio("P-001") == ("P-001", None)
+    assert _normalizar_codigo_precio("PN09") == ("PN09", None)
+    assert _normalizar_codigo_precio("P01") == ("P01", None)
+
+
+def test_normalizar_codigo_precio_recupera_pie_de_pagina_csv_al_final():
+    # Caso real, 6.24/28510.0180 (uno de los 7 `completado`): el pie de
+    # verificación CSV invertido queda pegado delante del código.
+    codigo, motivo = _normalizar_codigo_precio("j.adilav/vscPN005")
+
+    assert codigo == "PN005"
+    assert motivo is not None
+    assert "recuperado" in motivo
+
+
+def test_normalizar_codigo_precio_recupera_pie_de_pagina_csv_partido_alrededor():
+    # Caso real, 6.23/28510.0042: el ruido puede caer a ambos lados del
+    # código real, no solo delante.
+    codigo, motivo = _normalizar_codigo_precio("hneP-015elbac")
+
+    assert codigo == "P-015"
+    assert "recuperado" in motivo
+
+
+def test_normalizar_codigo_precio_descarta_ruido_sin_codigo_recuperable():
+    # Ninguna coincidencia de formato conocido dentro de la cadena: es puro
+    # ruido de pie de página, sin ningún código que aislar.
+    codigo, motivo = _normalizar_codigo_precio("psj.adilav/vsc")
+
+    assert codigo is None
+    assert motivo is not None
+    assert "descartado" in motivo
+
+
+def test_normalizar_codigo_precio_no_funde_sufijo_de_una_letra_con_el_codigo_base():
+    # Hallazgo real, 6.24/28510.0185: "P-001b".."P-021b" son códigos
+    # DISTINTOS de "P-001".."P-021" -- mismo material, precio distinto (dos
+    # tablas de precios reales del documento), no ruido de pie de página.
+    # Con solo 1 carácter de cola no hay evidencia suficiente para tratarlo
+    # como el mismo ruido de las URLs invertidas (siempre 2+ caracteres en
+    # el corpus real) -- se conserva tal cual, sin fundirlo con "P-001".
+    codigo, motivo = _normalizar_codigo_precio("P-001b")
+
+    assert codigo == "P-001b"
+    assert motivo is not None
+    assert "no reconocido" in motivo
+
+
+def test_normalizar_codigo_precio_formato_no_reconocido_no_se_guarda_en_silencio():
+    # Comprobación general del encargo (punto 1): un valor que no es ruido
+    # de pie de página conocido pero tampoco encaja en ningún formato
+    # catalogado se conserva (podría ser legítimo) pero siempre con motivo.
+    codigo, motivo = _normalizar_codigo_precio("X-9912")
+
+    assert codigo == "X-9912"
+    assert motivo is not None
+    assert "no reconocido" in motivo
+
+
+def test_construir_linea_catalogo_recupera_codigo_precio_corrupto():
+    mapeo = {"codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": None, "cantidad": None, "precio_unitario": 3}
+    fila = ["j.adilav/vscPN005", "", "m² cartelón de indicación de estación", "421,79 €"]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=1, documento_origen_id=None, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea["codigo_precio"] == "PN005"
+    assert linea["clave_linea"] == "PN005"
+    assert linea["motivo_revision"] is not None
+    assert "recuperado" in linea["motivo_revision"]
+
+
+def test_construir_linea_catalogo_codigo_precio_irrecuperable_no_pierde_el_resto_de_la_linea():
+    mapeo = {"codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": None, "cantidad": None, "precio_unitario": 3}
+    fila = ["psj.adilav/vsc", "643470030", "PAT 3 MORDAZA PUESTA A TIERRA", "112,25 €"]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=1, documento_origen_id=None, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea is not None
+    assert linea["codigo_precio"] is None
+    assert linea["matricula"] == "643470030"
+    assert linea["precio_unitario"] == Decimal("112.25")
+    assert linea["clave_linea"] == "643470030"  # cae a la matrícula, no se pierde la línea
+    assert "descartado" in linea["motivo_revision"]
+
+
+# --- Auditoría 2026-09-05: líneas duplicadas por segunda tabla técnica sin
+# codigo_precio propio (docs/correccion-defectos-auditoria.md, encargo de
+# esta sesión punto 2) ---
+
+
+def test_combinar_por_clave_funde_por_firma_de_material_entre_claves_distintas():
+    # Caso real, 6.23/28510.0018 lote 1, matrícula 601020180: la tabla de la
+    # página 12 trae codigo_precio ("P-02"), la de la página 16 repite el
+    # mismo material y precio sin código -- antes de esta sesión,
+    # `calcular_clave_linea` les daba claves distintas (codigo_precio vs.
+    # matrícula) y quedaban como dos líneas de catálogo para el mismo
+    # material real.
+    con_codigo = {
+        "clave_linea": "P-02", "matricula": "601020180", "descripcion": "CARRIL RN 45 BARRA 180 M.",
+        "codigo_precio": "P-02", "precio_unitario": Decimal("58.43"), "pagina": 12,
+    }
+    sin_codigo = {
+        "clave_linea": "601020180", "matricula": "601020180", "descripcion": "CARRIL RN 45 BARRA 180 M.",
+        "codigo_precio": None, "precio_unitario": Decimal("58.43"), "pagina": 16,
+    }
+
+    combinadas = _combinar_por_clave([con_codigo, sin_codigo])
+
+    assert len(combinadas) == 1
+    assert combinadas[0]["clave_linea"] == "P-02"
+    assert combinadas[0]["codigo_precio"] == "P-02"
+    assert combinadas[0]["pagina"] == 16  # el resto de campos se funde igual que siempre
+
+
+def test_combinar_por_clave_no_funde_por_firma_material_en_huerfanas():
+    # `permitir_fusion_material=False` es lo que usa `guardar_lineas_catalogo`
+    # para lote_id=None: dos huérfanas de lotes distintos pueden compartir
+    # matrícula+descripción+precio (mismo material de catálogo, ofertado en
+    # dos lotes de un acuerdo marco) y deben seguir siendo dos líneas.
+    huerfana_1 = {
+        "clave_linea": "P-1@p3y100", "matricula": "601020180", "descripcion": "MATERIAL X",
+        "codigo_precio": "P-1", "precio_unitario": Decimal("10.00"),
+    }
+    huerfana_2 = {
+        "clave_linea": "P-1@p5y100", "matricula": "601020180", "descripcion": "MATERIAL X",
+        "codigo_precio": "P-1", "precio_unitario": Decimal("10.00"),
+    }
+
+    combinadas = _combinar_por_clave([huerfana_1, huerfana_2], permitir_fusion_material=False)
+
+    assert len(combinadas) == 2
+
+
+def test_guardar_lineas_catalogo_funde_material_repetido_entre_documentos_distintos(db_session):
+    # Caso real, 6.23/28510.0102 y 6.25/28510.0016: la tabla sin código vive
+    # en un documento (ANEJO_3) y la que sí trae codigo_precio en otro
+    # (ANEJO_1) -- dos llamadas a `guardar_lineas_catalogo` completamente
+    # distintas, `_combinar_por_clave` en memoria nunca las ve juntas.
+    lote = _lote(db_session)
+    mapeo_sin_codigo = {"codigo_precio": None, "matricula": 0, "descripcion": 1, "unidad_medida": None, "cantidad": None, "precio_unitario": 2}
+    mapeo_con_codigo = {"codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": None, "cantidad": None, "precio_unitario": 3}
+
+    de_anejo_3 = construir_linea_catalogo(
+        ["601020180", "CARRIL RN 45 BARRA 180 M.", "58,43"], mapeo_sin_codigo, 3, None, lote.expediente_id, None, 0
+    )
+    de_anejo_1 = construir_linea_catalogo(
+        ["P-02", "601020180", "CARRIL RN 45 BARRA 180 M.", "58,43"], mapeo_con_codigo, 12, None, lote.expediente_id, None, 0
+    )
+
+    r1 = guardar_lineas_catalogo(db_session, lote.id, [de_anejo_3])
+    db_session.commit()
+    r2 = guardar_lineas_catalogo(db_session, lote.id, [de_anejo_1])
+    db_session.commit()
+
+    assert r1.creadas == 1
+    assert r2.creadas == 0 and r2.actualizadas == 1
+    lineas = db_session.query(LineaCatalogo).filter_by(lote_id=lote.id, matricula="601020180").all()
+    assert len(lineas) == 1
+    assert lineas[0].clave_linea == "P-02"  # la clave sube a la canónica al conocerse el código
+    assert lineas[0].codigo_precio == "P-02"
+
+
+def test_guardar_lineas_catalogo_absorbe_duplicado_heredado_al_subir_la_clave(db_session):
+    # Hallazgo real, 6.24/28510.0116, lote 25, "P-01": un duplicado ya
+    # guardado en el catálogo ANTES de existir la fusión por firma de
+    # material (dos filas, una con clave de matrícula y otra con clave
+    # "P-01", igual que el escenario de `_firma_material`, pero de una
+    # sesión anterior). Al reprocesar, la fila sin código sube su clave a
+    # "P-01" al fundirse con la extracción nueva -- pero esa clave YA
+    # pertenece a la otra fila heredada. Debe absorberla, no reventar la
+    # constraint UNIQUE.
+    lote = _lote(db_session)
+    sin_codigo = LineaCatalogo(
+        lote_id=lote.id, expediente_id=lote.expediente_id, clave_linea="645750101", orden_aparicion=0,
+        matricula="645750101", descripcion="DISPOSITIVO LIMITADOR TENSIÓN TIPO VLD-F", cantidad=Decimal("900"),
+        precio_unitario=Decimal("1485.00"), pagina=18,
+    )
+    con_codigo = LineaCatalogo(
+        lote_id=lote.id, expediente_id=lote.expediente_id, clave_linea="P-01", orden_aparicion=1,
+        codigo_precio="P-01", matricula="645750101", descripcion="DISPOSITIVO LIMITADOR TENSIÓN TIPO VLD-F",
+        precio_unitario=Decimal("1485.00"), pagina=22,
+    )
+    db_session.add_all([sin_codigo, con_codigo])
+    db_session.commit()
+
+    # La extracción fresca reproduce las dos tablas reales del mismo
+    # documento (página 18 sin código, página 22 con "P-01") — igual que en
+    # producción, `_combinar_por_clave` las funde en un único `datos` antes
+    # de llegar a `guardar_lineas_catalogo`.
+    mapeo_sin_codigo = {"codigo_precio": None, "matricula": 0, "descripcion": 1, "unidad_medida": None, "cantidad": 2, "precio_unitario": 3}
+    mapeo_con_codigo = {"codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": None, "cantidad": None, "precio_unitario": 3}
+    de_pagina_18 = construir_linea_catalogo(
+        ["645750101", "DISPOSITIVO LIMITADOR TENSIÓN TIPO VLD-F", "900", "1.485,00"],
+        mapeo_sin_codigo, 18, None, lote.expediente_id, None, 0,
+    )
+    de_pagina_22 = construir_linea_catalogo(
+        ["P-01", "645750101", "DISPOSITIVO LIMITADOR TENSIÓN TIPO VLD-F", "1.485,00"],
+        mapeo_con_codigo, 22, None, lote.expediente_id, None, 1,
+    )
+
+    resultado = guardar_lineas_catalogo(db_session, lote.id, [de_pagina_18, de_pagina_22])
+
+    assert resultado.creadas == 0
+    assert resultado.actualizadas == 1
+    lineas = db_session.query(LineaCatalogo).filter_by(lote_id=lote.id, matricula="645750101").all()
+    assert len(lineas) == 1
+    assert lineas[0].clave_linea == "P-01"
+    assert lineas[0].cantidad == Decimal("900")  # se conserva el dato que solo tenía la fila absorbida
+
+
+def test_guardar_lineas_catalogo_absorbe_las_dos_filas_heredadas_cuando_la_clave_exacta_no_encuentra_ninguna(db_session):
+    # Hallazgo real, 6.23/28510.0042, matrícula 643480020: TRES filas
+    # heredadas de antes de este arreglo para la misma pieza física (una ya
+    # con la clave limpia, dos con ruido de pie de página sin recuperar
+    # entonces). Cuando la búsqueda por clave exacta de la fila recién
+    # extraída no encuentra NINGUNA de ellas (ninguna coincide todavía con
+    # la clave limpia), la búsqueda por firma debe encontrarlas TODAS, no
+    # solo la primera por id -- quedarse con `.first()` antes de saber que
+    # la exacta había fallado dejaba la segunda sin absorber nunca.
+    lote = _lote(db_session)
+    heredada_1 = LineaCatalogo(
+        lote_id=lote.id, expediente_id=lote.expediente_id, clave_linea="RUIDO-VIEJO-1", orden_aparicion=0,
+        codigo_precio="RUIDO-VIEJO-1", matricula="643480020", descripcion="VAT-1 PÉRTIGA", pagina=10,
+        precio_unitario=Decimal("2365.67"),
+    )
+    heredada_2 = LineaCatalogo(
+        lote_id=lote.id, expediente_id=lote.expediente_id, clave_linea="RUIDO-VIEJO-2", orden_aparicion=1,
+        codigo_precio="RUIDO-VIEJO-2", matricula="643480020", descripcion="VAT-1 PÉRTIGA", pagina=105,
+        precio_unitario=Decimal("2365.67"), cantidad=Decimal("14"),
+    )
+    db_session.add_all([heredada_1, heredada_2])
+    db_session.commit()
+
+    mapeo = {"codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": None, "cantidad": None, "precio_unitario": 3}
+    reextraida = construir_linea_catalogo(
+        ["P-012", "643480020", "VAT-1 PÉRTIGA", "2.365,67"], mapeo, 12, None, lote.expediente_id, None, 0,
+    )
+
+    resultado = guardar_lineas_catalogo(db_session, lote.id, [reextraida])
+
+    assert resultado.actualizadas == 1
+    lineas = db_session.query(LineaCatalogo).filter_by(lote_id=lote.id, matricula="643480020").all()
+    assert len(lineas) == 1
+    assert lineas[0].clave_linea == "P-012"
+    assert lineas[0].cantidad == Decimal("14")  # dato heredado de la segunda fila absorbida

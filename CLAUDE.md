@@ -467,14 +467,31 @@ suficientes, no ahora.
   normal, no de MATRIZ. Sin investigar si son pedidos derivados con una
   matriz sin identificar o contratos cuyo anejo de precios nunca se
   adjuntó.
-- **Rendimiento: `6.23/28510.0051`** (el catálogo más grande del corpus,
-  1.080 líneas) se vuelve progresivamente más lento hasta parecer colgado
-  cuando se reprocesa como el N-ésimo expediente dentro de un mismo proceso
-  Python de vida larga (nunca en un proceso nuevo — el mismo expediente
-  aislado siempre termina en menos de 2 minutos). Causa sin confirmar
-  (¿fuga de recursos de `pdfplumber` entre documentos grandes sucesivos?).
-  Mitigación de hecho: procesar expedientes grandes en procesos aislados.
-  Candidato para una sesión de rendimiento aparte.
+- **Rendimiento de `6.23/28510.0051`: explicado, cerrado.** Auditoría previa
+  (`docs/auditoria-previa.md` bloque 1, sesión 2026-09-04): una tanda de 38
+  expedientes completó en 21,6 min sin cuelgue, `0051` dentro de su baseline
+  (108 s). Sesión de corrección de defectos (2026-09-05): el ciclo de
+  mantenimiento forzado tardó **30,8 min** en una ejecución real — a
+  primera vista, otra reproducción del episodio. Diagnóstico en caliente
+  (RSS/FD por minuto, `docker stats`, `pg_stat_activity`, todo mientras
+  corría, sin tocarlo) descartó un cuelgue: el proceso estuvo el 100% del
+  tiempo en estado `R` (ejecutando, nunca `D`/bloqueado), CPU al ~100-106%
+  sin caídas, memoria con un único pico de 2,9 GiB durante
+  `6.23/28510.0139` (no `0051`) que baja y se estabiliza en 1,3-1,5 GiB el
+  resto de la tanda, 4 descriptores de fichero constantes de principio a
+  fin, y una única conexión a Postgres sin ninguna consulta de larga
+  duración. **La causa real de los 30,8 min**: el descubrimiento por
+  sindicación de ese ciclo encontró 4 expedientes nuevos y los descargó de
+  la Plataforma real (Playwright headless) antes de extraer — trabajo real
+  y esperado, no una fuga. Dos reprocesos limpios posteriores, forzados con
+  `sindicacion_desactivada: true` (sin descargas), completaron en **24,4
+  min cada uno para 42 expedientes**, de forma idéntica entre sí, sin
+  ninguna anomalía — `6.23/28510.0139` es sistemáticamente el expediente
+  más lento del corpus (~206 s en las tres mediciones), no `0051`. **No hay
+  fuga ni cuelgue que arreglar**: el "problema de rendimiento" original
+  queda explicado como la suma de tiempo de scraping real más la
+  heterogeneidad esperada de duración por expediente. Detalle completo
+  (curva minuto a minuto) en `docs/hallazgos-extraccion.md` sección 30.5.
 - **Separar de verdad `6.24/28510.0088` y `6.23/28510.0129` (y expedientes
   similares) en expedientes de lote reales.** Identificado como cambio de
   modelo de datos mayor (crear filas de `Expediente` nuevas para cada
@@ -484,6 +501,15 @@ suficientes, no ahora.
 - **`expedientes.aviso_sindicacion` existe en la API pero no se muestra
   todavía en la web** — pendiente menor de la sesión de criterios del
   cliente (`docs/decisiones-cliente.md` sección 26).
+- **`6.24/28510.0116` no debe usarse como ejemplo de demo hasta
+  confirmarlo con el cliente.** Discrepancia real entre dos documentos del
+  mismo expediente: la Propuesta de Adjudicación declara una baja del
+  47,87%, el Contrato firmado declara 46,50% (sobre 1.485.000 €, no es
+  redondeo). El sistema usa el 46,50% del Contrato — probablemente correcto
+  (es el acto más definitivo), pero CLAUDE.md no documenta explícitamente
+  una prioridad Contrato-vs-Propuesta (solo Propuesta LC.27 vs. Resolución
+  de Adjudicación, sección 17). Verificado en
+  `docs/auditoria-previa.md` bloque 3, parte A.
 
 ---
 

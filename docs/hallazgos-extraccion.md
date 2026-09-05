@@ -527,6 +527,187 @@ aplicado, para que un humano la confirme antes de exportarla al cliente.
 `cache_mapeo_cabecera` no se toca — la corrección es por fila, no se
 propaga como si fuera el mapeo bueno de esa cabecera.
 
+---
+
+## 30. Corrección de defectos de la auditoría previa: `codigo_precio`
+    corrupto y líneas duplicadas (sesión 2026-09-05)
+
+Sesión de arreglo directo sobre los tres hallazgos de gravedad alta/media de
+`docs/auditoria-previa.md`. Los dos primeros ya tenían causa raíz verificada
+en la auditoría; esta sesión solo confirmó el mecanismo exacto con `SELECT`
+reales antes de tocar código y añadió la corrección en `app/catalogo.py`.
+
+### 30.1 `codigo_precio` corrupto por pie de página CSV, sin disparar revisión
+
+Verificado con `SELECT` real (`adif-postgres-1`) sobre los 2 expedientes de
+la auditoría: **31 filas** con el patrón (18 en `6.23/28510.0042`, 13 en
+`6.24/28510.0180` — la auditoría había contado 21+7=28 con un filtro más
+estrecho; el recuento real incluye variantes que su filtro no capturaba).
+El pie de página de verificación CSV del documento (una URL del tipo
+`https://sede.adif.gob.es/csv/valida.jsp`) se cuela **invertido carácter a
+carácter** en la celda del código de precio, con una cantidad creciente de
+ruido según la fila (el sello de verificación se solapa en coordenadas de
+página con la columna del código, y el solape crece o decrece según la
+posición vertical de cada fila) — a veces delante del código
+(`j.adilav/vscPN005`), a veces detrás (`PN004ps`), a veces partido a ambos
+lados (`hneP-015elbac`). El precio y la matrícula de estas filas están
+limpios; antes de esta sesión, nada validaba el formato del código y la
+cadena corrupta se guardaba tal cual.
+
+**Arreglo** (`app/catalogo._normalizar_codigo_precio`): se define el
+conjunto de formatos de `codigo_precio` verificados contra el corpus real y
+contra los fixtures ya existentes (`P-001` con guion, `P1`/`P01` sin guion a
+1-2 dígitos, `PN001`/`PN09` con prefijo de señalización, `PA-01` partida
+alzada numerada, `L01-T01` lote+tipo). Un valor que no encaja se procesa en
+cascada:
+
+1. Si dentro de la cadena aparece **exactamente una** coincidencia de un
+   formato conocido y el resto de la cadena son solo letras y los símbolos
+   de una URL invertida (`/`, `.`, `:`, nunca dígitos), se recupera el
+   código aislado y la línea queda con `motivo_revision` explicando el
+   recorte — mismo patrón que la recuperación de cabecera desalineada de la
+   sección 29.
+2. Si la cadena entera es ese mismo ruido sin ningún código aislable, se
+   descarta (`codigo_precio = None`) con `motivo_revision`; el resto de la
+   línea (matrícula, descripción, precio) no se pierde — la clave de la
+   línea cae a la matrícula, como ya preveía `calcular_clave_linea`.
+3. **Comprobación general** (no solo para este patrón): cualquier otro valor
+   que no encaje en ningún formato conocido se conserva tal cual —podría ser
+   un formato legítimo aún no catalogado— pero nunca en silencio: siempre
+   con `motivo_revision`.
+
+### 30.2 Líneas duplicadas: causa raíz confirmada, dos mecanismos distintos
+
+La auditoría pidió investigar la causa antes de limpiar. Verificado con
+`SELECT` reales que **no es un fallo de `_combinar_por_clave`** (esa función
+ya fusionaba correctamente repeticiones con la misma `clave_linea`) sino que
+la misma pieza física recibe una `clave_linea` **distinta** según de qué
+tabla del documento viene, porque `calcular_clave_linea` prioriza
+`codigo_precio > matrícula` (CLAUDE.md sección 7) y no todas las tablas que
+repiten un material traen `codigo_precio` propio. Dos mecanismos reales,
+verificados por separado:
+
+**Mecanismo A — el mismo defecto 30.1, con clave distinta en cada
+repetición.** `6.23/28510.0042`: el mismo material (p.ej. matrícula
+`643470030`, "PAT 3 MORDAZA...") aparece en **3 páginas** de **2 documentos
+distintos** (`ANEJO_3.pdf` p.3, `CONTRATO_1.pdf` p.105 y p.110 — el propio
+contrato incluye el anejo de precios completo, repetido, más una vez
+adicional). Antes de esta sesión, el ruido del pie de página CSV era
+distinto en cada página (el solape varía con la posición), así que las 3
+apariciones producían 3 `codigo_precio` corruptos distintos y por tanto 3
+`clave_linea` distintas → 3 filas de catálogo para el mismo material. **El
+arreglo de 30.1 resuelve este mecanismo sin necesitar nada más**: las 3
+variantes se normalizan al mismo código limpio (`P-005`), así que
+`_combinar_por_clave` (dentro del mismo documento) y la búsqueda por clave
+exacta de `guardar_lineas_catalogo` (entre documentos distintos, vía el
+`commit()` por documento ya existente) las funden en una sola fila de forma
+natural. Verificado que las 10 grupos/28 líneas de `0042` no necesitan
+ningún cambio adicional.
+
+**Mecanismo B — segunda tabla técnica sin columna de `codigo_precio`, en
+`6.23/28510.0018`, `6.23/28510.0102` y `6.25/28510.0016`.** Caso real
+verificado, `6.23/28510.0018` lote 1, matrícula `601020180`: la tabla de la
+página 12 (`ANEJO_1.pdf`) trae `codigo_precio="P-02"`; una segunda tabla de
+características técnicas en la página 16 **del mismo documento** repite el
+mismo material y el mismo precio (58,43 €) pero su tabla no tiene columna de
+código en absoluto — no es ruido, es una tabla real sin esa columna. En
+`0102` y `0016` el mismo patrón ocurre **entre dos documentos distintos**
+(`ANEJO_1.pdf` con código, `ANEJO_3.pdf` sin él) — dos llamadas a
+`guardar_lineas_catalogo` completamente separadas, así que ni
+`_combinar_por_clave` en memoria ni la búsqueda por clave exacta pueden
+verlas nunca como la misma línea: no hay corrupción que arreglar, la clave
+es correcta para cada tabla por separado, solo que las dos claves
+correctas describen la misma pieza real.
+
+**Arreglo** (`app/catalogo._firma_material`, `_combinar_por_clave`,
+`guardar_lineas_catalogo`): una firma de "misma pieza física"
+(matrícula + descripción + precio unitario, los tres presentes) unifica la
+`clave_linea` de dos líneas que la comparten, aunque una tenga
+`codigo_precio` y la otra no — tanto dentro de un mismo documento
+(`_combinar_por_clave`) como entre documentos distintos del mismo
+expediente (`guardar_lineas_catalogo` cae a una búsqueda por firma en base
+de datos cuando la búsqueda por clave exacta no encuentra nada). Al
+fundirse, la clave final sube siempre a la canónica
+(`codigo_precio` cuando se conoce), sin importar qué documento se procesó
+primero.
+
+**Deliberadamente NO se aplica a líneas huérfanas** (`lote_id is None`,
+`permitir_fusion_material=False`): CLAUDE.md sección 27 y
+`app/extraccion/pipeline_anejo.py` ya sufijan la `clave_linea` de las
+huérfanas con su página y posición precisamente para que dos tablas
+ambiguas de **lotes distintos** que comparten `codigo_precio` no se fundan
+en una sola fila. Fundir también por matrícula+descripción+precio ahí
+arriesgaría lo mismo al revés: el mismo material de catálogo, ofertado
+legítimamente en dos lotes distintos de un acuerdo marco al mismo precio,
+se fundiría en una sola fila perdiendo a qué lote pertenece cada oferta. La
+fusión por firma solo es segura cuando `lote_id` ya es un valor conocido y
+único para todas las líneas de la llamada.
+
+**Verificado tras aplicar el arreglo y reprocesar los 4 expedientes**: 0
+grupos de duplicados reales restantes (mismo lote, misma matrícula +
+descripción + precio) en el corpus completo — ver el cierre de esta sesión
+en `docs/decisiones.md` para el recuento final de líneas de catálogo.
+
+### 30.3 Tests
+
+`tests/test_catalogo.py`: casos nuevos —
+`_normalizar_codigo_precio` (formato conocido, recuperación con ruido antes
+y después del código, descarte sin código recuperable, formato no
+reconocido conservado con motivo), `construir_linea_catalogo` con código
+corrupto recuperable e irrecuperable, `_combinar_por_clave` con fusión por
+firma dentro de un lote y sin fusión en huérfanas, y
+`guardar_lineas_catalogo` fundiendo el mismo material entre dos documentos
+distintos con la clave subiendo a la canónica.
+
+### 30.4 Dos defectos reales encontrados al verificar el arreglo contra el
+     corpus completo, antes de darlo por bueno
+
+El encargo de esta sesión pedía reprocesar y dar el recuento final. Al
+forzar el reproceso de los 42 expedientes reales aparecieron dos defectos
+del arreglo de 30.1/30.2 que ningún test unitario había cubierto — los dos
+se encontraron **antes** de dar la sesión por cerrada, verificando contra el
+corpus real en vez de fiarse de que "pytest en verde" bastaba.
+
+**1. Falso positivo: `codigo_precio` con una sola letra de cola no es ruido
+de pie de página.** `6.24/28510.0185` trae dos tablas de precios reales del
+mismo documento con la misma numeración pero sufijo `b` en la segunda
+(`P-001` en la página 27, `P-001b` en la página 18) — **mismo material,
+precio distinto**, dos entradas legítimas, no la misma línea repetida. La
+recuperación de 30.1, tal como se implementó primero, trataba cualquier
+resto de una sola letra como el mismo ruido de las URLs invertidas y
+colapsaba `P-001b` en `P-001`, perdiendo un precio real. **Arreglo**: el
+resto descartable como ruido exige un mínimo de 2 caracteres — los 31 casos
+reales de pie de página verificados en 30.1 siempre traen 2 o más, nunca
+uno solo, así que el mínimo no deja de recuperar ningún caso real. Con un
+solo carácter de cola, el código se conserva tal cual y cae en la
+comprobación general ("formato no reconocido, revisar"), nunca se funde a
+ciegas.
+
+**2. La fusión por firma solo miraba la primera fila candidata, no todas.**
+Descubierto al reventar la constraint `uq_linea_lote_clave` en
+`6.24/28510.0116` (lote 25, "P-01": dos filas para el mismo material, una
+sin `codigo_precio` guardada como huérfana de clave de matrícula, otra ya
+con "P-01" — subir la clave de la primera a la canónica colisionaba con la
+segunda) y, ya corregido ese caso, en `6.23/28510.0042` (matrícula
+`643480020`: **tres** filas heredadas de sesiones anteriores a este
+arreglo, no dos — la búsqueda por firma, escrita para devolver un único
+candidato con `.first()` antes incluso de saber si la búsqueda por clave
+exacta había encontrado algo, se quedaba con la primera por id y dejaba la
+tercera sin visitar). **Arreglo**: `guardar_lineas_catalogo` reúne TODAS las
+filas que comparten firma con la que se está guardando (excluyendo la ya
+encontrada por clave exacta, si la hay) y las absorbe todas en una sola
+pasada — nunca dan por buena una fusión parcial de dos de tres.
+
+Los dos arreglos tienen test de regresión propio
+(`test_normalizar_codigo_precio_no_funde_sufijo_de_una_letra_con_el_codigo_base`,
+`test_guardar_lineas_catalogo_absorbe_las_dos_filas_heredadas_cuando_la_clave_exacta_no_encuentra_ninguna`).
+`pytest -q` dentro de `adif-api-1` tras la reconstrucción final: **274
+passed, 0 fallos**. Verificado además contra el corpus real completo (42
+expedientes reprocesados dos veces tras cada arreglo): `6.24/28510.0116`
+vuelve a `completado` sin error, `P-001`/`P-001b` de `6.24/28510.0185`
+siguen siendo dos líneas distintas y marcadas para revisión, y la matrícula
+`643480020` de `6.23/28510.0042` queda en una única fila.
+
 **Verificado contra el stack real**, no solo con tests: reconstruidas las
 imágenes de `api`/`worker`, reprocesados los 5 expedientes afectados
 (`6.20/28510.0136`, `6.23/28510.0051`, `6.23/28510.0066`,
@@ -619,3 +800,140 @@ por `6.24/28510.0187` muestra las dos líneas recuperadas con "Revisar";
 `/` (Expedientes) muestra los 5 expedientes reprocesados arriba; sin
 desbordamiento horizontal en ninguna de las dos páginas
 (`scrollWidth - clientWidth = 0`).
+
+---
+
+## 30.5 Diagnóstico en caliente del "problema de rendimiento" reproducido en
+     vivo (sesión 2026-09-05, continuación)
+
+Durante el reproceso de verificación de la sección 30.4, el ciclo de
+mantenimiento forzado (`trabajos_cola.id = 539`) tardó 30,8 min en vez de
+los ~22 min de la auditoría previa — a primera vista, la reaparición del
+episodio de CLAUDE.md ("problema de rendimiento... probablemente
+inestabilidad de `dockerd`"). Encargo explícito: capturar datos del proceso
+real **sin interrumpirlo**, para decidir si hace falta arreglarlo antes de
+la demo. Nada de lo siguiente cambia comportamiento del sistema — es
+observación pura (`docker stats`, `/proc/1/status` y `/proc/1/stat` dentro
+del contenedor, `pg_stat_activity`), muestreada cada ~65 s mientras corrían
+dos reprocesos completos posteriores (jobs 586 y 629) con el arreglo de
+30.1-30.4 ya desplegado.
+
+### Causa real de los 30,8 min del job 539
+
+El log del worker es inequívoco: el descubrimiento por sindicación de ese
+ciclo concreto encontró **4 expedientes nuevos** en el ZIP de
+`contrataciondelestado.es` y lanzó su descarga real (Playwright headless)
+antes de extraer nada — `{'nuevos_descubiertos': 4, 'descargas_lanzadas':
+4}`. Entre el último documento de la tanda de 38 "de siempre" (09:41 h,
+hora del job) y el primero de los 4 nuevos hay un hueco de **~5,5 min** que
+coincide exactamente con esa descarga. Confirmado reprocesando el corpus
+DOS VECES MÁS, ambas con `sindicacion_desactivada: true` (sin red, sin
+descargas): **1.464,5 s y 1.464,1 s** — 24,4 min, prácticamente idénticos
+entre sí, para 42 expedientes (más que los 38 originales, porque ya
+incluyen los 4 nuevos ya descargados). El "problema de rendimiento" del job
+539 no era una reproducción del episodio de CLAUDE.md — era trabajo de red
+real, esperado, simplemente no medido nunca antes en la misma tanda que la
+extracción.
+
+### 1-2. Memoria, descriptores de fichero, y expediente en curso
+
+Muestras del proceso `python -m app.worker` (PID 1 dentro del contenedor)
+durante el reproceso limpio (job 629, 09:36:59–10:02:56, 25 muestras):
+
+| Momento | RSS | Pico histórico (`VmHWM`) | FD abiertos |
+|---|---:|---:|---:|
+| Inicio (09:36:59) | 496 MiB | 496 MiB | 4 |
+| `6.23/28510.0139` en curso (09:45:38) — **pico de toda la tanda** | 2,89 GiB | 3,18 GiB | 4 |
+| Resto de la tanda (09:46:43–10:01:51) | 1,24–1,52 GiB | 3,18 GiB (no vuelve a crecer) | 4 |
+| Fin, proceso ocioso (10:02:56) | 1,38 GiB | 3,18 GiB | 4 |
+
+**Los descriptores de fichero se quedan en 4 durante los 26 minutos
+completos, sin una sola variación.** El pico de memoria (2,89 GiB) ocurre
+en `6.23/28510.0139` — el mismo expediente que ya señaló la auditoría
+previa como el más pesado real del corpus, no `6.23/28510.0051` (que en
+esta tanda tardó 102 s, dentro de su baseline). Tras el pico, la memoria
+baja y se queda estable en 1,2–1,5 GiB durante el resto de la tanda: **cero
+indicio de fuga acumulativa**, coherente con la medición de la auditoría
+previa.
+
+### 3. Duración por expediente (job 629, orden real de ejecución)
+
+Reconstruida con exactitud desde `documentos.procesado_en` (no desde el
+muestreo de 65 s, que solo da una foto aproximada):
+
+| # | Expediente | Duración (s) | | # | Expediente | Duración (s) |
+|--:|---|--:|---|--:|---|--:|
+| 9 | 6.20/28510.0136 | 6,2 | | 26 | 6.24/28510.0117 | 53,2 |
+| 10 | 6.23/28510.0018 | 27,2 | | 27 | 6.24/28510.0124 | 32,4 |
+| 11 | 6.23/28510.0042 | 24,7 | | 28 | 6.24/28510.0128 | 25,4 |
+| **12** | **6.23/28510.0051** | **102,2** | | 29 | 6.24/28510.0130 | 58,6 |
+| 13 | 6.23/28510.0066 | 52,8 | | 30 | 6.24/28510.0180 | 28,7 |
+| 14 | 6.23/28510.0102 | 27,2 | | 31 | 6.24/28510.0185 | 32,8 |
+| 15 | 6.23/28510.0104 | 8,1 | | 32 | 6.24/28510.0187 | 61,5 |
+| 16 | 6.23/28510.0109 | 50,9 | | 33 | 6.24/28510.0193 | 15,1 |
+| 17 | 6.23/28510.0129 | 28,6 | | 34 | 6.24/28510.0203 | 59,6 |
+| **18** | **6.23/28510.0139** | **205,9** | | 35 | 6.25/28510.0016 | 26,2 |
+| 19 | 6.24/28510.0008 | 36,4 | | 36 | 6.25/28510.0019 | 62,5 |
+| 20 | 6.24/28510.0025 | 18,2 | | 37 | 6.25/28510.0027 | 52,3 |
+| 21 | 6.24/28510.0047 | 10,6 | | 38 | 6.25/28510.0028 | 51,4 |
+| 22 | 6.24/28510.0064 | 60,3 | | 39 | 6.20/28510.0094 | 37,5 |
+| 23 | 6.24/28510.0088 | 48,2 | | 40 | 6.20/28510.0054 | 50,1 |
+| 24 | 6.24/28510.0094 | 39,7 | | 41 | 4.26/28510.0020 | 76,3 |
+| 25 | 6.24/28510.0116 | 25,4 | | 42 | 6.26/28510.0016 | 12,3 |
+
+**Prácticamente idéntica a la de la auditoría previa** (`0051` en la
+posición 12, `0139` el pico absoluto de toda la tanda en la posición 18,
+~206 s en ambas mediciones separadas por un día) — la duración por
+expediente es determinista y depende del expediente, no del orden ni de
+cuántos van procesados antes: no hay degradación progresiva en ningún
+punto de la serie.
+
+### 4. CPU o bloqueado
+
+En las 24 muestras tomadas mientras el ciclo estaba activo, `docker stats`
+marcó **entre 90% y 106% de CPU en todas y cada una** (un proceso de un
+solo hilo saturando un núcleo), y el estado del proceso
+(`/proc/1/status`, comprobado 3 veces seguidas por muestra, separadas
+0,3 s) fue **`R` (ejecutando) en las 24×3 = 72 comprobaciones**, nunca `D`
+(esperando E/S) ni `S` prolongado. `wchan` (la función del kernel en la que
+duerme un proceso bloqueado) fue `0` en las 24 muestras activas —
+únicamente pasó a `hrtimer_nanosleep` en la última muestra, tras el
+`completado` del job, que es el `sleep(3)` normal del bucle de sondeo del
+worker ocioso. **Conclusión inequívoca: el proceso estuvo activo en CPU
+todo el tiempo, nunca bloqueado.** Coincide con CLAUDE.md sección 16 ("activo
+en CPU todo el tiempo" era compatible con inestabilidad de `dockerd`) pero
+con una lectura distinta: aquí no hubo ningún bloqueo que la inestabilidad
+de `dockerd` pudiera explicar — fue trabajo de CPU real y contabilizado
+(scraping + extracción), no un cuelgue disfrazado de actividad.
+
+### 5. Conexiones a la base de datos
+
+`pg_stat_activity` mostró **3 conexiones constantes durante toda la
+tanda**: la del worker (persistente, un `commit()` por documento — nunca
+"idle in transaction" más de 74 s seguidos en ninguna muestra, y siempre
+volviendo a 0-5 s poco después, coherente con transacciones cortas por
+documento, no una transacción larga colgada) y dos del propio muestreo
+(una para consultar `trabajos_cola`/`lineas_catalogo`, otra para leerse a
+sí misma). **Ninguna consulta activa superó los 0 s de duración en el
+momento de la muestra** — no hay ninguna query atascada ni ningún lock
+largo. La cifra "segundos en la conexión actual" que crece de forma
+continua en el log crudo (`docs/...adif_monitor.log`, no publicado) es la
+antigüedad de la conexión persistente del worker, no el tiempo de una
+consulta — column engañosa si se lee sin este contexto, aclarada aquí para
+que una sesión futura no la malinterprete de nuevo.
+
+### Conclusión y recomendación
+
+**No hay nada que arreglar.** El episodio que pareció una reproducción del
+problema de rendimiento de CLAUDE.md era, verificado con datos en caliente,
+descubrimiento y descarga real de expedientes nuevos — trabajo esperado que
+nunca se había medido junto con la extracción en la misma tanda. Dos
+reprocesos limpios subsiguientes (sin descargas) fueron idénticos entre sí
+en duración total (24,4 min ambos) y en el perfil por expediente (mismo
+expediente más lento, mismas duraciones dentro de un pequeño margen), sin
+ningún indicio de fuga de memoria, descriptores crecientes, bloqueo o
+consulta atascada. La entrada de CLAUDE.md sección 16 sobre este tema se
+actualiza para reflejar que el episodio queda explicado, no que "no se
+reprodujo" — es una conclusión más fuerte que la de la auditoría previa,
+alcanzada por tener, esta vez, un episodio real que diagnosticar en vivo en
+lugar de solo su ausencia.
