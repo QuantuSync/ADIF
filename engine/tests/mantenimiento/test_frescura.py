@@ -4,14 +4,17 @@ from datetime import datetime, timezone
 
 from app.mantenimiento.frescura import (
     VERSION_LOGICA_EXTRACCION,
+    contar_lineas_catalogo,
     debe_descargar,
     debe_estampar_extraccion,
     debe_extraer,
+    detectar_crecimiento_sin_cambios,
+    documentos_sin_cambios,
     estampar_descarga_exitosa,
     estampar_extraccion,
     huella_documentos,
 )
-from app.models import Documento, EstadoExpediente, Expediente
+from app.models import Documento, EstadoExpediente, Expediente, Lote, LineaCatalogo
 
 
 def _documento(hash_: str) -> Documento:
@@ -135,3 +138,59 @@ def test_estampar_extraccion(db_session):
     assert exp.extraido_en is not None
     assert exp.version_logica_extraccion == VERSION_LOGICA_EXTRACCION
     assert exp.huella_documentos == huella_documentos(docs)
+
+
+# --- Comprobación permanente de integridad del catálogo (auditoría
+# 2026-09-05, docs/correccion-defectos-auditoria.md, CLAUDE.md sección 9.9,
+# encargo bloque 1 punto 4) ---
+
+
+def test_documentos_sin_cambios_nunca_extraido_antes_cuenta_como_cambio():
+    exp = _expediente(huella_documentos=None)
+    assert documentos_sin_cambios(exp, [_documento("h1")]) is False
+
+
+def test_documentos_sin_cambios_misma_huella():
+    docs = [_documento("h1"), _documento("h2")]
+    exp = _expediente(huella_documentos=huella_documentos(docs))
+    assert documentos_sin_cambios(exp, docs) is True
+
+
+def test_documentos_sin_cambios_huella_distinta():
+    exp = _expediente(huella_documentos=huella_documentos([_documento("h1")]))
+    assert documentos_sin_cambios(exp, [_documento("h1"), _documento("h2")]) is False
+
+
+def test_detectar_crecimiento_sin_cambios_no_crece():
+    assert detectar_crecimiento_sin_cambios(10, 10) is None
+    assert detectar_crecimiento_sin_cambios(10, 8) is None
+
+
+def test_detectar_crecimiento_sin_cambios_crece():
+    aviso = detectar_crecimiento_sin_cambios(10, 14)
+    assert aviso is not None
+    assert "10 -> 14" in aviso
+
+
+def test_contar_lineas_catalogo(db_session):
+    exp = _expediente()
+    db_session.add(exp)
+    db_session.commit()
+    lote = Lote(expediente_id=exp.id, identificador_lote="1")
+    db_session.add(lote)
+    db_session.commit()
+    db_session.add_all(
+        [
+            LineaCatalogo(
+                expediente_id=exp.id, lote_id=lote.id, clave_linea="P-001", orden_aparicion=0,
+                descripcion="A", precio_unitario=1,
+            ),
+            LineaCatalogo(
+                expediente_id=exp.id, lote_id=None, clave_linea="P-002", orden_aparicion=1,
+                descripcion="B", precio_unitario=2,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    assert contar_lineas_catalogo(db_session, exp.id) == 2

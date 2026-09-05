@@ -14,11 +14,12 @@ from __future__ import annotations
 
 import hashlib
 from datetime import datetime, timezone
-from typing import Iterable
+from typing import Iterable, Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.models import Documento, EstadoExpediente, Expediente
+from app.models import Documento, EstadoExpediente, Expediente, LineaCatalogo
 
 # Sube este valor cuando un cambio en `app.extraccion.*` deba forzar el
 # reproceso de todos los expedientes aunque sus documentos no hayan cambiado
@@ -108,3 +109,46 @@ def estampar_extraccion(db: Session, expediente: Expediente, documentos: list[Do
     expediente.version_logica_extraccion = VERSION_LOGICA_EXTRACCION
     expediente.huella_documentos = huella_documentos(documentos)
     db.commit()
+
+
+# Comprobación permanente de integridad del catálogo (auditoría 2026-09-05,
+# docs/correccion-defectos-auditoria.md): CLAUDE.md sección 9.9 exige que
+# reprocesar un expediente actualice sus filas, nunca las duplique. El bug
+# real que motiva esto (clave de huérfana "canonicalizada" de vuelta al
+# `codigo_precio` desnudo en cada actualización, arreglado en
+# `app.catalogo.guardar_lineas_catalogo`) duplicaba sin límite en cada ciclo
+# de mantenimiento sin que nada lo señalara -- se descubrió por auditoría
+# manual, no porque el sistema lo detectara solo. Estas dos funciones,
+# usadas juntas por `app.worker.procesar_extraer_expediente`, cierran ese
+# hueco: si los documentos del expediente no cambiaron (misma huella) desde
+# la última extracción con éxito, el número de líneas de catálogo tampoco
+# debería crecer.
+
+
+def documentos_sin_cambios(expediente: Expediente, documentos: Iterable[Documento]) -> bool:
+    """`False` si nunca hubo una extracción con éxito de la que partir
+    (`huella_documentos` todavía `None`) -- ahí no hay nada contra qué
+    comparar, y cualquier línea que se cree es la primera vez, no una
+    duplicación."""
+    if expediente.huella_documentos is None:
+        return False
+    return expediente.huella_documentos == huella_documentos(documentos)
+
+
+def contar_lineas_catalogo(db: Session, expediente_id: int) -> int:
+    return db.query(func.count(LineaCatalogo.id)).filter(LineaCatalogo.expediente_id == expediente_id).scalar() or 0
+
+
+def detectar_crecimiento_sin_cambios(conteo_antes: int, conteo_despues: int) -> Optional[str]:
+    """`None` cuando no hay nada que avisar. Un motivo explícito, listo para
+    `Expediente.error`, cuando el recuento creció -- nunca se corrige solo
+    (CLAUDE.md sección 12: "lo que no cuadra va a la cola de revisión"), la
+    idea es que un humano lo vea y decida, no que el sistema intente
+    deducir cuáles de las líneas nuevas son el duplicado real."""
+    if conteo_despues > conteo_antes:
+        return (
+            f"integridad del catálogo: {conteo_antes} -> {conteo_despues} líneas en este expediente sin que "
+            "cambiaran sus documentos (misma huella) -- posible duplicación en la extracción, revisar antes "
+            "de confiar en el recuento"
+        )
+    return None

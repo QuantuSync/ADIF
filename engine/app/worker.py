@@ -10,7 +10,14 @@ from app.interfaces.document_storage import LocalDiskStorage
 from app.interfaces.model_provider import AnthropicModelProvider, CachedModelProvider
 from app.mantenimiento.ciclo import TIPO_TRABAJO as TIPO_MANTENIMIENTO_CICLO
 from app.mantenimiento.ciclo import ejecutar_ciclo_mantenimiento
-from app.mantenimiento.frescura import debe_estampar_extraccion, estampar_descarga_exitosa, estampar_extraccion
+from app.mantenimiento.frescura import (
+    contar_lineas_catalogo,
+    debe_estampar_extraccion,
+    detectar_crecimiento_sin_cambios,
+    documentos_sin_cambios,
+    estampar_descarga_exitosa,
+    estampar_extraccion,
+)
 from app.mantenimiento.programacion import verificar_y_lanzar_ciclo_programado
 from app.models import Documento, EstadoExpediente, Expediente
 from app.queue import ejecutar_trabajo as ejecutar_trabajo_generico
@@ -71,7 +78,26 @@ def procesar_extraer_expediente(db, trabajo) -> dict:
     intento que sí corrió la cascada, aunque acabara mal, no hace falta
     repetirlo hasta que cambien los documentos o la versión de la lógica
     (ver `app.mantenimiento.frescura.debe_estampar_extraccion` para las dos
-    excepciones: `esperando_matriz` y `sin_publicar`)."""
+    excepciones: `esperando_matriz` y `sin_publicar`).
+
+    También captura, antes de llamar a la cascada, si los documentos de este
+    expediente son exactamente los que ya se usaron en su última extracción
+    con éxito (`app.mantenimiento.frescura.documentos_sin_cambios`) y, si es
+    así, cuántas líneas de catálogo tenía entonces -- para poder comparar al
+    terminar y detectar sola la duplicación silenciosa que motivó esta
+    comprobación (CLAUDE.md sección 9.9, auditoría 2026-09-05: ~4.500 líneas
+    de sobra en siete expedientes, sin que nada lo señalara hasta la
+    revisión manual)."""
+    expediente_antes = db.get(Expediente, trabajo.expediente_id) if trabajo.expediente_id else None
+    verificar_integridad = False
+    conteo_antes = 0
+    if expediente_antes is not None:
+        documentos_antes = db.execute(
+            select(Documento).where(Documento.expediente_id == expediente_antes.id)
+        ).scalars().all()
+        verificar_integridad = documentos_sin_cambios(expediente_antes, documentos_antes)
+        if verificar_integridad:
+            conteo_antes = contar_lineas_catalogo(db, expediente_antes.id)
     try:
         return ejecutar_extraccion_expediente(db, storage, trabajo, model_provider=model_provider)
     finally:
@@ -80,6 +106,14 @@ def procesar_extraer_expediente(db, trabajo) -> dict:
             documentos = db.execute(
                 select(Documento).where(Documento.expediente_id == expediente.id)
             ).scalars().all()
+            if verificar_integridad:
+                aviso = detectar_crecimiento_sin_cambios(conteo_antes, contar_lineas_catalogo(db, expediente.id))
+                if aviso is not None:
+                    logger.error("%s: %s", expediente.codigo_expediente, aviso)
+                    expediente.error = f"{expediente.error}; {aviso}" if expediente.error else aviso
+                    if expediente.estado == EstadoExpediente.completado:
+                        expediente.estado = EstadoExpediente.pendiente_revision
+                    db.commit()
             estampar_extraccion(db, expediente, documentos)
             _contrastar_con_sindicacion(db, expediente)
 

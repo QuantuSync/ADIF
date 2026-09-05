@@ -492,6 +492,37 @@ def test_guardar_lineas_catalogo_huerfana_sin_lote_no_se_duplica_al_reprocesar(d
     assert len(huerfanas) == 1
 
 
+def test_guardar_lineas_catalogo_huerfana_con_clave_sufijada_no_se_duplica_al_reprocesar(db_session):
+    # Auditoría 2026-09-05 (docs/correccion-defectos-auditoria.md): una
+    # huérfana real trae `clave_linea` con el sufijo de página/franja que
+    # añade `app.extraccion.pipeline_anejo` (p.ej. "P-094@p24y198"), no el
+    # `codigo_precio` desnudo -- a diferencia de
+    # `test_guardar_lineas_catalogo_huerfana_sin_lote_no_se_duplica_al_reprocesar`,
+    # que sin querer no ejercitaba el bug porque su clave ya coincidía con
+    # su propio `codigo_precio`. Antes del guard de `fusion_material` en
+    # `guardar_lineas_catalogo`, el segundo guardado "canonicalizaba" la
+    # clave de vuelta a "P-094" -- el tercer reproceso, que vuelve a
+    # calcular la clave CON sufijo (como haría `pipeline_anejo` de nuevo
+    # sobre el mismo documento), ya no encontraba la fila y creaba otra.
+    lote = _lote(db_session)
+    mapeo = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": None, "cantidad": None, "precio_unitario": 2}
+    fila = ["P-094", "Traviesa", "10,00"]
+
+    def _linea_con_sufijo():
+        linea = construir_linea_catalogo(fila, mapeo, 24, None, lote.expediente_id, None, 0)
+        linea["clave_linea"] = f"{linea['clave_linea']}@p24y198"
+        return linea
+
+    r1 = guardar_lineas_catalogo(db_session, None, [_linea_con_sufijo()])
+    r2 = guardar_lineas_catalogo(db_session, None, [_linea_con_sufijo()])
+    r3 = guardar_lineas_catalogo(db_session, None, [_linea_con_sufijo()])
+
+    assert (r1.creadas, r2.creadas, r3.creadas) == (1, 0, 0)
+    huerfanas = db_session.query(LineaCatalogo).filter_by(lote_id=None, expediente_id=lote.expediente_id).all()
+    assert len(huerfanas) == 1
+    assert huerfanas[0].clave_linea == "P-094@p24y198"
+
+
 def test_construir_lineas_desde_tabla_usa_orden_inicial():
     tabla = TablaExtraida(
         cabecera=["Código", "Descripción", "Precio"],

@@ -715,7 +715,7 @@ def guardar_lineas_catalogo(
                     if valor_heredado is not None and getattr(existente, campo) is None:
                         setattr(existente, campo, valor_heredado)
                 db.delete(duplicado)
-            if existente.codigo_precio:
+            if fusion_material and existente.codigo_precio:
                 # Prioridad de `calcular_clave_linea` aplicada de nuevo tras
                 # la fusión: si el código de precio ya se conoce (propio o
                 # recién fundido desde la otra tabla), esa es la clave
@@ -725,6 +725,28 @@ def guardar_lineas_catalogo(
                 # comparta el mismo `codigo_precio` sin compartir matrícula
                 # -- un problema de datos real que conviene que reviente
                 # aquí, no que se disimule.
+                #
+                # Guardado tras `fusion_material` (bug de duplicación
+                # infinita en huérfanas, auditoría 2026-09-05,
+                # docs/correccion-defectos-auditoria.md): para una línea
+                # huérfana (`lote_id is None`, `fusion_material=False`),
+                # `clave_linea` no es solo el `codigo_precio` -- lleva el
+                # sufijo de página/franja que añade
+                # `app.extraccion.pipeline_anejo` precisamente para
+                # distinguir dos tablas ambiguas que repiten el mismo
+                # código (docstring de ese módulo). Sin este guard, esta
+                # rama "limpiaba" esa clave de vuelta al `codigo_precio`
+                # desnudo en cuanto la línea se actualizaba una vez -- el
+                # siguiente reproceso, que vuelve a calcular la clave CON
+                # sufijo, ya no encontraba la fila existente (la búsqueda
+                # exacta por `clave_linea` fallaba) y creaba una fila nueva
+                # en su lugar. Repetido en cada ciclo de mantenimiento, esto
+                # duplicaba sin límite las huérfanas de los expedientes
+                # multi-lote con banda vacía (`6.25/28510.0019` y otros seis
+                # expedientes, ~4.500 líneas de sobra medidas en esa
+                # auditoría). Con el guard, esta "canonicalización" solo se
+                # aplica cuando de verdad hace falta: dentro de un lote
+                # conocido, tras fundir por firma de material.
                 clave_ideal = existente.codigo_precio.strip()
                 if clave_ideal:
                     existente.clave_linea = clave_ideal
