@@ -84,7 +84,7 @@ export default function MantenimientoPanel({ apiUrl }: { apiUrl: string }) {
   const [historial, setHistorial] = useState<Trabajo[]>([]);
   // Conexión (sondeo pasivo): gateado, igual que en el resto de paneles.
   // `errorAccion` es de "lanzar ahora" -- una acción directa, avisa ya.
-  const { error: errorConexion, registrarExito, registrarFallo } = useReintentoConexion();
+  const { error: errorConexion, confirmado, cargando, registrarExito, registrarFallo } = useReintentoConexion();
   const [errorAccion, setErrorAccion] = useState<string | null>(null);
   const [lanzando, setLanzando] = useState(false);
 
@@ -130,6 +130,13 @@ export default function MantenimientoPanel({ apiUrl }: { apiUrl: string }) {
 
   return (
     <div>
+      {/* Estados de carga y error (CONTEXTO.md, bloque de estados de carga y
+          error, sesión 2026-09-06): sin respuesta confirmada de la API
+          todavía, ni el panel de estado ni el histórico se enseñan -- antes
+          `estado` a `null` ya decía "Cargando…" arriba, pero el histórico
+          vacío decía "Sin ejecuciones todavía" a la vez que este banner de
+          error, un mensaje contradictorio. */}
+      {cargando && <p className="muted">Cargando estado de mantenimiento…</p>}
       {errorConexion && (
         <p className="error-banner">
           Error al conectar con la API ({apiUrl}): {errorConexion}
@@ -137,144 +144,144 @@ export default function MantenimientoPanel({ apiUrl }: { apiUrl: string }) {
       )}
       {errorAccion && <p className="error-banner">{errorAccion}</p>}
 
-      <div className="card" style={{ marginBottom: "1.5rem" }}>
-        <p className="section-label">Ejecución programada</p>
-        {estado ? (
-          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center" }}>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "2rem", alignItems: "flex-start", flex: "1 1 auto" }}>
-              <div>
-                <div className="muted">Frecuencia</div>
-                <strong>
-                  {estado.programado_activo ? formatearIntervalo(estado.intervalo_segundos) : "desactivada"}
-                </strong>
-              </div>
-              <div>
-                <div className="muted">Última ejecución</div>
-                <strong>
-                  {estado.ultima_ejecucion ? formatearFecha(estado.ultima_ejecucion.created_at) : "nunca"}
-                </strong>
-                {estado.ultima_ejecucion && (
-                  <span className="status-note status-note-inline"> {disparadoPor(estado.ultima_ejecucion)}</span>
-                )}
-              </div>
-              <div>
-                <div className="muted">Próxima ejecución</div>
-                <strong>
-                  {estado.en_curso ? (
-                    <span className="status status-attn">en curso ahora mismo</span>
-                  ) : (
-                    formatearFecha(estado.proxima_ejecucion)
+      {confirmado && estado && (
+        <>
+          <div className="card" style={{ marginBottom: "1.5rem" }}>
+            <p className="section-label">Ejecución programada</p>
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center" }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "2rem", alignItems: "flex-start", flex: "1 1 auto" }}>
+                <div>
+                  <div className="muted">Frecuencia</div>
+                  <strong>
+                    {estado.programado_activo ? formatearIntervalo(estado.intervalo_segundos) : "desactivada"}
+                  </strong>
+                </div>
+                <div>
+                  <div className="muted">Última ejecución</div>
+                  <strong>
+                    {estado.ultima_ejecucion ? formatearFecha(estado.ultima_ejecucion.created_at) : "nunca"}
+                  </strong>
+                  {estado.ultima_ejecucion && (
+                    <span className="status-note status-note-inline"> {disparadoPor(estado.ultima_ejecucion)}</span>
                   )}
-                </strong>
+                </div>
+                <div>
+                  <div className="muted">Próxima ejecución</div>
+                  <strong>
+                    {estado.en_curso ? (
+                      <span className="status status-attn">en curso ahora mismo</span>
+                    ) : (
+                      formatearFecha(estado.proxima_ejecucion)
+                    )}
+                  </strong>
+                </div>
               </div>
+              <button
+                onClick={lanzarAhora}
+                disabled={lanzando || estado.en_curso}
+                className="btn btn-primary"
+                style={{ marginLeft: "2rem" }}
+              >
+                {lanzando ? "Lanzando…" : "Lanzar ciclo ahora"}
+              </button>
             </div>
-            <button
-              onClick={lanzarAhora}
-              disabled={lanzando || estado.en_curso}
-              className="btn btn-primary"
-              style={{ marginLeft: "2rem" }}
-            >
-              {lanzando ? "Lanzando…" : "Lanzar ciclo ahora"}
-            </button>
-          </div>
-        ) : (
-          <p className="muted">Cargando…</p>
-        )}
-        {estado?.ultima_ejecucion && (
-          <>
-            <div className="hr" />
-            {estado.ultima_ejecucion.estado === "fallido" ? (
-              esInterrupcionManual(estado.ultima_ejecucion) ? (
-                // Distinto de un fallo real (encargo de la sesión de pulido
-                // de 1280px): tono neutro, sin el acento de atención — es
-                // ruido de una sesión de diagnóstico, no un problema del
-                // sistema que alguien tenga que mirar.
-                <div>
-                  <span className="status status-faint">Interrumpida manualmente</span>
-                  <p className="muted" style={{ margin: "0.35rem 0 0" }}>
-                    Se detuvo a mano durante una sesión de diagnóstico — no es un fallo real del motor de
-                    mantenimiento. Puede lanzarse un ciclo nuevo cuando convenga.
-                  </p>
-                </div>
-              ) : (
-                <div>
-                  <span className="status status-attn">La última ejecución falló</span>
-                  <p style={{ margin: "0.35rem 0 0" }}>{estado.ultima_ejecucion.error}</p>
-                </div>
-              )
-            ) : (
+            {estado.ultima_ejecucion && (
               <>
-                <p className="muted" style={{ marginBottom: "0.4rem" }}>
-                  Qué encontró la última ejecución
-                </p>
-                <ResumenCiclo resultado={estado.ultima_ejecucion.resultado} />
+                <div className="hr" />
+                {estado.ultima_ejecucion.estado === "fallido" ? (
+                  esInterrupcionManual(estado.ultima_ejecucion) ? (
+                    // Distinto de un fallo real (encargo de la sesión de pulido
+                    // de 1280px): tono neutro, sin el acento de atención — es
+                    // ruido de una sesión de diagnóstico, no un problema del
+                    // sistema que alguien tenga que mirar.
+                    <div>
+                      <span className="status status-faint">Interrumpida manualmente</span>
+                      <p className="muted" style={{ margin: "0.35rem 0 0" }}>
+                        Se detuvo a mano durante una sesión de diagnóstico — no es un fallo real del motor de
+                        mantenimiento. Puede lanzarse un ciclo nuevo cuando convenga.
+                      </p>
+                    </div>
+                  ) : (
+                    <div>
+                      <span className="status status-attn">La última ejecución falló</span>
+                      <p style={{ margin: "0.35rem 0 0" }}>{estado.ultima_ejecucion.error}</p>
+                    </div>
+                  )
+                ) : (
+                  <>
+                    <p className="muted" style={{ marginBottom: "0.4rem" }}>
+                      Qué encontró la última ejecución
+                    </p>
+                    <ResumenCiclo resultado={estado.ultima_ejecucion.resultado} />
+                  </>
+                )}
               </>
             )}
-          </>
-        )}
-      </div>
+          </div>
 
-      <p className="section-label">Histórico</p>
-      <div className="table-scroll">
-        <table className="table">
-          <thead>
-            <tr>
-              <th className="num">#</th>
-              <th>Origen</th>
-              <th>Estado</th>
-              <th>Lanzado</th>
-              <th>Terminado</th>
-              <th>Resumen</th>
-            </tr>
-          </thead>
-          <tbody>
-            {historial.map((trabajo) => {
-              const interrumpido = esInterrupcionManual(trabajo);
-              return (
-                <tr
-                  key={trabajo.id}
-                  className={trabajo.error && !interrumpido ? "row-accent row-accent-attn" : "row-accent"}
-                >
-                  <td className="num">{trabajo.id}</td>
-                  <td>{disparadoPor(trabajo)}</td>
-                  <td>
-                    <span
-                      className={`status ${
-                        trabajo.estado === "completado"
-                          ? "status-ok"
-                          : interrumpido
-                          ? "status-faint"
-                          : trabajo.estado === "fallido"
-                          ? "status-attn"
-                          : ""
-                      }`}
-                    >
-                      {interrumpido ? "Interrumpido" : trabajo.estado}
-                    </span>
-                  </td>
-                  <td>{formatearFecha(trabajo.created_at)}</td>
-                  <td>
-                    {trabajo.estado === "pendiente" || trabajo.estado === "en_proceso" ? (
-                      <DatoVacio motivo="pendiente" titulo="Todavía no ha terminado." />
-                    ) : (
-                      formatearFecha(trabajo.updated_at)
-                    )}
-                  </td>
-                  <td>
-                    <ResumenCiclo resultado={trabajo.resultado} />
-                    {trabajo.error && (
-                      <div className="status-note" title={interrumpido ? trabajo.error ?? undefined : undefined}>
-                        {interrumpido ? "Interrumpida manualmente para diagnóstico — no es un fallo real." : trabajo.error}
-                      </div>
-                    )}
-                  </td>
+          <p className="section-label">Histórico</p>
+          <div className="table-scroll">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th className="num">#</th>
+                  <th>Origen</th>
+                  <th>Estado</th>
+                  <th>Lanzado</th>
+                  <th>Terminado</th>
+                  <th>Resumen</th>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      {historial.length === 0 && <p className="muted" style={{ marginTop: "1rem" }}>Sin ejecuciones todavía.</p>}
+              </thead>
+              <tbody>
+                {historial.map((trabajo) => {
+                  const interrumpido = esInterrupcionManual(trabajo);
+                  return (
+                    <tr
+                      key={trabajo.id}
+                      className={trabajo.error && !interrumpido ? "row-accent row-accent-attn" : "row-accent"}
+                    >
+                      <td className="num">{trabajo.id}</td>
+                      <td>{disparadoPor(trabajo)}</td>
+                      <td>
+                        <span
+                          className={`status ${
+                            trabajo.estado === "completado"
+                              ? "status-ok"
+                              : interrumpido
+                              ? "status-faint"
+                              : trabajo.estado === "fallido"
+                              ? "status-attn"
+                              : ""
+                          }`}
+                        >
+                          {interrumpido ? "Interrumpido" : trabajo.estado}
+                        </span>
+                      </td>
+                      <td>{formatearFecha(trabajo.created_at)}</td>
+                      <td>
+                        {trabajo.estado === "pendiente" || trabajo.estado === "en_proceso" ? (
+                          <DatoVacio motivo="pendiente" titulo="Todavía no ha terminado." />
+                        ) : (
+                          formatearFecha(trabajo.updated_at)
+                        )}
+                      </td>
+                      <td>
+                        <ResumenCiclo resultado={trabajo.resultado} />
+                        {trabajo.error && (
+                          <div className="status-note" title={interrumpido ? trabajo.error ?? undefined : undefined}>
+                            {interrumpido ? "Interrumpida manualmente para diagnóstico — no es un fallo real." : trabajo.error}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {historial.length === 0 && <p className="muted" style={{ marginTop: "1rem" }}>Sin ejecuciones todavía.</p>}
+        </>
+      )}
     </div>
   );
 }

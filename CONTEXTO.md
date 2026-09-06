@@ -597,6 +597,23 @@ suficientes, no ahora.
   (vocabulario controlado todavía corto, CONTEXTO.md sección 6 — no un dato
   perdido). Detalle completo y números finales en
   `docs/excel-cliente-correccion.md` bloque 3.
+- **Estados de carga y error de la web: corregido (sesión 2026-09-06).**
+  Las cuatro pantallas mezclaban "sin respuesta confirmada todavía" con
+  "confirmado que no hay datos": mientras la API no había respondido
+  nunca (carga inicial, o la API arrancando y reintentando la conexión a
+  la base de datos), cada panel ya enseñaba su recuento en cero y su
+  "sin expedientes/casos/ejecuciones todavía" a la vez que, tras el
+  umbral de 3 fallos ya existente, el banner de error -- tres mensajes
+  contradictorios a la vez, que se leían como datos perdidos.
+  `useReintentoConexion` añade un tercer estado, `confirmado` (solo tras
+  al menos una respuesta real de la API, nunca vuelve a `false`), del que
+  se deriva `cargando`. Las cuatro pantallas distinguen ahora sin mezcla:
+  cargando (un aviso, sin cifras), corte real confirmado (solo el
+  banner), y confirmado con datos (cifras reales, ceros incluidos si son
+  de verdad). Regla: nunca un recuento en cero sin respuesta confirmada.
+  Verificado en vivo contra el stack real, incluido un reinicio real y
+  repetido de los cuatro contenedores durante la propia sesión. Detalle
+  y capturas en `docs/estados-carga-web.md`.
 - **Tolerancia a reinicios de `dockerd`: arreglada en lo que sí está en
   mano del motor (sesión 2026-09-06).** `docs/diagnostico-caidas-dockerd.md`
   ya documentaba que Modo de espera moderno reinicia el *init* de WSL con
@@ -638,5 +655,5 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `mantenimiento-automatico.md`, `decisiones.md`, `correccion-defectos-auditoria.md`,
 `comparacion-corpus-sharepoint.md`, `auditoria-huerfanos-y-autorreferencia.md`,
 `excel-cliente-correccion.md`, `diagnostico-caidas-dockerd.md`,
-`tolerancia-reinicios-dockerd.md`,
+`tolerancia-reinicios-dockerd.md`, `estados-carga-web.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.
