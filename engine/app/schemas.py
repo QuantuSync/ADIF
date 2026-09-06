@@ -42,19 +42,19 @@ class ExpedienteOut(BaseModel):
     importe_licitacion: Optional[Decimal] = None
     importe_adjudicacion: Optional[Decimal] = None
     baja_global: Optional[Decimal] = None
-    # CLAUDE.md, encargo de esta sesión, punto 4 (ajuste 3): True cuando hay
+    # CONTEXTO.md, encargo de esta sesión, punto 4 (ajuste 3): True cuando hay
     # 2+ lotes con baja distinta entre sí — `baja_global` queda en None a
     # propósito y la web tiene que decir explícitamente "varía por lote", no
     # dejar el campo vacío sin explicación.
     baja_variable_por_lote: Optional[bool] = None
     # True cuando la matriz declarada en el Anuncio PCSP propio y la columna
-    # MATRIZ del Excel de códigos no coinciden entre sí (CLAUDE.md sección 7
+    # MATRIZ del Excel de códigos no coinciden entre sí (CONTEXTO.md sección 7
     # y app.extraccion.cruce_codigos): el sistema no elige una en silencio.
     matriz_conflicto: Optional[bool] = None
     lotes: list[LoteOut] = []
     estado: str
     error: Optional[str] = None
-    # CLAUDE.md sección 26: desajuste con la instantánea de sindicación,
+    # CONTEXTO.md sección 26: desajuste con la instantánea de sindicación,
     # nunca bloqueante (el PDF es el acto administrativo, la sindicación no
     # tiene su misma autoridad) — informativo, distinto de `error`.
     aviso_sindicacion: Optional[str] = None
@@ -76,7 +76,7 @@ class LineaCatalogoOut(BaseModel):
 
     id: int
     # None cuando la tabla de origen no se pudo asociar a un único lote sin
-    # ambigüedad (CLAUDE.md, encargo de esta sesión, punto 3): la línea
+    # ambigüedad (CONTEXTO.md, encargo de esta sesión, punto 3): la línea
     # existe y se puede revisar, pero no cuelga de ningún lote.
     lote_id: Optional[int] = None
     expediente_id: int
@@ -105,7 +105,7 @@ class LineaCatalogoOut(BaseModel):
     # documento real de origen (el de la matriz): la trazabilidad no cambia.
     heredado_de_matriz: Optional[bool] = None
     estado_revision: str
-    # Trazabilidad (CLAUDE.md sección 9.10 y encargo de esta sesión, punto 2):
+    # Trazabilidad (CONTEXTO.md sección 9.10 y encargo de esta sesión, punto 2):
     # de qué documento, página y fragmento salió esta línea.
     documento_origen_id: Optional[int] = None
     documento_origen_nombre: Optional[str] = None
@@ -131,7 +131,7 @@ class LineaCatalogoCorreccion(BaseModel):
 
 
 class LineaCatalogoDescartar(BaseModel):
-    # CLAUDE.md bloque 2 ("descartar la línea con motivo"): el motivo es
+    # CONTEXTO.md bloque 2 ("descartar la línea con motivo"): el motivo es
     # obligatorio -- una línea que sale del catálogo entregado al cliente
     # (`app.exportacion.generar_excel_catalogo`) sin dejar dicho por qué no
     # se puede auditar después.
@@ -139,7 +139,7 @@ class LineaCatalogoDescartar(BaseModel):
 
 
 class LineaCatalogoPendiente(BaseModel):
-    # CLAUDE.md bloque 2 ("dejarla pendiente con una nota"): igual que el
+    # CONTEXTO.md bloque 2 ("dejarla pendiente con una nota"): igual que el
     # motivo de descarte, la nota es obligatoria -- es el único rastro de
     # por qué esta línea se dejó para consultar con otra persona en vez de
     # confirmarse o corregirse ya.

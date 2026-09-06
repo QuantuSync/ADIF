@@ -1,6 +1,6 @@
 """expedientes.codigo_interno, expedientes.codigos_cruzados
 
-CLAUDE.md sección 7, "Cruce con el Excel de códigos": código interno y
+CONTEXTO.md sección 7, "Cruce con el Excel de códigos": código interno y
 código de proyecto/matriz salen de `Expedientes.xlsx` por clave exacta, nunca
 por similitud de nombre, y "el sistema nunca inventa una matriz — si no
 cruza, se deja vacío y se marca". `codigo_matriz` ya existe (puede venir del

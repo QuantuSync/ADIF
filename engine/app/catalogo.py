@@ -23,7 +23,7 @@ from app.models import LineaCatalogo
 # "PRESUPUESTO DE LICITACIÓN", "IVA", "TOTAL CON IVA", o una partida alzada
 # sin celda de matrícula propia) desplaza sus columnas y el texto de esa fila
 # cae en la columna de matrícula — que es `varchar(9)` y revienta el INSERT
-# con cualquier texto más largo. CLAUDE.md sección 2: la matrícula "no es"
+# con cualquier texto más largo. CONTEXTO.md sección 2: la matrícula "no es"
 # nunca texto, es un código de 9 dígitos; cualquier valor con una letra ya es
 # la señal de que esta fila no es lo que el mapeo de cabecera cree que es.
 _MATRICULA_VALIDA_RE = re.compile(r"^\d+$")
@@ -49,7 +49,7 @@ def _es_pie_de_tabla(texto_normalizado_sin_espacios: str) -> bool:
 
 
 def _es_partida_alzada(texto_normalizado_sin_espacios: str) -> bool:
-    # "Partida alzada a justificar para imprevistos" y variantes: CLAUDE.md
+    # "Partida alzada a justificar para imprevistos" y variantes: CONTEXTO.md
     # sección 2 la define como línea legítima ("sin matrícula ni código de
     # material"), así que el texto no se descarta — se recupera como
     # descripción, nunca como matrícula.
@@ -57,14 +57,14 @@ def _es_partida_alzada(texto_normalizado_sin_espacios: str) -> bool:
 
 
 # Sesión de los 3 expedientes que seguían en revisión tras el criterio de
-# lote laxo del cliente (CLAUDE.md sección 26): un guion suelto en una celda
+# lote laxo del cliente (CONTEXTO.md sección 26): un guion suelto en una celda
 # de matrícula/cantidad/precio unitario es la misma convención administrativa
 # que un hueco en blanco ("no aplica a esta fila"), verificado contra las 39
 # filas reales de `6.24/28510.0117` — la propia tabla usa el guion en la
 # celda de matrícula Y en la de código de elemento de la misma fila,
 # sistemáticamente, nunca solo en una fila suelta. No es un dato ilegible que
 # haga falta revisar, es la forma en que el documento dice "vacío" — igual
-# que CLAUDE.md sección 2 ya trata la ausencia de matrícula en el ~34% de las
+# que CONTEXTO.md sección 2 ya trata la ausencia de matrícula en el ~34% de las
 # líneas como algo normal, no un error. Distinto de un valor con identificadores
 # de glifo sin decodificar (CID) o de dos valores duplicados que no coinciden:
 # esos sí son ilegibles de verdad y siguen yendo a revisión (ver
@@ -77,7 +77,7 @@ def _es_celda_vacia(valor: Optional[str]) -> bool:
 
 # Sesión de defectos de auditoría (2026-09-05, docs/correccion-defectos-
 # auditoria.md): formatos de codigo_precio verificados contra el corpus real
-# y contra `tests/test_catalogo.py` / `tests/fixtures/__init__.py`. CLAUDE.md
+# y contra `tests/test_catalogo.py` / `tests/fixtures/__init__.py`. CONTEXTO.md
 # sección 3 solo menciona "P-001, P-067"; el corpus real trae más variantes,
 # todas confirmadas: "P-001" (con guion), "P1"/"P01" (sin guion, 1-2
 # dígitos), "PN001"/"PN09" (prefijo de señalización), "PA-01" (partida
@@ -92,7 +92,7 @@ _CODIGO_PRECIO_VALIDO_RE = re.compile(rf"^(?:{_CODIGO_PRECIO_NUCLEO_RE.pattern})
 # "PARTIDA", no "Código de precio", y numera las filas 1..41 sin ningún
 # prefijo de letra -- verificado que son únicas dentro del lote (sin
 # colisión), igual de identificador de línea dentro del documento que
-# "P-001" (CLAUDE.md sección 2), solo que sin prefijo. Aparte de
+# "P-001" (CONTEXTO.md sección 2), solo que sin prefijo. Aparte de
 # `_CODIGO_PRECIO_NUCLEO_RE` (no dentro): ese patrón también se usa para
 # aislar el código real en medio de ruido de pie de página
 # (`_normalizar_codigo_precio` más abajo), y un dígito suelto ahí
@@ -180,7 +180,7 @@ def _acumular_motivo(motivo: Optional[str], nuevo: Optional[str]) -> Optional[st
 def _acumular_motivo_unico(motivo: Optional[str], nuevo: str) -> str:
     """Como `_acumular_motivo`, pero no repite `nuevo` si una fusión por
     firma ya lo dejó anotado en una vuelta anterior (una firma puede
-    absorber más de dos filas, CLAUDE.md sección 9 sobre idempotencia:
+    absorber más de dos filas, CONTEXTO.md sección 9 sobre idempotencia:
     reprocesar no debe ni duplicar filas ni duplicar texto de motivo)."""
     if motivo and nuevo in motivo:
         return motivo
@@ -235,7 +235,7 @@ def _parece_descripcion_recuperable(texto: Optional[str]) -> bool:
 # prioriza la matrícula (que sí sale bien, en su columna de siempre) como
 # clave, así que las dos copias de la misma fila material se funden en una
 # sola por clave exacta sin que importe cuál trajo la descripción vacía. Pero
-# una partida alzada (CLAUDE.md sección 2: nunca trae matrícula) cae en el
+# una partida alzada (CONTEXTO.md sección 2: nunca trae matrícula) cae en el
 # `hash(descripción + orden_aparicion)` de `calcular_clave_linea` — con la
 # descripción vacía en la copia del contrato y presente en la del anejo, el
 # hash sale distinto para lo que es la misma línea real, y las dos copias se
@@ -441,7 +441,7 @@ def _construir_campos(
     con un mapeo desplazado, no solo con el original.
 
     Devuelve `("pie_de_tabla", None)` cuando la fila es un resumen de tabla
-    (CLAUDE.md sección 2, sesión de rodaje 2026-09-03) y `("ok", campos)` en
+    (CONTEXTO.md sección 2, sesión de rodaje 2026-09-03) y `("ok", campos)` en
     cualquier otro caso — `campos["descripcion"]` puede ser `""` y
     `campos["precio_unitario"]` puede ser `None`, eso lo decide el
     llamador."""
@@ -465,7 +465,7 @@ def _construir_campos(
             matricula = None
         elif _es_partida_alzada(clave):
             # La celda de matrícula de esta fila no existe de verdad (una
-            # partida alzada no tiene, CLAUDE.md sección 2): el texto que
+            # partida alzada no tiene, CONTEXTO.md sección 2): el texto que
             # debía caer en descripción aterrizó aquí porque a esta fila le
             # falta una columna respecto a las demás de la tabla. Se
             # recupera de la celda cruda (`matricula_bruta`), no de
@@ -577,10 +577,10 @@ def construir_linea_catalogo(
     baja_lote: Optional[Decimal],
     orden_aparicion: int,
 ) -> Optional[dict]:
-    """Etapa 6 (normalización + derivación, CLAUDE.md secciones 4 y 8): una
+    """Etapa 6 (normalización + derivación, CONTEXTO.md secciones 4 y 8): una
     fila cruda de tabla + el mapeo de columnas de la etapa 5 -> los campos de
     una `LineaCatalogo`. `precio_adjudicado` se deriva aquí, no se busca en
-    ningún documento (CLAUDE.md sección 4: "no existe una tabla de precios
+    ningún documento (CONTEXTO.md sección 4: "no existe una tabla de precios
     adjudicados").
 
     `expediente_id` viaja en la línea desde este punto (encargo de esta
@@ -588,7 +588,7 @@ def construir_linea_catalogo(
     único lote sin ambigüedad se guarda igualmente, con `lote_id=None` —
     huérfana pero trazable hasta su expediente.
 
-    Devuelve `None` cuando la fila es un pie de tabla (CLAUDE.md sección 2,
+    Devuelve `None` cuando la fila es un pie de tabla (CONTEXTO.md sección 2,
     sesión de rodaje 2026-09-03): no es una línea de material, es un resumen
     ("PRESUPUESTO DE LICITACIÓN", "IVA", "TOTAL CON IVA") que el mapeo de
     cabecera no distingue de una fila de datos. Nunca lanza por un valor de
@@ -689,7 +689,7 @@ def construir_lineas_desde_tabla(
     baja_lote: Optional[Decimal],
     orden_inicial: int,
 ) -> list[dict]:
-    # Una fila de pie de tabla (CLAUDE.md sección 2, sesión de rodaje
+    # Una fila de pie de tabla (CONTEXTO.md sección 2, sesión de rodaje
     # 2026-09-03) devuelve None de `construir_linea_catalogo`: se descarta
     # aquí, nunca llega a `guardar_lineas_catalogo`.
     filas = tabla.filas
@@ -751,7 +751,7 @@ def _firma_material(datos: dict) -> Optional[tuple]:
     `6.23/28510.0042`, `6.23/28510.0051`) repite el mismo material con su
     mismo precio bajo un `codigo_precio` DISTINTO de numeración propia, sin
     matrícula ninguna de las dos veces — igual que una "PARTIDA ALZADA A
-    JUSTIFICAR PARA IMPREVISTOS" (nunca lleva matrícula, CLAUDE.md sección
+    JUSTIFICAR PARA IMPREVISTOS" (nunca lleva matrícula, CONTEXTO.md sección
     2) puede repetirse como cabecera de sección en varias páginas del mismo
     cuadro de precios. `_combinar_por_clave` y `guardar_lineas_catalogo`
     solo llaman a esta función dentro de un lote ya resuelto
@@ -780,7 +780,7 @@ _MOTIVO_FUSION_SIN_MATRICULA = (
 
 def _combinar_por_clave(lineas: list[dict], permitir_fusion_material: bool = True) -> list[dict]:
     """El mismo cuadro de precios puede reaparecer varias veces dentro de un
-    único documento (CLAUDE.md sección 3 y docstring de `guardar_lineas_catalogo`),
+    único documento (CONTEXTO.md sección 3 y docstring de `guardar_lineas_catalogo`),
     así que `lineas` puede traer la misma `clave_linea` repetida antes de tocar
     la base de datos. Doblarlas aquí, en Python, con la misma regla de fusión
     que ya aplica `guardar_lineas_catalogo` fila a fila (un valor `None` nunca
@@ -838,7 +838,7 @@ def _combinar_por_clave(lineas: list[dict], permitir_fusion_material: bool = Tru
 def guardar_lineas_catalogo(
     db: Session, lote_id: Optional[int], lineas: list[dict]
 ) -> ResultadoGuardadoCatalogo:
-    """Escritura por clave, no añadido ciego (CLAUDE.md sección 9.9): una
+    """Escritura por clave, no añadido ciego (CONTEXTO.md sección 9.9): una
     línea ya vista para este lote se actualiza, nunca se duplica. La
     actualización solo pisa los campos que la nueva extracción sí trae
     (`None` no borra un valor ya conocido) — necesario porque el mismo
@@ -847,7 +847,7 @@ def guardar_lineas_catalogo(
     y precio pero no trae cantidad): la segunda pasada no debe borrar la
     cantidad que sí trajo la primera.
 
-    No hace `commit()`: el llamador decide cuándo (CLAUDE.md, sesión de
+    No hace `commit()`: el llamador decide cuándo (CONTEXTO.md, sesión de
     rodaje 2026-09-03, punto 3 — antes cada llamada confirmaba por su cuenta,
     así que un documento con varios lotes podía dejar committed las líneas
     de un grupo y fallar en el siguiente, dejando el catálogo con restos de
@@ -855,7 +855,7 @@ def guardar_lineas_catalogo(
     hace un único `commit()` por documento tras guardar todos sus grupos: o
     se guarda entero, o el `rollback()` del `except` lo deshace entero.
 
-    `lote_id=None` es el caso huérfano (CLAUDE.md, encargo de esta sesión,
+    `lote_id=None` es el caso huérfano (CONTEXTO.md, encargo de esta sesión,
     punto 3): una tabla cuyo lote no se pudo determinar sin ambigüedad. El
     filtro de existencia siempre incluye `expediente_id` además de
     `lote_id`, aunque `lote_id` ya identifique el lote cuando no es None —

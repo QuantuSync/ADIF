@@ -23,7 +23,7 @@ router = APIRouter()
 
 
 def _acumular_comentario(comentarios: str | None, nuevo: str) -> str:
-    """Añade una nota nueva sin perder las que ya hubiera (CLAUDE.md sección
+    """Añade una nota nueva sin perder las que ya hubiera (CONTEXTO.md sección
     7: `comentarios` es la única columna de notas humanas, y varias
     acciones de la cola de revisión -- descartar, dejar pendiente, una
     corrección con nota -- pueden escribir en ella para la misma línea a lo
@@ -36,7 +36,7 @@ def listar_cola_revision(
     db: Session = Depends(get_db),
     usuario: Usuario = Depends(get_current_user),
 ):
-    """CLAUDE.md, encargo de esta sesión, punto 3: casos marcados como
+    """CONTEXTO.md, encargo de esta sesión, punto 3: casos marcados como
     `pendiente_revision`, con el motivo real (`expediente.error`) — el
     documento al lado y la confirmación/corrección se piden por expediente
     en `/expedientes/{id}/revision`."""
@@ -88,11 +88,11 @@ def confirmar_revision_expediente(
     db: Session = Depends(get_db),
     usuario: Usuario = Depends(get_current_user),
 ):
-    """CLAUDE.md, encargo de esta sesión, punto 3: "confirmar o corregir".
+    """CONTEXTO.md, encargo de esta sesión, punto 3: "confirmar o corregir".
     Con cuerpo vacío, confirma los datos tal cual (el caso ya estaba bien y
     el motivo era una alerta, no un error). Con campos, los corrige antes de
     confirmar y recalcula `precio_adjudicado` si cambió la baja del lote —
-    la derivación de CLAUDE.md sección 4 no puede quedar desfasada tras una
+    la derivación de CONTEXTO.md sección 4 no puede quedar desfasada tras una
     corrección manual."""
     expediente = _cargar_expediente_o_404(db, expediente_id)
 
@@ -137,10 +137,10 @@ def corregir_linea_catalogo(
     db: Session = Depends(get_db),
     usuario: Usuario = Depends(get_current_user),
 ):
-    """Corrección a nivel de línea (CLAUDE.md, encargo de esta sesión, punto
+    """Corrección a nivel de línea (CONTEXTO.md, encargo de esta sesión, punto
     3): solo toca los campos que trae `correccion`, nunca borra un valor ya
     conocido con uno ausente — mismo criterio de `guardar_lineas_catalogo`
-    (CLAUDE.md sección 9.9)."""
+    (CONTEXTO.md sección 9.9)."""
     linea = _linea_o_404(db, linea_id)
 
     datos = correccion.model_dump(exclude_unset=True, exclude_none=True)
@@ -193,11 +193,11 @@ def descartar_linea_catalogo(
     db: Session = Depends(get_db),
     usuario: Usuario = Depends(get_current_user),
 ):
-    """CLAUDE.md bloque 2: una línea que no es material real o no se puede
+    """CONTEXTO.md bloque 2: una línea que no es material real o no se puede
     determinar sale del catálogo entregado (`app.exportacion.
     generar_excel_catalogo` la excluye), pero se queda en base de datos con
     su motivo -- nunca se borra, para no perder la traza de por qué el
-    documento producía esta fila (CLAUDE.md sección 9.10)."""
+    documento producía esta fila (CONTEXTO.md sección 9.10)."""
     linea = _linea_o_404(db, linea_id)
     linea.estado_revision = EstadoRevisionLinea.descartado
     linea.comentarios = _acumular_comentario(linea.comentarios, f"Descartada: {cuerpo.motivo}")
@@ -212,7 +212,7 @@ def marcar_linea_pendiente(
     db: Session = Depends(get_db),
     usuario: Usuario = Depends(get_current_user),
 ):
-    """CLAUDE.md bloque 2: para cuando quien revisa necesita consultarlo con
+    """CONTEXTO.md bloque 2: para cuando quien revisa necesita consultarlo con
     otra persona antes de confirmar, corregir o descartar -- la línea sigue
     en el catálogo (a diferencia de `descartar_linea_catalogo`) mientras se
     resuelve."""

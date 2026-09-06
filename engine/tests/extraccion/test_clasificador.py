@@ -48,7 +48,7 @@ def test_contrato():
 
 
 def test_anejo_con_pliego_dentro_clasifica_como_pliego():
-    # CLAUDE.md sección 5: por marcadores de texto, no por nombre de fichero.
+    # CONTEXTO.md sección 5: por marcadores de texto, no por nombre de fichero.
     # Estos ficheros se llaman "*_ANEJO_1.pdf" en la Plataforma pero su
     # contenido es el Pliego de Prescripciones Técnicas completo (ver
     # docstring de app.extraccion.clasificador) — clasificarlos como `pliego`
@@ -74,13 +74,13 @@ def test_anejo_suelto_criterios_tecnicos():
     assert r.tipo == TipoDocumento.anejo
 
 
-# --- es_pliego_sin_precios (CLAUDE.md sección 26, criterio del cliente) ----
+# --- es_pliego_sin_precios (CONTEXTO.md sección 26, criterio del cliente) ----
 
 
 def test_pliego_tecnico_real_no_se_marca_sin_precios():
     # El pliego técnico (ANEJO_1 real, trae el cuadro de precios) es
     # justo el que NUNCA debe saltarse -- verificado contra el corpus real
-    # antes de aplicar el criterio del cliente (CLAUDE.md sección 26).
+    # antes de aplicar el criterio del cliente (CONTEXTO.md sección 26).
     r_guantes = clasificar(extraer_texto(fx.ANEJO_PRECIOS_GUANTES))
     r_traviesas = clasificar(extraer_texto(fx.ANEJO_PRECIOS_TRAVIESAS))
     assert es_pliego_sin_precios(r_guantes) is False

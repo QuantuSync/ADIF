@@ -1,7 +1,7 @@
 import MantenimientoPanel from "./MantenimientoPanel";
 
 export default function PaginaMantenimiento() {
-  // CLAUDE.md sección 9.1: la web solo llama a la API por HTTP — sin fetch
+  // CONTEXTO.md sección 9.1: la web solo llama a la API por HTTP — sin fetch
   // inicial en el servidor, igual que /catalogo.
   const apiUrlNavegador = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
   return (

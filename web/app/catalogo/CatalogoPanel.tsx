@@ -20,7 +20,7 @@ type LineaCatalogo = {
   nombre_proyecto: string | null;
   codigo_interno: string | null;
   codigos_cruzados: boolean | null;
-  // Huérfana (CLAUDE.md sección 2): la tabla de origen no se pudo asociar a
+  // Huérfana (CONTEXTO.md sección 2): la tabla de origen no se pudo asociar a
   // un lote sin ambigüedad. Existe y se puede revisar, pero no cuelga de
   // ningún lote -- `null`, no una cadena vacía.
   identificador_lote: string | null;
@@ -79,7 +79,7 @@ function necesitaRevision(linea: LineaCatalogo): boolean {
   );
 }
 
-// Matrícula vacía (CLAUDE.md sección 2 y encargo de esta sesión): distingue
+// Matrícula vacía (CONTEXTO.md sección 2 y encargo de esta sesión): distingue
 // "no aplica" (partida alzada — reserva presupuestaria, no un artículo de
 // almacén, hueco correcto y definitivo) de "no existe en el documento" (el
 // cuadro de precios de origen no la traía en ~1/3 de las líneas, tampoco
@@ -98,7 +98,7 @@ function celdaConCausaDeVacio(valor: string | null, esPartida: boolean, tituloNo
   return <DatoVacio motivo="no-consta" titulo={tituloNoConsta} />;
 }
 
-// Precio adjudicado = precio unitario × (1 − baja de lote) — CLAUDE.md
+// Precio adjudicado = precio unitario × (1 − baja de lote) — CONTEXTO.md
 // sección 4. Cuando falta, casi siempre es porque el expediente todavía no
 // tiene baja de lote declarada, no porque el sistema no supiera calcularlo:
 // distinto de un simple hueco, se resuelve solo en cuanto llegue ese dato.
@@ -116,7 +116,7 @@ function celdaPrecioAdjudicado(linea: LineaCatalogo) {
   return "";
 }
 
-// Lote vacío (huérfana, CLAUDE.md sección 2): la tabla de origen no se pudo
+// Lote vacío (huérfana, CONTEXTO.md sección 2): la tabla de origen no se pudo
 // asociar a un único lote sin ambigüedad -- `linea.motivo_revision` ya trae
 // el detalle exacto (banda vacía, varias cabeceras LOTE N en la misma
 // franja...); esta celda solo señala que el hueco tiene una causa conocida
@@ -136,7 +136,7 @@ function celdaLote(linea: LineaCatalogo) {
 }
 
 // Código de precio vacío: el cuadro de precios de origen no trae un
-// identificador de línea distinto para esta fila (CLAUDE.md sección 2, la
+// identificador de línea distinto para esta fila (CONTEXTO.md sección 2, la
 // matrícula es la única clave alternativa cuando falta). Definitivo, nada
 // que recuperar -- distinto de un valor descartado por formato irreconocible
 // (eso ya lleva su propio `motivo_revision`, con el valor bruto).
@@ -401,7 +401,7 @@ export default function CatalogoPanel({ apiUrl }: { apiUrl: string }) {
         </>
       )}
 
-      {/* Trazabilidad (CLAUDE.md, encargo de esta sesión, punto 2): de qué
+      {/* Trazabilidad (CONTEXTO.md, encargo de esta sesión, punto 2): de qué
           documento, página y fragmento sale cada cifra — es lo que la
           versión hecha con Copilot no puede ofrecer. */}
       {seleccion && (

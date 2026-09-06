@@ -33,7 +33,7 @@ function formatearFecha(iso: string): string {
 
 // Segundos legibles como "cada 7 días" / "cada 30 minutos" en vez de un
 // número de segundos crudo -- lo que de verdad va a configurar quien opere
-// el sistema (CLAUDE.md bloque 3, punto 1: "configurable en frecuencia").
+// el sistema (CONTEXTO.md bloque 3, punto 1: "configurable en frecuencia").
 function formatearIntervalo(segundos: number): string {
   if (segundos >= 86400) return `cada ${(segundos / 86400).toFixed(segundos % 86400 === 0 ? 0 : 1)} día(s)`;
   if (segundos >= 3600) return `cada ${(segundos / 3600).toFixed(segundos % 3600 === 0 ? 0 : 1)} hora(s)`;

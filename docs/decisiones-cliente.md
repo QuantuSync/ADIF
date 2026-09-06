@@ -1,7 +1,7 @@
 # Criterios del cliente
 
-Registro histórico movido desde `CLAUDE.md` (split de sesión 2026-09-05).
-Ver `CLAUDE.md` para el contexto vivo del proyecto.
+Registro histórico movido desde `CONTEXTO.md` (split de sesión 2026-09-05).
+Ver `CONTEXTO.md` para el contexto vivo del proyecto.
 
 ---
 
@@ -11,7 +11,7 @@ Tres criterios que llegan **del cliente**, no de nuestro propio análisis —
 marcados así explícitamente porque **dos de los tres no se sostienen tal
 cual contra los documentos reales** del corpus. Se verificaron contra
 documentos reales antes de tocar código (encargo explícito de esta sesión):
-donde contradicen lo ya documentado (CLAUDE.md sección 3, `docs/hallazgos-extraccion.md` sección 19), se implementó
+donde contradicen lo ya documentado (CONTEXTO.md sección 3, `docs/hallazgos-extraccion.md` sección 19), se implementó
 la parte que la evidencia confirma, no la versión literal del cliente. El
 motivo de cada decisión queda aquí para poder explicárselo sin que parezca
 que no se le hizo caso.
@@ -48,7 +48,7 @@ real resulta caro de procesar así, es el sitio a revisar.
 
 Ninguno de los fixtures reales de este corpus trae el literal "Tipo de
 Contrato" (el que sí lo trae, el "Documento de Pliegos", no está entre los
-fixtures fijos, CLAUDE.md sección 13) — probado con un caso sintético (`PaginaTexto`
+fixtures fijos, CONTEXTO.md sección 13) — probado con un caso sintético (`PaginaTexto`
 directo, sin PDF) para las dos ramas ("Suministros" no dispara nada,
 "Obras" sí).
 
@@ -58,12 +58,12 @@ directo, sin PDF) para las dos ramas ("Suministros" no dispara nada,
 `app.extraccion.precios_unitarios.calcular_baja_efectiva` exigía que la baja
 declarada en texto cuadrase (con tolerancia de medio punto) con la baja que
 resultaba de los importes de licitación y adjudicación — un desajuste
-mandaba el expediente entero a revisión (CLAUDE.md sección 12, "lo que no
+mandaba el expediente entero a revisión (CONTEXTO.md sección 12, "lo que no
 cuadra no se corrige solo"). El cliente pide un mínimo más laxo: lote,
 expediente y baja declarada bastan. Se quitó la exigencia de que cuadren —
 la baja declarada gana siempre que exista; solo sigue exigiéndose revisión
 cuando no hay ninguna baja de la que partir (el caso de precios unitarios
-sin baja declarada, CLAUDE.md sección 4, no cambia).
+sin baja declarada, CONTEXTO.md sección 4, no cambia).
 
 **Efecto medido, verificado contra el stack real (no solo predicho):** de
 los 7 expedientes que `docs/identidad-expediente.md` sección 22 agrupaba como "baja declarada no
@@ -82,7 +82,7 @@ segundo problema, antes oculto detrás del primero.
 
 **"Los pliegos no tienen contenido, son enlaces — se pueden ignorar":
 contradicho en parte por el corpus real, y ya apuntado antes de esta sesión
-(CLAUDE.md sección 3).** `TipoDocumento.pliego` mezcla tres documentos distintos,
+(CONTEXTO.md sección 3).** `TipoDocumento.pliego` mezcla tres documentos distintos,
 distinguibles por el marcador que los clasificó
 (`app.extraccion.clasificador`):
 
@@ -95,7 +95,7 @@ distinguibles por el marcador que los clasificó
   contra un documento real de 93 páginas
   (`6.23/28510.0018_ANEJO_2.pdf`). Coincide con el criterio del cliente.
 - **"pliego de prescripciones tecnicas"** (típicamente `*_ANEJO_1.pdf`,
-  CLAUDE.md sección 3): **contradice el criterio del cliente.** Es el pliego técnico
+  CONTEXTO.md sección 3): **contradice el criterio del cliente.** Es el pliego técnico
   completo, y el cuadro de precios es una sección interna suya — en este
   corpus, **544 líneas de catálogo reales** (21 de 21 documentos con este
   marcador aportan datos; 0 de los ~75 documentos con los otros dos
@@ -215,15 +215,15 @@ documentos reales de esta sesión (el PCAP de 93 páginas, las portadas
 administrativas, el par de contratos de `6.23/28510.0051`, los dos LC.27 de
 lote de `6.24/28510.0088` y `6.23/28510.0129`) se inspeccionó directamente
 sobre el corpus ya descargado en el volumen de Docker, sin copiarlo al
-repositorio (CLAUDE.md sección 13: no se meten los PDFs completos).
+repositorio (CONTEXTO.md sección 13: no se meten los PDFs completos).
 
 ---
 
 ## Pendientes ya resueltos (histórico)
 
-Bullets que estaban en "Pendiente de resolver" de `CLAUDE.md` y ya se
+Bullets que estaban en "Pendiente de resolver" de `CONTEXTO.md` y ya se
 cerraron en sesiones posteriores. Movidos aquí íntegros al recortar
-CLAUDE.md (sesión 2026-09-05) para no perder el rastro de la decisión.
+CONTEXTO.md (sesión 2026-09-05) para no perder el rastro de la decisión.
 
 - **Resuelto (sección 21 de `docs/identidad-expediente.md`, sesión de
   corrección de identidad):** los 8

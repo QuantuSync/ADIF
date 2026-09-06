@@ -1,4 +1,4 @@
-"""Encadena las etapas 3 a 6 de la cascada (CLAUDE.md sección 5) sobre un
+"""Encadena las etapas 3 a 6 de la cascada (CONTEXTO.md sección 5) sobre un
 documento completo: localizar páginas candidatas, extraer sus tablas, mapear
 cada cabecera (con caché) y normalizar las filas a líneas de catálogo listas
 para `app.catalogo.guardar_lineas_catalogo`. No persiste nada por sí mismo —
@@ -8,7 +8,7 @@ de un documento.
 Etapa 3.5 (asociación tabla -> lote, `app.extraccion.lote_tabla`) solo se
 ejercita cuando `lotes` trae más de una entrada: con un único lote no hay
 ambigüedad que resolver, y buscar cabeceras "LOTE N" en cada página sería
-trabajo — y riesgo de falso positivo— sin ningún propósito (CLAUDE.md
+trabajo — y riesgo de falso positivo— sin ningún propósito (CONTEXTO.md
 sección 6, el mismo principio de "no hacer trabajo que el caso no pide" que
 rige cuándo se llama al modelo)."""
 from __future__ import annotations
@@ -44,7 +44,7 @@ class ResultadoProcesamientoAnejo:
     # caso de ambigüedad.
     tablas_sin_lote: list[str] = field(default_factory=list)
     # Líneas cuyo valor de cantidad/precio/matrícula no se pudo interpretar
-    # (CLAUDE.md, sesión de rodaje 2026-09-03) — `linea["motivo_revision"]`
+    # (CONTEXTO.md, sesión de rodaje 2026-09-03) — `linea["motivo_revision"]`
     # ya lo explica por línea; este contador es solo para que el orquestador
     # sepa si tiene que avisar a nivel de expediente sin releer todas las
     # líneas.
@@ -65,7 +65,7 @@ def procesar_anejo(
     pasar por la búsqueda de banda. Con varios, cada tabla localizada se
     asocia a su lote por posición (etapa 3.5); las que resulten ambiguas
     quedan con `identificador_lote=None` en cada línea — el orquestador las
-    guarda con `lote_id=None` (huérfanas, CLAUDE.md encargo de esta sesión
+    guarda con `lote_id=None` (huérfanas, CONTEXTO.md encargo de esta sesión
     punto 3: nunca por proximidad ni adivinando)."""
     lineas: list[dict] = []
     tablas_procesadas = 0
@@ -116,7 +116,7 @@ def procesar_anejo(
                 )
                 for linea in lineas_tabla:
                     linea["identificador_lote"] = identificador_lote
-                    # `construir_linea_catalogo` (CLAUDE.md, sesión de rodaje
+                    # `construir_linea_catalogo` (CONTEXTO.md, sesión de rodaje
                     # 2026-09-03) ya puede haber puesto su propio
                     # `motivo_revision` (un valor de cantidad/precio/matrícula
                     # ilegible): se cuenta aparte de la ambigüedad de lote
@@ -131,7 +131,7 @@ def procesar_anejo(
                         # Hallazgo real (expediente 6.25/28510.0027): varias
                         # tablas ambiguas del mismo documento pueden compartir
                         # codigo_precio — el mismo cuadro de precios se repite
-                        # por lote (CLAUDE.md sección 3), así que LOTE 2, 4, 5
+                        # por lote (CONTEXTO.md sección 3), así que LOTE 2, 4, 5
                         # y 6 traen todos un "P-1".."P-6" propio. Sin lote que
                         # las separe, `clave_linea` a secas fundiría en una
                         # sola fila los datos de lotes distintos entre sí —

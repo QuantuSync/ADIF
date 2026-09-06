@@ -1,4 +1,4 @@
-"""Bloque 2 (CLAUDE.md sección 24): descubrimiento de expedientes nuevos por
+"""Bloque 2 (CONTEXTO.md sección 24): descubrimiento de expedientes nuevos por
 sindicación y detección de cambio de estado, contra un ZIP local sintético
 (`ruta_zip=...`, nunca red real en un test)."""
 from datetime import datetime, timezone

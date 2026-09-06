@@ -1,6 +1,6 @@
 """cache_mapeo_cabecera
 
-CLAUDE.md sección 6: "Una llamada por firma de cabecera, no por documento, no
+CONTEXTO.md sección 6: "Una llamada por firma de cabecera, no por documento, no
 por página, no por fila [...] Si está, ya sabes qué columna es cada cosa. Si
 no, una llamada, guardas el mapeo, y no vuelves a preguntarlo nunca." Esta
 tabla es esa memoria persistente.

@@ -1,6 +1,6 @@
 """tipo_documento: añade resolucion_adjudicacion
 
-CLAUDE.md sección 5, etapa 1 y sección 17: la Propuesta de Adjudicación
+CONTEXTO.md sección 5, etapa 1 y sección 17: la Propuesta de Adjudicación
 (LC.27) y la Resolución de Adjudicación son documentos distintos que pueden
 coexistir para un mismo expediente, y el motor debe poder clasificarlos por
 separado aunque declaren el mismo hecho.

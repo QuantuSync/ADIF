@@ -1,4 +1,4 @@
-"""Etapas 3 y 4 de la sesión (CLAUDE.md sección 4): la baja es un dato
+"""Etapas 3 y 4 de la sesión (CONTEXTO.md sección 4): la baja es un dato
 declarado en texto, nunca una tabla que calcular. Se busca en la Propuesta
 LC.27, en la Resolución de Adjudicación y en el contrato — las tres plantillas
 declaran la misma frase con redacciones distintas:
@@ -39,7 +39,7 @@ _BAJA_RE = re.compile(
 )
 
 # Redacciones alternativas de la misma baja (sesión de expedientes sin
-# publicar, CLAUDE.md sección 22), verificadas contra un caso real que no
+# publicar, CONTEXTO.md sección 22), verificadas contra un caso real que no
 # viene del corpus de PDFs de este proyecto sino de otra fuente: una etiqueta
 # de campo, no una frase en prosa, y sin la subordinada "precios unitarios"
 # que exige `_BAJA_RE`. Solo se intenta si `_BAJA_RE` no encontró nada en
@@ -82,7 +82,7 @@ _BAJA_INVERTIDA_RE = re.compile(
 )
 
 # Prioridad al elegir entre varios documentos del mismo hecho para el mismo
-# expediente/lote (CLAUDE.md sección 17: "preferir la Resolución cuando
+# expediente/lote (CONTEXTO.md sección 17: "preferir la Resolución cuando
 # existan las dos" porque es el acto posterior y definitivo).
 # `propuesta_dt` (docs/analisis-corpus.md hallazgo 4) es al mismo tipo de
 # hecho que propuesta_lc27 — una propuesta previa a la Resolución, nunca
@@ -162,7 +162,7 @@ def extraer_baja_declarada(
 
 def elegir_baja_preferida(candidatas: list[BajaDeclarada]) -> Optional[BajaDeclarada]:
     """Cuando el mismo expediente trae baja declarada en más de un documento
-    (p.ej. Propuesta y Resolución, CLAUDE.md sección 17), se queda con la del
+    (p.ej. Propuesta y Resolución, CONTEXTO.md sección 17), se queda con la del
     documento de mayor prioridad. No decide si los valores discrepan entre
     sí — eso es una incoherencia y va a la cola de revisión (sección 12), no
     algo que este selector deba resolver en silencio."""

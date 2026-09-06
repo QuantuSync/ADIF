@@ -47,7 +47,7 @@ class ExpedienteNoPublicadoError(RuntimeError):
     un fallo transitorio -- `app.scraping.job` lo trata aparte para marcar el
     expediente `sin_publicar` en vez de `fallido` y no gastar reintentos en
     repetir una búsqueda que no va a cambiar de resultado (sesión de
-    expedientes sin publicar, CLAUDE.md sección 22: comprobado a mano que
+    expedientes sin publicar, CONTEXTO.md sección 22: comprobado a mano que
     estos códigos no están en la Plataforma, no es un problema del scraper)."""
 
 BASE = "https://contrataciondelestado.es"
@@ -148,7 +148,7 @@ def category(label: str) -> str:
     """Clasifica la etiqueta de una fila de documento en la ficha PCSP.
 
     Nota: esto NO es la clasificación de plantilla (Anuncio PCSP / Propuesta
-    LC.27) de la sección 6 de CLAUDE.md — esa se decide leyendo el contenido
+    LC.27) de la sección 6 de CONTEXTO.md — esa se decide leyendo el contenido
     del documento, en la cascada de extracción, no aquí. Aquí solo se decide
     qué descargar y cómo nombrarlo.
     """

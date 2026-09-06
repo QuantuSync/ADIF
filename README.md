@@ -1,7 +1,7 @@
 # ADIF - esqueleto
 
 Cuatro servicios: API (FastAPI), worker, PostgreSQL y web (Next.js). Ver
-`CLAUDE.md` para el contexto completo del proyecto.
+`CONTEXTO.md` para el contexto completo del proyecto.
 
 ## Docker corre dentro de WSL, no en Windows directamente
 
@@ -29,7 +29,7 @@ de esta distro ni de Docker). Cuando pasa, `dockerd` se cae con ella —
 síntoma verificado en sesión: los cuatro servicios de `docker compose ps`
 en `Exited` y `dockerd` con un `Active: ... since` de segundos antes, sin que
 nadie tocara nada. Los trabajos de la cola que estaban `en_proceso` en ese
-momento se quedan huérfanos (CLAUDE.md sección 17). Corregido en
+momento se quedan huérfanos (CONTEXTO.md sección 17). Corregido en
 `C:\Users\<usuario>\.wslconfig` (fuera del repo, uno por máquina):
 
 ```ini

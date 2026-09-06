@@ -12,7 +12,7 @@ from app.extraccion.normalizacion import (
 
 
 def test_miles_y_decimales():
-    # CLAUDE.md sección 8: el ejemplo que float() rompe.
+    # CONTEXTO.md sección 8: el ejemplo que float() rompe.
     assert parsear_numero_es("1.234.567,89") == Decimal("1234567.89")
 
 
@@ -83,7 +83,7 @@ def test_normalizar_guiones_no_toca_el_guion_ascii_ni_el_resto():
 
 
 def test_limpiar_codigo_celda_normaliza_el_guion():
-    # Punto único de normalización (CLAUDE.md sección 8): el código de
+    # Punto único de normalización (CONTEXTO.md sección 8): el código de
     # precio que llega al catálogo queda con guion ASCII sin importar cuál
     # trajera la extracción, para que el mismo código no aparezca dos veces
     # con caracteres distintos.

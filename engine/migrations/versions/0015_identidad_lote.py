@@ -1,6 +1,6 @@
 """lotes/expedientes: identidad propia del lote y cobertura declarada
 
-CLAUDE.md sección 27 (sesión de identidad de lote): en una licitación
+CONTEXTO.md sección 27 (sesión de identidad de lote): en una licitación
 multi-lote, cada lote adjudicado tiene su propio código de expediente en la
 Plataforma (verificado idéntico al "Contrato nº" de su Contrato firmado),
 distinto del expediente principal bajo el que están archivados los

@@ -1,4 +1,4 @@
-"""Bloque 3 (CLAUDE.md sección 25): ejecución programada — sin solaparse
+"""Bloque 3 (CONTEXTO.md sección 25): ejecución programada — sin solaparse
 consigo misma, con histórico consultable en `trabajos_cola`."""
 from datetime import datetime, timedelta, timezone
 

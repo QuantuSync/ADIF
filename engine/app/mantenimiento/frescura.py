@@ -1,4 +1,4 @@
-"""Bloque 1, ejecución incremental (CLAUDE.md sección 23).
+"""Bloque 1, ejecución incremental (CONTEXTO.md sección 23).
 
 Decide si un expediente necesita una nueva descarga o una nueva extracción
 sin abrir ningún documento y sin tocar la cascada de extracción
@@ -33,7 +33,7 @@ VERSION_LOGICA_EXTRACCION = "2026-09-06.3"
 
 def huella_documentos(documentos: Iterable[Documento]) -> str:
     """Hash estable del conjunto de documentos de un expediente, por
-    contenido (`Documento.hash`, sección 17 de CLAUDE.md: la ruta de
+    contenido (`Documento.hash`, sección 17 de CONTEXTO.md: la ruta de
     almacenamiento ya va por hash), no por índice ni por fecha: cambia si se
     añade, se quita o se sustituye un documento, sin releer ningún PDF."""
     hashes = sorted(d.hash for d in documentos)
@@ -41,14 +41,14 @@ def huella_documentos(documentos: Iterable[Documento]) -> str:
 
 
 def debe_descargar(expediente: Expediente, documentos: list[Documento]) -> bool:
-    """CLAUDE.md, bloque 1, punto 2: "si los tiene [documentos] y no hay
+    """CONTEXTO.md, bloque 1, punto 2: "si los tiene [documentos] y no hay
     indicios de novedad, no se descarga". Sin ninguna fuente de novedad
     propia todavía (llega en el bloque 2 con la sindicación), la única señal
     disponible hoy es si el expediente ya tiene algún documento: si no tiene
     ninguno, nunca se descargó con éxito (o el intento anterior falló sin
     dejar nada), y merece un intento nuevo. Un expediente con documentos
     nunca se redescarga solo, aunque esté `fallido` o `pendiente_revision`
-    por otra causa — evitar cada descarga evitable es el punto (CLAUDE.md,
+    por otra causa — evitar cada descarga evitable es el punto (CONTEXTO.md,
     bloque 1: "la Plataforma es lenta y frágil").
 
     Deliberadamente sin `forzar`: el punto 4 del bloque 1 lo pide "para
@@ -64,7 +64,7 @@ def debe_descargar(expediente: Expediente, documentos: list[Documento]) -> bool:
 
 
 def debe_extraer(expediente: Expediente, documentos: list[Documento], forzar: bool) -> bool:
-    """CLAUDE.md, bloque 1, punto 3: "si los documentos no han cambiado
+    """CONTEXTO.md, bloque 1, punto 3: "si los documentos no han cambiado
     (mismo hash) y la lógica tampoco, no se reextrae". Deliberadamente NO
     mira si el expediente tiene documentos: un pedido derivado de acuerdo
     marco sin ningún documento propio (docs/analisis-corpus.md hallazgo 3)
@@ -93,7 +93,7 @@ def debe_estampar_extraccion(expediente: Expediente) -> bool:
     intento completo de la cascada: no en `esperando_matriz` (ahí no hay
     nada que registrar todavía, ver docstring de `debe_extraer`) ni en
     `sin_publicar` (`ejecutar_extraccion_expediente` corta en seco sin tocar
-    nada, CLAUDE.md sección 22)."""
+    nada, CONTEXTO.md sección 22)."""
     return expediente.estado not in (EstadoExpediente.esperando_matriz, EstadoExpediente.sin_publicar)
 
 
@@ -112,7 +112,7 @@ def estampar_extraccion(db: Session, expediente: Expediente, documentos: list[Do
 
 
 # Comprobación permanente de integridad del catálogo (auditoría 2026-09-05,
-# docs/correccion-defectos-auditoria.md): CLAUDE.md sección 9.9 exige que
+# docs/correccion-defectos-auditoria.md): CONTEXTO.md sección 9.9 exige que
 # reprocesar un expediente actualice sus filas, nunca las duplique. El bug
 # real que motiva esto (clave de huérfana "canonicalizada" de vuelta al
 # `codigo_precio` desnudo en cada actualización, arreglado en
@@ -142,7 +142,7 @@ def contar_lineas_catalogo(db: Session, expediente_id: int) -> int:
 def detectar_crecimiento_sin_cambios(conteo_antes: int, conteo_despues: int) -> Optional[str]:
     """`None` cuando no hay nada que avisar. Un motivo explícito, listo para
     `Expediente.error`, cuando el recuento creció -- nunca se corrige solo
-    (CLAUDE.md sección 12: "lo que no cuadra va a la cola de revisión"), la
+    (CONTEXTO.md sección 12: "lo que no cuadra va a la cola de revisión"), la
     idea es que un humano lo vea y decida, no que el sistema intente
     deducir cuáles de las líneas nuevas son el duplicado real."""
     if conteo_despues > conteo_antes:

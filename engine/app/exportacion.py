@@ -1,4 +1,4 @@
-"""Exportación del catálogo a Excel (CLAUDE.md, encargo de esta sesión, punto
+"""Exportación del catálogo a Excel (CONTEXTO.md, encargo de esta sesión, punto
 4, y sección 9.8: "El Excel es una vista generada, no la fuente. [...] Se
 regenera a demanda"). Un solo catálogo acumulativo para todos los
 expedientes, con las once columnas y el orden exactos de `Ejemplo/Output/`
@@ -84,7 +84,7 @@ _COLUMNA_PORCENTAJE = COLUMNAS.index("Baja del lote") + 1
 
 # Tamaño de página de la consulta al generar: bastante grande para pocas
 # vueltas a la base de datos, pequeño para no cargar el catálogo entero en
-# memoria de golpe si crece mucho (CLAUDE.md sección 1: catálogo acumulativo
+# memoria de golpe si crece mucho (CONTEXTO.md sección 1: catálogo acumulativo
 # para todos los expedientes).
 _TAMANO_LOTE = 500
 
@@ -155,7 +155,7 @@ _EXPLICACIONES_MOTIVO = {
 _EXPLICACIONES_MOTIVO[_OTRO_MOTIVO] = (_EXPLICACION_OTRO_MOTIVO, _RESOLUCION_OTRO_MOTIVO)
 _EXPLICACIONES_MOTIVO[_SIN_MOTIVO] = (_EXPLICACION_SIN_MOTIVO, _RESOLUCION_SIN_MOTIVO)
 
-# CLAUDE.md sección 6/7: "Código del material" solo se rellena cuando el
+# CONTEXTO.md sección 6/7: "Código del material" solo se rellena cuando el
 # sustantivo principal de la descripción casa contra un vocabulario todavía
 # pequeño (BRIDA, PLACA, JUNTA...); ampliarlo con el modelo cuando no casa
 # nada queda fuera de esta sesión (sin ningún caso real sin casar en el
@@ -222,7 +222,7 @@ def generar_excel_catalogo(db: Session, incluir_pendientes_sin_lote: bool = Fals
 
     pagina = 1
     while True:
-        # CLAUDE.md bloque 2: una línea descartada en la cola de revisión no
+        # CONTEXTO.md bloque 2: una línea descartada en la cola de revisión no
         # sale en el Excel que se entrega al cliente, aunque siga en base de
         # datos con su motivo.
         resultado = consultar_catalogo(db, pagina=pagina, tamano_pagina=_TAMANO_LOTE, excluir_descartadas=True)
@@ -232,7 +232,7 @@ def generar_excel_catalogo(db: Session, incluir_pendientes_sin_lote: bool = Fals
                 continue
             incluidas += 1
             # "El sistema nunca inventa una matriz. Si no cruza, se deja
-            # vacío" (CLAUDE.md sección 7): código interno y código de
+            # vacío" (CONTEXTO.md sección 7): código interno y código de
             # proyecto solo se rellenan cuando el cruce con el Excel de
             # códigos confirmó la fila.
             cruzado = bool(expediente.codigos_cruzados)

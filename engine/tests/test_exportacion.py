@@ -1,4 +1,4 @@
-"""CLAUDE.md, encargo de esta sesión (Excel al cliente), punto 1: ninguna
+"""CONTEXTO.md, encargo de esta sesión (Excel al cliente), punto 1: ninguna
 convención de marcador de texto de la web viaja al Excel -- celda vacía en
 su lugar, para no convertir una columna numérica en texto mixto."""
 from app.exportacion import (

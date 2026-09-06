@@ -1,4 +1,4 @@
-"""Bloque 1 (CLAUDE.md sección 23): el ciclo de mantenimiento decide, encola
+"""Bloque 1 (CONTEXTO.md sección 23): el ciclo de mantenimiento decide, encola
 y drena — con manejadores falsos, sin scraping real ni modelo real, igual
 que el resto de tests de esta cascada."""
 from datetime import datetime, timezone

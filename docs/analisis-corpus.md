@@ -28,9 +28,9 @@ forma P-NNN" que aplica `app/extraccion/tabla.py`, para ver qué encuentra
 | 2 | Guion Unicode (`‐` U+2010) en el código `P‑NNN`: el regex de `tabla.py` solo acepta el guion ASCII | 9 expedientes, 11 documentos | **Ajuste pequeño** |
 | 3 | Pedidos derivados de acuerdo marco: expediente sin cuadro de precios ni baja propios, ambos viven en la MATRIZ | 14 expedientes (7 sin ningún documento + 7 con solo 2 anuncios PCSP) | **Desarrollo nuevo** (depende de la matriz) |
 | 4 | Tercera plantilla de adjudicación (`L9_CM.32-FE`, Dirección Técnica) sin regla de clasificación propia: cae en `otro` o, peor, en un falso positivo de `pliego` — y por tanto nunca se le busca la baja aunque la traiga en texto claro | 2 expedientes confirmados | **Ajuste pequeño** |
-| 5 | Segunda familia de baja: fórmula `Ct = Oferta × Kt × Coeficiente de baja` por pedido, no una baja única de lote | al menos 3 expedientes | **Desarrollo nuevo** (requiere diseño, sección 16 de CLAUDE.md) |
+| 5 | Segunda familia de baja: fórmula `Ct = Oferta × Kt × Coeficiente de baja` por pedido, no una baja única de lote | al menos 3 expedientes | **Desarrollo nuevo** (requiere diseño, sección 16 de CONTEXTO.md) |
 | 6 | Otros formatos de código de precio sin prefijo `P-` reconocible (`P1`, `L01-T01`, tablas sin columna de código) | 9 expedientes adicionales (dentro del bloque ciego 1) | **Desarrollo medio** (necesita muestreo, no hay un patrón único) |
-| 7 | Cabeceras de cuadro de precios: la cascada funciona como está diseñada — 39/44 firmas resueltas por el mapeo determinista, las 5 restantes ya resueltas por el modelo y cacheadas | 0 (no es un problema, es la confirmación de que la sección 6 de CLAUDE.md funciona) | — |
+| 7 | Cabeceras de cuadro de precios: la cascada funciona como está diseñada — 39/44 firmas resueltas por el mapeo determinista, las 5 restantes ya resueltas por el modelo y cacheadas | 0 (no es un problema, es la confirmación de que la sección 6 de CONTEXTO.md funciona) | — |
 | 8 | 8 documentos que no encajan en ningún patrón (`otro`), descritos uno a uno | 6 expedientes | Ver ficha por documento |
 
 Los puntos 2 y 4 son los dos hallazgos con mejor relación impacto/esfuerzo:
@@ -42,7 +42,7 @@ Los puntos 3, 5 y 6 son estructurales y no se resuelven con un parche.
 ## 1. Inventario de formatos
 
 Agrupado por lo que **encuentra el clasificador actual hoy**, no por el
-`tipo_documento` que el scraper le puso al fichero (CLAUDE.md sección 3).
+`tipo_documento` que el scraper le puso al fichero (CONTEXTO.md sección 3).
 186 documentos, ningún error de lectura ni de extracción de texto.
 
 | Tipo (clasificador) | Subtipo real (marcador que ganó) | Docs | Expedientes | ¿Lo reconoce el clasificador? |
@@ -58,7 +58,7 @@ Agrupado por lo que **encuentra el clasificador actual hoy**, no por el
 | `otro` | Sin patrón — 8 documentos distintos | 8 | 6 | No — ver sección 5 |
 | `resolucion_adjudicacion` | Resolución (L9_AF.01-FE, con "resuelve") | 4 | 4 | Sí |
 
-**Verificado, no en CLAUDE.md todavía:**
+**Verificado, no en CONTEXTO.md todavía:**
 
 - La familia PCSP (`anuncio_pcsp`) se reparte casi por la mitad entre
   "Anuncio de adjudicación" (11) y "Anuncio de formalización de contrato"
@@ -80,7 +80,7 @@ Agrupado por lo que **encuentra el clasificador actual hoy**, no por el
   reconoce como tal: **cae en `otro` en el mejor caso, y en un falso
   positivo de `pliego` en el peor** — ver hallazgo 4 más abajo.
 - El marcador `L9_AF.01-FE` (plantilla real de la Resolución de
-  Adjudicación, CLAUDE.md sección 17) aparece exactamente en los 4
+  Adjudicación, CONTEXTO.md sección 17) aparece exactamente en los 4
   documentos clasificados como `resolucion_adjudicacion`: coherente, sin
   sorpresas ahí.
 
@@ -123,7 +123,7 @@ Sin patrón único — muestras reales:
   `L02-T01`, `L03-T01` (traviesas, prefijo de lote+tipo, no de precio).
 - `6.24/28510.0008_ANEJO_3.pdf`: la tabla no trae columna de precio ni de
   código en absoluto — es la tabla de características técnicas sin precio
-  ya documentada en CLAUDE.md sección 17.2 (comportamiento correcto, esta
+  ya documentada en CONTEXTO.md sección 17.2 (comportamiento correcto, esta
   tabla no debería aportar líneas: el expediente `6.24/28510.0008` **no**
   está en este bloque ciego porque su `ANEJO_1.pdf` sí aporta las líneas
   reales).
@@ -161,7 +161,7 @@ documentos PCSP únicamente, `codigo_expediente` con formato de MATRIZ
 de Expediente" **distinto** del `codigo_expediente` guardado (p.ej.
 `2.18/04703.0019` en base de datos, pero el Anuncio dice "Número de
 Expediente 6.24/28510.0103" dentro del texto). **Esto es exactamente el
-caso ya documentado en CLAUDE.md sección 17.1** (el pedido derivado
+caso ya documentado en CONTEXTO.md sección 17.1** (el pedido derivado
 `6.24/28510.0103`, cuya matriz es `2.18/04703.0019`) — confirma con 7
 casos más que no es una anomalía aislada, sino un patrón recurrente del
 corpus: el cuadro de precios y la baja de un pedido derivado de acuerdo
@@ -176,7 +176,7 @@ un pedido con el catálogo de su matriz.
 
 La consulta bruta devolvió 13, pero **`6.25/28510.0027` es un falso
 positivo de esta pregunta**: es el expediente multi-lote ya resuelto en
-CLAUDE.md sección 19 (LOTE 1 al 7,13%, LOTE 3 al 1,18%) — `baja_global`
+CONTEXTO.md sección 19 (LOTE 1 al 7,13%, LOTE 3 al 1,18%) — `baja_global`
 queda `None` **a propósito** porque los lotes tienen bajas distintas
 (`baja_variable_por_lote = true`, verificado en base de datos), no porque
 no se haya encontrado ninguna baja. Los 12 restantes sí son un vacío real.
@@ -235,7 +235,7 @@ baja única de lote — declaran una **fórmula de cálculo por pedido**,
 `Ct = (Oferta presentada por el licitador) × Kt × Coeficiente de baja`,
 donde el "Coeficiente de baja" lo oferta el licitador en cada pedido
 individual bajo el acuerdo marco, con la restricción de ser ≤ 1. Esto
-coincide con la sospecha, sin verificar, de la sección 16 de CLAUDE.md
+coincide con la sospecha, sin verificar, de la sección 16 de CONTEXTO.md
 ("puede haber una segunda familia con precio ofertado por línea"): aquí no
 es "por línea", es **por pedido dentro del acuerdo marco**, pero el efecto
 es el mismo — no hay una sola baja de lote que aplicar a todos los precios
@@ -255,11 +255,11 @@ tipo de documento en ningún caso muestreado, no que falte extraerlo.
 | Formato | Importe licitación | Importe adjudicación | Baja declarada | Cuadro de precios | Identificación de lote |
 |---|---|---|---|---|---|
 | Anuncio PCSP | Etiqueta fija "Presupuesto base de licitación → Importe (sin impuestos)" | Etiqueta fija "Importes de Adjudicación → Importe total ofertado" | — (nunca la declara; solo la cláusula boilerplate de "ofertas anormalmente bajas") | — | — |
-| Propuesta LC.27 | Etiqueta fija "Presupuesto de licitación:" | Etiqueta fija "Base imponible" | Texto libre, patrón `_BAJA_RE` | — | Solo si multi-lote ("En el LOTE N", CLAUDE.md sección 19); nunca visto en LC.27 real en este corpus |
+| Propuesta LC.27 | Etiqueta fija "Presupuesto de licitación:" | Etiqueta fija "Base imponible" | Texto libre, patrón `_BAJA_RE` | — | Solo si multi-lote ("En el LOTE N", CONTEXTO.md sección 19); nunca visto en LC.27 real en este corpus |
 | Resolución (`L9_AF.01-FE`) | Tabla "Presupuesto de licitación: LOTE N ... €" (solo si multi-lote) | Bloque "RESUELVE" por lote, o etiqueta "Base imponible" a nivel de expediente | Texto libre, mismo patrón que LC.27 ("con una baja del N% aplicable al conjunto de precios unitarios") | — | Sí, es la única plantilla con el patrón multi-lote verificado en el corpus |
 | **3ª plantilla `L9_CM.32-FE`** (Dirección Técnica) | "(A) BASE IMPONIBLE" en la cabecera del formulario | Implícito (mismo importe que la licitación en los 2 casos verificados) | **Sí, en texto claro** ("con una baja del N% a todos los precios unitarios") — hoy inalcanzable, ver hallazgo 4 | — | No visto |
 | Contrato firmado | **No se extrae hoy** (`_extraer_campos_expediente` no tiene rama para `contrato`) | **No se extrae hoy** | Texto libre, mismo patrón `_BAJA_RE` — sí se escanea | Ocasional: `find_tables()` encuentra tablas en la portada ("PARTES CONTRATANTES") o en anualidades, nunca el cuadro de precios real | No visto |
-| Pliego (Cláusulas / Prescripciones / Documento de Pliegos) | — | — | — | **Sí — es donde vive el cuadro real** en la mayoría de expedientes (el `*_ANEJO_N.pdf` es casi siempre, en realidad, un pliego completo, CLAUDE.md sección 3) | Solo si multi-lote, por cabecera "LOTE N" en la franja que precede a la tabla |
+| Pliego (Cláusulas / Prescripciones / Documento de Pliegos) | — | — | — | **Sí — es donde vive el cuadro real** en la mayoría de expedientes (el `*_ANEJO_N.pdf` es casi siempre, en realidad, un pliego completo, CONTEXTO.md sección 3) | Solo si multi-lote, por cabecera "LOTE N" en la franja que precede a la tabla |
 | Anejo suelto | — | — | — | Sí, cuando existe como documento independiente | Igual que pliego |
 
 **Gap verificado y no documentado hasta ahora: el Contrato firmado no
@@ -273,7 +273,7 @@ ha encontrado ningún expediente real en este corpus que dependa
 exclusivamente del contrato para el importe (siempre hay al menos un
 Anuncio PCSP o una Propuesta/Resolución), así que hoy es un hueco teórico,
 no un caso fallado — pero es la misma clase de hueco que ya se cerró para
-importes de Propuesta/Resolución (CLAUDE.md sección 18, "de paso, mismo
+importes de Propuesta/Resolución (CONTEXTO.md sección 18, "de paso, mismo
 cambio").
 
 ---
@@ -297,7 +297,7 @@ en las muestras — pero sin verificar hasta que se arregle).
 
 Las 5 que necesitan modelo **ya están resueltas y cacheadas** en
 `cache_mapeo_cabecera` con `origen = "modelo"` de un procesamiento real
-anterior — confirma en vivo que la cascada de la sección 6 de CLAUDE.md
+anterior — confirma en vivo que la cascada de la sección 6 de CONTEXTO.md
 funciona como está diseñada: cero cabeceras irreconocibles, el modelo se
 llama solo cuando hace falta y una vez por firma.
 
@@ -314,7 +314,7 @@ Por qué esas 5 no resuelven en determinista, verificado caso a caso:
   determinista sin tocar nada más.
 - **2 firmas (2 apariciones), `6.24/28510.0008_ANEJO_3.pdf`**: la tabla de
   características técnicas sin columna de precio ya documentada en
-  CLAUDE.md sección 17.2 — **no es un fallo**, es exactamente el caso que
+  CONTEXTO.md sección 17.2 — **no es un fallo**, es exactamente el caso que
   el mapeo determinista está diseñado a rechazar (`CAMPOS_OBLIGATORIOS`
   exige `precio_unitario`, que aquí no existe) para que decida el modelo,
   que ya devuelve `null` correctamente.
@@ -355,7 +355,7 @@ no forman un patrón nuevo:
    puntual. No se le conoce un patrón repetible en el resto del corpus.
 4. **`6.24/28510.0117_ANEJO_3.pdf`** (13 páginas) — "JUSTIFICACIÓN DE
    PARTIDAS ALZADAS EN CONTRATOS DE SERVICIOS Y SUMINISTROS": documento de
-   justificación de partida alzada (CLAUDE.md sección 2, "es legítima, no
+   justificación de partida alzada (CONTEXTO.md sección 2, "es legítima, no
    un error") como anejo independiente en vez de sección de un pliego. Sin
    otro caso igual en el corpus muestreado — no se sabe si es un patrón con
    volumen propio o un documento aislado de este expediente.
@@ -489,7 +489,7 @@ este informe, no por el arreglo:
   — confirmado ahora con datos reales del catálogo, no solo con el patrón de
   texto.
 - `6.23/28510.0139` (6 líneas), `6.24/28510.0117` (103 líneas) y
-  `6.24/28510.0130` (120 líneas): la validación de la sección 12 de CLAUDE.md
+  `6.24/28510.0130` (120 líneas): la validación de la sección 12 de CONTEXTO.md
   hizo su trabajo — la baja declarada en texto no cuadra con la que resulta
   de licitación/adjudicación (5,07 % declarado contra 68,64 % de los
   importes en `0139`; 24,99 % contra 90,00 % en `0117`; 0,00 % contra
@@ -519,7 +519,7 @@ actual aparece en más de un expediente. Dato notable: dos de los tres
 expedientes que comparten estas matrículas (`0018` y `0102`) no tenían
 ninguna línea de catálogo antes de esta sesión — el arreglo del guion
 Unicode es lo que hace posible, por primera vez, cruzar el precio de estos
-materiales entre expedientes (la pregunta real de ADIF, CLAUDE.md sección
+materiales entre expedientes (la pregunta real de ADIF, CONTEXTO.md sección
 11.5).
 
 ### Fixtures de regresión añadidos
@@ -542,7 +542,7 @@ y tests que fallarían sin el arreglo correspondiente:
 
 ## Herencia de acuerdo marco (sesión de herencia de matriz, 2026-09-03)
 
-Implementa el mecanismo del hallazgo 3 (CLAUDE.md sección 20: modelo,
+Implementa el mecanismo del hallazgo 3 (CONTEXTO.md sección 20: modelo,
 `app.extraccion.herencia_matriz`, protección de ciclos, encolado de la
 matriz, `esperando_matriz`) y lo verifica reprocesando los 45 expedientes
 reales desde cero, con scraping real habilitado (sin dobles de test).
@@ -602,12 +602,12 @@ sección 1 (código de expediente sin capturar), es decidir si se renombra
 `codigo_expediente` al valor real de `numero_expediente` cuando la matriz
 declarada coincide con el propio código, o si se separa el pedido real en
 una fila nueva y se mueven sus documentos. Las dos opciones tocan la clave
-de idempotencia (CLAUDE.md sección 9.9) sobre expedientes que ya están en
+de idempotencia (CONTEXTO.md sección 9.9) sobre expedientes que ya están en
 producción — decisión de diseño nueva, pendiente de plantear.
 
 ---
 
-## Corrección de identidad y reingesta (sesión 2026-09-03, CLAUDE.md sección 21)
+## Corrección de identidad y reingesta (sesión 2026-09-03, CONTEXTO.md sección 21)
 
 Cierra la decisión de diseño que dejaba pendiente la sección anterior: se
 renombra `codigo_expediente` en el sitio (nunca una fila nueva), porque
@@ -615,7 +615,7 @@ ninguna otra tabla lo usa como clave externa. Los 8 casos reales de esta
 página se verificaron uno a uno antes de tocar código (extracción manual del
 "Número de Expediente" de sus 16 documentos): son 8 pedidos distintos con 8
 matrices distintas, no el mismo caso repetido — ver la tabla completa en
-CLAUDE.md sección 21.
+CONTEXTO.md sección 21.
 
 **El hallazgo 3 de este documento queda parcialmente verificado, en sentido
 negativo.** "Sin verificar la causa raíz" de por qué el scraping no
@@ -644,7 +644,7 @@ falla; todo lo que empieza por `6.` funciona (correlación con 14 casos, no
 una regla de código). Las métricas del proyecto se miden desde ahora sobre
 **31 expedientes reales**, no sobre 45. Detalle completo del mecanismo
 (`ExpedienteNoPublicadoError`, el estado y sus guardas contra reintentos y
-reprocesos) en CLAUDE.md sección 22.
+reprocesos) en CONTEXTO.md sección 22.
 
 La misma sesión ataca, por impacto, las causas de los hallazgos 2 y 6 de este
 documento que seguían bloqueando expedientes:
@@ -667,7 +667,7 @@ documento que seguían bloqueando expedientes:
   de esta sesión con un caso real de otra fuente, no de este corpus de PDFs.
 - **El único documento escaneado del corpus** (`6.20/28510.0136_ANEJO_2.pdf`,
   100 páginas) se detecta y se marca con un motivo propio, distinto de "no se
-  extrajo ninguna línea de catálogo" — ver CLAUDE.md secciones 3 y 15.
+  extrajo ninguna línea de catálogo" — ver CONTEXTO.md secciones 3 y 15.
 
 **Medición final sobre los 31**: 14 `completado` (antes 10 sobre 45), 17
 `pendiente_revision` (antes 35 sobre 45), 2.208 líneas de catálogo. De los
@@ -678,4 +678,4 @@ diseño, 1 de formato de código inválido) y 2 son trabajo pendiente genuino
 (`6.24/28510.0025` y `6.24/28510.0193`, sin ningún documento con cuadro de
 precios — mismo síntoma que un pedido derivado de acuerdo marco, pero con
 código normal, sin investigar todavía). Tabla completa y categorización
-detallada en CLAUDE.md sección 22.
+detallada en CONTEXTO.md sección 22.

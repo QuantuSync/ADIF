@@ -3,7 +3,7 @@ from pathlib import Path
 
 
 class DocumentStorage(ABC):
-    """Interfaz de almacenamiento de documentos. CLAUDE.md sección 9.3:
+    """Interfaz de almacenamiento de documentos. CONTEXTO.md sección 9.3:
     hoy disco local, mañana almacenamiento de objetos."""
 
     @abstractmethod

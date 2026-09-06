@@ -1,16 +1,16 @@
-"""Etapa 4 de la cascada de extracción (CLAUDE.md sección 5): extraer el
+"""Etapa 4 de la cascada de extracción (CONTEXTO.md sección 5): extraer el
 cuadro de precios de una página candidata con `pdfplumber`, nunca con el
-texto plano de esa página — sale entrelazado e inservible (CLAUDE.md sección
+texto plano de esa página — sale entrelazado e inservible (CONTEXTO.md sección
 3 y docstring de `app.extraccion.texto`).
 
-Hallazgo de esta sesión sobre el corpus real que CLAUDE.md todavía no recoge:
+Hallazgo de esta sesión sobre el corpus real que CONTEXTO.md todavía no recoge:
 `pdfplumber` no siempre da una cabecera limpia en la primera fila. Cuando la
 cabecera envuelve a varias líneas visuales anchas, `find_tables()` puede
 devolver esas líneas como filas de tabla independientes — vacías a trozos,
 con el nombre de cada columna repartido entre varias de ellas — antes de la
 primera fila de datos real. No hay forma fiable de saber por adelantado
 cuántas filas ocupa la cabecera, así que se localiza la primera fila de
-*datos* (la que trae un código de precio con la forma `P-NNN`, CLAUDE.md
+*datos* (la que trae un código de precio con la forma `P-NNN`, CONTEXTO.md
 sección 2) y todo lo anterior se trata como cabecera: se fusiona columna a
 columna, uniendo con un espacio los fragmentos no vacíos de cada una en el
 orden en que aparecen.
@@ -40,12 +40,12 @@ fila. Verificado documento a documento contra el corpus real (no inventado):
   Contrato — el mismo cuadro de traviesas trae también `L01-T01`..`L03-T19`,
   ver siguiente punto).
 - `L01-T01`..`L03-T19` (prefijo de lote+tipo, no es semánticamente un "código
-  de precio" per CLAUDE.md sección 3, pero identifica la fila igual de bien
+  de precio" per CONTEXTO.md sección 3, pero identifica la fila igual de bien
   dentro de su tabla — no hace falta distinguirlo aquí, solo saber que esa
   fila es una fila de datos).
 - Tablas sin ninguna columna de código: la fila de datos se identifica por su
   matrícula de 9 dígitos en su lugar (`6.20/28510.0136_ANEJO_3.pdf`, hilo de
-  contacto) — CLAUDE.md sección 2, la matrícula tiene forma fija de 9 dígitos.
+  contacto) — CONTEXTO.md sección 2, la matrícula tiene forma fija de 9 dígitos.
 """
 from __future__ import annotations
 
@@ -62,7 +62,7 @@ FILA = list[CELDA]
 # necesitar una rama aparte para cada uno.
 _CODIGO_PRECIO_RE = re.compile(r"^(?:P-?\d+|PN\d+|PA-\d+|L\d+-T\d+)$")
 # Matrícula como identificador de fila cuando la tabla no trae ninguna
-# columna de código en absoluto (CLAUDE.md sección 2: forma fija de 9
+# columna de código en absoluto (CONTEXTO.md sección 2: forma fija de 9
 # dígitos) — señal aparte, nunca se confunde con un código de precio.
 _MATRICULA_DATO_RE = re.compile(r"^\d{9}$")
 
@@ -76,7 +76,7 @@ class TablaExtraida:
     # (`app.extraccion.lote_tabla`) la usa para saber qué franja de la
     # página precede a esta tabla y buscar ahí su cabecera "LOTE N" — nunca
     # por proximidad textual global, que en una página con varias tablas de
-    # lote (CLAUDE.md sección 3: un lote pequeño cabe entero en una página
+    # lote (CONTEXTO.md sección 3: un lote pequeño cabe entero en una página
     # junto a otro) confundiría una tabla con la cabecera de la siguiente.
     bbox: tuple[float, float, float, float]
 

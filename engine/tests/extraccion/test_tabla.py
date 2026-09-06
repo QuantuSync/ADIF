@@ -18,7 +18,7 @@ def test_cabecera_de_una_sola_fila_se_extrae_tal_cual():
 
 
 def test_cabecera_partida_en_varias_filas_fisicas_se_reconstruye():
-    # CLAUDE.md sección 3 / hallazgo de esta sesión: en esta página
+    # CONTEXTO.md sección 3 / hallazgo de esta sesión: en esta página
     # find_tables() devuelve la cabecera repartida en 8 filas físicas antes
     # de la primera fila de datos (P-001). Debe reconstruirse en una sola
     # fila lógica, igual que la cabecera limpia de la página 19 del mismo
@@ -115,7 +115,7 @@ def test_codigo_con_prefijo_pn_se_reconoce_como_fila_de_datos():
 
 def test_codigo_lote_tipo_y_partida_alzada_se_reconocen_como_fila_de_datos():
     # 6.24/28510.0094: el mismo cuadro de traviesas trae "L0N-T0M" (lote+tipo,
-    # no es semánticamente un código de precio per CLAUDE.md sección 3, pero
+    # no es semánticamente un código de precio per CONTEXTO.md sección 3, pero
     # identifica la fila igual) y "PA-NN" (partida alzada numerada) — dos
     # tablas en el recorte de 2 páginas, cada una con su propia cabecera.
     with pdfplumber.open(fx.ANEJO_PRECIOS_LOTE_TIPO_Y_PARTIDA_ALZADA) as pdf:
@@ -131,7 +131,7 @@ def test_codigo_lote_tipo_y_partida_alzada_se_reconocen_como_fila_de_datos():
 
 def test_matricula_de_9_digitos_se_reconoce_como_fila_de_datos_sin_codigo_precio():
     # 6.20/28510.0136: esta tabla no trae ninguna columna de código de
-    # precio, solo matrícula (CLAUDE.md sección 2: forma fija de 9 dígitos).
+    # precio, solo matrícula (CONTEXTO.md sección 2: forma fija de 9 dígitos).
     # Antes del arreglo, `_es_fila_de_datos` solo miraba códigos de precio y
     # esta tabla entera se descartaba como espuria.
     with pdfplumber.open(fx.TABLA_PRECIOS_SOLO_MATRICULA) as pdf:

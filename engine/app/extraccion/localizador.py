@@ -1,4 +1,4 @@
-"""Etapa 3 de la cascada de extracción (CLAUDE.md sección 5): localizar,
+"""Etapa 3 de la cascada de extracción (CONTEXTO.md sección 5): localizar,
 dentro de un documento cualquiera, las páginas que traen un cuadro de precios
 unitarios — nunca por tipo de documento ni por nombre de fichero. Los
 `*_ANEJO_N.pdf` del corpus son en realidad el Pliego de Prescripciones
@@ -16,7 +16,7 @@ Dos señales, medidas sobre los fixtures fijos del proyecto:
 2. **Grupos de marcadores de cabecera.** Presencia de al menos dos categorías
    distintas entre código de precio, precio, cantidad/unidad, matrícula y
    descripción. Ni matrícula ni ningún marcador aislado basta por sí solo:
-   la matrícula falta por completo en algunas tablas del corpus (CLAUDE.md
+   la matrícula falta por completo en algunas tablas del corpus (CONTEXTO.md
    sección 3, "presente solo en ~66% de las líneas"), y una sola palabra
    suelta ("precio") aparece también en párrafos que no son tabla.
 
@@ -26,7 +26,7 @@ medido contra los fixtures, un umbral de densidad de 0,04 combinado con dos
 grupos de marcadores descarta 91,7% de las páginas del anejo de un solo
 cuadro (11 de 12) y 88,5% del anejo con tres tablas de precios repartidas en
 tres cabeceras distintas (23 de 26) — del mismo orden que el 83% medido sobre
-el corpus completo en CLAUDE.md sección 3.
+el corpus completo en CONTEXTO.md sección 3.
 
 Umbral bajado a 0,025 en la sesión de expedientes sin publicar (2026-09-03):
 `6.24/28510.0187_ANEJO_1.pdf` página 11 tiene un cuadro de precios real (dos

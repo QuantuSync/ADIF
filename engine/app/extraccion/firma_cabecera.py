@@ -1,4 +1,4 @@
-"""Firma estable de una cabecera de tabla (CLAUDE.md sección 6): la clave con
+"""Firma estable de una cabecera de tabla (CONTEXTO.md sección 6): la clave con
 la que se indexa la caché persistente de mapeos, para que la misma cabecera
 —vista en cualquier página, documento o expediente— nunca dispare una
 segunda llamada al modelo."""

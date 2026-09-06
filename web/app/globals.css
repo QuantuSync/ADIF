@@ -648,7 +648,7 @@ input:focus-visible {
   white-space: nowrap;
 }
 
-/* No aplica: definitivo y correcto (partida alzada — CLAUDE.md sección 2).
+/* No aplica: definitivo y correcto (partida alzada — CONTEXTO.md sección 2).
    Mismo tono que `.status-faint`: "fuera de alcance a propósito". */
 .dato-vacio--na {
   color: var(--text-faint);
@@ -1139,7 +1139,7 @@ input:focus-visible {
 }
 
 /* Panel de acción de una línea de la cola de revisión (RevisionPanel,
-   CLAUDE.md bloque 2: corregir/descartar/dejar pendiente, no solo
+   CONTEXTO.md bloque 2: corregir/descartar/dejar pendiente, no solo
    confirmar) — una fila propia bajo la línea, con el mismo fondo sutil que
    distingue una zona secundaria del resto de la tabla. */
 .table tbody td.linea-accion-panel {

@@ -29,7 +29,7 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-adif}:${POSTGRES_PASSWORD:-adif}@postgres:5432/${POSTGRES_DB:-adif}
       DOCUMENT_STORAGE_PATH: /data/documentos
-      # Cruce con el Excel de códigos (CLAUDE.md sección 7). Vacío por
+      # Cruce con el Excel de códigos (CONTEXTO.md sección 7). Vacío por
       # defecto: sin esta variable, ningún expediente cruza (se deja vacío
       # y se marca, nunca se inventa). Para activarlo en local, añade un
       # docker-compose.override.yml que monte tu `Expedientes.xlsx` en esta
@@ -39,7 +39,7 @@ services:
       # esta API desde fuera de la red de Docker, en el origen donde corre
       # "web". Lista separada por comas si hace falta más de uno.
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
-      # Bloque 3 (CLAUDE.md sección 25): solo el worker decide cuándo lanzar
+      # Bloque 3 (CONTEXTO.md sección 25): solo el worker decide cuándo lanzar
       # el ciclo programado, pero la API también lee estos dos valores para
       # que GET /mantenimiento/estado muestre la frecuencia real, no el
       # valor por defecto de app/config.py -- deben coincidir con los del
@@ -69,13 +69,15 @@ services:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-adif}:${POSTGRES_PASSWORD:-adif}@postgres:5432/${POSTGRES_DB:-adif}
       DOCUMENT_STORAGE_PATH: /data/documentos
       WORKER_POLL_INTERVAL_SECONDS: 3
-      # Etapa 5 de la cascada de extracción (CLAUDE.md sección 6): el
+      # Etapa 5 de la cascada de extracción (CONTEXTO.md sección 6): el
       # worker es el único proceso que puede necesitar llamar al modelo.
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-5}
-      # Solo si ANTHROPIC_API_KEY es una clave ligada a identidad (ver
-      # docstring de AnthropicModelProvider).
-      ANTHROPIC_WORKSPACE_ID: ${ANTHROPIC_WORKSPACE_ID:-}
+      # Sin valor por defecto embebido a propósito -- depende del proveedor
+      # de modelo elegido en cada despliegue, se rellena siempre desde .env.
+      MODEL_API_KEY: ${MODEL_API_KEY:-}
+      MODEL_ID: ${MODEL_ID:-}
+      # Solo si MODEL_API_KEY es una clave ligada a identidad (ver
+      # docstring de APIModelProvider).
+      MODEL_WORKSPACE_ID: ${MODEL_WORKSPACE_ID:-}
       # Solo desarrollo (CachedModelProvider, ver app/config.py): bind mount
       # al host para no pagar la misma cabecera dos veces entre reinicios
       # del contenedor. Vacío en un despliegue real.
@@ -83,11 +85,11 @@ services:
       # Ver comentario en el servicio "api": mismo cruce, el worker lo
       # rellena al terminar la extracción de cada expediente.
       CODIGOS_PROYECTO_PATH: ${CODIGOS_PROYECTO_PATH:-}
-      # Bloque 2, descubrimiento por sindicación (CLAUDE.md sección 24):
+      # Bloque 2, descubrimiento por sindicación (CONTEXTO.md sección 24):
       # departamentos de ADIF que se dan de alta solos. "28510" por defecto
       # -- el único que usa el corpus de hoy. Lista separada por comas.
       SINDICACION_DEPARTAMENTOS_ADIF: ${SINDICACION_DEPARTAMENTOS_ADIF:-28510}
-      # Bloque 3, ejecución programada (CLAUDE.md sección 25): cada cuánto
+      # Bloque 3, ejecución programada (CONTEXTO.md sección 25): cada cuánto
       # se lanza el ciclo completo solo. Semanal por defecto; "false" en
       # MANTENIMIENTO_PROGRAMADO_ACTIVO lo desactiva sin tocar código.
       MANTENIMIENTO_INTERVALO_SEGUNDOS: ${MANTENIMIENTO_INTERVALO_SEGUNDOS:-604800}

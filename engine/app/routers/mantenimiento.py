@@ -35,7 +35,7 @@ def lanzar_ciclo_mantenimiento(
     db: Session = Depends(get_db),
     usuario: Usuario = Depends(get_current_user),
 ):
-    """Encola el ciclo completo de mantenimiento (CLAUDE.md sección 23,
+    """Encola el ciclo completo de mantenimiento (CONTEXTO.md sección 23,
     bloque 1: descubrir, descargar lo que falte, extraer lo que falte). Es
     el botón manual de la web (bloque 3, punto 3) — el mismo ciclo que
     lanza solo la ejecución programada (`app.mantenimiento.programacion`),
@@ -56,7 +56,7 @@ def estado_mantenimiento(
     db: Session = Depends(get_db),
     usuario: Usuario = Depends(get_current_user),
 ):
-    """CLAUDE.md, bloque 3 punto 3: cuándo fue la última ejecución, qué
+    """CONTEXTO.md, bloque 3 punto 3: cuándo fue la última ejecución, qué
     encontró (`ultima_ejecucion.resultado`), si hay una en curso ahora
     mismo, y cuándo tocaría la próxima programada."""
     return obtener_estado(db)
@@ -68,10 +68,10 @@ def historial_mantenimiento(
     db: Session = Depends(get_db),
     usuario: Usuario = Depends(get_current_user),
 ):
-    """CLAUDE.md, bloque 3 punto 4: registro histórico, más reciente
+    """CONTEXTO.md, bloque 3 punto 4: registro histórico, más reciente
     primero — para responder "por qué apareció este expediente" o "por qué
     no se actualizó aquel" sin tener que ir a la base de datos a mano. Es
-    la propia `trabajos_cola` (CLAUDE.md sección 10: consultable con SQL),
+    la propia `trabajos_cola` (CONTEXTO.md sección 10: consultable con SQL),
     no una tabla nueva que duplique la misma información."""
     return db.execute(
         select(TrabajoCola).where(TrabajoCola.tipo == TIPO_TRABAJO).order_by(TrabajoCola.created_at.desc()).limit(limite)

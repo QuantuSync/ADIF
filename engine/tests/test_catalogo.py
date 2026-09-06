@@ -88,7 +88,7 @@ def test_construir_linea_catalogo_recupera_partida_alzada_mal_alineada():
     # Expediente 6.24/28510.0064 (sesión de rodaje 2026-09-03): una partida
     # alzada no tiene celda de matrícula propia, así que sus columnas se
     # desplazan y el texto que debía caer en descripción aterriza en
-    # matrícula. CLAUDE.md sección 2: la partida alzada es una línea
+    # matrícula. CONTEXTO.md sección 2: la partida alzada es una línea
     # legítima del catálogo — se recupera, no se descarta como un pie de
     # tabla, pero nunca con texto en la columna de matrícula.
     mapeo = {"codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": None, "cantidad": None, "precio_unitario": 3}
@@ -112,7 +112,7 @@ def test_construir_linea_catalogo_recupera_descripcion_de_columna_fantasma():
     # `anejo` independiente. En esa copia, `pdfplumber` intercala una columna
     # en blanco de más entre matrícula y descripción -- la celda de
     # descripción sale vacía y el texto real cae en la columna siguiente, sin
-    # mapear. Sin matrícula que perder (partida alzada, CLAUDE.md sección 2),
+    # mapear. Sin matrícula que perder (partida alzada, CONTEXTO.md sección 2),
     # se recupera de esa columna en vez de perderse -- de lo contrario, la
     # misma partida alzada del documento `anejo` (con descripción) y esta
     # copia (sin ella) generan claves distintas (`calcular_clave_linea` cae al
@@ -162,7 +162,7 @@ def test_construir_linea_catalogo_matricula_no_reconocible_se_vacia_y_marca_revi
 
 
 def test_construir_linea_catalogo_guion_suelto_en_matricula_no_marca_revision():
-    # CLAUDE.md sección 26 (arreglo de los 3 que seguían en revisión tras el
+    # CONTEXTO.md sección 26 (arreglo de los 3 que seguían en revisión tras el
     # criterio de lote laxo): expediente real 6.24/28510.0117, 39 filas
     # reales con este patrón exacto -- un guion suelto en la celda de
     # matrícula es la convención del documento para "vacío", no un valor
@@ -185,7 +185,7 @@ def test_construir_linea_catalogo_guion_suelto_en_matricula_no_marca_revision():
 
 def test_construir_linea_catalogo_guion_suelto_en_cantidad_no_marca_revision():
     # Expediente real 6.24/28510.0203: tabla de características técnicas
-    # (CLAUDE.md sección 17.2, "sin columna de precio ni de cantidad" es un
+    # (CONTEXTO.md sección 17.2, "sin columna de precio ni de cantidad" es un
     # caso ya conocido) donde la celda de cantidad trae un guion en vez de
     # quedar vacía.
     mapeo = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": None, "cantidad": 2, "precio_unitario": 3}
@@ -202,7 +202,7 @@ def test_construir_linea_catalogo_guion_suelto_en_cantidad_no_marca_revision():
 
 
 def test_construir_linea_catalogo_valor_ilegible_no_revienta_marca_revision():
-    # CLAUDE.md, sesión de rodaje 2026-09-03: un valor de precio que no se
+    # CONTEXTO.md, sesión de rodaje 2026-09-03: un valor de precio que no se
     # puede interpretar (fuente sin ToUnicode) no debe tirar la fila entera
     # ni la tabla — la línea se guarda igual, con el campo en None y un
     # motivo de revisión.
@@ -373,7 +373,7 @@ def test_guardar_lineas_catalogo_primera_vez_crea(db_session):
 
 
 def test_guardar_lineas_catalogo_no_hace_commit_el_llamador_decide(db_session):
-    # CLAUDE.md, sesión de rodaje 2026-09-03, punto 3: antes esta función
+    # CONTEXTO.md, sesión de rodaje 2026-09-03, punto 3: antes esta función
     # confirmaba por su cuenta, así que un documento con varias tablas podía
     # dejar guardado un grupo y fallar en el siguiente sin poder deshacer el
     # primero. Ahora es el llamador (`ejecutar_extraccion_expediente`) quien
@@ -400,7 +400,7 @@ def test_guardar_lineas_catalogo_no_hace_commit_el_llamador_decide(db_session):
 
 
 def test_guardar_lineas_catalogo_reprocesar_no_duplica(db_session):
-    # CLAUDE.md sección 9.9: idempotencia. Reprocesar el mismo expediente
+    # CONTEXTO.md sección 9.9: idempotencia. Reprocesar el mismo expediente
     # actualiza sus filas, nunca las duplica.
     lote = _lote(db_session)
     mapeo = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": None, "cantidad": None, "precio_unitario": 2}
@@ -440,7 +440,7 @@ def test_combinar_por_clave_funde_repeticiones_dentro_del_mismo_lote_de_lineas()
     # Bug real (sesión de validación del mapeo de cabecera contra la API):
     # SessionLocal (app/db.py) usa autoflush=False, así que un mismo
     # clave_linea repetido más de una vez dentro de un único `lineas` (el
-    # mismo cuadro de precios reaparece en el documento — CLAUDE.md sección
+    # mismo cuadro de precios reaparece en el documento — CONTEXTO.md sección
     # 3) llegaba sin fundir hasta el INSERT final y violaba la constraint
     # UNIQUE de golpe, tirando el trabajo entero. `_combinar_por_clave` debe
     # resolverlo en Python, sin depender de autoflush.
@@ -473,7 +473,7 @@ def test_guardar_lineas_catalogo_funde_clave_repetida_en_un_solo_lote(db_session
 
 
 def test_guardar_lineas_catalogo_huerfana_sin_lote_no_se_duplica_al_reprocesar(db_session):
-    # CLAUDE.md, encargo de esta sesión, punto 3 (ajuste 1 del usuario): una
+    # CONTEXTO.md, encargo de esta sesión, punto 3 (ajuste 1 del usuario): una
     # línea cuya tabla de origen no se pudo asociar a un lote sin ambigüedad
     # se guarda con lote_id=None, no con un lote centinela. La idempotencia
     # de esas huérfanas la garantiza el filtro por expediente_id + lote_id
@@ -1064,7 +1064,7 @@ def test_guardar_lineas_catalogo_funde_por_firma_sin_matricula_entre_documentos_
 def test_combinar_por_clave_no_repite_el_motivo_al_fundir_mas_de_dos_firmas_iguales():
     # Una firma sin matrícula puede absorber más de dos filas (la misma
     # tabla repetida tres veces): el motivo de revisión no debe repetirse
-    # una vez por cada fusión (CLAUDE.md sección 9, idempotencia).
+    # una vez por cada fusión (CONTEXTO.md sección 9, idempotencia).
     filas = [
         {
             "clave_linea": f"C-{i}", "matricula": None, "descripcion": "PARTIDA ALZADA A JUSTIFICAR PARA IMPREVISTOS",

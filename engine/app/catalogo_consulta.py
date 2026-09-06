@@ -1,4 +1,4 @@
-"""Lado de lectura del catálogo (CLAUDE.md, encargo de esta sesión, punto 1
+"""Lado de lectura del catálogo (CONTEXTO.md, encargo de esta sesión, punto 1
 y 2): explorar el catálogo con filtros y **búsqueda por matrícula a través
 de todos los expedientes**, y la trazabilidad de cada línea. `app.catalogo`
 es el lado de escritura (construir y guardar líneas); este módulo solo
@@ -24,19 +24,19 @@ def _aplicar_filtros(
     excluir_descartadas: bool = False,
 ) -> Select:
     if excluir_descartadas:
-        # CLAUDE.md bloque 2: una línea descartada en la cola de revisión
+        # CONTEXTO.md bloque 2: una línea descartada en la cola de revisión
         # (no es material real, o no se pudo determinar) sale del catálogo
         # entregado al cliente -- pero sigue en base de datos con su
         # motivo, y sigue apareciendo en `/catalogo` y en la propia cola de
         # revisión, para no perder la traza de por qué el documento la
-        # produjo (CLAUDE.md sección 9.10).
+        # produjo (CONTEXTO.md sección 9.10).
         stmt = stmt.where(LineaCatalogo.estado_revision != EstadoRevisionLinea.descartado)
     if expediente:
         stmt = stmt.where(Expediente.codigo_expediente.ilike(f"%{expediente}%"))
     if lote:
         stmt = stmt.where(Lote.identificador_lote == lote)
     if matricula:
-        # Búsqueda por matrícula a través de todos los expedientes (CLAUDE.md,
+        # Búsqueda por matrícula a través de todos los expedientes (CONTEXTO.md,
         # encargo de esta sesión, punto 1): sin filtro de expediente, esto ya
         # responde "cómo evoluciona el precio de un material" por sí solo.
         stmt = stmt.where(LineaCatalogo.matricula.ilike(f"%{matricula}%"))
@@ -68,7 +68,7 @@ def consultar_catalogo(
     tamano_pagina: int = 50,
     excluir_descartadas: bool = False,
 ) -> PaginaCatalogo:
-    # `Lote` es outerjoin: una línea huérfana (CLAUDE.md, encargo de esta
+    # `Lote` es outerjoin: una línea huérfana (CONTEXTO.md, encargo de esta
     # sesión, punto 3 — su tabla de origen no se pudo asociar a un lote sin
     # ambigüedad) tiene `lote_id=None` pero sigue teniendo que aparecer en
     # el catálogo/cola de revisión. El join a `Expediente` ya no depende de

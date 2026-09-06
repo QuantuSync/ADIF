@@ -1,4 +1,4 @@
-"""Bloque 2, punto 4 (CLAUDE.md sección 24): contraste de importes entre lo
+"""Bloque 2, punto 4 (CONTEXTO.md sección 24): contraste de importes entre lo
 que extrajo la cascada de los PDFs y la instantánea de sindicación."""
 from datetime import datetime, timezone
 from decimal import Decimal

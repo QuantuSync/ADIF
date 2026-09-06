@@ -1,7 +1,7 @@
-"""Bloque 2, punto 4 (CLAUDE.md sección 24): "Guárdalos como fuente
+"""Bloque 2, punto 4 (CONTEXTO.md sección 24): "Guárdalos como fuente
 independiente y úsalos para contrastar con lo que extraiga el motor de los
 PDFs." Dos fuentes que se verifican entre sí, no una que sustituye a la
-otra — pero no con la misma autoridad (CLAUDE.md sección 26): esta función
+otra — pero no con la misma autoridad (CONTEXTO.md sección 26): esta función
 solo detecta y describe el desajuste, nunca decide mandar nada a revisión —
 eso es responsabilidad de quien la llama
 (`app.worker._contrastar_con_sindicacion`), y desde la sección 26 nunca lo
@@ -33,7 +33,7 @@ def _no_cuadra(motor: Optional[Decimal], sindicacion: Optional[Decimal]) -> bool
 
 def contrastar_expediente(db: Session, expediente: Expediente) -> Optional[str]:
     """Compara `Expediente.importe_licitacion`/`importe_adjudicacion` (lo
-    que extrajo la cascada de los PDFs, siempre "sin impuestos" — CLAUDE.md
+    que extrajo la cascada de los PDFs, siempre "sin impuestos" — CONTEXTO.md
     sección 4) contra la instantánea de sindicación más reciente del mismo
     expediente (`app.sindicacion.descubrimiento`). Devuelve `None` si no
     hay nada que contrastar (sin fila de sindicación, o sin importe

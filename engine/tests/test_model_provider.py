@@ -1,6 +1,6 @@
 import json
 
-from app.interfaces.model_provider import AnthropicModelProvider, CachedModelProvider
+from app.interfaces.model_provider import APIModelProvider, CachedModelProvider
 from tests.extraccion.dobles import ProveedorModeloContador
 
 
@@ -47,10 +47,10 @@ class _ProveedorFijo:
         return dict(self._respuesta)
 
 
-def test_anthropic_model_provider_construye_la_peticion_y_parsea_json_estructurado(monkeypatch):
-    """Sin red: se sustituye `anthropic.Anthropic` por un doble que capta
-    los kwargs de la llamada y devuelve una respuesta con la forma real del
-    SDK (un bloque de texto con JSON válido)."""
+def test_api_model_provider_construye_la_peticion_y_parsea_json_estructurado(monkeypatch):
+    """Sin red: se sustituye el cliente del SDK del proveedor por un doble
+    que capta los kwargs de la llamada y devuelve una respuesta con la
+    forma real del SDK (un bloque de texto con JSON válido)."""
     peticiones = []
 
     class BloqueTexto:
@@ -81,13 +81,13 @@ def test_anthropic_model_provider_construye_la_peticion_y_parsea_json_estructura
 
     monkeypatch.setattr(anthropic, "Anthropic", ClienteFalso)
 
-    proveedor = AnthropicModelProvider(api_key="sk-test", modelo="claude-opus-5")
+    proveedor = APIModelProvider(api_key="sk-test", modelo="modelo-de-prueba")
     esquema = {"type": "object", "properties": {"descripcion": {"type": "integer"}}}
     resultado = proveedor.completar("mapea esta cabecera", esquema=esquema)
 
     assert resultado == {"descripcion": 1, "precio_unitario": 2}
     assert len(peticiones) == 1
     peticion = peticiones[0]
-    assert peticion["model"] == "claude-opus-5"
+    assert peticion["model"] == "modelo-de-prueba"
     assert peticion["output_config"] == {"format": {"type": "json_schema", "schema": esquema}}
     assert peticion["messages"] == [{"role": "user", "content": "mapea esta cabecera"}]

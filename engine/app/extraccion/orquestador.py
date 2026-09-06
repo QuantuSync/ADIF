@@ -1,5 +1,5 @@
 """Trabajo de cola "extraer_expediente": encadena las seis etapas de la
-cascada de extracción (CLAUDE.md sección 5) sobre todos los documentos ya
+cascada de extracción (CONTEXTO.md sección 5) sobre todos los documentos ya
 descargados de un expediente, y deja líneas de catálogo escritas en base de
 datos. Es el punto de entrada que usa el worker (app/worker.py), simétrico a
 `app.scraping.job.ejecutar_scraping_expediente` para el trabajo de descarga.
@@ -73,13 +73,13 @@ from app.models import (
 )
 
 # Identificador de lote cuando el documento no declara ninguno por su nombre
-# (CLAUDE.md, encargo de esta sesión, punto 1: "un único lote implícito,
+# (CONTEXTO.md, encargo de esta sesión, punto 1: "un único lote implícito,
 # para que el modelo de datos sea uniforme"). "1" para coincidir con la
 # convención ya usada en los tests de la cascada
 # (tests/extraccion/test_pipeline_anejo.py).
 LOTE_UNICO = "1"
 
-# Documentos de estas plantillas declaran la baja en texto (CLAUDE.md sección
+# Documentos de estas plantillas declaran la baja en texto (CONTEXTO.md sección
 # 4 y docstring de app.extraccion.baja). `propuesta_dt` añadido en la sesión
 # de arreglos pequeños (docs/analisis-corpus.md hallazgo 4): sin esto, aunque
 # el clasificador ya reconociera la plantilla, su baja declarada ("con una
@@ -91,7 +91,7 @@ _TIPOS_CON_BAJA_DECLARADA = (
     TipoDocumento.propuesta_dt,
 )
 
-# Igual que `app.extraccion.baja._PRIORIDAD_BAJA` (CLAUDE.md sección 17:
+# Igual que `app.extraccion.baja._PRIORIDAD_BAJA` (CONTEXTO.md sección 17:
 # preferir la Resolución sobre la Propuesta cuando existan las dos, por ser
 # el acto posterior y definitivo). `propuesta_dt` es al mismo tipo de hecho
 # que `propuesta_lc27` (docs/analisis-corpus.md hallazgo 4), misma
@@ -109,13 +109,13 @@ class _Documento:
     documento: Documento
     tipo: TipoDocumento
     paginas: list
-    # CLAUDE.md sección 3: el único documento escaneado confirmado del
+    # CONTEXTO.md sección 3: el único documento escaneado confirmado del
     # corpus. Se marca aquí, en la clasificación, para que el motivo de
     # revisión lo distinga de "no se extrajo ninguna línea" (ver
     # `es_documento_escaneado`) en vez de intentar procesarlo como si tuviera
     # texto.
     escaneado: bool = False
-    # CLAUDE.md sección 26 (criterio del cliente sobre pliegos, verificado
+    # CONTEXTO.md sección 26 (criterio del cliente sobre pliegos, verificado
     # contra el corpus real): un pliego administrativo o PCAP nunca trae
     # cuadro de precios -- se salta la localización/extracción de tabla
     # entera, nunca un `pliego de prescripciones tecnicas` (ver
@@ -141,7 +141,7 @@ def _traza(
     valor,
     entidad_tipo: str = "expediente",
 ) -> None:
-    """CLAUDE.md sección 9.10: cada cifra derivada queda anclada a
+    """CONTEXTO.md sección 9.10: cada cifra derivada queda anclada a
     documento, página y fragmento, no solo al número final. `entidad_tipo`
     por defecto es "expediente" (uso histórico); las trazas de baja/importe
     por lote pasan `entidad_tipo="lote"` con `entidad_id=lote.id`."""
@@ -179,7 +179,7 @@ def _obtener_o_crear_lote(db: Session, expediente_id: int, identificador: str) -
 
 
 def _eliminar_lote_sentinela_obsoleto(db: Session, expediente_id: int) -> None:
-    """Idempotencia (CLAUDE.md sección 9.9) al migrar al arreglo de
+    """Idempotencia (CONTEXTO.md sección 9.9) al migrar al arreglo de
     identidad de lote (sección 27): un expediente reprocesado con el
     generalizador nuevo puede pasar de "un único lote implícito"
     (`LOTE_UNICO`, camino de antes de esta sesión) a lotes reales de
@@ -208,11 +208,11 @@ def _clasificar_documentos(db: Session, storage: DocumentStorage, documentos: li
         escaneado = es_documento_escaneado(paginas)
         # Un documento escaneado no tiene marcadores de texto que buscar —
         # clasificarlo igual lo mandaría a `otro` de forma indistinguible de
-        # un documento legible con una plantilla desconocida (CLAUDE.md
+        # un documento legible con una plantilla desconocida (CONTEXTO.md
         # sección 3, docstring de `es_documento_escaneado`).
         clasificacion = clasificar(paginas) if not escaneado else None
         # El clasificador manda, nunca el nombre de fichero ni la categoría
-        # que le asignó el scraper (CLAUDE.md sección 3 y docstring de
+        # que le asignó el scraper (CONTEXTO.md sección 3 y docstring de
         # app.extraccion.clasificador).
         tipo = clasificacion.tipo if clasificacion is not None else TipoDocumento.otro
         sin_precios = clasificacion is not None and es_pliego_sin_precios(clasificacion)
@@ -268,7 +268,7 @@ _TIPOS_CONTRATO_OBRA = ("obras", "obra")
 
 
 def _detectar_contrato_obra(documentos: list[_Documento]) -> Optional[CampoAnclado]:
-    """CLAUDE.md sección 26, criterio del cliente: el campo "Tipo de
+    """CONTEXTO.md sección 26, criterio del cliente: el campo "Tipo de
     Contrato" del Anuncio PCSP (misma etiqueta fija que ya lee
     `extraer_campos_anuncio_pcsp`) dice "Suministros", "Obras" o "Servicios".
     Ninguno de los dos expedientes reales de este corpus (todos "Suministros",
@@ -285,7 +285,7 @@ def _detectar_contrato_obra(documentos: list[_Documento]) -> Optional[CampoAncla
 
 def _es_documento_de_pliegos_pcsp(item: _Documento) -> bool:
     """Un "Documento de Pliegos" clasifica como `TipoDocumento.pliego`
-    (CLAUDE.md sección 26, criterio del cliente: sin cuadro de precios, se
+    (CONTEXTO.md sección 26, criterio del cliente: sin cuadro de precios, se
     salta la localización de tabla) pero es, en su contenido, la misma
     portada administrativa PCSP que un Anuncio PCSP -- "comparten
     exactamente la misma anatomía de etiquetas fijas" (docstring de
@@ -298,7 +298,7 @@ def _es_documento_de_pliegos_pcsp(item: _Documento) -> bool:
 
 
 def _detectar_numero_lotes_pcsp(documentos: list[_Documento]) -> Optional[int]:
-    """Sesión de identidad de lote (CLAUDE.md sección 27): el campo
+    """Sesión de identidad de lote (CONTEXTO.md sección 27): el campo
     estructurado "Nº de Lotes:" del Anuncio PCSP es la única fuente de
     "cuántos lotes declara la licitación" para un expediente que no trae
     ninguna Propuesta LC.27 ni Resolución con bloque narrativo por lote —
@@ -311,7 +311,7 @@ def _detectar_numero_lotes_pcsp(documentos: list[_Documento]) -> Optional[int]:
     expediente -- antes de esta guarda, la cobertura parcial (1 de 8) no se
     detectaba nunca porque el expediente no tiene ningún Anuncio PCSP, solo
     el Documento de Pliegos con el campo "Nº de Lotes: 8", excluido de esta
-    búsqueda sin motivo real (CLAUDE.md sección 12: "lo que no cuadra va a
+    búsqueda sin motivo real (CONTEXTO.md sección 12: "lo que no cuadra va a
     revisión" -- esto se quedaba silenciosamente sin ir a revisión)."""
     for item in documentos:
         if item.tipo != TipoDocumento.anuncio_pcsp and not _es_documento_de_pliegos_pcsp(item):
@@ -328,7 +328,7 @@ def _extraer_campos_expediente(
     """Etapa 2: nombre del proyecto y matriz (siempre) e importes de
     licitación/adjudicación y baja declarada a nivel de expediente (solo
     cuando `registrar_baja_importe`). Prioridad de importes: Anuncio PCSP
-    sobre Propuesta LC.27 (CLAUDE.md sección 4, tabla "Dónde está cada
+    sobre Propuesta LC.27 (CONTEXTO.md sección 4, tabla "Dónde está cada
     dato") — LC.27 es la reserva para expedientes sin Anuncio PCSP en el
     corpus (docstring de app.extraccion.campos_lc27).
 
@@ -365,7 +365,7 @@ def _extraer_campos_expediente(
                 except AutoreferenciaMatrizError:
                     # No debería pasar con el campo "Licitación basada en el
                     # acuerdo marco" (es una etiqueta distinta de la trampa
-                    # "Nº EXPEDIENTE MATRIZ" de CLAUDE.md sección 2), pero la
+                    # "Nº EXPEDIENTE MATRIZ" de CONTEXTO.md sección 2), pero la
                     # comprobación es la misma para cualquier candidato --
                     # ver docstring de `asignar_matriz`.
                     escrito = False
@@ -380,7 +380,7 @@ def _extraer_campos_expediente(
                     campos.objeto_contrato.pagina, campos.objeto_contrato.fragmento,
                 )
         elif item.tipo in (TipoDocumento.propuesta_lc27, TipoDocumento.resolucion_adjudicacion):
-            # Misma familia de etiquetas fijas en ambas plantillas (CLAUDE.md
+            # Misma familia de etiquetas fijas en ambas plantillas (CONTEXTO.md
             # sección 17: Propuesta y Resolución declaran los mismos importes
             # del mismo procedimiento) — se tratan igual aquí, "primera que
             # aparece gana" ya cubre la preferencia por la Resolución cuando
@@ -433,7 +433,7 @@ def _procesar_lotes_declarados(
     db: Session, expediente: Expediente, lotes_declarados: list[LoteDeclarado], documento_id: Optional[int],
 ) -> tuple[list[Lote], Optional[str]]:
     """Un lote por cada `LoteDeclarado`: la baja se extrae del texto, nunca
-    se calcula (CLAUDE.md sección 4), pero se contrasta contra los importes
+    se calcula (CONTEXTO.md sección 4), pero se contrasta contra los importes
     de ESE lote con `calcular_baja_efectiva` — el mismo caso "0 % ingenuo"
     de la sección 4 puede darse lote a lote, no solo a nivel de expediente."""
     lotes: list[Lote] = []
@@ -467,7 +467,7 @@ def _procesar_lotes_declarados(
 
 
 def _resumir_lotes_en_expediente(expediente: Expediente, lotes: list[Lote]) -> None:
-    """CLAUDE.md, encargo de esta sesión, punto 4: "un expediente con lotes
+    """CONTEXTO.md, encargo de esta sesión, punto 4: "un expediente con lotes
     de bajas distintas no tiene una baja única" — no se inventa una media.
     `baja_variable_por_lote` es lo que le dice a la web que explique el
     vacío de `baja_global` en vez de dejarlo parecer un fallo (ajuste 3)."""
@@ -501,7 +501,7 @@ def ejecutar_extraccion_expediente(
         raise RuntimeError(f"expediente_id {trabajo.expediente_id} no existe")
 
     if expediente.estado == EstadoExpediente.sin_publicar:
-        # CLAUDE.md sección 22: un expediente ya confirmado sin publicar no
+        # CONTEXTO.md sección 22: un expediente ya confirmado sin publicar no
         # tiene nada que extraer, y no se reprocesa por error si queda un
         # trabajo de extracción encolado de antes de que se confirmara (o si
         # alguien lo reencola a mano) -- sin este corte, ese trabajo lo
@@ -553,7 +553,7 @@ def ejecutar_extraccion_expediente(
         if sin_documentos:
             # Sin documentos propios no hay nada que clasificar ni que leer
             # por etiqueta fija -- pero el cruce con el Excel de códigos
-            # (CLAUDE.md sección 7) no depende de los documentos, solo del
+            # (CONTEXTO.md sección 7) no depende de los documentos, solo del
             # propio `codigo_expediente`: es el único camino que le queda a
             # un pedido derivado de acuerdo marco sin ningún documento
             # descargado (docs/analisis-corpus.md hallazgo 3, 7 de los 14
@@ -568,7 +568,7 @@ def ejecutar_extraccion_expediente(
             items = _clasificar_documentos(db, storage, list(documentos))
             documentos_procesados = len(items)
 
-            # CLAUDE.md sección 26, criterio del cliente: solo bajas de
+            # CONTEXTO.md sección 26, criterio del cliente: solo bajas de
             # material por lotes, un contrato de obra queda fuera de alcance.
             # Se detecta pronto (mismo campo de etiqueta fija que ya lee
             # `_extraer_campos_expediente`, sección 2 de la cascada) para no
@@ -579,7 +579,7 @@ def ejecutar_extraccion_expediente(
             # dejado por el camino.
             campo_obra = _detectar_contrato_obra(items)
 
-            # Identidad del expediente (CLAUDE.md sección 20): antes de anclar
+            # Identidad del expediente (CONTEXTO.md sección 20): antes de anclar
             # cualquier otro dato a este expediente, corrige su
             # `codigo_expediente` si sus propios Anuncio PCSP declaran uno
             # distinto -- el código con el que se registró suele ser en
@@ -615,7 +615,7 @@ def ejecutar_extraccion_expediente(
                 # `expediente.codigo_matriz` -- una de sus tres etiquetas
                 # reales es literalmente "Nº EXPEDIENTE MATRIZ"
                 # (`6.24/28510.0094`), una trampa de vocabulario sin
-                # relación con acuerdo marco (CLAUDE.md sección 27):
+                # relación con acuerdo marco (CONTEXTO.md sección 27):
                 # escribirla ahí reintroduciría el bug de autorreferencia
                 # de las secciones 20/21.
                 principal = resultado_lotes.codigo_principal_declarado
@@ -638,7 +638,7 @@ def ejecutar_extraccion_expediente(
                     resultado_lotes.lotes_totales_declarados or lotes_totales_pcsp
                 )
 
-                # Cobertura parcial (sesión de identidad de lote, CLAUDE.md
+                # Cobertura parcial (sesión de identidad de lote, CONTEXTO.md
                 # sección 27, encargo explícito del cliente): "un expediente
                 # del que solo conocemos 2 de 13 lotes no puede figurar como
                 # completado". Se compara contra los lotes que SÍ traen dato
@@ -662,7 +662,7 @@ def ejecutar_extraccion_expediente(
                             f"(con datos: {', '.join(identificadores) or 'ninguno'})",
                         )
             else:
-                # Camino de siempre: un único lote implícito (CLAUDE.md,
+                # Camino de siempre: un único lote implícito (CONTEXTO.md,
                 # encargo de esta sesión, punto 1). La falta de importe/baja
                 # ya no se explica en línea aquí: si el expediente declara
                 # una matriz, la herencia de más abajo puede resolverla
@@ -726,7 +726,7 @@ def ejecutar_extraccion_expediente(
                         "dato que el sistema no haya encontrado"
                     )
                 else:
-                    # Idempotencia (CLAUDE.md sección 9): un reproceso que ya
+                    # Idempotencia (CONTEXTO.md sección 9): un reproceso que ya
                     # no detecte el marcador (documento corregido, o el
                     # propio marcador dejó de estar) no debe dejar un
                     # `indexado_por_pedido` obsoleto de una ejecución previa.
@@ -747,7 +747,7 @@ def ejecutar_extraccion_expediente(
                     # haya podido sacar baja/importe de algún otro sitio
                     # (p.ej. el Contrato): ese valor sería el de un solo
                     # lote de los 2, presentado sin saber de cuál -- el
-                    # mismo riesgo que ya diagnosticó CLAUDE.md sección 26
+                    # mismo riesgo que ya diagnosticó CONTEXTO.md sección 26
                     # para 6.24/28510.0088, aquí sin ni siquiera un
                     # documento que lo desglose.
                     motivo_revision = _acumular_motivo(
@@ -765,17 +765,17 @@ def ejecutar_extraccion_expediente(
 
             # Etapas 3-6: el cuadro de precios se busca por contenido en TODOS
             # los documentos, nunca solo en los clasificados como "anejo"
-            # (CLAUDE.md sección 3: los *_ANEJO_N.pdf son a veces el Pliego
+            # (CONTEXTO.md sección 3: los *_ANEJO_N.pdf son a veces el Pliego
             # completo, y localizar_paginas_candidatas ya descarta barato lo que
             # no trae tabla). Cada documento se procesa de forma aislada: una
             # tabla que no se puede mapear (cabecera nunca vista y sin modelo
             # configurado) manda ESE documento a revisión, no tira las líneas ya
-            # extraídas de los demás — CLAUDE.md sección 12, "lo que no cuadra
+            # extraídas de los demás — CONTEXTO.md sección 12, "lo que no cuadra
             # va a la cola de revisión", no revienta el expediente entero.
             documentos_con_error: list[str] = []
             for item in items:
                 if item.pliego_sin_precios:
-                    # CLAUDE.md sección 26: pliego administrativo o PCAP,
+                    # CONTEXTO.md sección 26: pliego administrativo o PCAP,
                     # verificado sin cuadro de precios en todo el corpus real
                     # -- ni localizar páginas candidatas ni extraer tabla
                     # gastan tiempo en él. No es un error ni algo que mandar a
@@ -784,7 +784,7 @@ def ejecutar_extraccion_expediente(
                     continue
                 if item.escaneado:
                     # Sin capa de texto no hay páginas candidatas que buscar
-                    # ni cabecera que mapear (CLAUDE.md sección 3): intentar
+                    # ni cabecera que mapear (CONTEXTO.md sección 3): intentar
                     # `procesar_anejo` igual solo gastaría tiempo abriendo el
                     # PDF para no encontrar nada. Se registra aparte de
                     # `documentos_con_error` para que el motivo final lo diga
@@ -795,7 +795,7 @@ def ejecutar_extraccion_expediente(
                 contenido = storage.recuperar(item.documento.ruta_almacenamiento)
                 # Todo el trabajo de este documento —extraer, y guardar sus
                 # líneas— vive en el mismo bloque try/except con un único commit
-                # al final (CLAUDE.md, sesión de rodaje 2026-09-03, punto 2): un
+                # al final (CONTEXTO.md, sesión de rodaje 2026-09-03, punto 2): un
                 # error de base de datos al guardar (p.ej. un valor que revienta
                 # una columna) es tan aislable por documento como uno de mapeo de
                 # cabecera, y antes tiraba el expediente entero porque el
@@ -854,7 +854,7 @@ def ejecutar_extraccion_expediente(
                 # variable).
                 motivo_escaneados = (
                     "documento(s) escaneado(s), sin capa de texto (fuera de alcance sin OCR o modelo "
-                    "multimodal, CLAUDE.md sección 15): " + "; ".join(documentos_escaneados)
+                    "multimodal, CONTEXTO.md sección 15): " + "; ".join(documentos_escaneados)
                 )
 
         total_lineas = lineas_creadas + lineas_actualizadas
@@ -899,7 +899,7 @@ def ejecutar_extraccion_expediente(
             if sin_documentos:
                 motivo_revision = "extracción encolada sin documentos descargados para este expediente"
             elif motivo_escaneados is not None:
-                # Motivo aparte y explícito (CLAUDE.md sección 3): distinto
+                # Motivo aparte y explícito (CONTEXTO.md sección 3): distinto
                 # de "no se pudo extraer el cuadro de precios" (ese documento
                 # sí tiene texto, solo falló su tabla) y de "no se extrajo
                 # ninguna línea de catálogo" (ese expediente sí tiene
@@ -951,7 +951,7 @@ def ejecutar_extraccion_expediente(
             # -- ese es justo el caso real de `0136` (verificado a mano,
             # muestreo visual de 11 páginas del propio `ANEJO_2`: es el
             # Pliego de Cláusulas Administrativas, la misma familia que
-            # CLAUDE.md sección 26 ya confirmó sin cuadro de precios en 93
+            # CONTEXTO.md sección 26 ya confirmó sin cuadro de precios en 93
             # páginas reales de otro expediente; el cuadro de precios real
             # de este expediente ya sale de `ANEJO_3`, con capa de texto).
             # Si llegamos aquí es porque `total_lineas` no era 0 (si lo
@@ -971,11 +971,11 @@ def ejecutar_extraccion_expediente(
         if campo_obra is not None:
             # Gana sobre cualquier motivo que el intento de leer un cuadro de
             # precios que no existe (porque el expediente es de obra, no de
-            # material) hubiera dejado por el camino -- CLAUDE.md sección 26.
+            # material) hubiera dejado por el camino -- CONTEXTO.md sección 26.
             estado_especial = EstadoExpediente.fuera_de_alcance
             motivo_revision = (
                 f'contrato de obra ("Tipo de Contrato: {campo_obra.valor}"), fuera de alcance del motor de '
-                "materiales (criterio del cliente, CLAUDE.md sección 26)"
+                "materiales (criterio del cliente, CONTEXTO.md sección 26)"
             )
 
         if estado_especial is not None:

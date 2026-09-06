@@ -27,7 +27,7 @@ class ProveedorModeloFalso(ModelProvider):
 
 class ProveedorModeloCabeceraPorContenido(ModelProvider):
     """Doble para cabeceras reales que la extracción corrompe (un carácter
-    acentuado roto, CLAUDE.md sección 17.2) o desplaza (columnas fantasma,
+    acentuado roto, CONTEXTO.md sección 17.2) o desplaza (columnas fantasma,
     sección 3): a diferencia de `ProveedorModeloFalso`, que devuelve siempre
     la misma respuesta fija, este doble lee la lista de columnas del propio
     prompt (`app.extraccion.mapeo_cabecera._construir_prompt` ya las numera)
@@ -41,7 +41,7 @@ class ProveedorModeloCabeceraPorContenido(ModelProvider):
     los datos de forma distinta dentro de la misma tabla. Un emparejamiento
     por texto de cabecera a secas apuntaría entonces a una columna vacía. El
     modelo real resuelve esto mirando también las filas de ejemplo que ya
-    trae el prompt (CLAUDE.md sección 6: "dos o tres filas de ejemplo para
+    trae el prompt (CONTEXTO.md sección 6: "dos o tres filas de ejemplo para
     desambiguar"); este doble hace lo mismo para los campos numéricos
     (`cantidad`, `precio_unitario`): si la columna que eligió por palabra
     clave sale vacía en las tres filas de ejemplo, prueba la columna vecina

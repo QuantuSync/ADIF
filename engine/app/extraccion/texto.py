@@ -1,6 +1,6 @@
 """Lectura de texto de PDF, página a página.
 
-CLAUDE.md sección 3: 186 de los 187 documentos del corpus tienen capa de
+CONTEXTO.md sección 3: 186 de los 187 documentos del corpus tienen capa de
 texto — no hace falta OCR ni modelo multimodal para leerlos. El documento
 número 187 (`6.20/28510.0136_ANEJO_2.pdf`, 100 páginas) es la excepción
 confirmada (sesión de expedientes sin publicar): cada página es una imagen a
@@ -32,7 +32,7 @@ import pdfplumber
 class PaginaTexto:
     """Una página con su texto. `numero` es 1-indexado: es el número de
     página que se ancla en `documentos.pagina` / `trazas_origen.pagina`
-    (CLAUDE.md sección 9.10), no un índice de lista."""
+    (CONTEXTO.md sección 9.10), no un índice de lista."""
 
     numero: int
     texto: str
@@ -71,7 +71,7 @@ def es_documento_escaneado(paginas: list[PaginaTexto]) -> bool:
 def normalizar(texto: str) -> str:
     """Minúsculas, sin acentos, espacios colapsados. Para *comparar* texto
     (buscar marcadores), nunca para guardarlo: el valor guardado siempre es
-    el fragmento original (CLAUDE.md sección 8, "el modelo devuelve el
+    el fragmento original (CONTEXTO.md sección 8, "el modelo devuelve el
     literal, tu código normaliza" aplica igual al código determinista)."""
     s = texto.lower()
     s = "".join(c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn")

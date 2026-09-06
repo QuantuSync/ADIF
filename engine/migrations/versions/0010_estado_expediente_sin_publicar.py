@@ -1,6 +1,6 @@
 """estado_expediente: añade sin_publicar
 
-Sesión de expedientes sin publicar (CLAUDE.md sección 22): 14 códigos reales
+Sesión de expedientes sin publicar (CONTEXTO.md sección 22): 14 códigos reales
 de la Plataforma (6 expedientes derivados sin documentos + 8 matrices de
 acuerdo marco) se comprobaron a mano y por scraping real, con todas las
 variantes de separador, y no devuelven resultados. No son recuperables ni son

@@ -1,6 +1,6 @@
 """Campos de etiqueta fija de la Propuesta LC.27 — hermano de
 `app.extraccion.campos_pcsp` para la otra plantilla con etiquetas fijas del
-corpus (CLAUDE.md sección 3: "formulario estándar con etiquetas fijas" /
+corpus (CONTEXTO.md sección 3: "formulario estándar con etiquetas fijas" /
 "plantilla propia de ADIF").
 
 Se añade porque el caso de aceptación de esta sesión (expediente
@@ -31,7 +31,7 @@ from app.extraccion.texto import PaginaTexto
 # solo lote sí necesita cruzar ("licitación:\n138.000,00 €") — hasta el
 # primer dígito, sea el importe real o no.
 #
-# Documentos multi-lote no usan este valor de todos modos (CLAUDE.md, punto
+# Documentos multi-lote no usan este valor de todos modos (CONTEXTO.md, punto
 # 1 del encargo: el importe de licitación por lote sale de
 # `app.extraccion.lotes`, que lee la tabla "LOTE N <importe> €" directamente
 # con su propio patrón anclado a inicio de línea, y el del expediente se
@@ -54,7 +54,7 @@ _NUMERO_EXPEDIENTE_RE = re.compile(
 # El bloque "IDENTIFICACIÓN DEL DOCUMENTO" de la página de firmas repite el
 # objeto sin el reflow a dos columnas de la portada, tanto en la Propuesta
 # LC.27 ("PROPUESTA DE ADJUDICACIÓN DEL CONTRATO DE <objeto> EXPEDIENTE...")
-# como en la Resolución (plantilla L9_AF.01-FE, CLAUDE.md sección 17: misma
+# como en la Resolución (plantilla L9_AF.01-FE, CONTEXTO.md sección 17: misma
 # estructura de firma, "RESOLUCIÓN DE ADJUDICACIÓN DEL CONTRATO DE..."). Corta
 # en el primer " EXPEDIENTE" (con espacio o salto de línea delante, nunca a
 # mitad de palabra como en "EXPEDIENTE PRINCIPAL").

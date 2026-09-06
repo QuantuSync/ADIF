@@ -1,4 +1,4 @@
-"""Etapa 2, camino multi-lote (CLAUDE.md sección 19 y sección 27 — sesión de
+"""Etapa 2, camino multi-lote (CONTEXTO.md sección 19 y sección 27 — sesión de
 identidad de lote): un expediente puede subdividirse en varios lotes, cada
 uno con su propia baja, su propio presupuesto, su propio adjudicatario y
 —hallazgo de la sesión de identidad de lote— su propio código de
@@ -59,7 +59,7 @@ hueco.
 **Trampa verificada del vocabulario, sesión de identidad de lote:
 `6.24/28510.0094` etiqueta su expediente principal como "Nº EXPEDIENTE
 MATRIZ" — la palabra "matriz" aquí no tiene relación con el acuerdo marco
-de CLAUDE.md sección 2/20 (`codigo_matriz`/`matriz_expediente_id`), es solo
+de CONTEXTO.md sección 2/20 (`codigo_matriz`/`matriz_expediente_id`), es solo
 como esta Propuesta LC.27 concreta llama a "expediente que agrupa los
 lotes". Por eso `codigo_principal_declarado` de este módulo NUNCA se
 escribe en `expediente.codigo_matriz`: hacerlo reintroduciría el bug de
@@ -114,13 +114,13 @@ _IMPORTE_ADJUDICACION_LOTE_RE = re.compile(r"[Bb]ase [Ii]mponible[^\d\n]{0,100}(
 
 # Presupuesto de licitación por lote, cuando el documento lo declara en una
 # tabla con una fila por lote empezando la línea por "LOTE N" (verificado
-# solo en `6.25/28510.0027`, CLAUDE.md sección 19) -- no generalizado más
+# solo en `6.25/28510.0027`, CONTEXTO.md sección 19) -- no generalizado más
 # allá de esta forma exacta porque ningún otro de los 15 expedientes trae
 # esta tabla (docs/analisis-corpus.md, sesión de identidad de lote): sin
 # ella, `importe_licitacion` del lote queda `None`, nunca inventado.
 _TABLA_LICITACION_LOTE_RE = re.compile(r"^LOTE\s*(\d{1,2})\s+([\d.,]+)\s*€", re.MULTILINE)
 
-# Adjudicatario: dato secundario (CLAUDE.md sección 7, "no lo exige").
+# Adjudicatario: dato secundario (CONTEXTO.md sección 7, "no lo exige").
 # Ampliado en la sesión de identidad de lote para cubrir "a la empresa" /
 # "a las empresas", "con NIF" / "con CIF" (`6.23/28510.0051` usa CIF, el
 # resto NIF) y con o sin dos puntos -- si no casa con ninguna variante, se
@@ -232,7 +232,7 @@ def _codigo_principal_declarado(texto: str) -> Optional[CampoAnclado]:
 def extraer_lotes_declarados(paginas: list[PaginaTexto]) -> ResultadoLotes:
     """Lista vacía si el documento no menciona ningún "LOTE N" por su
     nombre -- el llamador (orquestador) cae entonces al camino de un único
-    lote implícito (CLAUDE.md, sección 19, "un único lote implícito")."""
+    lote implícito (CONTEXTO.md, sección 19, "un único lote implícito")."""
     texto, limites = _texto_y_paginas(paginas)
     ocurrencias = list(_LOTE_OCURRENCIA_RE.finditer(texto))
     if not ocurrencias:

@@ -5,7 +5,7 @@ Sesión de trabajo pendiente real (2026-09-05): 3 expedientes reales
 de suministro de carril nuevo cuya fórmula de precio es
 `P(t) = Precio_ofertado × Kt × Coeficiente_de_baja`, verificada contra los
 tres documentos reales -- distinta del modelo de baja única por lote
-(CLAUDE.md sección 4). Ni `Kt` (índices IPRI de energía/acero, publicados por
+(CONTEXTO.md sección 4). Ni `Kt` (índices IPRI de energía/acero, publicados por
 el INE) ni el "Coeficiente de baja" existen en ningún documento de la
 licitación: los fija ADIF pedido a pedido, en el futuro, contra el acuerdo
 marco ya adjudicado. Lo único que la licitación sí fija es el "coeficiente de

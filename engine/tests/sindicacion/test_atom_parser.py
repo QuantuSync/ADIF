@@ -1,4 +1,4 @@
-"""Bloque 2 (CLAUDE.md sección 24): parseo del XML CODICE de sindicación,
+"""Bloque 2 (CONTEXTO.md sección 24): parseo del XML CODICE de sindicación,
 contra un ZIP sintético con la misma forma que el real (verificado en la
 sesión de mantenimiento automático contra el ZIP real de agosto 2024)."""
 from decimal import Decimal
@@ -37,7 +37,7 @@ def test_parsea_campos_basicos(tmp_path):
 
 
 def test_parsea_adjudicacion_y_suma_varios_tender_result(tmp_path):
-    """Verificado contra el expediente real 6.24/28510.0103 (CLAUDE.md
+    """Verificado contra el expediente real 6.24/28510.0103 (CONTEXTO.md
     sección 17.1): licitación y adjudicación pueden ser el mismo número."""
     zip_path = construir_zip(
         tmp_path / "prueba.zip",

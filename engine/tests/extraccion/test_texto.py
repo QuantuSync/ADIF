@@ -8,7 +8,7 @@ def test_documento_con_texto_normal_no_se_marca_escaneado():
 
 
 def test_documento_escaneado_real_se_detecta():
-    # CLAUDE.md sección 3: el único documento escaneado confirmado del
+    # CONTEXTO.md sección 3: el único documento escaneado confirmado del
     # corpus real (100 páginas, cada una una imagen a página completa, sin
     # ningún carácter de texto ni con pdfplumber ni con pypdf).
     paginas = extraer_texto(fx.DOCUMENTO_ESCANEADO_SIN_TEXTO)

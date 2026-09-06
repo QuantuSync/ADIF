@@ -1,4 +1,4 @@
-"""Integración bloque 1 + bloque 2 (CLAUDE.md sección 24): un expediente
+"""Integración bloque 1 + bloque 2 (CONTEXTO.md sección 24): un expediente
 descubierto por sindicación en un ciclo entra en el mismo bucle de decisión
 de frescura de ESE mismo ciclo, sin esperar al siguiente."""
 from app.mantenimiento.ciclo import ejecutar_ciclo_mantenimiento

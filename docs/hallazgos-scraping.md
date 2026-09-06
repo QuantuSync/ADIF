@@ -1,7 +1,7 @@
 # Hallazgos de scraping
 
-Registro histórico movido desde `CLAUDE.md` (split de sesión 2026-09-05).
-Ver `CLAUDE.md` para el contexto vivo del proyecto.
+Registro histórico movido desde `CONTEXTO.md` (split de sesión 2026-09-05).
+Ver `CONTEXTO.md` para el contexto vivo del proyecto.
 
 ---
 

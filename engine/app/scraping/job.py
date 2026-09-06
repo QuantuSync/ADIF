@@ -41,7 +41,7 @@ def ejecutar_scraping_expediente(db: Session, storage: DocumentStorage, trabajo:
     except ExpedienteNoPublicadoError as exc:
         # Resultado negativo determinista (docstring de la excepción): no es
         # "fallido" (que sugiere que reintentar podría cambiar el resultado),
-        # es "sin_publicar" (CLAUDE.md sección 22) -- y no hay razón para
+        # es "sin_publicar" (CONTEXTO.md sección 22) -- y no hay razón para
         # gastar dos intentos más de scraping real repitiendo una búsqueda
         # que ya se sabe que no encuentra nada, así que se agota el trabajo
         # aquí mismo en vez de dejar que `ejecutar_trabajo` lo reintente.
@@ -95,7 +95,7 @@ def ejecutar_scraping_expediente(db: Session, storage: DocumentStorage, trabajo:
     expediente.error = None
     db.commit()
 
-    # Encadenado (CLAUDE.md, encargo de esta sesión, punto 3): al terminar
+    # Encadenado (CONTEXTO.md, encargo de esta sesión, punto 3): al terminar
     # la descarga se encola la extracción, no se ejecuta suelta.
     encolar_trabajo(db, tipo="extraer_expediente", expediente_id=expediente.id)
 

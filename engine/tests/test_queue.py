@@ -1,4 +1,4 @@
-"""CLAUDE.md sección 17 (pendiente): recuperación de trabajos huérfanos.
+"""CONTEXTO.md sección 17 (pendiente): recuperación de trabajos huérfanos.
 Un trabajo `en_proceso` bloqueado por un worker que ya no existe (contenedor
 caído, `dockerd` reiniciado a mitad de ejecución) no lo recoge nadie más,
 porque `tomar_siguiente_trabajo` solo mira `estado = pendiente`."""

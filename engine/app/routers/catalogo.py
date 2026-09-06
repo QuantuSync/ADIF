@@ -27,7 +27,7 @@ def explorar_catalogo(
     db: Session = Depends(get_db),
     usuario: Usuario = Depends(get_current_user),
 ):
-    """CLAUDE.md, encargo de esta sesión, punto 1: catálogo con filtros por
+    """CONTEXTO.md, encargo de esta sesión, punto 1: catálogo con filtros por
     expediente, lote y material, y búsqueda por matrícula a través de todos
     los expedientes (sin filtro de `expediente`, `matricula` ya cruza todo
     el catálogo)."""
@@ -66,9 +66,9 @@ def exportar_catalogo(
     db: Session = Depends(get_db),
     usuario: Usuario = Depends(get_current_user),
 ):
-    """CLAUDE.md, encargo de esta sesión, punto 4: un solo catálogo
+    """CONTEXTO.md, encargo de esta sesión, punto 4: un solo catálogo
     acumulativo generado desde la base de datos a demanda, nunca la fuente
-    de los datos (CLAUDE.md sección 9.8)."""
+    de los datos (CONTEXTO.md sección 9.8)."""
     sin_cruzar = db.execute(
         select(Expediente).where(Expediente.codigos_cruzados.is_(None))
     ).scalars().all()

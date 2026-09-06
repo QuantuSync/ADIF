@@ -1,4 +1,4 @@
-"""Bloque 2, descubrimiento por sindicación (CLAUDE.md sección 24): parseo
+"""Bloque 2, descubrimiento por sindicación (CONTEXTO.md sección 24): parseo
 incremental del XML CODICE que trae cada ZIP mensual
 (`licitacionesPerfilesContratanteCompleto3_AAAAMM.zip`, sindicación 643).
 
@@ -35,7 +35,7 @@ CAC_PLACE_NS = "urn:dgpe:names:draft:codice-place-ext:schema:xsd:CommonAggregate
 _TAG_ENTRY = f"{{{ATOM_NS}}}entry"
 
 # Formato del departamento dentro del código de expediente ("6.24/28510.0088"
-# -> "28510"): mismo patrón que documenta CLAUDE.md sección 20 para
+# -> "28510"): mismo patrón que documenta CONTEXTO.md sección 20 para
 # distinguir expediente de matriz, aplicado aquí a la parte "28510".
 _DEPARTAMENTO_RE = re.compile(r"^\d+\.\d+/(\d+)\.")
 
@@ -87,7 +87,7 @@ class EntradaSindicacion:
 def _decimal(texto: Optional[str]) -> Optional[Decimal]:
     """Los importes del XML CODICE ya vienen en formato máquina (punto
     decimal, sin separador de miles ni símbolo de moneda) — a diferencia del
-    formato español de los PDF (CLAUDE.md sección 8), aquí basta `Decimal`
+    formato español de los PDF (CONTEXTO.md sección 8), aquí basta `Decimal`
     directo, nunca `parsear_importe_es`."""
     if texto is None:
         return None
@@ -137,7 +137,7 @@ def _adjudicacion(status: ET.Element) -> tuple[Optional[Decimal], Optional[Decim
     """Suma los importes de todos los `cac:TenderResult` del expediente (0,
     1 o varios — un expediente multi-lote puede traer uno por lote, sin
     verificar contra un ejemplo real de este corpus): agregado a nivel de
-    expediente, no por lote — el contraste de este bloque (CLAUDE.md sección
+    expediente, no por lote — el contraste de este bloque (CONTEXTO.md sección
     24) compara contra `Expediente.importe_adjudicacion`, que tampoco baja a
     nivel de lote."""
     total_sin = total_con = None
@@ -204,7 +204,7 @@ def _entradas_de_stream(stream, filtro: Optional[Callable[[EntradaSindicacion], 
         entrada = _parsear_entrada(elemento)
         elemento.clear()
         # Trueco estándar de iterparse con memoria acotada: libera también
-        # los hermanos ya procesados que cuelgan de la raíz (CLAUDE.md
+        # los hermanos ya procesados que cuelgan de la raíz (CONTEXTO.md
         # bloque 2, punto 1: "procesamiento incremental, no cargarlo entero
         # en memoria" — sin esto, el árbol entero del feed se acumula igual
         # aunque cada <entry> se limpie a sí misma).

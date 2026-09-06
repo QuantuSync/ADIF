@@ -1,4 +1,4 @@
-"""Segunda familia de baja (CLAUDE.md sección 16, "Pendiente de resolver";
+"""Segunda familia de baja (CONTEXTO.md sección 16, "Pendiente de resolver";
 propuesta completa en docs/identidad-expediente.md sección 28): al menos 3
 expedientes reales del corpus (`6.23/28510.0018`, `6.23/28510.0102`,
 `6.25/28510.0016`, los tres Acuerdos Marco de suministro de carril nuevo)

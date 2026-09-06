@@ -1,11 +1,11 @@
 """estado_expediente: añade descargado
 
-CLAUDE.md, encargo de esta sesión (cola y seguimiento), punto 2: la descarga
+CONTEXTO.md, encargo de esta sesión (cola y seguimiento), punto 2: la descarga
 y la extracción son dos trabajos de cola encadenados, no uno solo. Sin este
 estado intermedio, un expediente que ya terminó de descargar pero cuyo
 trabajo de extracción todavía no ha arrancado (encolado, esperando al
 worker) se ve indistinguible de uno que ya está extrayendo — un estado que
-miente, justo lo que CLAUDE.md sección 12 pide evitar.
+miente, justo lo que CONTEXTO.md sección 12 pide evitar.
 
 Revision ID: 0004
 Revises: 0003

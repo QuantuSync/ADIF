@@ -22,7 +22,7 @@ variante de contenido**, ninguna con datos distintos entre copias). Todas
 las filas duplicadas tenían `estado_revision = sin_revisar` y `comentarios
 IS NULL`: ningún trabajo de revisión humana en riesgo.
 
-Concentrado en siete expedientes, todos multi-lote (CLAUDE.md sección 27):
+Concentrado en siete expedientes, todos multi-lote (CONTEXTO.md sección 27):
 
 | Expediente | Líneas antes | Huérfanas antes | Líneas después | Huérfanas después |
 |---|---|---|---|---|
@@ -36,7 +36,7 @@ Concentrado en siete expedientes, todos multi-lote (CLAUDE.md sección 27):
 
 Ningún expediente de lote único tenía ni una sola línea huérfana afectada:
 el defecto solo podía manifestarse donde existen líneas con
-`lote_id IS NULL` (huérfanas, CLAUDE.md sección 2 y
+`lote_id IS NULL` (huérfanas, CONTEXTO.md sección 2 y
 `app.models.LineaCatalogo.lote_id`).
 
 ### Causa raíz
@@ -62,7 +62,7 @@ los documentos (docstring de `_combinar_por_clave`, caso real
 `6.24/28510.0116`).
 
 Pero una línea **huérfana** (`lote_id IS NULL`, tabla cuya asociación a
-lote quedó ambigua — CLAUDE.md sección 2, `app.extraccion.lote_tabla`) no
+lote quedó ambigua — CONTEXTO.md sección 2, `app.extraccion.lote_tabla`) no
 usa esa clave desnuda: `app.extraccion.pipeline_anejo.procesar_anejo` le
 añade un sufijo de página y franja vertical
 (`f"{clave}@p{pagina}y{bbox_top}"`) precisamente para poder distinguir dos
@@ -92,7 +92,7 @@ reprocesos reales entre el 2026-09-04 y el 2026-09-05):
    vuelve a quedar "invisible" para el siguiente reproceso.
 
 Cada ciclo de mantenimiento programado que reprocesaba estos expedientes
-—atrapados en `pendiente_revision` por cobertura parcial de lotes, CLAUDE.md
+—atrapados en `pendiente_revision` por cobertura parcial de lotes, CONTEXTO.md
 sección 27, así que nunca llegaban a `completado` y volvían a entrar en
 cada ronda— añadía exactamente una copia nueva por línea huérfana con
 `codigo_precio`. `app.mantenimiento.frescura.VERSION_LOGICA_EXTRACCION`
@@ -159,7 +159,7 @@ recuento correcto del que partir.
 
 - `documentos_sin_cambios(expediente, documentos)`: compara la huella
   actual de documentos contra `expediente.huella_documentos` (el mismo
-  mecanismo del bloque 1 de ejecución incremental, CLAUDE.md sección 23).
+  mecanismo del bloque 1 de ejecución incremental, CONTEXTO.md sección 23).
 - `contar_lineas_catalogo(db, expediente_id)`.
 - `detectar_crecimiento_sin_cambios(conteo_antes, conteo_despues)`: motivo
   de revisión explícito si el recuento creció.

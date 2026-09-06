@@ -54,7 +54,7 @@ que hace falta para poder ejecutarla.
      disco local y ejecutar el mismo script de abajo sobre esa carpeta.
 2. **Diferencia los dos manifiestos** por `sha256_completo` (no por nombre
    de fichero — el mismo contenido con un nombre distinto en cada sitio
-   debe contar como "el mismo documento"; CLAUDE.md sección 8, "el
+   debe contar como "el mismo documento"; CONTEXTO.md sección 8, "el
    scraping funciona... deduplicación por hash" ya sigue este criterio en
    el resto del sistema):
    - Hash presente en SharePoint y no en el manifiesto local → documento
@@ -122,7 +122,7 @@ with open("manifiesto_sharepoint.csv", "w", newline="", encoding="utf-8") as f:
   Entra ID con permiso `Sites.Read.All` (o `Files.Read.All`) sobre el site
   del cliente, o credenciales de un usuario con acceso delegado a esa
   carpeta concreta — ninguna de las dos existe en este entorno ni en este
-  proyecto todavía (CLAUDE.md invariante 5: nada específico de un
+  proyecto todavía (CONTEXTO.md invariante 5: nada específico de un
   proveedor cloud en el código del motor, así que este acceso viviría
   fuera de `engine/`, como un paso manual o un script aparte, nunca como
   una dependencia del sistema en producción).

@@ -94,7 +94,7 @@ de verificar antes de fundir/borrar.
 
 Ya vivían en cada línea (`LineaCatalogo.precio_adjudicado`,
 `LineaCatalogo.baja_lote`, calculadas en `app.catalogo`, sección 4 de
-CLAUDE.md) — solo faltaban en el Excel. Añadidas **al final**, sin mover
+CONTEXTO.md) — solo faltaban en el Excel. Añadidas **al final**, sin mover
 las once columnas del formato original: "Precio adjudicado" y "Baja del
 lote" (formato `0.00%`).
 
@@ -341,7 +341,7 @@ que pasa, sin que ninguna sesión lo dejara escrito la primera.
 Verificado antes de tocar nada: comparado archivo a archivo contra el
 commit `HEAD` real (con `git stash` para dejar el repositorio en el estado
 exacto del último commit), **todo el código de aplicación de los últimos 3
-commits coincidía exactamente** entre las dos copias — solo `CLAUDE.md`,
+commits coincidía exactamente** entre las dos copias — solo `CONTEXTO.md`,
 `README.md` y un fichero de `docs/` estaban desactualizados en la copia.
 **Ningún código llegó a correr sin estar en `git`.**
 
@@ -356,7 +356,7 @@ diferencia medible que justifique una segunda copia.
 (`md5sum` dentro del contenedor coincide con el fichero del repositorio) y
 con la suite completa en verde (339 tests) sirviendo desde
 `/mnt/c/dev/ADIF`. `/home/lucas/adif` borrado. Regla explícita añadida en
-`CLAUDE.md` (invariante 11): fuente única de verdad = el repositorio
+`CONTEXTO.md` (invariante 11): fuente única de verdad = el repositorio
 versionado; si algún día hace falta una ruta nativa de Linux por
 rendimiento, la única alternativa permitida es un `git worktree` del mismo
 repositorio, nunca una copia de ficheros suelta.
@@ -430,7 +430,7 @@ seguía siendo válida con el sistema ya arreglado.
 
 - **Máximo, 1.020.000 €** (`6.24/28510.0203` lote 2): "Partida alzada a
   justificar para imprevistos", código `PN10`. Partida alzada legítima
-  (CLAUDE.md sección 2), no un error de parseo -- el mismo expediente
+  (CONTEXTO.md sección 2), no un error de parseo -- el mismo expediente
   repite la partida en varios lotes con importes de 780.000 a 1.020.000 €,
   coherentes entre sí.
 - **Mínimo, 0,142 €** (`6.23/28510.0129` lote 2): "T x km de balasto
@@ -478,7 +478,7 @@ líneas con 253 códigos rellenos): el sistema solo la rellena cuando la
 primera palabra de la descripción casa contra un vocabulario todavía
 corto (`app.extraccion.codigo_material.VOCABULARIO_CODIGO_MATERIAL`, 11
 palabras); ampliarlo con el modelo cuando no casa nada está
-deliberadamente fuera de alcance (CLAUDE.md sección 6, sin ningún caso
+deliberadamente fuera de alcance (CONTEXTO.md sección 6, sin ningún caso
 real sin casar en el corpus de prueba) -- se deja explícito en el Excel
 para que una columna casi vacía no se lea como un fallo del entregable.
 

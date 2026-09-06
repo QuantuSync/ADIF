@@ -1,6 +1,6 @@
 """sindicacion_expedientes: bloque 2, descubrimiento por sindicación
 
-CLAUDE.md sección 24: instantánea más reciente de cada expediente conocida
+CONTEXTO.md sección 24: instantánea más reciente de cada expediente conocida
 por el XML CODICE de sindicación, guardada aparte de `expedientes`/`lotes`
 para poder contrastarla contra lo que extrae la cascada de los PDFs sin que
 una fuente pise a la otra.

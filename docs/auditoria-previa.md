@@ -22,16 +22,16 @@ líneas de catálogo.
 
 | # | Gravedad | Hallazgo | Bloque |
 |---|---|---|---|
-| 1 | **Alta** | `6.24/28510.0116` (uno de los 7 `completado`, candidato a ejemplo de demo) tiene dos documentos reales del mismo expediente con bajas distintas: 47,87% (Propuesta de Adjudicación) vs 46,50% (Contrato firmado). El sistema usa el 46,50% del Contrato, probablemente correcto, pero sin ninguna regla documentada en CLAUDE.md que lo confirme como intencional. Confirmar con el cliente antes de usarlo en la demo. | 3 |
+| 1 | **Alta** | `6.24/28510.0116` (uno de los 7 `completado`, candidato a ejemplo de demo) tiene dos documentos reales del mismo expediente con bajas distintas: 47,87% (Propuesta de Adjudicación) vs 46,50% (Contrato firmado). El sistema usa el 46,50% del Contrato, probablemente correcto, pero sin ninguna regla documentada en CONTEXTO.md que lo confirme como intencional. Confirmar con el cliente antes de usarlo en la demo. | 3 |
 | 2 | **Media-Alta** | El problema de rendimiento de `6.23/28510.0051` **no se reprodujo** en una tanda real de 38 expedientes (mayor que los 20 pedidos): terminó en 108 s, dentro de su baseline aislado, sin cuelgue. Buena noticia para el riesgo inmediato de la demo, pero la causa raíz del episodio de >15 min documentado sigue sin confirmarse ni descartarse — ver limitaciones del bloque 1. | 1 |
 | 3 | **Media** | 108 líneas de catálogo duplicadas de verdad (mismo lote, misma matrícula+descripción, mismo precio) en 4 expedientes, causadas por una segunda tabla técnica que repite el material sin código de precio — se exportarían al Excel como filas repetidas. | 2 |
 | 4 | **Media** | 28 líneas de catálogo (2 expedientes, uno de ellos `completado`) tienen `codigo_precio` contaminado por el pie de página de verificación CSV del documento, invertido y colado en la celda (p. ej. `j.adilav/vscPN005`). El precio y la cantidad de esas líneas son correctos; el código no, y no dispara revisión. | 3 (ampliado en 2) |
-| 5 | **Media** | La premisa de CLAUDE.md sección 19 ("cero casos de banda vacía en el corpus") ya no es cierta con el corpus multi-lote actual: 797 líneas tienen `motivo_revision` de tipo "banda vacía", el 72% concentradas en un solo expediente (`6.25/28510.0019`, 9 lotes). No bloquea nada nuevo (ese expediente ya está en revisión por cobertura parcial), pero es una brecha real entre lo documentado y el dato de hoy. | 2 |
+| 5 | **Media** | La premisa de CONTEXTO.md sección 19 ("cero casos de banda vacía en el corpus") ya no es cierta con el corpus multi-lote actual: 797 líneas tienen `motivo_revision` de tipo "banda vacía", el 72% concentradas en un solo expediente (`6.25/28510.0019`, 9 lotes). No bloquea nada nuevo (ese expediente ya está en revisión por cobertura parcial), pero es una brecha real entre lo documentado y el dato de hoy. | 2 |
 | 6 | **Baja** | Discrepancia de recuento: el encargo decía "8 completados / 30 en revisión"; hoy son 7 y 31. Sin investigar la causa. | — |
 | 7 | **Baja** | 2 líneas de catálogo con `descripcion` vacía pero `precio_unitario` y matrícula reales, sin `motivo_revision` que lo señale — se verían como un hueco en el Excel. | 2 |
-| 8 | **Informativo** | Matrícula rellena en el 35% de las líneas, no el ~66% que documenta CLAUDE.md sección 2 sobre la muestra original de 45 expedientes — el corpus ampliado trae más tablas sin columna de matrícula. No investigado más a fondo. | 2 |
+| 8 | **Informativo** | Matrícula rellena en el 35% de las líneas, no el ~66% que documenta CONTEXTO.md sección 2 sobre la muestra original de 45 expedientes — el corpus ampliado trae más tablas sin columna de matrícula. No investigado más a fondo. | 2 |
 
-Los 5 casos de trabajo pendiente **ya documentado** en CLAUDE.md (segunda
+Los 5 casos de trabajo pendiente **ya documentado** en CONTEXTO.md (segunda
 familia de baja sin modelar, 3 expedientes; 2 expedientes sin ninguna línea
 extraída) no se listan como hallazgos nuevos — ver bloque 3, parte B.
 
@@ -41,7 +41,7 @@ extraída) no se listan como hallazgos nuevos — ver bloque 3, parte B.
 
 **Método**: se disparó el ciclo de mantenimiento real
 (`POST /mantenimiento/ejecutar`, `forzar: true`) desde el worker real
-(`adif-worker-1`), que — CLAUDE.md sección 23 — encola y **drena de forma
+(`adif-worker-1`), que — CONTEXTO.md sección 23 — encola y **drena de forma
 síncrona dentro del propio proceso Python de larga vida**: es exactamente el
 escenario "N-ésimo expediente en un proceso de vida larga" descrito como
 origen del problema. Sin `forzar_expedientes` explícito, el ciclo forzó los
@@ -82,7 +82,7 @@ los 38 superó los 207 s.
 
 **Hallazgo colateral, no buscado pero real**: el expediente inmediatamente
 posterior a `0051`, `6.23/28510.0139`, fue el más lento de toda la tanda
-(206,8 s) pese a que CLAUDE.md no lo documenta como grande (solo Anuncio PCSP
+(206,8 s) pese a que CONTEXTO.md no lo documenta como grande (solo Anuncio PCSP
 + 2 Contratos, sin anejo, fixture de test de 24 KB). Sus documentos reales en
 el volumen de desarrollo deben ser considerablemente más grandes que el
 fixture — sin verificar el tamaño real en esta pasada.
@@ -116,7 +116,7 @@ abiertos al terminar: 4 — sin indicio de fuga de `pdfplumber`.
    días sin reiniciarse). Esta corrida no lo prueba ni lo descarta.
 4. **Sin verificar, alternativa**: el episodio original puede no ser un
    problema de recursos del proceso Python en absoluto, sino la
-   inestabilidad de `dockerd`/WSL ya documentada (CLAUDE.md secciones 17 y
+   inestabilidad de `dockerd`/WSL ya documentada (CONTEXTO.md secciones 17 y
    17.4) — "activo en CPU todo el tiempo" también es compatible con un
    contenedor en un estado extraño tras una caída parcial de Docker.
 5. El pico real de memoria de esta tanda lo causó `0139`, no `0051` — si el
@@ -138,7 +138,7 @@ con más memoria de toda la tanda.
 El riesgo inmediato para la demo es bajo si se procesa una tanda de tamaño
 razonable de una vez — no se reprodujo el cuelgue con una tanda mayor que la
 pedida. Si se quiere eliminar el riesgo sin investigar más la causa raíz, la
-mitigación ya verificada que funciona (CLAUDE.md, "Pendiente de resolver") es
+mitigación ya verificada que funciona (CONTEXTO.md, "Pendiente de resolver") es
 procesar expedientes grandes en procesos aislados en vez de una tanda larga
 sin reiniciar — no algo nuevo que construir.
 
@@ -163,7 +163,7 @@ escritura.
 | Cantidad | 1.987 | 66,2% |
 | Lote asignado | 1.892 | 63,1% |
 
-Matrícula al 35% queda por debajo del ~66% que documenta CLAUDE.md sobre la
+Matrícula al 35% queda por debajo del ~66% que documenta CONTEXTO.md sobre la
 muestra original de 45 expedientes — el corpus ampliado trae más tablas sin
 columna de matrícula; no investigado más a fondo, fuera de alcance de este
 bloque.
@@ -171,7 +171,7 @@ bloque.
 **2 líneas con descripción vacía pero datos reales** (`id` 2050 y 2056,
 expediente `6.20/28510.0136`, `precio_unitario = 9,29 €`, matrícula real, sin
 `motivo_revision`). Distintas de las "filas fantasma" ya limpiadas en la
-sesión anterior (CLAUDE.md sección 29) — estas sí tienen precio, solo falta
+sesión anterior (CONTEXTO.md sección 29) — estas sí tienen precio, solo falta
 el texto de descripción. Se verían como un hueco en el Excel.
 
 ### Precio adjudicado (derivado)
@@ -193,7 +193,7 @@ La derivación funciona de forma consistente allí donde tiene los dos
 insumos — cero casos del tercer tipo. El cuello de botella real son las
 1.143 líneas sin `baja_lote`: en su mayoría son líneas huérfanas sin lote
 determinado (sección 5 abajo) y las de la "segunda familia de baja" (3
-expedientes, sin baja única que aplicar por diseño — CLAUDE.md sección 22).
+expedientes, sin baja única que aplicar por diseño — CONTEXTO.md sección 22).
 
 ### Revisión
 
@@ -212,7 +212,7 @@ de la entrega, nadie las ha tocado desde la cola de revisión todavía.
 | "valor de matrícula no reconocible, descartado: '***'" | 1 | `6.23/28510.0042` |
 
 **El motivo "banda vacía" (797 líneas, 72% de las huérfanas) contradice la
-medición de CLAUDE.md sección 19** ("cero casos de banda vacía en el corpus
+medición de CONTEXTO.md sección 19** ("cero casos de banda vacía en el corpus
 completo") — esa premisa ya no se sostiene con el corpus multi-lote actual:
 un solo expediente, `6.25/28510.0019` (9 lotes), concentra 656 de los 797
 casos. No bloquea nada nuevo (ese expediente ya está en revisión por
@@ -244,14 +244,14 @@ misma descripción repetida en el mismo lote: 50 grupos, 108 líneas**,
 concentradas en 4 expedientes: `6.23/28510.0018` (13 grupos/26 líneas),
 `6.23/28510.0102` (13/26), `6.25/28510.0016` (13/26), `6.23/28510.0042`
 (10/28). Los tres primeros coinciden con los 3 expedientes de "segunda
-familia de baja" ya pendientes en CLAUDE.md sección 22.
+familia de baja" ya pendientes en CONTEXTO.md sección 22.
 
 Verificado a mano un caso real (`6.23/28510.0018`, lote 10, matrícula
 `601020180`, "CARRIL RN 45 BARRA 180 M..."): las dos filas vienen del mismo
 documento (`ANEJO_1`) pero de páginas distintas (12 y 16), mismo precio
 exacto (58,43 €) — una segunda tabla de características técnicas que repite
 las mismas filas de material, esta vez con precio incluido (a diferencia del
-caso ya documentado en CLAUDE.md sección 17.2, donde la segunda tabla no
+caso ya documentado en CONTEXTO.md sección 17.2, donde la segunda tabla no
 traía precio). No es un fallo de `_combinar_por_clave`: las dos filas tienen
 `clave_linea` distinta (una con código de precio, otra sin él), así que el
 mecanismo de deduplicación por clave nunca las ve como la misma fila —
@@ -286,9 +286,9 @@ matrícula no son señales de error, son la naturaleza heterogénea del catálog
 
 **Nota sobre `6.24/28510.0116`**: no es un bug de extracción — los dos
 números están literalmente en dos documentos reales distintos del mismo
-expediente. CLAUDE.md sección 17 documenta una regla de prioridad para el par
+expediente. CONTEXTO.md sección 17 documenta una regla de prioridad para el par
 Propuesta LC.27 / Resolución de Adjudicación ("preferir la Resolución,
-CLAUDE.md sección 17"), pero **no documenta explícitamente una prioridad
+CONTEXTO.md sección 17"), pero **no documenta explícitamente una prioridad
 Contrato-vs-Propuesta**. Es plausible que el Contrato (acto más definitivo)
 sea el correcto, pero **antes de usar este expediente como ejemplo en la
 demo, confirmar con el cliente** — 47,87% vs 46,50% sobre 1.485.000 € no es
@@ -306,7 +306,7 @@ la cantidad de esas líneas están limpios; solo el código, y **no dispara
 
 | Grupo | Expedientes | Correcto por diseño / Pendiente |
 |---|---:|---|
-| Matriz de acuerdo marco `sin_publicar` | 8 | **Correcto por diseño** (CLAUDE.md sección 22) |
+| Matriz de acuerdo marco `sin_publicar` | 8 | **Correcto por diseño** (CONTEXTO.md sección 22) |
 | Documento escaneado, sin capa de texto | 1 (`6.20/28510.0136`) | **Correcto por diseño**, fuera de alcance sin OCR (sección 15) |
 | Segunda familia de baja (sin baja declarada en ningún documento) | 3 (`0018`, `0102`, `0016`) | **Trabajo pendiente real** — sin diseñar cómo modelarla |
 | Cobertura parcial de lotes multi-lote | 12 | **Correcto por diseño** (sección 27), causa de fondo es de origen de datos |
@@ -316,7 +316,7 @@ la cantidad de esas líneas están limpios; solo el código, y **no dispara
 
 **26 de 31 son comportamiento correcto ya documentado; 5 son trabajo
 pendiente real** (3 de la segunda familia de baja + 2 sin ninguna línea
-extraída) — coincide con lo que CLAUDE.md ya tenía anotado, sin motivos
+extraída) — coincide con lo que CONTEXTO.md ya tenía anotado, sin motivos
 nuevos no documentados.
 
 ### Parte C — Trazabilidad: 10 líneas al azar

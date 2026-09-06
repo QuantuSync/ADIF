@@ -1,4 +1,4 @@
-"""Caso de aceptación de esta sesión: etapas 3 a 6 de la cascada (CLAUDE.md
+"""Caso de aceptación de esta sesión: etapas 3 a 6 de la cascada (CONTEXTO.md
 sección 5) encadenadas sobre los dos anejos de fixture con cabecera
 distinta, produciendo líneas de catálogo reales — no inventadas a mano en el
 test. Ejecutar con `pytest -s` para ver el informe de páginas descartadas,
@@ -49,7 +49,7 @@ def test_cascada_completa_sobre_los_dos_anejos_de_fixture(db_session, capsys):
     ]
 
     # Con las cabeceras reales de estos dos fixtures, el mapeo determinista
-    # (CLAUDE.md sección 6: "antes de llamar al modelo, intenta un mapeo
+    # (CONTEXTO.md sección 6: "antes de llamar al modelo, intenta un mapeo
     # determinista") ya las resuelve —no hace falta un ModelProvider real
     # aquí—, pero se ejercita igual con un doble que reventaría el test si
     # se le llamase, para dejar constancia de que en efecto no se llama.
@@ -117,7 +117,7 @@ def test_documento_0008_guantes_produce_13_lineas_con_baja_aplicada(db_session):
     assert primera["matricula"] == "697500900"
     assert primera["cantidad"] == Decimal("30")
     assert primera["precio_unitario"] == Decimal("24.00")
-    # 24,00 * (1 - 0,54) = 11,04 — no 0,00 (CLAUDE.md sección 4).
+    # 24,00 * (1 - 0,54) = 11,04 — no 0,00 (CONTEXTO.md sección 4).
     assert primera["precio_adjudicado"] == Decimal("11.0400")
     assert primera["identificador_lote"] == "1"
 

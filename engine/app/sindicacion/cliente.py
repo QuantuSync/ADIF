@@ -1,10 +1,10 @@
-"""Descarga del ZIP mensual de sindicación (CLAUDE.md sección 24, bloque 2,
+"""Descarga del ZIP mensual de sindicación (CONTEXTO.md sección 24, bloque 2,
 punto 1: "ficheros grandes: procesamiento incremental, no cargarlo entero en
 memoria"). Verificado real contra `contrataciondelestado.es`: el ZIP de un
 mes completo pesa entre 90 y 130 MB comprimidos — se escribe a disco en
 streaming, nunca se acumula en un `bytes` ni en memoria.
 
-Hallazgo de esta sesión, mismo patrón que CLAUDE.md sección 17 ("el WAF
+Hallazgo de esta sesión, mismo patrón que CONTEXTO.md sección 17 ("el WAF
 distingue por tipo de URL"): una petición `HEAD` sin cabeceras (`curl -I`)
 contra esta URL no responde (conexión cerrada); una petición `GET` con una
 cabecera `User-Agent` de navegador real sí responde `200` con el ZIP

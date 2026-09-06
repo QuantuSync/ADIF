@@ -1,6 +1,6 @@
 """expedientes: añade aviso_sindicacion
 
-CLAUDE.md sección 26 (regresión de 6.24/28510.0088, el ejemplo central de la
+CONTEXTO.md sección 26 (regresión de 6.24/28510.0088, el ejemplo central de la
 sección 4): el contraste con sindicación mandaba a revisión un expediente
 correcto porque comparaba contra una instantánea de otro alcance (la
 licitación completa de varios lotes, no el lote concreto que trae el PDF

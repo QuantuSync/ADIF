@@ -1,6 +1,6 @@
 """expedientes.error
 
-CLAUDE.md, encargo de esta sesión, punto 2: "si falla, guardar por qué, con
+CONTEXTO.md, encargo de esta sesión, punto 2: "si falla, guardar por qué, con
 el mensaje real, no un genérico". `trabajos_cola.error` ya guarda el motivo
 de fallo de cada trabajo, pero un expediente puede acabar en
 `pendiente_revision` sin que ningún trabajo haya fallado (p.ej. faltan

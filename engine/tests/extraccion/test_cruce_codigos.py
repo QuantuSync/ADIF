@@ -21,7 +21,7 @@ def excel_codigos(tmp_path):
     hoja = libro.active
     hoja.append(["Nº Interno", "Nº Expediente", "MATRIZ", "ESPECIALIDAD/DISCIPLINA", "DESCRIPCIÓN"])
     hoja.append([24001, "6.24/28510.0128", None, "Señalización", "Equipos de medida"])
-    # Fila con espacios sobrantes (CLAUDE.md sección 8): un cruce exacto sin
+    # Fila con espacios sobrantes (CONTEXTO.md sección 8): un cruce exacto sin
     # normalizar fallaría en silencio.
     hoja.append([24038, "6.25/28510.0085 ", "6.25/28510.0028", "Vía", "Balasto"])
     libro.save(ruta)
@@ -61,7 +61,7 @@ def test_expediente_que_es_matriz_de_otra_fila_no_se_pone_su_propia_matriz(excel
     # sale de la columna MATRIZ de la fila encontrada) como si el expediente
     # tuviera una matriz distinta de sí mismo — eso sería inventarla por
     # auto-referencia (bug real: expediente 6.25/28510.0027, sesión de
-    # pulido de la web, CLAUDE.md).
+    # pulido de la web, CONTEXTO.md).
     resultado = cruzar_codigo_proyecto(excel_codigos, "6.25/28510.0028")
 
     assert resultado.cruzado is True
@@ -129,7 +129,7 @@ def test_asignar_matriz_candidato_vacio_no_hace_nada():
 
 # --- `asegurar_cruce_codigos`: caso real 6.23/28510.0109, licitación
 # multi-lote cuya fila en el Excel de códigos declara su propia columna
-# MATRIZ igual a su "Nº Expediente" -- ruido heredado del Excel (CLAUDE.md,
+# MATRIZ igual a su "Nº Expediente" -- ruido heredado del Excel (CONTEXTO.md,
 # "Pendiente de resolver"), no un acuerdo marco real. Antes de esta sesión,
 # `asegurar_cruce_codigos` escribía ese valor tal cual en
 # `expediente.codigo_matriz`, dejando al expediente como su propia matriz. ---

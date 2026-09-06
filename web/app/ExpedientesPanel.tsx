@@ -8,7 +8,7 @@ import { useReintentoConexion } from "./useReintentoConexion";
 // Un expediente todavía en curso (no ha terminado de descargar/extraer)
 // puede no tener importe/baja por simple falta de tiempo, no porque el
 // sistema no lo encontrara — distinto de un expediente ya resuelto que se
-// quedó sin ese dato de verdad (CLAUDE.md bloque 3).
+// quedó sin ese dato de verdad (CONTEXTO.md bloque 3).
 const ESTADOS_EN_CURSO = ["pendiente", "descargando", "descargado", "extrayendo", "esperando_matriz"];
 
 const LARGO_MOTIVO_LISTA = 88;
@@ -50,12 +50,12 @@ export type Expediente = {
   importe_licitacion: string | null;
   importe_adjudicacion: string | null;
   baja_global: string | null;
-  // CLAUDE.md, encargo de la sesión de multi-lote: cuando hay varios lotes
+  // CONTEXTO.md, encargo de la sesión de multi-lote: cuando hay varios lotes
   // con baja distinta, `baja_global` es null a propósito y este campo lo
   // explica — nunca se muestra un "—" mudo que parezca un fallo.
   baja_variable_por_lote: boolean | null;
   // True cuando el Anuncio PCSP propio y la columna MATRIZ del Excel de
-  // códigos declaran una matriz distinta entre sí (CLAUDE.md sección 7): un
+  // códigos declaran una matriz distinta entre sí (CONTEXTO.md sección 7): un
   // `codigo_matriz` vacío con esto en `true` es un conflicto sin resolver,
   // no un expediente que simplemente no depende de un acuerdo marco.
   matriz_conflicto: boolean | null;
@@ -89,7 +89,7 @@ function coincideBusqueda(exp: Expediente, busqueda: string): boolean {
   );
 }
 
-// El hallazgo central del proyecto (CLAUDE.md sección 4): en el modelo de
+// El hallazgo central del proyecto (CONTEXTO.md sección 4): en el modelo de
 // "baja única por lote", licitación y adjudicación son a menudo el mismo
 // importe (el presupuesto es un techo de gasto, no cambia) y la baja real
 // vive solo en el porcentaje declarado. Sin esta nota, esa fila se lee como
@@ -105,7 +105,7 @@ function esCasoPreciosUnitarios(exp: Expediente): boolean {
 // Matriz vacía: la inmensa mayoría de los expedientes no son un pedido
 // derivado de un acuerdo marco, así que no declaran matriz — "no aplica",
 // definitivo. Solo cuando el propio sistema ya detectó un conflicto entre
-// el Anuncio PCSP y el Excel de códigos (CLAUDE.md sección 7) el hueco es
+// el Anuncio PCSP y el Excel de códigos (CONTEXTO.md sección 7) el hueco es
 // en realidad un "no consta" sin resolver, no una ausencia estructural.
 function celdaMatriz(expediente: Expediente) {
   if (expediente.codigo_matriz) return expediente.codigo_matriz;
@@ -172,7 +172,7 @@ function CeldaBaja({ expediente }: { expediente: Expediente }) {
       {esCasoPreciosUnitarios(expediente) && (
         <span
           className="status-note status-note-tight"
-          title="El importe de licitación y el de adjudicación coinciden: es el modelo de baja única sobre precios unitarios (CLAUDE.md sección 4), no un error de extracción."
+          title="El importe de licitación y el de adjudicación coinciden: es el modelo de baja única sobre precios unitarios (CONTEXTO.md sección 4), no un error de extracción."
         >
           Importe fijo, baja en precios unitarios
         </span>
@@ -490,7 +490,7 @@ export default function ExpedientesPanel({
 
       {/* Grupo aparte, plegado por defecto (encargo de esta sesión): un
           expediente `sin_publicar` está verificado que no existe en la
-          Plataforma (CLAUDE.md sección 22) — no hay licitación, adjudicación
+          Plataforma (CONTEXTO.md sección 22) — no hay licitación, adjudicación
           ni baja que mostrar, ni descarga o extracción que tenga sentido
           lanzar por defecto. Una fila de una sola línea, sin las columnas
           vacías de la tabla principal. */}

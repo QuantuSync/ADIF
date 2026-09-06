@@ -1,7 +1,7 @@
 import CatalogoPanel from "./CatalogoPanel";
 
 export default function PaginaCatalogo() {
-  // CLAUDE.md sección 9.1: la web solo llama a la API por HTTP, nunca toca
+  // CONTEXTO.md sección 9.1: la web solo llama a la API por HTTP, nunca toca
   // la base de datos ni un PDF directamente — por eso esta página server no
   // hace fetch inicial (a diferencia de "/"), todo el filtrado vive en el
   // cliente contra la API.

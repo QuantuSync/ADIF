@@ -1,4 +1,4 @@
-"""CLAUDE.md sección 20, encargo de la sesión de corrección de identidad: el
+"""CONTEXTO.md sección 20, encargo de la sesión de corrección de identidad: el
 código de un expediente es el que declara su propio Anuncio PCSP en "Número
 de Expediente", nunca el término de búsqueda con el que se registró. Cubre
 `corregir_identidad_expediente` de forma aislada (con el fixture real que
@@ -75,7 +75,7 @@ def test_codigo_ya_correcto_es_no_op(db_session):
 
 
 def test_codigo_registrado_con_el_de_la_matriz_se_corrige(db_session):
-    # Caso real de los 8 expedientes mal etiquetados (CLAUDE.md sección 20):
+    # Caso real de los 8 expedientes mal etiquetados (CONTEXTO.md sección 20):
     # la fila se registró con el código de su MATRIZ (el término con el que
     # se buscó), no con el suyo propio.
     expediente = Expediente(codigo_expediente="2.18/04703.0019")

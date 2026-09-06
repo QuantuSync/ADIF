@@ -1,7 +1,7 @@
 """lineas_catalogo.expediente_id, lineas_catalogo.lote_id nullable,
 lineas_catalogo.motivo_revision, expedientes.baja_variable_por_lote
 
-Extracción por lote (CLAUDE.md secciones 2 y 4, y encargo de esta sesión):
+Extracción por lote (CONTEXTO.md secciones 2 y 4, y encargo de esta sesión):
 un expediente multi-lote (p.ej. 6.25/28510.0027, LOTE 1 al 7,13% y LOTE 3 al
 1,18%) tiene una baja distinta por lote, y hay que poder guardar una línea
 del cuadro de precios sin saber todavía a qué lote pertenece (cuando la
@@ -14,7 +14,7 @@ corresponde o inventar un lote "SIN_DETERMINAR" que contaminaría `lotes`
 añade directamente porque, sin lote, ya no hay camino de join hasta
 `expedientes` (antes bastaba `lineas_catalogo -> lotes -> expedientes`).
 `motivo_revision` guarda por qué esa línea concreta no tiene lote —
-distinto de `comentarios`, que es para notas humanas (CLAUDE.md sección 7).
+distinto de `comentarios`, que es para notas humanas (CONTEXTO.md sección 7).
 
 Revision ID: 0007
 Revises: 0006

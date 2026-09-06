@@ -1,7 +1,7 @@
 # Mantenimiento automático
 
-Registro histórico movido desde `CLAUDE.md` (split de sesión 2026-09-05).
-Ver `CLAUDE.md` para el contexto vivo del proyecto.
+Registro histórico movido desde `CONTEXTO.md` (split de sesión 2026-09-05).
+Ver `CONTEXTO.md` para el contexto vivo del proyecto.
 
 Bloque 2 (descubrimiento por sindicación): ver `docs/hallazgos-sindicacion.md`, sección 24.
 
@@ -54,13 +54,13 @@ debe_estampar_extraccion` para las dos excepciones (`esperando_matriz`,
   huella actual. Deliberadamente **no** mira si el expediente tiene
   documentos: un pedido derivado sin ningún documento propio también
   necesita que se intente su extracción — es su único camino para cruzar
-  con el Excel de códigos y heredar de su matriz (CLAUDE.md sección 3 y
+  con el Excel de códigos y heredar de su matriz (CONTEXTO.md sección 3 y
   `docs/identidad-expediente.md` sección 20).
 
 ### El ciclo como trabajo de la cola, no como script
 
 `app.mantenimiento.ciclo.ejecutar_ciclo_mantenimiento` es un tipo de trabajo
-más (`mantenimiento_ciclo`, CLAUDE.md sección 10: "no un script suelto"),
+más (`mantenimiento_ciclo`, CONTEXTO.md sección 10: "no un script suelto"),
 encolable por `POST /mantenimiento/ejecutar` (payload opcional `{"forzar":
 bool, "forzar_expedientes": [id, ...]}`). Por cada expediente (excepto
 `sin_publicar`, fuera de alcance por diseño desde `docs/identidad-expediente.md` sección 22) decide y
@@ -138,7 +138,7 @@ Cierra la sesión de mantenimiento automático (bloques 1 y 2 arriba y en
 `docs/hallazgos-sindicacion.md` sección 24, base de este). El ciclo completo — descubrir, descargar lo
 que falte, extraer lo que falte — ya existía como trabajo de la cola
 (`mantenimiento_ciclo`); este bloque lo dispara solo, sin intervención,
-respetando CLAUDE.md sección 10 ("cuatro procesos, ni uno más").
+respetando CONTEXTO.md sección 10 ("cuatro procesos, ni uno más").
 
 ### Dónde vive el planificador: dentro del worker que ya existe
 
@@ -160,7 +160,7 @@ en la propia comprobación):
    `payload.disparado_por = "programado"` — el histórico (punto 4)
    distingue así por qué corrió cada ejecución.
 
-**El histórico es la propia `trabajos_cola`, sin tabla nueva.** CLAUDE.md
+**El histórico es la propia `trabajos_cola`, sin tabla nueva.** CONTEXTO.md
 sección 10 ya la describe como "consultable con SQL para la pantalla de
 seguimiento" — duplicar esa información en una tabla aparte solo la
 desincronizaría. `GET /mantenimiento/historial` la expone tal cual, más
@@ -184,7 +184,7 @@ tocaría la próxima, un resumen de lo que encontró la última ejecución
 el botón "Lanzar ciclo ahora" (`POST /mantenimiento/ejecutar`, el mismo
 endpoint que dispara la programación en sí, solo que `disparado_por` queda
 como `"manual"`) — y la tabla de histórico completa. Sondeo cada 4 s, mismo
-patrón que el resto de la web (CLAUDE.md, encargo de la sesión de
+patrón que el resto de la web (CONTEXTO.md, encargo de la sesión de
 identidad, "Expedientes").
 
 ### Verificación contra el stack real, intervalo corto

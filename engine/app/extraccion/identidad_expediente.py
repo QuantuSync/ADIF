@@ -1,4 +1,4 @@
-"""Identidad del expediente (CLAUDE.md sección 20, "pendiente de resolver";
+"""Identidad del expediente (CONTEXTO.md sección 20, "pendiente de resolver";
 docs/analisis-corpus.md, sección "Herencia de acuerdo marco"): el código de
 un expediente es el que declara su propio Anuncio PCSP en *Número de
 Expediente*, nunca la carpeta ni el término con el que se buscó en la
@@ -16,7 +16,7 @@ patrón es "la fila representa al pedido pero está etiquetada con el código
 de su matriz", no una anomalía de un único caso.
 
 Corrige la identidad en el sitio, no crea una fila nueva: `codigo_expediente`
-es la clave de idempotencia (CLAUDE.md sección 9.9) pero no es una clave
+es la clave de idempotencia (CONTEXTO.md sección 9.9) pero no es una clave
 externa de ninguna otra tabla (`documentos.expediente_id`,
 `lotes.expediente_id`, `lineas_catalogo.expediente_id` y
 `trabajos_cola.expediente_id` son todos por `id`, no por código), así que
@@ -25,7 +25,7 @@ renombrarla en el sitio no pierde ni duplica nada de lo ya extraído.
 Solo se aplica en la etapa de extracción (`app.extraccion.orquestador`), no
 en el scraping: el scraping descarga bytes sin leer el contenido, y la
 identidad real solo se conoce leyendo el texto del Anuncio PCSP -- que es
-exactamente lo que ya hace la etapa 2 de la cascada (CLAUDE.md sección 5).
+exactamente lo que ya hace la etapa 2 de la cascada (CONTEXTO.md sección 5).
 "En la ingesta y en el scraping" del encargo se cumple end-to-end: un
 expediente se registra por primera vez (POST /expedientes o
 `herencia_matriz.resolver_o_encolar_matriz`) con el código que se tenga a
@@ -61,7 +61,7 @@ def corregir_identidad_expediente(db: Session, expediente: Expediente, documento
     Nunca corrige a ciegas: si los distintos Anuncio PCSP del mismo
     expediente declaran códigos distintos entre sí, o si el código real ya
     pertenece a otra fila (un caso de fusión, no de renombrado -- fuera de
-    alcance de esta función, CLAUDE.md sección 9.9), se deja la identidad
+    alcance de esta función, CONTEXTO.md sección 9.9), se deja la identidad
     como está y se devuelve un motivo para la cola de revisión en vez de
     adivinar."""
     codigos_declarados: dict[str, tuple] = {}
@@ -114,7 +114,7 @@ def corregir_identidad_expediente(db: Session, expediente: Expediente, documento
             # declarada distinta del código con el que estaba registrado, no
             # se pisa en silencio -- se marca igual que hace
             # `asegurar_cruce_codigos` para el mismo tipo de discrepancia
-            # (CLAUDE.md sección 20, requisito 1).
+            # (CONTEXTO.md sección 20, requisito 1).
             expediente.matriz_conflicto = True
 
     db.add(TrazaOrigen(

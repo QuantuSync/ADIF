@@ -9,8 +9,8 @@ logger = logging.getLogger(__name__)
 
 
 class ModelProvider(ABC):
-    """Interfaz de acceso al modelo. CLAUDE.md secciones 6 y 9.2:
-    misma firma para la API de Anthropic hoy y un modelo autoalojado mañana."""
+    """Interfaz de acceso al modelo. CONTEXTO.md secciones 6 y 9.2:
+    misma firma para la API comercial de hoy y un modelo autoalojado mañana."""
 
     @abstractmethod
     def completar(self, prompt: str, esquema: Optional[dict] = None) -> Any:
@@ -27,38 +27,44 @@ class NullModelProvider(ModelProvider):
         )
 
 
-class AnthropicModelProvider(ModelProvider):
-    """Implementación real de `ModelProvider` sobre la API de Anthropic
-    (CLAUDE.md sección 6: la única etapa de la cascada que puede llamar al
-    modelo es el mapeo de cabecera, y una vez por firma). Salida estructurada
-    obligatoria vía `output_config.format` de tipo `json_schema`: la
-    respuesta siempre es JSON válido contra `esquema`, nunca texto libre que
-    haya que parsear a ojo. La clave de API se resuelve por variable de
-    entorno (`ANTHROPIC_API_KEY`, vía el SDK) — nunca hardcodeada.
+class APIModelProvider(ModelProvider):
+    """Implementación real de `ModelProvider` sobre la API comercial del
+    proveedor de modelo configurado (CONTEXTO.md sección 6: la única etapa
+    de la cascada que puede llamar al modelo es el mapeo de cabecera, y una
+    vez por firma). Salida estructurada obligatoria vía
+    `output_config.format` de tipo `json_schema`: la respuesta siempre es
+    JSON válido contra `esquema`, nunca texto libre que haya que parsear a
+    ojo. La clave de API se resuelve por variable de entorno
+    (`MODEL_API_KEY`, vía el SDK del proveedor) — nunca hardcodeada.
 
     `workspace_id` es un detalle de autenticación de esta implementación
     concreta, no de la interfaz `ModelProvider`: una clave de API "ligada a
     identidad" (creada en la consola bajo un usuario, no una clave clásica de
-    workspace) exige la cabecera `anthropic-workspace-id` en cada petición a
-    `/v1/messages` — si falta, la API devuelve 400. Una clave clásica de
-    workspace no la necesita. No pertenece a `ModelProvider.completar` ni a
-    ninguna implementación futura sobre un modelo autoalojado: esa cabecera
-    no existe fuera de la API de Anthropic."""
+    workspace) exige una cabecera propia del proveedor en cada petición —
+    si falta, la API devuelve 400. Una clave clásica de workspace no la
+    necesita. No pertenece a `ModelProvider.completar` ni a ninguna
+    implementación futura sobre un modelo autoalojado: esa cabecera es
+    exclusiva de la API de este proveedor concreto, parte de su contrato de
+    red y no se puede renombrar sin romper la llamada real."""
+
+    _CABECERA_WORKSPACE = "anthropic-workspace-id"
 
     def __init__(
         self,
         api_key: Optional[str] = None,
-        modelo: str = "claude-haiku-4-5",
+        modelo: Optional[str] = None,
         max_tokens: int = 2048,
         workspace_id: Optional[str] = None,
     ):
         import anthropic  # import perezoso: no forzar la dependencia en NullModelProvider ni en tests que no llaman al modelo
 
+        if not modelo:
+            raise ValueError("APIModelProvider requiere un identificador de modelo (variable de entorno MODEL_ID).")
         kwargs: dict = {}
         if api_key:
             kwargs["api_key"] = api_key
         if workspace_id:
-            kwargs["default_headers"] = {"anthropic-workspace-id": workspace_id}
+            kwargs["default_headers"] = {self._CABECERA_WORKSPACE: workspace_id}
         self._client = anthropic.Anthropic(**kwargs)
         self._modelo = modelo
         self._max_tokens = max_tokens
@@ -68,7 +74,7 @@ class AnthropicModelProvider(ModelProvider):
         if esquema is not None:
             kwargs["output_config"] = {"format": {"type": "json_schema", "schema": esquema}}
         logger.info(
-            "AnthropicModelProvider.completar: llamada real a %s, prompt (%d caracteres):\n%s",
+            "APIModelProvider.completar: llamada real a %s, prompt (%d caracteres):\n%s",
             self._modelo, len(prompt), prompt,
         )
         respuesta = self._client.messages.create(
@@ -77,11 +83,11 @@ class AnthropicModelProvider(ModelProvider):
             messages=[{"role": "user", "content": prompt}],
             **kwargs,
         )
-        # CLAUDE.md sección 6: la única llamada al modelo que hace la
+        # CONTEXTO.md sección 6: la única llamada al modelo que hace la
         # cascada es cara de dimensionar sin este dato — se registra en
         # cada llamada real (nunca en un acierto de CachedModelProvider).
         logger.info(
-            "AnthropicModelProvider.completar: %s tokens de entrada, %s de salida (modelo %s)",
+            "APIModelProvider.completar: %s tokens de entrada, %s de salida (modelo %s)",
             respuesta.usage.input_tokens, respuesta.usage.output_tokens, self._modelo,
         )
         texto = next(bloque.text for bloque in respuesta.content if bloque.type == "text")
@@ -92,7 +98,7 @@ class CachedModelProvider(ModelProvider):
     """Decorador de desarrollo: cachea en disco la respuesta de cada llamada
     a `completar` por hash de (prompt, esquema), para no gastar créditos
     reprocesando los mismos fixtures mientras se itera. No sustituye a la
-    caché persistente de firma de cabecera (CLAUDE.md sección 6, tabla
+    caché persistente de firma de cabecera (CONTEXTO.md sección 6, tabla
     `cache_mapeo_cabecera`) — esa vive en base de datos y es la que hace que
     el sistema llame menos al modelo cuantos más expedientes procesa; esta
     solo evita llamadas de red repetidas durante el desarrollo local."""

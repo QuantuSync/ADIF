@@ -9,7 +9,7 @@ from app.db import SessionLocal
 from app.extraccion.cruce_codigos import validar_ruta_codigos_proyecto
 from app.extraccion.orquestador import ejecutar_extraccion_expediente
 from app.interfaces.document_storage import LocalDiskStorage
-from app.interfaces.model_provider import AnthropicModelProvider, CachedModelProvider
+from app.interfaces.model_provider import APIModelProvider, CachedModelProvider
 from app.mantenimiento.ciclo import TIPO_TRABAJO as TIPO_MANTENIMIENTO_CICLO
 from app.mantenimiento.ciclo import ejecutar_ciclo_mantenimiento
 from app.mantenimiento.frescura import (
@@ -32,16 +32,16 @@ logger = logging.getLogger("worker")
 
 storage = LocalDiskStorage(settings.document_storage_path)
 
-# Etapa 5 de la cascada (CLAUDE.md sección 6): sin clave configurada, se
+# Etapa 5 de la cascada (CONTEXTO.md sección 6): sin clave configurada, se
 # procesa igual pero el mapeo de cabecera nunca vista fallará con un error
 # real en vez de una llamada silenciosa a ningún sitio (NullModelProvider).
 model_provider = (
-    AnthropicModelProvider(
-        api_key=settings.anthropic_api_key,
-        modelo=settings.anthropic_model,
-        workspace_id=settings.anthropic_workspace_id,
+    APIModelProvider(
+        api_key=settings.model_api_key,
+        modelo=settings.model_id,
+        workspace_id=settings.model_workspace_id,
     )
-    if settings.anthropic_api_key
+    if settings.model_api_key
     else None
 )
 # Decorador de desarrollo (interfaces/model_provider.py, docstring de
@@ -58,10 +58,10 @@ def procesar_ping(db, trabajo) -> dict:
 
 
 def procesar_descargar_expediente(db, trabajo) -> dict:
-    """Envuelve `ejecutar_scraping_expediente` (sin tocarla, CLAUDE.md
+    """Envuelve `ejecutar_scraping_expediente` (sin tocarla, CONTEXTO.md
     encargo de esta sesión: "no toques el motor de extracción" — esto
     tampoco es el motor, pero por la misma razón se deja intacto) para
-    estampar `descargado_en` (bloque 1, CLAUDE.md sección 23) solo cuando la
+    estampar `descargado_en` (bloque 1, CONTEXTO.md sección 23) solo cuando la
     descarga termina con éxito. Si falla, o el expediente resulta
     `sin_publicar`, la excepción se propaga antes de llegar aquí y no se
     estampa nada — coherente con `app.mantenimiento.frescura.debe_descargar`,
@@ -87,7 +87,7 @@ def procesar_extraer_expediente(db, trabajo) -> dict:
     con éxito (`app.mantenimiento.frescura.documentos_sin_cambios`) y, si es
     así, cuántas líneas de catálogo tenía entonces -- para poder comparar al
     terminar y detectar sola la duplicación silenciosa que motivó esta
-    comprobación (CLAUDE.md sección 9.9, auditoría 2026-09-05: ~4.500 líneas
+    comprobación (CONTEXTO.md sección 9.9, auditoría 2026-09-05: ~4.500 líneas
     de sobra en siete expedientes, sin que nada lo señalara hasta la
     revisión manual)."""
     expediente_antes = db.get(Expediente, trabajo.expediente_id) if trabajo.expediente_id else None
@@ -121,13 +121,13 @@ def procesar_extraer_expediente(db, trabajo) -> dict:
 
 
 def _contrastar_con_sindicacion(db, expediente) -> None:
-    """Bloque 2, punto 4 (CLAUDE.md sección 24), corregido en la sección 26:
+    """Bloque 2, punto 4 (CONTEXTO.md sección 24), corregido en la sección 26:
     dos fuentes que se verifican entre sí, pero no con la misma autoridad. El
     PDF es el acto administrativo; la instantánea de sindicación es un
     volcado de otra fuente, que puede tener otro alcance (la licitación
     completa de un expediente con varios lotes, cuando el PDF que tenemos es
     el de un lote concreto — el caso real que hizo bajar de `completado` a
-    revisión el ejemplo central de CLAUDE.md sección 4, 6.24/28510.0088, sin
+    revisión el ejemplo central de CONTEXTO.md sección 4, 6.24/28510.0088, sin
     que la extracción tuviera nada mal) o estar simplemente desactualizada.
     Un desajuste ya nunca cambia `estado` ni `error` — se guarda como aviso
     informativo en `aviso_sindicacion`, para que se pueda ver sin que

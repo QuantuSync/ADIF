@@ -1,4 +1,4 @@
-"""Pruebas de la API de catálogo, revisión y documentos (CLAUDE.md, encargo
+"""Pruebas de la API de catálogo, revisión y documentos (CONTEXTO.md, encargo
 de esta sesión, puntos 1 a 4): sobre `TestClient` con SQLite en memoria, sin
 Postgres levantado — mismo patrón que `db_session` de conftest.py."""
 import io
@@ -182,7 +182,7 @@ def test_exportar_catalogo_genera_xlsx_con_columnas_del_formato_esperado(cliente
     libro = openpyxl.load_workbook(ruta)
     hoja = libro.active
     cabecera = [c.value for c in next(hoja.iter_rows(min_row=1, max_row=1))]
-    # CLAUDE.md, encargo de esta sesión, punto 4: mismas columnas y mismo
+    # CONTEXTO.md, encargo de esta sesión, punto 4: mismas columnas y mismo
     # orden que Ejemplo/Output/.
     assert cabecera == [
         "Código interno", "Código de proyecto", "Código matriz", "Nombre del proyecto",
@@ -197,7 +197,7 @@ def test_exportar_catalogo_genera_xlsx_con_columnas_del_formato_esperado(cliente
     assert fila[8] == 24.0
     # Sin cruce con el Excel de códigos configurado en este test: código
     # interno y código de proyecto se dejan vacíos, no inventados
-    # (CLAUDE.md sección 7).
+    # (CONTEXTO.md sección 7).
     assert fila[0] is None
     assert fila[1] is None
     # Encargo de esta sesión, punto 3: precio adjudicado y baja del lote,
@@ -382,7 +382,7 @@ def test_corregir_linea_catalogo_actualiza_y_marca_corregido(cliente, db_session
     assert datos["comentarios"] == "matrícula corregida a mano"
     assert datos["estado_revision"] == "corregido"
     # Un campo no incluido en la corrección no se borra (mismo criterio que
-    # guardar_lineas_catalogo, CLAUDE.md sección 9.9).
+    # guardar_lineas_catalogo, CONTEXTO.md sección 9.9).
     assert datos["descripcion"] == "GUANTE CONTRA RIESGO ELECTRICO"
 
 
@@ -405,7 +405,7 @@ def test_descartar_linea_catalogo_exige_motivo(cliente, db_session):
 
 
 def test_descartar_linea_catalogo(cliente, db_session):
-    # CLAUDE.md bloque 2: una línea que no es material real, o no se puede
+    # CONTEXTO.md bloque 2: una línea que no es material real, o no se puede
     # determinar, se saca del catálogo con un motivo -- nunca se borra.
     _expediente, _lote, _doc, linea = _sembrar_catalogo(db_session)
 
@@ -467,7 +467,7 @@ def test_exportar_catalogo_excluye_lineas_descartadas(cliente, db_session, monke
 
 def test_catalogo_sigue_mostrando_lineas_descartadas(cliente, db_session):
     # A diferencia del Excel, la pantalla de catálogo/revisión no oculta las
-    # descartadas -- CLAUDE.md bloque 2 solo pide excluirlas de la entrega.
+    # descartadas -- CONTEXTO.md bloque 2 solo pide excluirlas de la entrega.
     _expediente, _lote, _doc, linea = _sembrar_catalogo(db_session)
     cliente.post(f"/catalogo/lineas/{linea.id}/descartar", json={"motivo": "no es material real"})
 

@@ -1,7 +1,7 @@
 """Herencia de acuerdo marco (docs/analisis-corpus.md hallazgo 3): un pedido
 derivado de un acuerdo marco no trae su propio cuadro de precios ni su propia
 baja — viven en los documentos de la MATRIZ, el expediente del acuerdo marco
-del que cuelga el pedido (CLAUDE.md sección 2). Este módulo resuelve esa
+del que cuelga el pedido (CONTEXTO.md sección 2). Este módulo resuelve esa
 matriz como expediente propio (creándola y encolando su descarga o su
 extracción si hace falta) y copia lo que el pedido no tiene, sin perder
 trazabilidad ni inventar nada que la matriz tampoco tenga.
@@ -17,7 +17,7 @@ cual desde la línea de la matriz ya es la trazabilidad completa que pide el
 encargo; `heredado_de_matriz` (en `LineaCatalogo`, y `baja_heredada_de_matriz`
 en `Lote` para la baja) es solo una marca de lectura rápida para la web.
 
-Límite conocido, documentado en CLAUDE.md: reprocesar una matriz ya resuelta
+Límite conocido, documentado en CONTEXTO.md: reprocesar una matriz ya resuelta
 no refresca sola a los pedidos que ya heredaron de ella — hay que reencolar
 esos pedidos a mano. `reencolar_pedidos_esperando_matriz` solo dispara
 cuando la matriz TERMINA un trabajo de extracción, no en cualquier reproceso
@@ -57,7 +57,7 @@ _PROFUNDIDAD_MAXIMA_CADENA = 10
 
 _ESTADOS_TERMINADOS = frozenset({
     EstadoExpediente.completado, EstadoExpediente.pendiente_revision, EstadoExpediente.fallido,
-    # `sin_publicar` (CLAUDE.md sección 22) es tan terminal como `fallido`
+    # `sin_publicar` (CONTEXTO.md sección 22) es tan terminal como `fallido`
     # para efectos de esta resolución -- sin incluirlo aquí, una matriz sin
     # publicar (sin documentos, sin trabajo activo) se releería como "hace
     # falta encolar su descarga" en cada pedido que la referencia, reintentando
@@ -137,7 +137,7 @@ def resolver_o_encolar_matriz(db: Session, pedido: Expediente) -> ResolucionMatr
     expediente propio si no existe, y encolar lo que le falte: su descarga
     si no tiene documentos, su extracción si los tiene pero no se ha
     procesado. Nunca se ejecuta nada en línea, siempre por la cola, igual
-    que cualquier otro expediente (CLAUDE.md sección 10)."""
+    que cualquier otro expediente (CONTEXTO.md sección 10)."""
     if not pedido.codigo_matriz:
         return ResolucionMatriz(EstadoResolucionMatriz.sin_matriz)
 
@@ -256,7 +256,7 @@ def intentar_heredar_de_matriz(
         lote_pedido.baja_lote = baja_efectiva
         lote_pedido.baja_heredada_de_matriz = True
         # La traza de la baja heredada apunta al mismo documento/página de la
-        # matriz que ya la trazó (CLAUDE.md sección 9.10): "cada línea
+        # matriz que ya la trazó (CONTEXTO.md sección 9.10): "cada línea
         # heredada debe dejar constancia... con su documento y página de
         # origen" aplica igual a la baja del lote, no solo a las líneas.
         traza_matriz = db.execute(
@@ -268,7 +268,7 @@ def intentar_heredar_de_matriz(
             )
             .order_by(TrazaOrigen.id.desc())
         ).scalars().first()
-        # `trazas_origen.documento_id` es NOT NULL (CLAUDE.md sección 9.10:
+        # `trazas_origen.documento_id` es NOT NULL (CONTEXTO.md sección 9.10:
         # toda traza cuelga de un documento real) -- si la baja de la matriz
         # nunca se trazó a un documento (p.ej. se corrigió a mano en la cola
         # de revisión, sección 18), no hay nada real que copiar aquí. La
@@ -336,7 +336,7 @@ def reencolar_pedidos_esperando_matriz(db: Session, matriz: Expediente) -> int:
     `app.scraping.job.ejecutar_scraping_expediente` usa para pasar de
     descarga a extracción.
 
-    Límite conocido, documentado en CLAUDE.md: esto solo dispara cuando la
+    Límite conocido, documentado en CONTEXTO.md: esto solo dispara cuando la
     MATRIZ termina un trabajo de extracción. Reprocesar una matriz ya
     resuelta a mano no reencola sola a los pedidos que ya heredaron de
     ella."""

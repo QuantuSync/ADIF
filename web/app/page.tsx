@@ -4,7 +4,7 @@ export default async function Home() {
   // API_URL: red interna de contenedores, para el fetch inicial en el
   // servidor (Next corriendo dentro de docker-compose). NEXT_PUBLIC_API_URL:
   // variable expuesta al navegador, que no resuelve nombres de contenedor —
-  // ver CLAUDE.md sección 13, "la dirección de la API en la web es una
+  // ver CONTEXTO.md sección 13, "la dirección de la API en la web es una
   // variable de entorno".
   const apiUrlServidor = process.env.API_URL ?? "http://localhost:8000";
   const apiUrlNavegador = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";

@@ -1,7 +1,7 @@
 # Hallazgos de sindicación
 
-Registro histórico movido desde `CLAUDE.md` (split de sesión 2026-09-05).
-Ver `CLAUDE.md` para el contexto vivo del proyecto.
+Registro histórico movido desde `CONTEXTO.md` (split de sesión 2026-09-05).
+Ver `CONTEXTO.md` para el contexto vivo del proyecto.
 
 ---
 
@@ -25,7 +25,7 @@ acuerdo marco, matriz `2.18/04703.0019`), `6.24/28510.0088` y
   acuerdo marco — no tiene **ninguna** referencia documental en ninguno de
   sus estados (`ADJ` y `RES`), pese a que el scraper sí encuentra su
   `ADJUDICACION_1.pdf` navegando. Los pedidos de acuerdo marco son un patrón
-  dominante en el corpus de ADIF (CLAUDE.md sección 3). **Consecuencia: la sindicación
+  dominante en el corpus de ADIF (CONTEXTO.md sección 3). **Consecuencia: la sindicación
   no puede ser la fuente principal de documentos.**
 - **La Propuesta LC.27 y el Anuncio PCSP de adjudicación no aparecieron nunca**
   en la muestra. Cuando hay algo de la fase de adjudicación, es el contrato
@@ -35,9 +35,9 @@ acuerdo marco, matriz `2.18/04703.0019`), `6.24/28510.0088` y
 - **La MATRIZ no existe como campo estructurado.** Se buscó
   `FrameworkAgreement`/`AcuerdoMarco` en el mes completo de agosto 2024: cero
   resultados. El cruce con la matriz sigue dependiendo de la extracción por
-  etiqueta fija del Anuncio PCSP (CLAUDE.md sección 7), igual que hoy.
+  etiqueta fija del Anuncio PCSP (CONTEXTO.md sección 7), igual que hoy.
 - **No hay campo de baja porcentual en el XML.** Y lo confirma desde una
-  fuente independiente el hallazgo central de la sección 4 de CLAUDE.md: en
+  fuente independiente el hallazgo central de la sección 4 de CONTEXTO.md: en
   `6.24/28510.0103` y en `6.24/28510.0193`, el importe de licitación y el de
   adjudicación (`TaxExclusiveAmount` en ambos bloques) son el mismo número.
   La baja real (0,30 % en `6.24/28510.0193`) solo estaba en el texto del
@@ -144,7 +144,7 @@ Paquete nuevo app/sindicacion/:
   si algún día se reprocesa un periodo desde cero).
 - **contraste.py** — bloque 2, punto 4: compara
   Expediente.importe_licitacion/importe_adjudicacion (lo que extrajo la
-  cascada de los PDF, siempre "sin impuestos", CLAUDE.md sección 4) contra
+  cascada de los PDF, siempre "sin impuestos", CONTEXTO.md sección 4) contra
   sindicacion_expedientes.importe_*_sin_impuestos, con tolerancia (1%
   relativo o 1 euro absoluto, lo mayor) para no disparar por ruido de redondeo
   entre dos fuentes independientes. Si no cuadra: si el expediente estaba
@@ -164,7 +164,7 @@ Paquete nuevo app/sindicacion/:
   PayableAmount, campo distinto. Sin ambigüedad real en ninguno de los
   casos verificados esta sesión.
 - **Multi-TenderResult sin verificar contra un expediente multi-lote real
-  con más de una adjudicación** (igual que CLAUDE.md deja sin verificar
+  con más de una adjudicación** (igual que CONTEXTO.md deja sin verificar
   la Propuesta LC.27 multi-lote): _adjudicacion en atom_parser.py suma
   los importes de todos los cac:TenderResult que traiga el expediente y
   concatena los adjudicatarios, a nivel de expediente — nunca por lote. Si

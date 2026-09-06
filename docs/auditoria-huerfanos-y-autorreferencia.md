@@ -112,14 +112,14 @@ consecuencia) que "Documento de Pliegos" "comparte exactamente la misma
 anatomía de etiquetas fijas" que un Anuncio PCSP. La cobertura parcial (1 de
 8) nunca se calculaba: el expediente se quedaba con el motivo genérico de
 "no hay catálogo", que no explica que faltan 7 lotes enteros — justo el tipo
-de "dato que se ve bien y está mal" que CLAUDE.md sección 12 pide evitar
+de "dato que se ve bien y está mal" que CONTEXTO.md sección 12 pide evitar
 ("un sistema que sabe cuándo no sabe vale más que uno que acierta cinco de
 cinco").
 
 **Arreglo, deliberadamente acotado** (no se toca la clasificación de
 "documento de pliegos" como `pliego`, ni `es_pliego_sin_precios`, ni las
 etapas 3-4 de la cascada que sí deben seguir saltándose para este tipo de
-documento — CLAUDE.md sección 26, criterio del cliente, sigue vigente sin
+documento — CONTEXTO.md sección 26, criterio del cliente, sigue vigente sin
 cambios): `_detectar_numero_lotes_pcsp` ahora también acepta un documento
 `pliego` cuyo marcador de clasificación fue literalmente "documento de
 pliegos" (nuevo campo `_Documento.marcador`, y el helper
@@ -140,7 +140,7 @@ sistema no puede inventar.
 **Alcance del arreglo más allá de este expediente**: subido
 `app.mantenimiento.frescura.VERSION_LOGICA_EXTRACCION` a `"2026-09-06.2"`
 para forzar el reproceso de todo el corpus (igual que hace cualquier cambio
-de la cascada, CLAUDE.md sección 23) y comprobar si algún otro expediente
+de la cascada, CONTEXTO.md sección 23) y comprobar si algún otro expediente
 real tiene el mismo patrón ("Documento de Pliegos" como única fuente de "Nº
 de Lotes") sin detectar hasta ahora. Recuento del reproceso completo, más
 abajo en la sección 3.
@@ -176,7 +176,7 @@ real dentro del contenedor. La licitación es multi-lote genuina
 no tiene ninguna matriz de acuerdo marco real — probablemente quien mantiene
 el Excel usó la columna MATRIZ como "N/A, es su propio expediente agrupador"
 para estas filas, el mismo tipo de confusión de vocabulario que la sección 2
-de `CLAUDE.md` ya documenta para el PDF, ahora encontrada también en el
+de `CONTEXTO.md` ya documenta para el PDF, ahora encontrada también en el
 Excel.
 
 `app.extraccion.cruce_codigos.asegurar_cruce_codigos` copiaba ese valor tal
@@ -264,7 +264,7 @@ Ciclo de mantenimiento manual lanzado con `VERSION_LOGICA_EXTRACCION =
 cambio de la cascada): descubrimiento de sindicación sin novedades (61
 expedientes ADIF totales, 4 tras el filtro, 0 nuevos — ninguna descarga
 lanzada), 43 expedientes evaluados (58 en la base menos los 15
-`sin_publicar`, que no se reprocesan por diseño, CLAUDE.md sección 22), 43
+`sin_publicar`, que no se reprocesan por diseño, CONTEXTO.md sección 22), 43
 extracciones relanzadas, 0 fallidas, 1.587 s de duración total.
 
 | | Antes de esta sesión | Después |
@@ -289,4 +289,4 @@ resto de los 42 expedientes reprocesados.
 con su motivo real y explícito ("cobertura parcial: 1 de 8" y "1 de 2"
 respectivamente) — comportamiento correcto, no un fallo pendiente: falta
 dato real de los lotes que ni sindicación ni ningún documento local
-declaran, y este sistema no lo inventa (CLAUDE.md sección 7 y 12).
+declaran, y este sistema no lo inventa (CONTEXTO.md sección 7 y 12).

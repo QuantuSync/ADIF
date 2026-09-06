@@ -40,7 +40,7 @@ def listar_trabajos_expediente(
 ):
     """Historial de trabajos de este expediente, más reciente primero — lo
     que consulta la web para explicar en qué está y, si algo falló, por qué
-    (CLAUDE.md, encargo de esta sesión, punto 2)."""
+    (CONTEXTO.md, encargo de esta sesión, punto 2)."""
     if db.get(Expediente, expediente_id) is None:
         raise HTTPException(status_code=404, detail="expediente no encontrado")
     return db.execute(

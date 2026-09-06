@@ -1,7 +1,7 @@
 # Decisiones y pulido de UI
 
-Registro histórico movido desde `CLAUDE.md` (split de sesión 2026-09-05).
-Ver `CLAUDE.md` para el contexto vivo del proyecto.
+Registro histórico movido desde `CONTEXTO.md` (split de sesión 2026-09-05).
+Ver `CONTEXTO.md` para el contexto vivo del proyecto.
 
 ---
 
@@ -62,7 +62,7 @@ antes y después de cada cambio, nunca solo mirando una captura.
   baja por diseño, no por error. Contados los 53: **28 de 53 (53%)** sí
   traen una baja real (directa o "varía por lote"), solo que ninguno cae
   en las primeras filas visibles sin hacer scroll. Decisión: la columna se
-  queda — es información central del proyecto (CLAUDE.md sección 4) y mayoritaria
+  queda — es información central del proyecto (CONTEXTO.md sección 4) y mayoritaria
   una vez se cuenta bien —, sin tocar el orden de listado (no pedido,
   fuera de alcance de un arreglo de descuadres; el orden sí se tocó en la
   sesión siguiente — ver `docs/hallazgos-extraccion.md` sección 29, punto 3).
@@ -137,7 +137,7 @@ de `engine` afectados — ningún cambio de esta sesión toca `engine/`.
     aplica, pero el dato real desaconseja implementarla tal como estaba
     planteada (sesión 2026-09-05)
 
-CLAUDE.md sección 19 (y `app/extraccion/lote_tabla.py`) documentaba una
+CONTEXTO.md sección 19 (y `app/extraccion/lote_tabla.py`) documentaba una
 decisión explícita de no implementar herencia de lote entre páginas cuando
 la franja que precede a una tabla está vacía de texto, basada en una
 medición de **cero casos** en el corpus de entonces. La auditoría previa
@@ -151,7 +151,7 @@ revisar la decisión con el dato nuevo, sin implementar nada todavía.
 Van a huérfanas (`lote_id = NULL`) con `motivo_revision = "banda vacía:
 posible continuación de tabla partida entre páginas, sin inferir"` — el
 expediente entero ya está en `pendiente_revision` por cobertura parcial de
-lotes (CLAUDE.md sección 27), así que no bloquean nada nuevo, pero
+lotes (CONTEXTO.md sección 27), así que no bloquean nada nuevo, pero
 tampoco aparecen en el catálogo con su lote correcto.
 
 ### Lo que se encontró al revisar `6.25/28510.0019` fila a fila
@@ -203,7 +203,7 @@ la tabla inmediatamente anterior en orden de lectura") podría atribuir
 incorrectamente estas líneas al lote resuelto más próximo, que es el de una
 tabla estructuralmente distinta. Eso sería un dato incorrecto con
 apariencia de resuelto, peor que dejarlo huérfano para revisión manual —
-exactamente el riesgo que CLAUDE.md sección 19 ya anticipaba ("puede fallar
+exactamente el riesgo que CONTEXTO.md sección 19 ya anticipaba ("puede fallar
 de formas silenciosas"), ahora confirmado con un caso real en vez de
 hipotético.
 

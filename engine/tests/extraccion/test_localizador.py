@@ -5,7 +5,7 @@ from tests import fixtures as fx
 
 def test_anejo_guantes_localiza_solo_la_pagina_del_cuadro_de_precios():
     # El resto del documento es el Pliego de Prescripciones Técnicas
-    # completo (CLAUDE.md sección 3): el localizador no debe dejarse
+    # completo (CONTEXTO.md sección 3): el localizador no debe dejarse
     # engañar por el nombre "_ANEJO_1.pdf".
     paginas = extraer_texto(fx.ANEJO_PRECIOS_GUANTES)
     resultado = localizar_paginas_candidatas(paginas)
@@ -18,7 +18,7 @@ def test_anejo_guantes_descarta_la_mayoria_de_paginas():
     paginas = extraer_texto(fx.ANEJO_PRECIOS_GUANTES)
     resultado = localizar_paginas_candidatas(paginas)
     # 1 de 12 candidata: 91,7% descartado, del mismo orden que el 83%
-    # medido sobre el corpus completo (CLAUDE.md sección 3).
+    # medido sobre el corpus completo (CONTEXTO.md sección 3).
     assert resultado.porcentaje_descartado > 0.9
 
 
@@ -64,7 +64,7 @@ def test_pagina_con_prosa_larga_y_tabla_corta_sigue_siendo_candidata():
 def test_parrafo_que_solo_menciona_precio_no_es_candidato():
     # Un párrafo de pliego puede mencionar "precio" de pasada sin ser una
     # tabla: un solo grupo de marcador, por muchas veces que aparezca, no
-    # basta (CLAUDE.md sección 3: localizar por contenido real de tabla, no
+    # basta (CONTEXTO.md sección 3: localizar por contenido real de tabla, no
     # por una palabra suelta).
     from app.extraccion.texto import PaginaTexto
 

@@ -5,7 +5,7 @@ piezas del encargo por separado (`resolver_o_encolar_matriz`,
 `intentar_heredar_de_matriz`, `reencolar_pedidos_esperando_matriz`) y un caso
 de aceptación de extremo a extremo con el fixture real que declara una
 matriz (`ANUNCIO_PCSP_CON_MATRIZ`, expediente 6.24/28510.0103, matriz
-2.18/04703.0019 — CLAUDE.md sección 17.1)."""
+2.18/04703.0019 — CONTEXTO.md sección 17.1)."""
 from __future__ import annotations
 
 from decimal import Decimal
@@ -133,7 +133,7 @@ def test_matriz_terminada_se_reporta_lista(db_session):
 
 
 def test_matriz_sin_publicar_se_reporta_lista_sin_reintentar_descarga(db_session):
-    # CLAUDE.md sección 22: `sin_publicar` es tan terminal como `fallido`
+    # CONTEXTO.md sección 22: `sin_publicar` es tan terminal como `fallido`
     # para esta resolución. Sin esto, una matriz confirmada como no
     # localizable en la Plataforma (sin documentos, sin trabajo activo)
     # volvería a encolar su descarga en cada pedido que la referencia,
@@ -152,7 +152,7 @@ def test_matriz_sin_publicar_se_reporta_lista_sin_reintentar_descarga(db_session
 
 
 def test_ciclo_autoreferencia_se_corta(db_session):
-    # Caso real (CLAUDE.md sección 19): 6.25/28510.0027 llegó a declararse su
+    # Caso real (CONTEXTO.md sección 19): 6.25/28510.0027 llegó a declararse su
     # propia matriz. No se crea ninguna fila nueva ni se encola nada.
     pedido = _crear_expediente(db_session, "6.25/28510.0027", codigo_matriz="6.25/28510.0027")
 
@@ -315,7 +315,7 @@ def test_matriz_sin_datos_va_a_revision_citando_su_propio_motivo(db_session):
 
 
 def test_matriz_sin_publicar_va_a_revision_distinguible_de_fallido(db_session):
-    # Caso real (CLAUDE.md sección 22): los 8 pedidos cuya identidad se
+    # Caso real (CONTEXTO.md sección 22): los 8 pedidos cuya identidad se
     # corrigió (sección 21) dependen de una matriz confirmada `sin_publicar`,
     # no `fallido` — el pedido en sí es real y localizable, solo su matriz no
     # existe en la Plataforma. El motivo tiene que decir cuál de los dos es.
@@ -361,7 +361,7 @@ def test_reencola_solo_los_pedidos_esperando_esa_matriz(db_session):
 
 
 def test_pedido_real_sin_matriz_creada_pasa_a_esperando_matriz(db_session):
-    """Fixture real (CLAUDE.md sección 17.1): el Anuncio PCSP de
+    """Fixture real (CONTEXTO.md sección 17.1): el Anuncio PCSP de
     6.24/28510.0103 declara "Licitación basada en el acuerdo marco ->
     Expediente 2.18/04703.0019" y no trae cuadro de precios propio (es el
     patrón de los 14 pedidos derivados de docs/analisis-corpus.md hallazgo 3:

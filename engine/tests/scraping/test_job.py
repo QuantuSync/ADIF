@@ -1,4 +1,4 @@
-"""Sesión de expedientes sin publicar (CLAUDE.md sección 22):
+"""Sesión de expedientes sin publicar (CONTEXTO.md sección 22):
 `ExpedienteNoPublicadoError` es un resultado negativo determinista (no
 localizable en la Plataforma por ninguna variante de búsqueda), distinto de
 cualquier otro fallo de scraping (timeout, WAF, formulario no localizado).

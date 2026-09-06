@@ -1,11 +1,11 @@
-"""Etapa 2 de la cascada de extracción (CLAUDE.md sección 5): campos de
+"""Etapa 2 de la cascada de extracción (CONTEXTO.md sección 5): campos de
 etiqueta fija de la familia de formularios PCSP (Anuncio de adjudicación,
 Anuncio de formalización de contrato, Documento de Pliegos — ver docstring de
 `app.extraccion.clasificador`). Todo lo que sea de esta familia se extrae por
 posición de etiqueta, sin tablas y sin modelo.
 
 Cada valor se ancla a la página y al fragmento de texto de los que salió
-(CLAUDE.md sección 9.10): un campo ausente es `None` en el campo y no
+(CONTEXTO.md sección 9.10): un campo ausente es `None` en el campo y no
 aparece en `campos`, nunca un valor inventado.
 """
 from __future__ import annotations
@@ -37,11 +37,11 @@ _IMPORTE_ADJUDICACION_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 _ADJUDICATARIO_RE = re.compile(r"^Adjudicatario\s*$\n([^\n]+)", re.MULTILINE)
-# CLAUDE.md sección 26, criterio del cliente ("solo bajas de material por
+# CONTEXTO.md sección 26, criterio del cliente ("solo bajas de material por
 # lotes; las de obra quedan fuera de alcance"): el mismo formulario PCSP que
 # ya se lee por etiqueta fija trae este campo ("Tipo de Contrato Suministros"
 # / "... Obras" / "... Servicios"), verificado en los documentos reales de
-# este corpus (todos "Suministros", CLAUDE.md sección 26) -- no hace falta
+# este corpus (todos "Suministros", CONTEXTO.md sección 26) -- no hace falta
 # adivinar la palabra por CPV ni por el objeto del contrato.
 _TIPO_CONTRATO_RE = re.compile(r"Tipo de Contrato\s+(\S+)", re.IGNORECASE)
 # "Objeto del Contrato: <texto, a veces partido en varias líneas>\nDescripción"
@@ -50,7 +50,7 @@ _TIPO_CONTRATO_RE = re.compile(r"Tipo de Contrato\s+(\S+)", re.IGNORECASE)
 _OBJETO_CONTRATO_RE = re.compile(
     r"Objeto del Contrato:\s*(.+?)\s*\nDescripci[oó]n", re.DOTALL
 )
-# Sesión de identidad de lote (CLAUDE.md sección 27): el "Anuncio de
+# Sesión de identidad de lote (CONTEXTO.md sección 27): el "Anuncio de
 # adjudicación" (familia PCSP) trae este campo estructurado incluso cuando
 # el expediente no tiene ninguna Propuesta LC.27 ni Resolución de la que
 # sacar el bloque narrativo por lote (caso real: 6.23/28510.0139, "2 lotes"
@@ -93,7 +93,7 @@ def _buscar_objeto(paginas: list[PaginaTexto]) -> Optional[CampoAnclado]:
         return None
     # El objeto puede venir partido en varias líneas de PDF (ancho de
     # columna, no puntuación) — colapsar a una sola línea como el resto de
-    # texto libre normalizado (CLAUDE.md sección 8).
+    # texto libre normalizado (CONTEXTO.md sección 8).
     return CampoAnclado(valor=re.sub(r"\s+", " ", campo.valor), pagina=campo.pagina, fragmento=campo.fragmento)
 
 
@@ -112,7 +112,7 @@ def extraer_campos_anuncio_pcsp(paginas: list[PaginaTexto]) -> CamposAnuncioPcsp
 
 def importe_como_decimal(campo: Optional[CampoAnclado]) -> Optional[Decimal]:
     """El modelo (aquí, el regex) devuelve el literal; esta es la única
-    frontera donde se normaliza a Decimal (CLAUDE.md sección 8)."""
+    frontera donde se normaliza a Decimal (CONTEXTO.md sección 8)."""
     if campo is None:
         return None
     return parsear_importe_es(campo.valor)

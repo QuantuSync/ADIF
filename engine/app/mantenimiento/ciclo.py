@@ -1,7 +1,7 @@
-"""Ciclo de mantenimiento (CLAUDE.md sección 23): descubrir expedientes
+"""Ciclo de mantenimiento (CONTEXTO.md sección 23): descubrir expedientes
 nuevos por sindicación (bloque 2, `app.sindicacion.descubrimiento`),
 descargar lo que falte y extraer lo que falte — como un tipo de trabajo más
-de la cola (CLAUDE.md sección 10: "no un script suelto"), no como un comando
+de la cola (CONTEXTO.md sección 10: "no un script suelto"), no como un comando
 aparte.
 
 Bloque 1: decide, expediente a expediente, si hace falta encolar una

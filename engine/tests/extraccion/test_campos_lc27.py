@@ -19,7 +19,7 @@ def test_objeto_contrato_propuesta_lc27_multilinea_y_varios_lotes():
 
 
 def test_objeto_contrato_resolucion_adjudicacion():
-    # Plantilla distinta (L9_AF.01-FE, CLAUDE.md sección 17) pero misma
+    # Plantilla distinta (L9_AF.01-FE, CONTEXTO.md sección 17) pero misma
     # estructura de bloque de firma que la Propuesta LC.27.
     paginas = extraer_texto(fx.RESOLUCION_ADJUDICACION)
     campo = extraer_objeto_contrato_lc27(paginas)

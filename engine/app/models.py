@@ -45,7 +45,7 @@ class EstadoExpediente(str, enum.Enum):
     # `pendiente_revision`: no hace falta un humano, no es trabajo pendiente,
     # es un expediente fuera de alcance del sistema.
     sin_publicar = "sin_publicar"
-    # CLAUDE.md sección 26, criterio del cliente: solo bajas de material por
+    # CONTEXTO.md sección 26, criterio del cliente: solo bajas de material por
     # lotes; un contrato de obra (campo "Tipo de Contrato" del Anuncio PCSP
     # distinto de "Suministros") no es un fallo de extracción, es un tipo de
     # contrato que este motor no está pensado para leer. Distinto de
@@ -88,7 +88,7 @@ class EstadoTrabajo(str, enum.Enum):
 
 
 class ModeloPrecio(str, enum.Enum):
-    # `fijo`: modelo de siempre (CLAUDE.md sección 4), una baja porcentual
+    # `fijo`: modelo de siempre (CONTEXTO.md sección 4), una baja porcentual
     # única por lote. `indexado_por_pedido`: segunda familia (migración
     # 0016, sesión de trabajo pendiente real 2026-09-05) -- el precio de
     # cada pedido futuro contra un Acuerdo Marco depende de índices IPRI
@@ -107,7 +107,7 @@ class Expediente(Base):
     codigo_expediente = Column(String(64), nullable=False, unique=True)
     codigo_matriz = Column(String(64), nullable=True)
     nombre_proyecto = Column(String(255), nullable=True)
-    # Cruce con el Excel de códigos (CLAUDE.md sección 7, "Cruce con el
+    # Cruce con el Excel de códigos (CONTEXTO.md sección 7, "Cruce con el
     # Excel de códigos"): por clave exacta contra `codigo_expediente` /
     # `codigo_matriz`, nunca por similitud de nombre. `codigos_cruzados` es
     # `None` mientras no se ha intentado el cruce (expedientes procesados
@@ -120,7 +120,7 @@ class Expediente(Base):
     importe_adjudicacion = Column(Numeric(14, 4), nullable=True)
     baja_global = Column(Numeric(12, 6), nullable=True)
     # True cuando el expediente tiene 2+ lotes con baja declarada distinta
-    # entre sí: ahí `baja_global` se deja en NULL a propósito (CLAUDE.md
+    # entre sí: ahí `baja_global` se deja en NULL a propósito (CONTEXTO.md
     # sección 4, "no hay una baja distinta por material dentro de un lote"
     # no dice nada de que todos los lotes de un expediente compartan baja) y
     # este campo es lo que le dice a la web que explique el vacío en vez de
@@ -138,7 +138,7 @@ class Expediente(Base):
     # una de las dos en silencio (encargo de la sesión de herencia de
     # acuerdo marco, requisito 1 — "si discrepan, a revisión").
     matriz_conflicto = Column(Boolean, nullable=True)
-    # Frescura para la ejecución incremental (CLAUDE.md sección 23, bloque 1):
+    # Frescura para la ejecución incremental (CONTEXTO.md sección 23, bloque 1):
     # cuándo se descargó y cuándo se extrajo por última vez con éxito, y con
     # qué versión de la lógica de extracción (`app.mantenimiento.frescura.
     # VERSION_LOGICA_EXTRACCION`). Los estampa `app.worker` (nunca
@@ -153,7 +153,7 @@ class Expediente(Base):
     huella_documentos = Column(String(64), nullable=True)
     # Cuántos lotes declara la licitación en total (del "N LOTES" del título,
     # o del campo "Nº de Lotes:" del Anuncio PCSP) -- sesión de identidad de
-    # lote, CLAUDE.md sección 27. Puede ser mayor que `len(lotes)`: la
+    # lote, CONTEXTO.md sección 27. Puede ser mayor que `len(lotes)`: la
     # numeración real tiene huecos (lotes desiertos/anulados, verificado con
     # 6.25/28510.0028 saltando su LOTE 5), así que este número nunca se usa
     # para generar identificadores de lote que faltan, solo para comparar
@@ -166,11 +166,11 @@ class Expediente(Base):
         server_default=EstadoExpediente.pendiente.value,
     )
     # Por qué está en fallido o pendiente_revision, con el mensaje real
-    # (CLAUDE.md, encargo de esta sesión, punto 2). `trabajos_cola.error`
+    # (CONTEXTO.md, encargo de esta sesión, punto 2). `trabajos_cola.error`
     # cubre el fallo de un trabajo concreto; este cubre el motivo a nivel de
     # expediente, incluida la revisión sin que ningún trabajo haya fallado.
     error = Column(Text, nullable=True)
-    # CLAUDE.md sección 26 (regresión de 6.24/28510.0088): el documento
+    # CONTEXTO.md sección 26 (regresión de 6.24/28510.0088): el documento
     # firmado (PDF) es el acto administrativo; la instantánea de sindicación
     # es un volcado de otra fuente, con su propio alcance (a veces el de la
     # licitación completa de varios lotes, no el de un lote concreto) y su
@@ -211,7 +211,7 @@ class Lote(Base):
     # Código propio de ESTE lote en la Plataforma (formato de expediente,
     # p.ej. "6.24/28510.0113"), distinto del expediente principal bajo el
     # que están archivados los documentos (sesión de identidad de lote,
-    # CLAUDE.md sección 27) -- verificado que coincide siempre con el
+    # CONTEXTO.md sección 27) -- verificado que coincide siempre con el
     # "Contrato nº" del Contrato firmado de este lote (de ahí el nombre
     # anterior de esta columna, `numero_contrato`, renombrada porque el dato
     # casi siempre se conoce antes, por la Propuesta/Resolución). Atributo
@@ -271,7 +271,7 @@ class LineaCatalogo(Base):
     id = Column(Integer, primary_key=True)
     # `expediente_id` es directo, no derivado de `lote_id` -> `lotes.expediente_id`:
     # una línea huérfana (tabla de precios cuyo lote no se pudo determinar
-    # con fiabilidad, CLAUDE.md encargo de esta sesión punto 3) no tiene
+    # con fiabilidad, CONTEXTO.md encargo de esta sesión punto 3) no tiene
     # lote, pero sigue perteneciendo a un expediente concreto y tiene que
     # poder trazarse hasta él.
     expediente_id = Column(Integer, ForeignKey("expedientes.id"), nullable=False)
@@ -344,7 +344,7 @@ class TrazaOrigen(Base):
 
 
 class MapeoCabeceraCache(Base):
-    """Caché de la etapa 5 (CLAUDE.md sección 6): una cabecera de tabla ya
+    """Caché de la etapa 5 (CONTEXTO.md sección 6): una cabecera de tabla ya
     vista no vuelve a pasar por el mapeo determinista ni por el modelo. La
     firma es un hash estable de la cabecera normalizada (ver
     app.extraccion.firma_cabecera); `mapeo` guarda a qué índice de columna
@@ -364,7 +364,7 @@ class MapeoCabeceraCache(Base):
 
 
 class SindicacionExpediente(Base):
-    """Bloque 2, descubrimiento por sindicación (CLAUDE.md sección 24):
+    """Bloque 2, descubrimiento por sindicación (CONTEXTO.md sección 24):
     última instantánea conocida de un expediente en el XML CODICE de
     sindicación (ZIP mensual `licitacionesPerfilesContratanteCompleto3_
     AAAAMM.zip`), guardada como fuente independiente de los PDFs — nunca se
@@ -375,7 +375,7 @@ class SindicacionExpediente(Base):
     verifican entre sí, no una sustituye a la otra.
 
     Clave `codigo_expediente` (no `id` de la entrada `<atom:entry>`, que
-    identifica la publicación sindicada, no el expediente en sí — CLAUDE.md
+    identifica la publicación sindicada, no el expediente en sí — CONTEXTO.md
     sección 17.1: "un mismo expediente puede aparecer varias veces"). Una
     fila por expediente, siempre la más reciente por `actualizado_en`
     (`<updated>` del feed) — nunca se regresa a un dato más viejo."""

@@ -1,6 +1,6 @@
-"""Bloque 3 (CLAUDE.md sección 25): ejecución programada del ciclo de
+"""Bloque 3 (CONTEXTO.md sección 25): ejecución programada del ciclo de
 mantenimiento. Vive dentro del bucle del worker que ya existe
-(`app.worker.bucle_principal`) — CLAUDE.md sección 10, "cuatro procesos, ni
+(`app.worker.bucle_principal`) — CONTEXTO.md sección 10, "cuatro procesos, ni
 uno más": no hay un quinto proceso de tipo "scheduler", ni Redis, ni un cron
 del sistema operativo. Cada vuelta del bucle (cada `WORKER_POLL_INTERVAL_
 SECONDS`, unos segundos) es una comprobación barata contra `trabajos_cola`
@@ -10,7 +10,7 @@ SECONDS`, unos segundos) es una comprobación barata contra `trabajos_cola`
 cola que ya existe: si ya hay un trabajo `mantenimiento_ciclo` `pendiente` o
 `en_proceso` (programado o disparado a mano, da igual el origen), no se
 encola otro. El histórico (punto 4) es la propia tabla `trabajos_cola`,
-consultable con SQL (CLAUDE.md sección 10, invariante de la cola): no hace
+consultable con SQL (CONTEXTO.md sección 10, invariante de la cola): no hace
 falta una tabla nueva que duplique la misma información.
 """
 from __future__ import annotations
@@ -84,7 +84,7 @@ class EstadoMantenimiento:
 
 
 def obtener_estado(db: Session) -> EstadoMantenimiento:
-    """CLAUDE.md, bloque 3 punto 3: lo que consulta la web para mostrar
+    """CONTEXTO.md, bloque 3 punto 3: lo que consulta la web para mostrar
     cuándo fue la última ejecución, qué encontró (`ultima_ejecucion.
     resultado`), y cuándo será la próxima."""
     ultimo = _ultimo_trabajo_ciclo(db)
@@ -114,7 +114,7 @@ def verificar_y_lanzar_ciclo_programado(db: Session) -> Optional[TrabajoCola]:
        se lanzó un ciclo (de cualquier origen).
 
     Limitación conocida, no un descuido: con un único proceso `worker`
-    (CLAUDE.md sección 10, arquitectura de cuatro procesos) esta
+    (CONTEXTO.md sección 10, arquitectura de cuatro procesos) esta
     comprobación no compite consigo misma. Si algún día hubiera varias
     réplicas del worker, dos podrían decidir lanzar en la misma vuelta antes
     de que ninguna llegue a insertar — no se ha construido un bloqueo

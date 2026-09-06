@@ -1,6 +1,6 @@
 "use client";
 
-// Kit compartido por las cuatro pantallas (CLAUDE.md; rediseño visual
+// Kit compartido por las cuatro pantallas (CONTEXTO.md; rediseño visual
 // 2026-09-04): formateadores y los componentes de estado y descripción, para
 // no repetir la misma regla de formato ni la misma distinción tipográfica en
 // cada panel. Los estados se distinguen por tipografía, peso y un punto de
@@ -86,7 +86,7 @@ export function formatearNumero(valor: string | number | null, maxDecimales = 4)
   return Number(valor).toLocaleString("es-ES", { maximumFractionDigits: maxDecimales });
 }
 
-// Ninguna celda vacía sin explicación (CLAUDE.md bloque 3): solo hay tres
+// Ninguna celda vacía sin explicación (CONTEXTO.md bloque 3): solo hay tres
 // motivos por los que un dato no aparece — no aplica a este tipo de línea,
 // no consta en el documento de origen, o está pendiente de otro dato. Un
 // único componente para las cuatro pantallas, para que el mismo hueco se
@@ -109,7 +109,7 @@ export function DatoVacio({ motivo, titulo }: { motivo: MotivoVacio; titulo: str
 
 // Réplica en el cliente de `app.catalogo._es_partida_alzada` (motor, no se
 // toca desde aquí): una partida alzada es una reserva presupuestaria, no un
-// artículo de almacén — CLAUDE.md sección 2 la define "sin matrícula ni
+// artículo de almacén — CONTEXTO.md sección 2 la define "sin matrícula ni
 // código de material", y el motor la guarda así, con el texto en
 // `descripcion`. Sirve para explicar por qué la matrícula está vacía
 // (encargo de la sesión de claridad visual) en vez de dejarla en blanco sin

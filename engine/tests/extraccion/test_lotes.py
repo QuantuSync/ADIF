@@ -10,7 +10,7 @@ def _por_identificador(resultado):
 
 
 def test_documento_sin_ninguna_mencion_de_lote_no_declara_nada():
-    # CLAUDE.md sección 19: el llamador cae al lote implícito único cuando
+    # CONTEXTO.md sección 19: el llamador cae al lote implícito único cuando
     # esto devuelve una lista vacía.
     resultado = extraer_lotes_declarados(extraer_texto(fx.PROPUESTA_LC27_PRECIOS_UNITARIOS))
     assert resultado.lotes == []
@@ -34,7 +34,7 @@ def test_resolucion_multi_lote_en_el_lote_n():
 
 
 def test_propuesta_lc27_un_solo_lote_de_una_licitacion_de_dos():
-    # 6.24/28510.0088 (CLAUDE.md sección 26): el cuerpo nunca repite "LOTE
+    # 6.24/28510.0088 (CONTEXTO.md sección 26): el cuerpo nunca repite "LOTE
     # N", solo la cabecera la nombra una vez -- antes de esta sesión caía
     # al lote implícito único; ahora debe quedar etiquetado con el número
     # de lote real (1), no con el sentinela.

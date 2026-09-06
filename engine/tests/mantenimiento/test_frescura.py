@@ -1,4 +1,4 @@
-"""Bloque 1, ejecución incremental (CLAUDE.md sección 23): decisiones de
+"""Bloque 1, ejecución incremental (CONTEXTO.md sección 23): decisiones de
 frescura sin abrir ningún documento ni tocar la cascada de extracción."""
 from datetime import datetime, timezone
 
@@ -141,7 +141,7 @@ def test_estampar_extraccion(db_session):
 
 
 # --- Comprobación permanente de integridad del catálogo (auditoría
-# 2026-09-05, docs/correccion-defectos-auditoria.md, CLAUDE.md sección 9.9,
+# 2026-09-05, docs/correccion-defectos-auditoria.md, CONTEXTO.md sección 9.9,
 # encargo bloque 1 punto 4) ---
 
 

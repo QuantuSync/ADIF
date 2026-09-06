@@ -1,12 +1,12 @@
-"""Etapa 5 de la cascada de extracción (CLAUDE.md sección 5 y 6): traducir
+"""Etapa 5 de la cascada de extracción (CONTEXTO.md sección 5 y 6): traducir
 una cabecera de tabla al esquema del catálogo. El modelo es el último
 recurso, no el primero — antes se intenta un mapeo determinista por
 coincidencia de nombres de cabecera conocidos, y solo si eso falla se llama
 al modelo, una vez por firma de cabecera, con el resultado cacheado en
-`cache_mapeo_cabecera` para no volver a preguntarlo nunca (CLAUDE.md sección
+`cache_mapeo_cabecera` para no volver a preguntarlo nunca (CONTEXTO.md sección
 6: "Si no, una llamada, guardas el mapeo, y no vuelves a preguntarlo nunca").
 
-CLAUDE.md sección 3: "11 variantes distintas [de cabecera] en solo 7
+CONTEXTO.md sección 3: "11 variantes distintas [de cabecera] en solo 7
 documentos [...] columnas fantasma vacías que desplazan los índices, y
 alguna cabecera corrompida por la extracción" — el mapeo determinista falla
 a propósito (y cae al modelo) ante cualquier ambigüedad, en vez de adivinar.

@@ -1,17 +1,17 @@
-"""Detección del caso de precios unitarios (CLAUDE.md sección 4 y 12).
+"""Detección del caso de precios unitarios (CONTEXTO.md sección 4 y 12).
 
 Cuando el pliego fija un presupuesto techo y el licitador solo oferta una
 baja porcentual, importe de licitación e importe de adjudicación llegan
 iguales al Anuncio PCSP — no porque no haya habido rebaja, sino porque el
 "precio" que se adjudica es la baja, no un importe distinto. La fórmula
 ingenua `1 - adjudicado/licitación` da 0 % ahí, y devolver ese 0 % es el
-error que este módulo existe para no cometer (ejemplo real, CLAUDE.md sección
+error que este módulo existe para no cometer (ejemplo real, CONTEXTO.md sección
 4: expediente 6.24/28510.0088, 1.000.000 € en ambos importes, baja real
 0,50 %).
 
 Fuera de ese caso, la baja se puede seguir derivando de los importes.
 
-CLAUDE.md sección 26, criterio del cliente sobre el mínimo exigible para dar
+CONTEXTO.md sección 26, criterio del cliente sobre el mínimo exigible para dar
 por buena una baja de lote ("la palabra lote, un número de expediente y la
 baja"): una baja declarada en texto ya no tiene que cuadrar con la que
 resulta de los importes para darse por buena. Antes de esta sesión, un
@@ -78,7 +78,7 @@ def calcular_baja_efectiva(
             requiere_revision=False,
             motivo=(
                 f"baja declarada ({baja_declarada:.4%}) usada tal cual; no cuadra con la baja que resulta de "
-                f"los importes ({baja_por_importes:.4%}), pero el criterio del cliente (CLAUDE.md sección 26) "
+                f"los importes ({baja_por_importes:.4%}), pero el criterio del cliente (CONTEXTO.md sección 26) "
                 "no exige que cuadren: lote, expediente y baja declarada bastan"
             ),
         )

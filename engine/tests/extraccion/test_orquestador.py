@@ -1,4 +1,4 @@
-"""Caso de aceptación de esta sesión (cola y seguimiento, CLAUDE.md punto 3):
+"""Caso de aceptación de esta sesión (cola y seguimiento, CONTEXTO.md punto 3):
 el trabajo "extraer_expediente" corriendo sobre los documentos reales de un
 expediente completo, no piezas sueltas de la cascada probadas por separado.
 Usa los tres fixtures reales del expediente 6.24/28510.0008 (propuesta
@@ -75,10 +75,10 @@ def test_expediente_0008_completo_produce_catalogo_y_pasa_a_completado(db_sessio
     assert expediente.error is None
     assert expediente.importe_licitacion == Decimal("138000.00")
     assert expediente.importe_adjudicacion == Decimal("138000.00")
-    # Caso central del proyecto (CLAUDE.md sección 4): no 0%, la baja
+    # Caso central del proyecto (CONTEXTO.md sección 4): no 0%, la baja
     # declarada en texto.
     assert expediente.baja_global == Decimal("0.5400")
-    # Objeto del contrato (CLAUDE.md sección 7): sale de la Propuesta LC.27
+    # Objeto del contrato (CONTEXTO.md sección 7): sale de la Propuesta LC.27
     # a falta de Anuncio PCSP en este expediente de fixture.
     assert expediente.nombre_proyecto == "SUMINISTRO DE GUANTES CONTRA RIESGO ELECTRICO."
 
@@ -95,13 +95,13 @@ def test_expediente_0008_completo_produce_catalogo_y_pasa_a_completado(db_sessio
     assert resultado["motivo_revision"] is None
 
     # El documento que trae el cuadro de precios (en realidad un pliego
-    # completo, CLAUDE.md sección 3) se reclasifica por contenido, no por la
+    # completo, CONTEXTO.md sección 3) se reclasifica por contenido, no por la
     # categoría que le puso el scraper.
     doc_anejo = db_session.query(Documento).filter_by(nombre_archivo=fx.ANEJO_PRECIOS_GUANTES.name).one()
     assert doc_anejo.tipo_documento in (TipoDocumento.pliego, TipoDocumento.anejo)
     assert doc_anejo.procesado_en is not None
 
-    # Trazabilidad (CLAUDE.md sección 9.10): las cifras de expediente
+    # Trazabilidad (CONTEXTO.md sección 9.10): las cifras de expediente
     # también quedan ancladas a documento/página/fragmento.
     trazas = db_session.query(TrazaOrigen).filter_by(entidad_tipo="expediente", entidad_id=expediente.id).all()
     campos_trazados = {t.campo for t in trazas}
@@ -109,7 +109,7 @@ def test_expediente_0008_completo_produce_catalogo_y_pasa_a_completado(db_sessio
 
 
 def test_expediente_sin_publicar_no_se_reprocesa(db_session):
-    # CLAUDE.md sección 22: un expediente ya confirmado sin publicar no tiene
+    # CONTEXTO.md sección 22: un expediente ya confirmado sin publicar no tiene
     # nada que extraer -- un trabajo de extracción encolado por error (o a
     # mano) no debe devolverlo a `pendiente_revision` con un motivo genérico,
     # perdiendo la marca ya verificada.
@@ -171,7 +171,7 @@ def test_expediente_sin_anejo_ni_pliego_da_motivo_especifico_de_cuadro_ausente(d
 
 
 def test_expediente_con_documento_escaneado_va_a_revision_con_motivo_distinto(db_session):
-    # CLAUDE.md sección 3: un documento escaneado (sin capa de texto) no
+    # CONTEXTO.md sección 3: un documento escaneado (sin capa de texto) no
     # aporta ninguna línea, pero el motivo debe decirlo explícitamente en vez
     # de confundirse con "no se extrajo ninguna línea de catálogo" (ese
     # motivo dice "se leyó pero no traía cuadro de precios"; este dice "no se
@@ -196,7 +196,7 @@ def test_documento_escaneado_no_bloquea_si_el_resto_ya_resolvio_el_expediente(db
     # Sesión de trabajo pendiente real (2026-09-05), caso real
     # `6.20/28510.0136`: el documento escaneado (Pliego de Cláusulas
     # Administrativas, verificado a mano sin cuadro de precios, misma
-    # familia que CLAUDE.md sección 26) convive con otros documentos reales
+    # familia que CONTEXTO.md sección 26) convive con otros documentos reales
     # que ya dan baja, importes y líneas completas -- forzar revisión solo
     # por la existencia del escaneado sería más cauto de lo que los propios
     # datos justifican. Antes de esta sesión, cualquier documento escaneado
@@ -220,7 +220,7 @@ def test_documento_escaneado_no_bloquea_si_el_resto_ya_resolvio_el_expediente(db
     assert expediente.error is None
     assert resultado["motivo_revision"] is None
     # El aviso queda registrado aparte, sin bloquear el estado (mismo
-    # espíritu que `aviso_sindicacion`, CLAUDE.md sección 12).
+    # espíritu que `aviso_sindicacion`, CONTEXTO.md sección 12).
     assert "escaneado" in resultado["aviso_documento_escaneado"]
 
     doc_escaneado = (
@@ -232,7 +232,7 @@ def test_documento_escaneado_no_bloquea_si_el_resto_ya_resolvio_el_expediente(db
 
 
 def test_expediente_0008_cruza_codigo_interno_del_excel_de_referencia(db_session, tmp_path, monkeypatch):
-    # CLAUDE.md sección 7: cruce por clave exacta contra el Excel de
+    # CONTEXTO.md sección 7: cruce por clave exacta contra el Excel de
     # códigos, ejecutado como parte del mismo trabajo de extracción.
     ruta_excel = tmp_path / "Codigos_de_proyecto.xlsx"
     libro = openpyxl.Workbook()
@@ -338,7 +338,7 @@ def test_expediente_0027_multi_lote_produce_baja_correcta_por_lote(db_session):
     assert lote3.importe_adjudicacion == Decimal("853250.00")
     assert lote3.adjudicatario == "EMIPESA, S.A."
 
-    # CLAUDE.md, encargo de esta sesión, punto 4: un expediente con lotes de
+    # CONTEXTO.md, encargo de esta sesión, punto 4: un expediente con lotes de
     # bajas distintas no tiene una baja única — nunca se inventa una media,
     # y la web tiene que poder explicar el vacío (ajuste 3, `baja_variable_por_lote`).
     assert expediente.baja_global is None
@@ -353,7 +353,7 @@ def test_expediente_0027_multi_lote_produce_baja_correcta_por_lote(db_session):
 
     # Cuadro de precios: los seis lotes del Pliego (1 a 6) traen tabla de
     # precios, pero solo 1 y 3 están entre los lotes declarados por la
-    # Resolución (CLAUDE.md, encargo de esta sesión, punto 3: la tabla de un
+    # Resolución (CONTEXTO.md, encargo de esta sesión, punto 3: la tabla de un
     # lote no adjudicado, o cuya cabecera "LOTE N" no se pudo leer en la
     # franja que le precede, no se asigna por cercanía — queda huérfana).
     lineas_lote3 = (
@@ -366,7 +366,7 @@ def test_expediente_0027_multi_lote_produce_baja_correcta_por_lote(db_session):
     p1 = lineas_lote3[0]
     assert p1.precio_unitario == Decimal("10.8500")
     # 10,85 * (1 - 0,0118) — la baja de SU lote, no la del expediente
-    # (CLAUDE.md, encargo de esta sesión, punto 2). Numeric(14, 4) en la
+    # (CONTEXTO.md, encargo de esta sesión, punto 2). Numeric(14, 4) en la
     # columna redondea a 4 decimales al guardar.
     assert p1.precio_adjudicado == Decimal("10.7220")
     assert all(l.expediente_id == expediente.id for l in lineas_lote3)
@@ -411,7 +411,7 @@ def test_expediente_0027_multi_lote_produce_baja_correcta_por_lote(db_session):
     assert resultado["motivo_revision"] is not None
 
 
-# --- CLAUDE.md sección 27: sesión de identidad de lote ---------------------
+# --- CONTEXTO.md sección 27: sesión de identidad de lote ---------------------
 
 
 def test_expediente_0124_lote_2_de_dos_no_usa_sentinela(db_session):
@@ -456,7 +456,7 @@ def test_tres_lotes_completos_no_generan_motivo_de_cobertura_parcial(db_session)
 
 
 def test_expediente_0028_con_hueco_en_la_numeracion_marca_cobertura_parcial(db_session):
-    # Encargo explícito del cliente (CLAUDE.md sección 27): 6.25/28510.0028
+    # Encargo explícito del cliente (CONTEXTO.md sección 27): 6.25/28510.0028
     # declara "7 LOTES" pero el LOTE 5 no aparece en ningún sitio del
     # documento -- el motivo tiene que decir "6 de 7", nunca fabricar un
     # LOTE 5 vacío para completar la secuencia.
@@ -494,7 +494,7 @@ def test_expediente_0139_sin_ningun_desglose_por_lote_marca_cobertura_cero(db_se
 
 
 def test_reprocesar_expediente_con_sentinela_previo_lo_sustituye(db_session):
-    """Idempotencia (CLAUDE.md sección 9.9) al migrar al arreglo de
+    """Idempotencia (CONTEXTO.md sección 9.9) al migrar al arreglo de
     identidad de lote: un expediente que ya tenía el lote implícito único
     (de antes de esta sesión) con líneas de catálogo colgando de él no debe
     dejarlas conviviendo con los datos correctos una vez que se reprocesa y
@@ -527,7 +527,7 @@ def test_reprocesar_expediente_con_sentinela_previo_lo_sustituye(db_session):
 
 def test_codigo_principal_declarado_nunca_se_confunde_con_matriz(db_session):
     """Trampa de vocabulario verificada en 6.24/28510.0094 ("Nº EXPEDIENTE
-    MATRIZ" sin relación con acuerdo marco, CLAUDE.md sección 27): procesar
+    MATRIZ" sin relación con acuerdo marco, CONTEXTO.md sección 27): procesar
     este expediente no debe dejar `codigo_matriz` relleno con el valor que
     el documento llama "matriz" (que aquí es simplemente su propio
     expediente principal, el mismo código bajo el que ya está archivado) --
@@ -547,12 +547,12 @@ def test_codigo_principal_declarado_nunca_se_confunde_con_matriz(db_session):
     assert expediente.lotes_totales_declarados == 3
 
 
-# --- CLAUDE.md sección 26: criterios de alcance del cliente ----------------
+# --- CONTEXTO.md sección 26: criterios de alcance del cliente ----------------
 
 
 def test_detectar_contrato_obra_marca_tipo_contrato_obras():
     # Sin fixture PDF real con "Tipo de Contrato Obras" (ningún expediente
-    # de este corpus lo es, CLAUDE.md sección 26) -- se prueba a nivel del
+    # de este corpus lo es, CONTEXTO.md sección 26) -- se prueba a nivel del
     # helper, con `_Documento` sintético, igual que ya hace `docstring`.
     paginas = [PaginaTexto(numero=1, texto="Tipo de Contrato Obras\n")]
     doc = SimpleNamespace(id=1, nombre_archivo="anuncio.pdf")
@@ -571,7 +571,7 @@ def test_detectar_contrato_obra_ignora_suministros():
 
 def test_detectar_contrato_obra_ignora_documentos_que_no_son_anuncio_pcsp():
     # El campo "Tipo de Contrato" también aparece en el "Documento de
-    # Pliegos" (misma familia de formulario, CLAUDE.md sección 3), pero solo
+    # Pliegos" (misma familia de formulario, CONTEXTO.md sección 3), pero solo
     # se mira en documentos ya clasificados como `anuncio_pcsp` -- no hace
     # falta más para el corpus real y evita depender de un tipo que además
     # puede saltarse por `es_pliego_sin_precios`.

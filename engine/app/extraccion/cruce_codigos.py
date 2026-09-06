@@ -1,9 +1,9 @@
-"""Cruce con el Excel de códigos (CLAUDE.md sección 7, "Cruce con el Excel
+"""Cruce con el Excel de códigos (CONTEXTO.md sección 7, "Cruce con el Excel
 de códigos" y sección 16, "confirmar con el cliente..."): las tres primeras
 columnas del catálogo — código interno, código de proyecto y código matriz —
 salen de `Expedientes.xlsx` por clave exacta, nunca por similitud de nombre.
 
-No usa modelo, no es una etapa de la cascada de extracción (CLAUDE.md sección
+No usa modelo, no es una etapa de la cascada de extracción (CONTEXTO.md sección
 5): es una búsqueda determinista sobre un fichero de referencia, igual de
 mecánica que un `JOIN`. El Excel se carga entero una vez por proceso (es un
 fichero de unos pocos cientos de filas, sección 3) y se cachea en memoria por
@@ -37,7 +37,7 @@ class CruceCodigos:
 
 
 def normalizar_codigo_expediente(valor: Optional[str]) -> Optional[str]:
-    """Recorta espacios sobrantes y unifica separadores (CLAUDE.md sección 8:
+    """Recorta espacios sobrantes y unifica separadores (CONTEXTO.md sección 8:
     "En el Excel hay valores como '6.25/28510.0146 '. Un cruce exacto fallaría
     en silencio.")."""
     if valor is None:
@@ -47,7 +47,7 @@ def normalizar_codigo_expediente(valor: Optional[str]) -> Optional[str]:
 
 
 class AutoreferenciaMatrizError(ValueError):
-    """Un expediente no puede declararse su propia matriz (CLAUDE.md sección
+    """Un expediente no puede declararse su propia matriz (CONTEXTO.md sección
     2, trampa de vocabulario "Matriz"). Verificada en cuatro variantes reales
     del mismo síntoma, cada una desde un origen de dato distinto
     (docs/identidad-expediente.md): el PDF propio ("Nº EXPEDIENTE MATRIZ" de
@@ -62,7 +62,7 @@ class AutoreferenciaMatrizError(ValueError):
 
 def asignar_matriz(expediente, candidato: Optional[str], *, sobrescribir: bool = False) -> bool:
     """Único punto de escritura de `expediente.codigo_matriz`. Normaliza el
-    candidato (espacios sobrantes, CLAUDE.md sección 8) y lo compara contra
+    candidato (espacios sobrantes, CONTEXTO.md sección 8) y lo compara contra
     el propio `codigo_expediente` antes de escribir, venga el dato de donde
     venga (PDF, Excel de códigos, corrección manual).
 
@@ -95,7 +95,7 @@ def asignar_matriz(expediente, candidato: Optional[str], *, sobrescribir: bool =
 class _IndiceCodigosProyecto:
     """Índice en memoria de `Expedientes.xlsx` (columnas `Nº Interno`,
     `Nº Expediente`, `MATRIZ`), por las dos claves por las que puede cruzar
-    un código extraído (CLAUDE.md sección 3: "29 como Nº Expediente, 3 como
+    un código extraído (CONTEXTO.md sección 3: "29 como Nº Expediente, 3 como
     MATRIZ")."""
 
     def __init__(self, filas: list[dict]):
@@ -112,7 +112,7 @@ class _IndiceCodigosProyecto:
     def buscar(self, codigo_expediente: str, codigo_matriz: Optional[str]) -> Optional[tuple[dict, bool]]:
         """Devuelve la fila encontrada junto con si el cruce fue por `Nº
         Expediente` (`True`) o por `MATRIZ` (`False`). La distinción importa:
-        cuando `codigo_expediente` cruza por la columna MATRIZ (CLAUDE.md
+        cuando `codigo_expediente` cruza por la columna MATRIZ (CONTEXTO.md
         sección 3: "3 como MATRIZ"), significa que el propio expediente ES el
         acuerdo marco de esa fila — su columna MATRIZ vale, trivialmente, el
         propio `codigo_expediente` que se buscó. Devolver ese valor como "la
@@ -219,7 +219,7 @@ def asegurar_cruce_codigos(db: Session, expediente) -> Optional[str]:
     de `None` a `True`/`False`, nunca se repite) y deja la sesión con el
     cambio aplicado pero sin `commit` — lo hace la persona que llama, igual
     que el resto de mutaciones sobre `expediente` en esta cascada
-    (CLAUDE.md sección 7: cruce por clave exacta, "el sistema nunca inventa
+    (CONTEXTO.md sección 7: cruce por clave exacta, "el sistema nunca inventa
     una matriz"). Se usa tanto al terminar la extracción de un expediente
     como, de forma perezosa, sobre expedientes ya procesados antes de que
     existiera esta columna (routers de catálogo y de expedientes).
@@ -261,7 +261,7 @@ def asegurar_cruce_codigos(db: Session, expediente) -> Optional[str]:
     try:
         asignar_matriz(expediente, resultado.codigo_matriz)
     except AutoreferenciaMatrizError:
-        # Ruido heredado en el Excel de ejemplo (CLAUDE.md "Pendiente de
+        # Ruido heredado en el Excel de ejemplo (CONTEXTO.md "Pendiente de
         # resolver"): al menos una fila declara su propia columna MATRIZ
         # igual a su "Nº Expediente" para una licitación multi-lote sin
         # acuerdo marco real (caso 6.23/28510.0109, verificado). No es un

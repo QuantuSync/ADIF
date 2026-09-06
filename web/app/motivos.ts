@@ -181,7 +181,7 @@ const REGLAS: Regla[] = [
     prefijo: /^documento\(s\) escaneado\(s\), sin capa de texto/,
     categoria: "limitacion",
     humanizar: (t) => {
-      const lista = t.replace(/^.*CLAUDE\.md sección 15\):\s*/, "");
+      const lista = t.replace(/^.*CONTEXTO\.md sección 15\):\s*/, "");
       return `${lista} — es un documento escaneado (imagen). El sistema todavía no lee documentos escaneados automáticamente; hay que revisarlo a mano.`;
     },
   },

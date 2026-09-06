@@ -1,4 +1,4 @@
-"""CLAUDE.md sección 26 (regresión de 6.24/28510.0088): un desajuste con la
+"""CONTEXTO.md sección 26 (regresión de 6.24/28510.0088): un desajuste con la
 instantánea de sindicación ya no cambia `estado` ni `error` de un
 expediente -- el PDF es el acto administrativo, la sindicación no tiene su
 misma autoridad. Se guarda como aviso informativo aparte."""

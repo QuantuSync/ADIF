@@ -1,6 +1,6 @@
 """Conjunto fijo de prueba para la cascada de extracción.
 
-CLAUDE.md sección 13: "No metas los 187 PDFs en el repo. Deja un conjunto fijo
+CONTEXTO.md sección 13: "No metas los 187 PDFs en el repo. Deja un conjunto fijo
 de prueba [...] Trabaja siempre contra esos." Copiados de Ejemplo/Input/ (que
 no está en el repo, ver .gitignore) el 2026-09-02. Cada fichero conserva su
 nombre original de la Plataforma para no romper la trazabilidad hacia el
@@ -15,7 +15,7 @@ from pathlib import Path
 
 FIXTURES_DIR = Path(__file__).parent / "pdfs"
 
-# Anuncio PCSP (formulario estándar, CLAUDE.md sección 3): "Anuncio de
+# Anuncio PCSP (formulario estándar, CONTEXTO.md sección 3): "Anuncio de
 # adjudicación" con la sección "Licitación basada en el acuerdo marco" que
 # trae la MATRIZ.
 ANUNCIO_PCSP_CON_MATRIZ = FIXTURES_DIR / "2.18_04703.0019_ADJUDICACION_1.pdf"
@@ -24,7 +24,7 @@ ANUNCIO_PCSP_CON_MATRIZ = FIXTURES_DIR / "2.18_04703.0019_ADJUDICACION_1.pdf"
 # acuerdo marco de por medio: no trae MATRIZ.
 ANUNCIO_PCSP_SIN_MATRIZ = FIXTURES_DIR / "6.24_28510.0193_ADJUDICACION_1.pdf"
 
-# Propuesta LC.27. Caso central del proyecto (CLAUDE.md sección 4): licitación
+# Propuesta LC.27. Caso central del proyecto (CONTEXTO.md sección 4): licitación
 # y adjudicación son ambas 138.000,00 €, baja declarada del 54,00 %. La
 # fórmula ingenua (1 - adjudicado/licitación) da 0 %.
 PROPUESTA_LC27_PRECIOS_UNITARIOS = FIXTURES_DIR / "6.24_28510.0008_ADJUDICACION_1.pdf"
@@ -35,7 +35,7 @@ PROPUESTA_LC27_PRECIOS_UNITARIOS = FIXTURES_DIR / "6.24_28510.0008_ADJUDICACION_
 PROPUESTA_LC27_UTE = FIXTURES_DIR / "6.24_28510.0088_ADJUDICACION_1.pdf"
 
 # Resolución de Adjudicación (plantilla L9_AF.01-FE, distinta de LC.27; ver
-# CLAUDE.md sección 17). Tercer caso real de precios unitarios: 800.000,00 €
+# CONTEXTO.md sección 17). Tercer caso real de precios unitarios: 800.000,00 €
 # en licitación y adjudicación, baja declarada del 4,50 %.
 RESOLUCION_ADJUDICACION = FIXTURES_DIR / "6.24_28510.0124_ADJUDICACION_1.pdf"
 
@@ -53,7 +53,7 @@ ANEJO_PRECIOS_GUANTES = FIXTURES_DIR / "6.24_28510.0008_ANEJO_1.pdf"
 
 # Igual que el anterior pero con cabecera de tabla distinta ("CÓDIGO ...
 # CANTIDADES ... UNIDAD ... PRECIO DE ..."), y con varias tablas de cabecera
-# repetida dentro del mismo documento. CLAUDE.md sección 3: "11 variantes
+# repetida dentro del mismo documento. CONTEXTO.md sección 3: "11 variantes
 # distintas en solo 7 documentos".
 ANEJO_PRECIOS_TRAVIESAS = FIXTURES_DIR / "6.24_28510.0088_ANEJO_1.pdf"
 
@@ -119,14 +119,14 @@ ANEJO_PRECIOS_CODIGO_PN = FIXTURES_DIR / "6.24_28510.0180_ANEJO_1_p18.pdf"
 # ("PA-01", "PA-02") en la misma tabla — traviesas, 6.24/28510.0094. Recorte
 # de 2 páginas (112-113) del Contrato real (2,8 MB / 118+ páginas): el cuadro
 # de precios es una sección interna suya, igual que los "*_ANEJO_N.pdf" de
-# CLAUDE.md sección 3.
+# CONTEXTO.md sección 3.
 ANEJO_PRECIOS_LOTE_TIPO_Y_PARTIDA_ALZADA = FIXTURES_DIR / "6.24_28510.0094_CONTRATO_1_p112-113.pdf"
 
 # Tabla sin ninguna columna de código: la matrícula de 9 dígitos es el único
 # identificador de fila — hilo de contacto, 6.20/28510.0136.
 TABLA_PRECIOS_SOLO_MATRICULA = FIXTURES_DIR / "6.20_28510.0136_ANEJO_3_p3.pdf"
 
-# Sesión de identidad de lote (CLAUDE.md sección 27): expedientes multi-lote
+# Sesión de identidad de lote (CONTEXTO.md sección 27): expedientes multi-lote
 # reales cuya redacción del bloque de adjudicación por lote NO coincide con
 # la de RESOLUCION_MULTI_LOTE ("En el LOTE N.") -- catalogados antes de
 # generalizar `app.extraccion.lotes` contra las 15 variantes reales del
@@ -149,7 +149,7 @@ PROPUESTA_LC27_TRES_LOTES_BAJA_ENTRE_PAGINAS = FIXTURES_DIR / "6.24_28510.0117_A
 
 # "7 LOTES" pero el LOTE 5 no aparece en ningún sitio del documento (ni en
 # la cabecera ni en el cuerpo) -- desierto o anulado, sin verificar cuál
-# (CLAUDE.md sección 27): la numeración real tiene huecos y
+# (CONTEXTO.md sección 27): la numeración real tiene huecos y
 # `lotes_totales_declarados` (7) nunca se usa para generar el lote que
 # falta, solo para contar cuántos de los 7 sí se conocen (6).
 RESOLUCION_LOTES_CON_HUECO = FIXTURES_DIR / "6.25_28510.0028_ADJUDICACION_1.pdf"
@@ -172,7 +172,7 @@ PROPUESTA_LC27_NUMERADA_CON_ETIQUETA_MATRIZ = FIXTURES_DIR / "6.24_28510.0094_AD
 ANUNCIO_PCSP_DOS_LOTES_SIN_DESGLOSE = FIXTURES_DIR / "6.23_28510.0139_ADJUDICACION_1.pdf"
 
 # El único documento escaneado confirmado del corpus real (186 de 187
-# documentos tienen capa de texto, CLAUDE.md sección 3): recorte de 1 página
+# documentos tienen capa de texto, CONTEXTO.md sección 3): recorte de 1 página
 # del anejo de 100 páginas real (`6.20/28510.0136_ANEJO_2.pdf`) — cada página
 # es una imagen a página completa, sin ningún carácter de texto ni con
 # `pdfplumber` ni con `pypdf`.

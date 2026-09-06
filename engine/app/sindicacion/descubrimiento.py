@@ -1,11 +1,11 @@
-"""Bloque 2 (CLAUDE.md sección 24): descubrimiento de expedientes nuevos de
+"""Bloque 2 (CONTEXTO.md sección 24): descubrimiento de expedientes nuevos de
 ADIF por sindicación, y detección de cambio de estado en los que ya conoce
-el sistema. Se suma al Excel de códigos (CLAUDE.md sección 7), nunca lo
+el sistema. Se suma al Excel de códigos (CONTEXTO.md sección 7), nunca lo
 sustituye — ese sigue siendo la fuente del cruce de códigos; esto es solo
 una fuente más para *encontrar* expedientes y para *contrastar* sus importes
 (`app.sindicacion.contraste`).
 
-Recordatorio de lo ya verificado (CLAUDE.md secciones 17.1 y 22, y esta
+Recordatorio de lo ya verificado (CONTEXTO.md secciones 17.1 y 22, y esta
 sesión): la sindicación no sirve para descargar documentos —
 `resolver_o_encolar_matriz`/`descargar_expediente` (scraping real, con
 navegador) siguen siendo el único camino para traer los PDFs. Este módulo
@@ -157,7 +157,7 @@ def descubrir_novedades(
             # decisión del bloque 1, más abajo en el ciclo, quien decide
             # encolar su descarga porque no tiene documentos, no este
             # módulo. Idempotente por `codigo_expediente` igual que
-            # `POST /expedientes` (CLAUDE.md sección 9.9).
+            # `POST /expedientes` (CONTEXTO.md sección 9.9).
             expediente = Expediente(codigo_expediente=entrada.codigo_expediente)
             db.add(expediente)
             db.commit()

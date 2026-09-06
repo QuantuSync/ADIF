@@ -6,7 +6,7 @@ from app.extraccion.precios_unitarios import calcular_baja_efectiva
 
 
 def test_caso_precios_unitarios_con_baja_declarada_no_da_cero():
-    # CLAUDE.md sección 4, el caso central del proyecto: licitación y
+    # CONTEXTO.md sección 4, el caso central del proyecto: licitación y
     # adjudicación iguales no significa baja 0 %.
     r = calcular_baja_efectiva(
         importe_licitacion=Decimal("1000000.00"),
@@ -19,7 +19,7 @@ def test_caso_precios_unitarios_con_baja_declarada_no_da_cero():
 
 
 def test_caso_precios_unitarios_sin_baja_declarada_va_a_revision():
-    # CLAUDE.md sección 12: "un sistema que sabe cuándo no sabe vale más...".
+    # CONTEXTO.md sección 12: "un sistema que sabe cuándo no sabe vale más...".
     r = calcular_baja_efectiva(
         importe_licitacion=Decimal("145100"),
         importe_adjudicacion=Decimal("145100"),
@@ -52,7 +52,7 @@ def test_caso_normal_con_baja_declarada_que_cuadra():
 
 
 def test_baja_declarada_que_no_cuadra_se_da_por_buena():
-    # CLAUDE.md sección 26, criterio del cliente: lote + expediente + baja
+    # CONTEXTO.md sección 26, criterio del cliente: lote + expediente + baja
     # declarada bastan, ya no se exige que cuadre con la baja por importes.
     r = calcular_baja_efectiva(
         importe_licitacion=Decimal("100000"),

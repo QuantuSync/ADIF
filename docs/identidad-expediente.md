@@ -1,7 +1,7 @@
 # Identidad de expediente
 
-Registro histórico movido desde `CLAUDE.md` (split de sesión 2026-09-05).
-Ver `CLAUDE.md` para el contexto vivo del proyecto.
+Registro histórico movido desde `CONTEXTO.md` (split de sesión 2026-09-05).
+Ver `CONTEXTO.md` para el contexto vivo del proyecto.
 
 ---
 
@@ -37,7 +37,7 @@ de precios ni baja propios, porque viven en los documentos de la MATRIZ.
   `LineaCatalogo` normales del pedido, vía el mismo `guardar_lineas_catalogo`
   idempotente de siempre (mismo mecanismo, misma clave). Se descartó
   referenciar en caliente porque todo el sistema ya es snapshot-y-traza
-  (CLAUDE.md sección 9), y porque `/catalogo` y la exportación pagan directo sobre
+  (CONTEXTO.md sección 9), y porque `/catalogo` y la exportación pagan directo sobre
   `lineas_catalogo` sin saber resolver "esta línea vive en otro expediente".
 - **"Lo propio del pedido manda" se decide a nivel de tabla completa, no
   fila a fila**: si el pedido ya aportó alguna línea propia a su lote, no se
@@ -179,7 +179,7 @@ alcance), se deja la identidad como está y se añade un motivo a la cola de
 revisión en vez de adivinar.
 
 **Por qué renombrar en el sitio es seguro**: `codigo_expediente` es la clave
-de idempotencia (CLAUDE.md sección 9.9) pero no es clave externa de ninguna otra tabla
+de idempotencia (CONTEXTO.md sección 9.9) pero no es clave externa de ninguna otra tabla
 — `documentos.expediente_id`, `lotes.expediente_id`,
 `lineas_catalogo.expediente_id` y `trabajos_cola.expediente_id` son todos por
 `id`. Renombrar la fila no mueve ni un documento, ni un lote, ni una línea de
@@ -187,7 +187,7 @@ catálogo ya extraída.
 
 **Por qué solo en la extracción, no en el scraping ni en un paso de
 "ingesta" aparte**: la identidad real solo se conoce leyendo el texto del
-Anuncio PCSP, y eso ya es exactamente la etapa 2 de la cascada (CLAUDE.md sección 5).
+Anuncio PCSP, y eso ya es exactamente la etapa 2 de la cascada (CONTEXTO.md sección 5).
 El scraping descarga bytes sin leerlos; no hay nada que corregir ahí. Un
 expediente se registra por primera vez con el código que se tenga a mano —
 casi siempre el término de búsqueda, sea por la web (`POST /expedientes`) o
@@ -249,7 +249,7 @@ corrección de identidad del punto 1 llegó a descubrir y encolar
 automáticamente (`resolver_o_encolar_matriz`), **las 8 fallaron igual, con
 el mismo error exacto** — ninguna de las 5 matrices de la familia
 `2.18/04703` ni las 3 de `2.24/04110` se encuentra en la Plataforma por
-búsqueda. El sistema lo encajó exactamente como está diseñado (CLAUDE.md sección 9.10,
+búsqueda. El sistema lo encajó exactamente como está diseñado (CONTEXTO.md sección 9.10,
 sección 12): cada matriz cae a `fallido` con su motivo, y
 `reencolar_pedidos_esperando_matriz` reencola a los 8 pedidos, que
 `intentar_heredar_de_matriz` manda a `pendiente_revision` con
@@ -357,7 +357,7 @@ mucho menos claro, perdiendo la marca ya verificada.
 
 **Los 14 códigos marcados, verificados contra la Plataforma real** (scraping
 real, sin dobles de test, cada uno con un único intento gracias al agotado
-inmediato de intentos): las 8 matrices de CLAUDE.md sección 16 (`2.18/04703.0019`,
+inmediato de intentos): las 8 matrices de CONTEXTO.md sección 16 (`2.18/04703.0019`,
 `0021`, `0022`, `0024`, `0025`; `2.24/04110.0035`, `0036`, `0037`) y los 6
 expedientes sin documentos (`2.24/28520.0128`, `2.25/28520.0161`,
 `3.24/20810.0090`, `3.24/28520.0129`, `3.25/27520.0055`, `4.24/27520.0090`).
@@ -369,9 +369,9 @@ que siguen en `pendiente_revision` con un motivo ahora preciso: "la matriz
 
 **Patrón observado, no una regla de código**: los 14 códigos no publicados
 empiezan todos por `2.`, `3.` o `4.`; los que empiezan por `6.` siempre se
-encuentran. Documentado como correlación (CLAUDE.md sección 16), no convertido en un
+encuentran. Documentado como correlación (CONTEXTO.md sección 16), no convertido en un
 atajo que rechace un código nuevo por su prefijo sin intentarlo — con 14
-casos no hay base para generalizar, y CLAUDE.md sección 9 prohíbe inventar
+casos no hay base para generalizar, y CONTEXTO.md sección 9 prohíbe inventar
 lo que no está verificado.
 
 **Métricas del proyecto, desde ahora sobre 31, no sobre 45**: los 14 códigos
@@ -398,7 +398,7 @@ aplicada):
 son comportamiento correcto y cuáles trabajo pendiente:**
 
 Comportamiento correcto (el sistema detecta una contradicción real o un caso
-ya documentado, y por diseño no adivina — CLAUDE.md sección 12):
+ya documentado, y por diseño no adivina — CONTEXTO.md sección 12):
 
 - **7 expedientes, baja declarada no cuadra con la baja por importes**
   (`6.23/28510.0139`, `6.24/28510.0094`, `0117`, `0130`, `0203`,
@@ -408,7 +408,7 @@ ya documentado, y por diseño no adivina — CLAUDE.md sección 12):
   sin confirmar caso a caso.
 - **3 expedientes, segunda familia de baja** (`6.23/28510.0018`, `0102`,
   `6.25/28510.0016`): fórmula `Ct = Oferta × Kt × Coeficiente de baja` por
-  pedido, no una baja única de lote (CLAUDE.md sección 16, "segunda familia
+  pedido, no una baja única de lote (CONTEXTO.md sección 16, "segunda familia
   de baja"). No hay un valor que extraer, es un modelo de cálculo distinto
   — diseño pendiente, no un fallo de extracción.
 - **2 expedientes, valores ilegibles marcados y descartados en vez de
@@ -435,7 +435,7 @@ investigación futura, no un ajuste de expresión regular):
   síntoma estructural que los pedidos derivados de acuerdo marco, pero con
   código `6.24/28510.0NNN` normal, no de MATRIZ. Sin investigar si son
   pedidos derivados con una matriz sin identificar o contratos cuyo anejo de
-  precios nunca se adjuntó — ver CLAUDE.md sección 16.
+  precios nunca se adjuntó — ver CONTEXTO.md sección 16.
 
 ---
 
@@ -485,19 +485,19 @@ Tres relaciones distintas coexisten en el corpus, y conviene no confundirlas:
 ### 2. Dos trampas de vocabulario verificadas, no supuestas
 
 El corpus reutiliza dos palabras del dominio con un segundo significado
-ajeno al de CLAUDE.md sección 2 — confusión real, no hipotética, y hay que evitar
+ajeno al de CONTEXTO.md sección 2 — confusión real, no hipotética, y hay que evitar
 que el código las mezcle:
 
 - **"Lote"**: en una licitación multi-lote (este documento) es la
   subdivisión en contratos concurrentes que describe el punto 1. En un
-  pedido derivado de acuerdo marco (CLAUDE.md sección 3 y sección 20 de arriba), "Lote N" es una
+  pedido derivado de acuerdo marco (CONTEXTO.md sección 3 y sección 20 de arriba), "Lote N" es una
   **categoría de producto dentro del catálogo del acuerdo marco** ("Pedido
   nº 7 acuerdo marco de suministro de equipos de protección individual. Lote
   4.- guantes de protección..."), sin ninguna subdivisión en contratos
   concurrentes. Dos conceptos distintos, misma palabra.
 - **"Matriz"**: `6.24/28510.0094` etiqueta su expediente principal como "Nº
   EXPEDIENTE MATRIZ" — verificado en el documento real, sin relación alguna
-  con `codigo_matriz`/`matriz_expediente_id` (acuerdo marco, CLAUDE.md sección 2 y
+  con `codigo_matriz`/`matriz_expediente_id` (acuerdo marco, CONTEXTO.md sección 2 y
   sección 20 de arriba). Es solo cómo esta Propuesta LC.27 concreta llama a "el expediente que
   agrupa los lotes". **Guarda de código**: `app.extraccion.lotes` captura
   este valor como `codigo_principal_declarado` únicamente para
@@ -550,7 +550,7 @@ falta, se promueve.
 - **Cobertura parcial, sin estado nuevo ni columna booleana**: se compara
   `lotes_totales_declarados` contra los lotes que sí traen `baja_lote` o
   `importe_adjudicacion` (no basta con que el lote *exista* por nombre,
-  CLAUDE.md sección 5). Si faltan, se acumula en `motivo_revision` — el mecanismo ya
+  CONTEXTO.md sección 5). Si faltan, se acumula en `motivo_revision` — el mecanismo ya
   existente hace que eso nunca llegue a `completado`, sin tocar la máquina
   de estados.
 - **Lote conocido por nombre pero sin bloque de adjudicación**: se modela
@@ -614,7 +614,7 @@ inmediatamente antes de "% de baja", no basta la palabra "baja" sola).
 
 Reprocesados los 15 expedientes multi-lote reales (más `0139`) contra el
 stack real, uno a uno en procesos aislados (ver nota de rendimiento en
-CLAUDE.md, "Pendiente de resolver"):
+CONTEXTO.md, "Pendiente de resolver"):
 
 | | Antes de esta sesión | Después |
 |---|---:|---:|
@@ -648,7 +648,7 @@ autorreferencia del lote lo bloqueara a medias.
 ### Fixtures de regresión
 
 `engine/tests/fixtures/pdfs/`, cinco documentos reales completos añadidos
-(CLAUDE.md sección 13: pequeños, `6.23_28510.0066_ADJUDICACION_1.pdf`
+(CONTEXTO.md sección 13: pequeños, `6.23_28510.0066_ADJUDICACION_1.pdf`
 (153 KB), `6.24_28510.0117_ADJUDICACION_1.pdf` (146 KB),
 `6.25_28510.0028_ADJUDICACION_1.pdf` (144 KB),
 `6.24_28510.0094_ADJUDICACION_1.pdf` (207 KB, la trampa "Nº EXPEDIENTE
@@ -672,7 +672,7 @@ de más de 210 KB.
 
 Encargo del cliente tras ver el primer reproceso de esa sesión:
 `6.24/28510.0088` (el
-ejemplo central de CLAUDE.md sección 4) no puede estar en revisión, y el problema
+ejemplo central de CONTEXTO.md sección 4) no puede estar en revisión, y el problema
 de fondo es de diseño — sindicación no tiene la misma autoridad que el
 documento firmado.
 
@@ -709,7 +709,7 @@ de arriba). **Separarlo bien de verdad**
 (crear expedientes de lote reales, `.0113`/`.0143`, y dejar `.0088`/`.0129`
 como lo que son —el expediente principal, sin cuadro de precios propio— es
 un cambio de modelo de datos mayor, fuera de alcance de un arreglo urgente:
-queda anotado en CLAUDE.md, "Pendiente de resolver", para una sesión aparte.
+queda anotado en CONTEXTO.md, "Pendiente de resolver", para una sesión aparte.
 
 **Lo que sí se implementó, urgente, coherente con la propuesta del
 cliente:** el contraste con sindicación ya no cambia `estado` ni `error` de
@@ -729,13 +729,13 @@ mirados uno a uno (encargo: "si son celdas concretas, puede ser barato"):**
 - `6.24/28510.0117` (39 líneas) y `6.24/28510.0203` (1 línea): un guion
   suelto (`-`) en la celda de matrícula o de cantidad, la misma convención
   administrativa de "no aplica a esta fila" que ya se trata como hueco en
-  blanco en el resto del sistema (columnas fantasma, CLAUDE.md sección 8) —
+  blanco en el resto del sistema (columnas fantasma, CONTEXTO.md sección 8) —
   no un valor ilegible. **Barato, arreglado**: `app.catalogo._es_celda_vacia`
   trata un guion suelto como campo vacío para matrícula, cantidad y precio
   unitario, sin generar motivo de revisión. Los dos pasan a `completado`.
 - `6.25/28510.0028` (4 líneas): **no era barato.** Las celdas traen
   identificadores de glifo sin decodificar (`(cid:1005)...`, fuente sin tabla
-  ToUnicode) — es justo el caso de "fuera de alcance sin OCR" de CLAUDE.md
+  ToUnicode) — es justo el caso de "fuera de alcance sin OCR" de CONTEXTO.md
   sección 15, no una celda con un valor reconocible. Sigue en revisión, y es
   correcto que lo esté.
 
@@ -744,7 +744,7 @@ mirados uno a uno (encargo: "si son celdas concretas, puede ser barato"):**
 ## 28. Segunda familia de baja: modelo de precio indexado por pedido
      (sesión de trabajo pendiente real, 2026-09-05)
 
-Diseña y implementa una versión acotada de lo pendiente en CLAUDE.md sección
+Diseña y implementa una versión acotada de lo pendiente en CONTEXTO.md sección
 16 ("segunda familia de baja, sin diseñar todavía"), tras verificar los tres
 documentos reales de los tres expedientes conocidos (`6.23/28510.0018`,
 `6.23/28510.0102`, `6.25/28510.0016`) — los tres son Acuerdo Marco de
@@ -801,7 +801,7 @@ estructuralmente no existe todavía.
   expediente. Una llamada de regex, sin modelo — la frase es literal y fija
   en la plantilla, no varía de redacción entre los tres casos vistos.
 - **`app.extraccion.orquestador`**: en el camino de lote único implícito
-  (CLAUDE.md, "camino de siempre"), si se detecta el modelo indexado, se
+  (CONTEXTO.md, "camino de siempre"), si se detecta el modelo indexado, se
   salta `calcular_baja_efectiva` entero (esa función no aplica: no hay baja
   que cuadrar ni derivar) y el lote queda con `baja_lote = NULL`,
   `modelo_precio = indexado_por_pedido`, sin que el chequeo final de "no se
@@ -839,7 +839,7 @@ estructuralmente no existe todavía.
   los índices IPRI reales del grupo 351/241 en dos momentos concretos (fecha
   de publicación de la licitación, fecha de solicitud de cada pedido) — una
   fuente de datos externa, viva, fuera del alcance de una extracción de PDF
-  y de las invariantes de arquitectura (CLAUDE.md sección 9, "nada
+  y de las invariantes de arquitectura (CONTEXTO.md sección 9, "nada
   específico de un proveedor" no aplica aquí, pero sí el principio general:
   no se construye una integración nueva sin un caso de uso real que la
   necesite).

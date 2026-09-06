@@ -1,9 +1,9 @@
-"""Etapa 1 de la cascada de extracción (CLAUDE.md sección 5): clasificar la
+"""Etapa 1 de la cascada de extracción (CONTEXTO.md sección 5): clasificar la
 plantilla de un documento por marcadores de texto, determinista y sin
 modelo. Decide toda la ruta posterior — nada aquí se adivina por el nombre
 del fichero, solo por su contenido.
 
-Hallazgos de esta sesión sobre el corpus real que CLAUDE.md todavía no
+Hallazgos de esta sesión sobre el corpus real que CONTEXTO.md todavía no
 recoge:
 
 - El formulario PCSP no tiene una sola plantilla de título: "Anuncio de
@@ -26,7 +26,7 @@ recoge:
   como una sección interna suya (título de página 1: "PLIEGO DE
   PRESCRIPCIONES TÉCNICAS..."). Clasificarlo por contenido lo manda a
   `pliego`, no a `anejo` — y es correcto: localizar páginas candidatas
-  (CLAUDE.md sección 5, etapa 3) se hace por página dentro de cualquier tipo
+  (CONTEXTO.md sección 5, etapa 3) se hace por página dentro de cualquier tipo
   de documento, no depende de que el documento entero se llame "anejo".
 - Falso positivo de `pliego` (docs/analisis-corpus.md hallazgo 4, corpus
   completo, sesión de arreglos pequeños 2026-09-03): el título real de un
@@ -39,7 +39,7 @@ recoge:
   1662 respectivamente). La regla de pliego exige que el marcador aparezca
   cerca del principio de la página — una mención de pasada no cuenta.
 - `TipoDocumento.pliego` mezcla tres documentos reales distintos, distinguibles
-  solo por el marcador que los clasificó (CLAUDE.md sección 26, criterio del
+  solo por el marcador que los clasificó (CONTEXTO.md sección 26, criterio del
   cliente sobre pliegos, verificado contra el corpus real antes de aplicarlo):
   "documento de pliegos" (portada administrativa PCSP, 4-7 páginas, sin cuadro
   de precios) y "pliego de clausulas administrativas" (PCAP, decenas de
@@ -183,7 +183,7 @@ def clasificar(paginas: list[PaginaTexto]) -> ResultadoClasificacion:
 
 
 # Marcadores de `TipoDocumento.pliego` que, verificado contra el corpus real
-# (CLAUDE.md sección 26), nunca traen cuadro de precios: la portada
+# (CONTEXTO.md sección 26), nunca traen cuadro de precios: la portada
 # administrativa PCSP ("documento de pliegos") y el Pliego de Cláusulas
 # Administrativas Particulares ("pliego de clausulas administrativas"). El
 # tercer marcador posible, "pliego de prescripciones tecnicas", es justo el
@@ -192,7 +192,7 @@ _MARCADORES_PLIEGO_SIN_PRECIOS = frozenset({"documento de pliegos", "pliego de c
 
 
 def es_pliego_sin_precios(resultado: ResultadoClasificacion) -> bool:
-    """CLAUDE.md sección 26: criterio del cliente ("los pliegos no tienen
+    """CONTEXTO.md sección 26: criterio del cliente ("los pliegos no tienen
     contenido, se pueden ignorar") aplicado solo a la parte del corpus real
     que lo confirma. Etapas 3-4 de la cascada pueden saltarse enteras para
     estos documentos -- nunca para un `pliego de prescripciones tecnicas`."""

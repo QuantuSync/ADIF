@@ -1,6 +1,6 @@
 """Fabrica ZIPs de sindicación sintéticos (namespaces y forma reales,
 verificados contra el ZIP real de agosto 2024 en la sesión de mantenimiento
-automático — CLAUDE.md sección 24) para no depender de la red en los tests."""
+automático — CONTEXTO.md sección 24) para no depender de la red en los tests."""
 from __future__ import annotations
 
 import zipfile

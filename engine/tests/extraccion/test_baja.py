@@ -28,7 +28,7 @@ def test_baja_en_contrato():
 
 
 def test_propuesta_y_contrato_del_mismo_expediente_declaran_la_misma_baja():
-    # CLAUDE.md sección 17: propuesta y (aquí) contrato son el mismo hecho.
+    # CONTEXTO.md sección 17: propuesta y (aquí) contrato son el mismo hecho.
     baja_propuesta = extraer_baja_declarada(extraer_texto(fx.PROPUESTA_LC27_PRECIOS_UNITARIOS))
     baja_contrato = extraer_baja_declarada(extraer_texto(fx.CONTRATO_PRECIOS_UNITARIOS))
     assert baja_propuesta.baja == baja_contrato.baja
@@ -69,7 +69,7 @@ def test_elegir_baja_preferida_sin_candidatas():
     assert elegir_baja_preferida([]) is None
 
 
-# Sesión de expedientes sin publicar (CLAUDE.md sección 22): variantes de
+# Sesión de expedientes sin publicar (CONTEXTO.md sección 22): variantes de
 # etiqueta de campo, no de frase en prosa — no vienen del corpus de PDFs de
 # este proyecto, sino de otra fuente real. `_BAJA_RE` no las alcanza (no
 # tienen "del" ni "precios unitarios"), así que solo las resuelve el patrón
@@ -113,7 +113,7 @@ def test_baja_etiqueta_no_confunde_baja_laboral_con_baja_de_expediente():
     assert r is None
 
 
-# Sesión de identidad de lote (CLAUDE.md sección 27), verificado contra
+# Sesión de identidad de lote (CONTEXTO.md sección 27), verificado contra
 # 6.23/28510.0051_ADJUDICACION_1.pdf: "con un 25,31 % de baja a todos los
 # precios unitarios" -- el número precede a "% de baja" en vez de seguirlo,
 # la redacción exactamente opuesta a `_BAJA_RE`. Fixture sintético: el

@@ -218,11 +218,12 @@ Efecto buscado: **el sistema llama menos al modelo cuantos más expedientes proc
 Si te ves escribiendo un prompt que pide "extrae los datos de este documento",
 párate: has salido de la cascada.
 
-**Modelo por defecto: `claude-haiku-4-5`**, no un modelo grande — traducir
-una cabecera nunca vista es correspondencia de etiquetas, no una tarea que
-se beneficie de razonamiento. Verificado contra la API real: mismo
-comportamiento correcto que un modelo mayor, a una fracción del coste.
-Detalle y cifras en `docs/hallazgos-extraccion.md` secciones 17.2-17.3.
+**Modelo por defecto: un modelo pequeño del proveedor configurado
+(`MODEL_ID`)**, no un modelo grande — traducir una cabecera nunca vista es
+correspondencia de etiquetas, no una tarea que se beneficie de
+razonamiento. Verificado contra la API real: mismo comportamiento correcto
+que un modelo mayor, a una fracción del coste. Detalle y cifras en
+`docs/hallazgos-extraccion.md` secciones 17.2-17.3.
 
 ---
 
@@ -298,8 +299,9 @@ Estas reglas no se rompen ni siquiera "solo para la demo".
    a la API por HTTP. Si haces un atajo aquí, rompes el argumento de soberanía sin
    que se note hasta el día de la migración.
 2. **El acceso al modelo pasa siempre por una interfaz con implementaciones
-   intercambiables.** Hoy API de Anthropic, mañana modelo autoalojado. Misma firma,
-   mismo esquema de salida. Cambiar de una a otra es una variable de entorno.
+   intercambiables.** Hoy la API comercial de un proveedor, mañana un modelo
+   autoalojado. Misma firma, mismo esquema de salida. Cambiar de una a otra
+   es una variable de entorno.
 3. **El almacenamiento de documentos pasa por una interfaz mínima**
    (guardar, recuperar, listar). Hoy disco local, mañana almacenamiento de objetos.
 4. **Todo en contenedores desde el primer día.** Lo que corre en local es lo que
@@ -537,7 +539,7 @@ suficientes, no ahora.
   mismo expediente: la Propuesta de Adjudicación declara una baja del
   47,87%, el Contrato firmado declara 46,50% (sobre 1.485.000 €, no es
   redondeo). El sistema usa el 46,50% del Contrato — probablemente correcto
-  (es el acto más definitivo), pero CLAUDE.md no documenta explícitamente
+  (es el acto más definitivo), pero CONTEXTO.md no documenta explícitamente
   una prioridad Contrato-vs-Propuesta (solo Propuesta LC.27 vs. Resolución
   de Adjudicación, sección 17). Verificado en
   `docs/auditoria-previa.md` bloque 3, parte A.
@@ -592,7 +594,7 @@ suficientes, no ahora.
   motivos de exclusión a lenguaje llano (qué ha pasado / qué haría falta
   para resolverlo, tabla de tres columnas) e incluye una nota fija sobre
   por qué "Código del material" queda vacía en la mayoría de las filas
-  (vocabulario controlado todavía corto, CLAUDE.md sección 6 — no un dato
+  (vocabulario controlado todavía corto, CONTEXTO.md sección 6 — no un dato
   perdido). Detalle completo y números finales en
   `docs/excel-cliente-correccion.md` bloque 3.
 - **Tolerancia a reinicios de `dockerd`: arreglada en lo que sí está en

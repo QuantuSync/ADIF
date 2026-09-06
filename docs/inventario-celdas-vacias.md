@@ -1,6 +1,6 @@
 # Inventario de celdas vacías
 
-Sesión 2026-09-06, bloque 3 (CLAUDE.md): "ninguna celda vacía sin
+Sesión 2026-09-06, bloque 3 (CONTEXTO.md): "ninguna celda vacía sin
 explicación". Regla general aplicada: si un dato no aparece, el motivo es
 siempre uno de tres — **no aplica** a este tipo de línea, **no consta** en
 el documento de origen, o está **pendiente** de otro dato — nunca una
@@ -19,13 +19,13 @@ compartido, mismo CSS de siempre (`dato-vacio`, `dato-vacio--na`,
 
 | Pantalla | Columna | Motivo | Regla |
 |---|---|---|---|
-| Catálogo, Cola de revisión | Matrícula | no aplica / no consta | Partida alzada (CLAUDE.md sección 2) → no aplica. Cualquier otra línea sin matrícula → no consta (~1/3 del catálogo, cifra ya medida en sesiones previas). |
+| Catálogo, Cola de revisión | Matrícula | no aplica / no consta | Partida alzada (CONTEXTO.md sección 2) → no aplica. Cualquier otra línea sin matrícula → no consta (~1/3 del catálogo, cifra ya medida en sesiones previas). |
 | Catálogo, Cola de revisión | Código (precio) | no consta | El cuadro de precios no trae un identificador de línea distinto para esa fila. |
 | Catálogo | Lote | no consta | Huérfana: la tabla de origen no se pudo asociar a un único lote sin ambigüedad (`motivo_revision` trae el detalle exacto — banda vacía, varias cabeceras LOTE N, lote no declarado...). |
 | Catálogo | Cantidad | no consta | Ver sección siguiente — verificado contra el corpus real, no supuesto. |
 | Catálogo | Precio unitario | no consta | Ver sección siguiente — mismo tipo de verificación que cantidad, mismo hallazgo. |
 | Catálogo | Precio adjudicado | pendiente | El lote todavía no tiene baja declarada; se calcula solo en cuanto llegue. |
-| Expedientes | Matriz | no aplica / no consta | La mayoría de expedientes no son pedido derivado de acuerdo marco → no aplica. Si `matriz_conflicto` es cierto (Anuncio PCSP y Excel de códigos discrepan, CLAUDE.md sección 7) → no consta, conflicto sin resolver. |
+| Expedientes | Matriz | no aplica / no consta | La mayoría de expedientes no son pedido derivado de acuerdo marco → no aplica. Si `matriz_conflicto` es cierto (Anuncio PCSP y Excel de códigos discrepan, CONTEXTO.md sección 7) → no consta, conflicto sin resolver. |
 | Expedientes | Licitación / Adjudicación / Baja (expediente y por lote) | pendiente / no consta | Pendiente mientras el expediente sigue en curso (descargando/extrayendo/esperando matriz); no consta si ya terminó y el dato no apareció en los documentos. |
 | Expedientes | Adjudicatario (tabla de lotes) | no consta | El documento de adjudicación no lo declara para ese lote. |
 | Mantenimiento | Terminado | pendiente | El trabajo todavía está `pendiente` o `en_proceso`. |
@@ -37,7 +37,7 @@ Columnas que se dejan **sin** tratamiento especial, con su motivo anotado
 para que quede explícito por qué:
 - **Código interno / Código de proyecto** (Excel y detalle de línea en
   Catálogo): ya explicado en prosa en el panel de trazabilidad ("sin
-  cruzar con el Excel de códigos") y en el Excel (CLAUDE.md sección 7, "el
+  cruzar con el Excel de códigos") y en el Excel (CONTEXTO.md sección 7, "el
   sistema nunca inventa una matriz"); no se duplica como badge tabular
   porque esas dos columnas no aparecen como columnas de la tabla principal,
   solo en el detalle y en el Excel.
@@ -72,7 +72,7 @@ instalaciones de seguridad; `6.24/28510.0064`, 3 lotes, cables;
 — rate cards de un catálogo amplio de materiales de mantenimiento, con
 precio unitario fijado pero sin comprometer una cantidad hasta que se
 decide el pedido concreto. Es el mismo fenómeno que motiva la "segunda
-familia de baja" de CLAUDE.md sección 16 (indexado por pedido), pero más
+familia de baja" de CONTEXTO.md sección 16 (indexado por pedido), pero más
 amplio: no hace falta que el expediente sea literalmente un "Acuerdo
 Marco" con ese nombre para que su cuadro de precios funcione así.
 
@@ -163,7 +163,7 @@ en `docs/correccion-defectos-auditoria.md`):
 508 de las 719 originales) pasó de `completado` a `pendiente_revision`: al
 recuperar 1.073 precios de una vez, esas líneas quedan marcadas para
 confirmación humana (mismo criterio que cualquier otra recuperación
-automática de columna fantasma, CLAUDE.md sección 12 — "un sistema que sabe
+automática de columna fantasma, CONTEXTO.md sección 12 — "un sistema que sabe
 cuándo no sabe vale más que uno que acierta cinco de cinco"). Antes de este
 arreglo, ese expediente aparecía como `completado` con más de 500 precios
 unitarios silenciosamente ausentes; ahora aparece, con razón, como
@@ -179,5 +179,5 @@ del tono tipográfico de la web (que no tiene sentido en una celda de
 hoja de cálculo) — `(no aplica)` / `(no consta)`, aplicado a Matrícula,
 Código del material, Cantidad, Precio unitario y Lote. Precio adjudicado
 (motivo "pendiente") se deja vacío sin marcador: es una columna derivada
-que no sale en el Excel de todas formas (CLAUDE.md sección 7, columnas del
+que no sale en el Excel de todas formas (CONTEXTO.md sección 7, columnas del
 entregable). Cubierto en `tests/test_exportacion.py`.

@@ -1,5 +1,5 @@
 """Etapa 3.5: a qué lote pertenece cada tabla de precios localizada, cuando
-el expediente declara varios (CLAUDE.md, encargo de esta sesión, punto 3 —
+el expediente declara varios (CONTEXTO.md, encargo de esta sesión, punto 3 —
 "es la parte difícil"). Aprobado explícitamente por el usuario: se decide
 por la **posición de la tabla en la página** (la caja delimitadora que ya da
 `pdfplumber`), nunca por proximidad textual ni por adivinación.
@@ -16,7 +16,7 @@ si es la primera) hasta su propio techo. Si en esa franja —y solo ahí—
 aparece una única cabecera "LOTE N", esa tabla es de ese lote: es la
 cabecera de sección que la introduce, con certeza estructural, no una
 suposición. Si aparecen cero o varias, la tabla es ambigua y no se le asigna
-lote por defecto ni por cercanía: sus líneas quedan huérfanas (CLAUDE.md,
+lote por defecto ni por cercanía: sus líneas quedan huérfanas (CONTEXTO.md,
 `app.models.LineaCatalogo.lote_id` admite NULL para esto) y van a la cola de
 revisión.
 

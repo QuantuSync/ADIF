@@ -1,14 +1,14 @@
 # Hallazgos de extracción
 
-Registro histórico movido desde `CLAUDE.md` (split de sesión 2026-09-05).
-Ver `CLAUDE.md` para el contexto vivo del proyecto.
+Registro histórico movido desde `CONTEXTO.md` (split de sesión 2026-09-05).
+Ver `CONTEXTO.md` para el contexto vivo del proyecto.
 
 ---
 
 ## 17.2 Validación del mapeo de cabecera contra la API real (sesión 2026-09-02)
 
-Primera vez que la etapa 5 de la cascada (CLAUDE.md sección 6) se ejercita contra la
-API de Anthropic real, no contra un doble de test. Caso disparador: el
+Primera vez que la etapa 5 de la cascada (CONTEXTO.md sección 6) se ejercita contra la
+API real del proveedor de modelo, no contra un doble de test. Caso disparador: el
 `ANEJO_3.pdf` del expediente `6.24/28510.0008`, que fallaba por cabecera no
 mapeable. Verificado en contenedor Linux (worker real, Postgres real), no en
 un script suelto.
@@ -25,32 +25,33 @@ un script suelto.
   comprobado por separado: la caché de firma en `cache_mapeo_cabecera`
   (borrando el fichero de disco) y la caché de disco de
   `CachedModelProvider` (borrando la fila de `cache_mapeo_cabecera`) — cada
-  una por sí sola basta para que no haya HTTP real a `api.anthropic.com`.
+  una por sí sola basta para que no haya HTTP real contra la API del
+  proveedor.
 - **Coste medido, tres cabeceras reales:** 1397 in / 56 out, 1323 in / 56
   out (`ANEJO_3.pdf`, cabeceras corruptas con `Ó`→`�`), y 1066 in / 535 out
   (`6.25/28510.0027_ANEJO_1.pdf`, cabecera con dos columnas fantasma). El
   salto de tokens de salida en el tercer caso es razonamiento del modelo
-  (`claude-opus-5` piensa por defecto — no se desactiva `thinking` en
-  `AnthropicModelProvider`), no JSON más largo: el esquema de salida es el
-  mismo en los tres casos. `AnthropicModelProvider.completar` ahora registra
-  el prompt y el coste en tokens de cada llamada real vía `logging`
-  (nunca en un acierto de `CachedModelProvider`).
+  (el modelo mayor probado en ese momento piensa por defecto — no se
+  desactiva `thinking` en `APIModelProvider`), no JSON más largo: el
+  esquema de salida es el mismo en los tres casos. `APIModelProvider.
+  completar` ahora registra el prompt y el coste en tokens de cada llamada
+  real vía `logging` (nunca en un acierto de `CachedModelProvider`).
 - **Nuevo tipo de clave de API: "ligada a identidad".** Una clave creada en
-  la consola bajo un usuario (no una clave clásica de workspace) exige la
-  cabecera `anthropic-workspace-id` en cada petición a `/v1/messages` — sin
-  ella, 400 `invalid_request_error`. Se añadió `ANTHROPIC_WORKSPACE_ID`
+  la consola bajo un usuario (no una clave clásica de workspace) exige una
+  cabecera propia del proveedor en cada petición de mensajes — sin ella,
+  400 `invalid_request_error`. Se añadió `MODEL_WORKSPACE_ID`
   (`app/config.py`, `.env`, `docker-compose.yml`) y se pasa por
-  `default_headers` **dentro de `AnthropicModelProvider`**, nunca en la
+  `default_headers` **dentro de `APIModelProvider`**, nunca en la
   interfaz `ModelProvider`: es un detalle de esta implementación concreta,
   no existe para un futuro modelo autoalojado.
 - **Confirmado: sin clave y con fallo de red, el expediente cae en
   `pendiente_revision` con motivo claro, nunca rompe el trabajo entero** —
-  ambos casos probados contra el worker real (sin `ANTHROPIC_API_KEY`, y con
+  ambos casos probados contra el worker real (sin `MODEL_API_KEY`, y con
   el cliente HTTP apuntado a un host inalcanzable).
 - **Bug real encontrado y corregido: `guardar_lineas_catalogo` podía violar
   la constraint `UNIQUE` de golpe cuando el mismo `clave_linea` se repetía
   más de una vez dentro de un único lote de líneas** (el mismo cuadro de
-  precios reaparece varias veces en un documento, CLAUDE.md sección 3). Causa: `app/db.py`
+  precios reaparece varias veces en un documento, CONTEXTO.md sección 3). Causa: `app/db.py`
   configura `SessionLocal` con `autoflush=False` a propósito, así que el
   `db.query(...)` de comprobación de cada fila nunca veía las filas ya
   añadidas (`db.add()`) en la misma pasada del bucle — el `INSERT` en bloque
@@ -87,21 +88,21 @@ un script suelto.
 
 ---
 
-## 17.3 Migración a Haiku para el mapeo de cabecera, y coste por expediente (sesión 2026-09-02)
+## 17.3 Migración a un modelo pequeño para el mapeo de cabecera, y coste por expediente (sesión 2026-09-02)
 
-Disparado por el propio dato de la sección 17.2: `claude-opus-5` devolvía
-hasta 535 tokens de salida para traducir una cabecera a un diccionario de 6
-claves — razonamiento (`thinking`) que la tarea no necesita. Traducir una
-cabecera nunca vista es correspondencia de etiquetas, no una tarea que se
-beneficie de un modelo grande.
+Disparado por el propio dato de la sección 17.2: el modelo mayor probado
+devolvía hasta 535 tokens de salida para traducir una cabecera a un
+diccionario de 6 claves — razonamiento (`thinking`) que la tarea no
+necesita. Traducir una cabecera nunca vista es correspondencia de
+etiquetas, no una tarea que se beneficie de un modelo grande.
 
-- **Modelo por defecto de `AnthropicModelProvider` cambiado a
-  `claude-haiku-4-5`** (`app/interfaces/model_provider.py`,
-  `app/config.py`), configurable por `ANTHROPIC_MODEL` igual que antes — el
+- **Modelo por defecto de `APIModelProvider` cambiado a un modelo pequeño
+  del mismo proveedor** (`app/interfaces/model_provider.py`,
+  `app/config.py`), configurable por `MODEL_ID` igual que antes — el
   worker ya leía esa variable (`app/worker.py`), así que el cambio de modelo
-  es solo el valor por defecto. `.env` y `.env.example` actualizados a
-  `claude-haiku-4-5`.
-- **Verificado contra la API real de Anthropic** (no un doble de test),
+  es solo el valor por defecto. `.env` y `.env.example` actualizados al
+  identificador del modelo pequeño.
+- **Verificado contra la API real del proveedor** (no un doble de test),
   con las cachés vacías a propósito: sesión de base de datos en memoria
   recién creada (sin filas en `cache_mapeo_cabecera`) y sin pasar por
   `CachedModelProvider`, para forzar una llamada real en cada cabecera no
@@ -112,9 +113,10 @@ beneficie de un modelo grande.
   fantasma). Entre los dos aparecieron **5 firmas de cabecera distintas**
   (2 y 3 respectivamente — más que las 3 de la sesión 17.2 porque esta vez
   se recorrió el documento entero con la cascada real, no una cabecera
-  aislada elegida a mano) y las 5 forzaron una llamada real a Haiku.
+  aislada elegida a mano) y las 5 forzaron una llamada real al modelo
+  pequeño.
 - **Los 5 mapeos salen idénticos en estructura a los que ya había validado
-  Opus**, verificado línea a línea:
+  el modelo mayor**, verificado línea a línea:
   - Las dos variantes de `ANEJO_3.pdf` (tabla de características técnicas
     sin precio ni cantidad) devuelven `cantidad: null` y
     `precio_unitario: null` en vez de inventar una columna — el mismo
@@ -126,53 +128,54 @@ beneficie de un modelo grande.
     tabla de balasto no trae matrícula, no es un fallo del mapeo).
   - **Ninguna cabecera falló.** No hizo falta volver a un modelo mayor para
     ningún caso — la salvedad que pedía la tarea no aplicó.
-- **Coste medido, Haiku, 5 llamadas reales:** de 829 a 1091 tokens de
-  entrada, 48-49 de salida en las cinco (media 926 in / 49 out) — nunca los
-  535 de salida que se vio con Opus en un caso. A precio de Haiku
-  ($1,00 / $5,00 por millón de tokens entrada/salida), cada llamada cuesta
-  **≈ 0,0012 $** (≈ 0,0011 €). Las tres llamadas de Opus de la sesión 17.2
-  (1397/56, 1323/56, 1066/535 tokens) costaban, al precio de Opus
-  ($5,00 / $25,00 por millón), entre 0,0080 $ y 0,0187 $ cada una, media
-  ≈ 0,0117 $. **Haiku sale de la cascada ≈ 10 veces más barato por llamada
-  que Opus para esta tarea concreta.** (Conversión USD→EUR indicativa a
-  ≈0,92 €/$; la facturación real de Anthropic es en dólares.)
+- **Coste medido, modelo pequeño, 5 llamadas reales:** de 829 a 1091 tokens
+  de entrada, 48-49 de salida en las cinco (media 926 in / 49 out) — nunca
+  los 535 de salida que se vio con el modelo mayor en un caso. Al precio
+  del modelo pequeño ($1,00 / $5,00 por millón de tokens entrada/salida),
+  cada llamada cuesta **≈ 0,0012 $** (≈ 0,0011 €). Las tres llamadas del
+  modelo mayor de la sesión 17.2 (1397/56, 1323/56, 1066/535 tokens)
+  costaban, a su precio ($5,00 / $25,00 por millón), entre 0,0080 $ y
+  0,0187 $ cada una, media ≈ 0,0117 $. **El modelo pequeño sale de la
+  cascada ≈ 10 veces más barato por llamada que el modelo mayor para esta
+  tarea concreta.** (Conversión USD→EUR indicativa a ≈0,92 €/$; la
+  facturación real del proveedor es en dólares.)
 - **Caché de desarrollo (`engine/.cache_modelo_dev/`) vaciada** como parte
   de esta verificación: su clave es un hash de `(prompt, esquema)`, no
   incluye el modelo, así que un acierto de caché anterior a este cambio
-  habría seguido sirviéndose sin pasar nunca por Haiku. Vacía no rompe
-  nada — se repuebla sola en el primer uso real de cada firma.
+  habría seguido sirviéndose sin pasar nunca por el modelo pequeño. Vacía
+  no rompe nada — se repuebla sola en el primer uso real de cada firma.
 
 ### Coste estimado de procesar un expediente completo
 
-Con Haiku como modelo por defecto y el precio de arriba. CLAUDE.md sección 6 fija
+Con el modelo pequeño por defecto y el precio de arriba. CONTEXTO.md sección 6 fija
 la regla que hace esta cuenta favorable: una llamada por firma de cabecera
 nunca vista, nunca por documento ni por fila.
 
 - **Peor caso (expediente nuevo, cachés en frío — el primer expediente que
   ve una plantilla, o el primero de la demo).** Un expediente típico trae 1
   a 3 documentos con cuadro de precios (anejo, y a veces un segundo anejo de
-  características técnicas que repite el mismo cuadro, CLAUDE.md sección 3). Medido
+  características técnicas que repite el mismo cuadro, CONTEXTO.md sección 3). Medido
   en este mismo expediente (`6.24/28510.0008`, con `ANEJO_1` y `ANEJO_3`):
   hasta 2-3 firmas de cabecera distintas por documento por las columnas
   fantasma y la corrupción de extracción. Cota razonable: **hasta 6-8
   llamadas al modelo por expediente** (mapeo de cabecera), más 1 llamada
-  adicional por documento si trae filas huérfanas que agrupar (CLAUDE.md sección 6;
+  adicional por documento si trae filas huérfanas que agrupar (CONTEXTO.md sección 6;
   camino no ejercitado todavía contra ningún fixture real, así que esa cota
   es sin verificar) y, rara vez, 1 llamada de `Código del material` si no
   casa nada del vocabulario controlado. **Techo defendible: ≈ 8-10 llamadas,
   ≈ 0,010-0,012 $ (≈ 0,010-0,011 €) por expediente** — sigue siendo una
   fracción de céntimo.
 - **Régimen normal, caché caliente (a partir de los primeros expedientes
-  procesados).** CLAUDE.md sección 3 mide que las cabeceras se repiten mucho —
+  procesados).** CONTEXTO.md sección 3 mide que las cabeceras se repiten mucho —
   "una aparece 20 veces, otra 6, otra 4" sobre solo 7 documentos — así que
   en cuanto el catálogo de firmas se estabiliza, un expediente nuevo casi
   siempre trae solo cabeceras ya vistas. **0 llamadas al modelo en el caso
   típico**, y 1 llamada (≈ 0,0012 $) en el expediente ocasional que
   introduce una variante de cabecera realmente nueva.
 - **Efecto agregado.** Sobre un lote de, por ejemplo, 45 expedientes (el
-  corpus de la sección 3 de CLAUDE.md), el coste de mapeo de cabecera no pasa de un
+  corpus de la sección 3 de CONTEXTO.md), el coste de mapeo de cabecera no pasa de un
   puñado de céntimos en total, aunque cada uno se procesara con la caché en
-  frío — y baja hacia cero según crece el catálogo, por diseño (CLAUDE.md sección 6:
+  frío — y baja hacia cero según crece el catálogo, por diseño (CONTEXTO.md sección 6:
   "el sistema llama menos al modelo cuantos más expedientes procesa"). El
   coste de esta etapa es irrelevante frente a cualquier otro coste del
   proyecto (cómputo, almacenamiento, scraping); no es la partida que hay
@@ -192,7 +195,7 @@ exportación a Excel y cruce con el Excel de códigos.
   no como etapa de la cascada** (`app/extraccion/cruce_codigos.py`): carga
   `Expedientes.xlsx` una vez por proceso (cacheado en memoria por ruta +
   fecha de modificación), indexa por `Nº Expediente` y por `MATRIZ`
-  normalizados (CLAUDE.md sección 8: recorta espacios sobrantes antes de
+  normalizados (CONTEXTO.md sección 8: recorta espacios sobrantes antes de
   comparar), y busca primero por `codigo_expediente`, luego por
   `codigo_matriz` si el primero no cruza. Se intenta **una sola vez por
   expediente** (`expedientes.codigos_cruzados` pasa de `NULL` a
@@ -230,7 +233,7 @@ exportación a Excel y cruce con el Excel de códigos.
   hipotético, dado que `docs/hallazgos-scraping.md` sección 17 documenta que a veces solo existe uno
   de los dos documentos de adjudicación.
 - **`Código del material`: solo la parte determinista implementada
-  (CLAUDE.md sección 6), sin ruta a modelo todavía**
+  (CONTEXTO.md sección 6), sin ruta a modelo todavía**
   (`app/extraccion/codigo_material.py`). Vocabulario inicial: los cuatro
   ejemplos literales de la sección 6 (`BRIDA`, `PLACA`, `JUNTA`,
   `SUPLEMENTO`) más los sustantivos que sí aparecen en el corpus de prueba
@@ -272,7 +275,7 @@ exportación a Excel y cruce con el Excel de códigos.
   ELÉCTRICO.`, `GUANTE`, precios reales). Las tres páginas web
   (`/`, `/catalogo`, `/revision`) responden 200 y renderizan contenido real
   contra la API en contenedor.
-- **Pendiente de la sección 16 de CLAUDE.md, sin resolver todavía:** si `Precio unitario`
+- **Pendiente de la sección 16 de CONTEXTO.md, sin resolver todavía:** si `Precio unitario`
   en el Excel de salida debe ser el licitado o el adjudicado. Esta sesión
   usa el licitado (`precio_unitario` tal cual, sin aplicar la baja) porque
   es la lectura literal de la tabla de la sección 7 ("Precio unitario |
@@ -330,7 +333,7 @@ en el esquema desde el esqueleto pero no se usaba.
   ese caso concreto: no se implementa.
 - **`baja_variable_por_lote`** (nueva columna en `expedientes`, migración
   0007): cuando 2+ lotes tienen baja distinta entre sí, `baja_global` queda
-  en `None` a propósito (CLAUDE.md sección 4: nunca se inventa una media) y
+  en `None` a propósito (CONTEXTO.md sección 4: nunca se inventa una media) y
   este booleano se lo dice explícitamente a la web — nunca se deja un campo
   vacío sin explicar, que parecería un fallo de extracción.
 - **Medido sobre el corpus completo de 45 expedientes** (script puntual, no
@@ -338,12 +341,12 @@ en el esquema desde el esqueleto pero no se usaba.
   `6.25/28510.0027`) y **ninguna Propuesta LC.27 del corpus es multi-lote**
   — el patrón "En el LOTE N" de `lotes.py` se aplica también a LC.27 por si
   aparece alguna vez, pero **sigue sin verificar contra un documento real**
-  (CLAUDE.md sección 16): si aparece una LC.27 multi-lote con redacción distinta, ese
+  (CONTEXTO.md sección 16): si aparece una LC.27 multi-lote con redacción distinta, ese
   módulo es el sitio a revisar.
 - **Bug real encontrado y corregido al verificar contra el stack real:**
   varias tablas ambiguas del mismo documento (LOTE 2, 4, 5 y 6 del Pliego,
   ninguno declarado por la Resolución) comparten `codigo_precio` — el mismo
-  cuadro de precios se repite por lote (CLAUDE.md sección 3). Sin lote que las
+  cuadro de precios se repite por lote (CONTEXTO.md sección 3). Sin lote que las
   separase, `_combinar_por_clave` las fundía entre sí por `clave_linea` a
   secas (las 28 líneas huérfanas del expediente real colapsaban a 6 filas,
   perdiendo datos reales de lotes distintos). Arreglado en
@@ -372,7 +375,7 @@ Atacados en el orden que pedía el encargo — el que más expedientes
 desbloquea primero.
 
 **a) Otros formatos de código de precio (`app/extraccion/tabla.py`).**
-`_CODIGO_PRECIO_RE` solo reconocía `P-NNN` (con guion ASCII o Unicode, CLAUDE.md sección
+`_CODIGO_PRECIO_RE` solo reconocía `P-NNN` (con guion ASCII o Unicode, CONTEXTO.md sección
 3). Verificado contra el corpus real completo antes
 de tocar el regex — no adivinado —, los formatos reales que aparecen son:
 
@@ -382,7 +385,7 @@ de tocar el regex — no adivinado —, los formatos reales que aparecen son:
 | `P` + dígitos, dos cifras | `P01`, `P02` | `6.24/28510.0187` |
 | `PN` + dígitos | `PN001`..`PN018` | `6.24/28510.0180` |
 | `PA-` + dígitos (partida alzada numerada) | `PA-01`, `PA-02` | `6.24/28510.0094` |
-| `L` + dígitos + `-T` + dígitos (lote+tipo, no es semánticamente "código de precio" per CLAUDE.md sección 3, pero identifica la fila igual) | `L01-T01`..`L03-T19` | `6.24/28510.0094` |
+| `L` + dígitos + `-T` + dígitos (lote+tipo, no es semánticamente "código de precio" per CONTEXTO.md sección 3, pero identifica la fila igual) | `L01-T01`..`L03-T19` | `6.24/28510.0094` |
 | Sin ninguna columna de código: la matrícula de 9 dígitos identifica la fila | `642910100` | `6.20/28510.0136` |
 
 `_CODIGO_PRECIO_RE` pasa a `^(?:P-?\d+|PN\d+|PA-\d+|L\d+-T\d+)$`, y
@@ -402,7 +405,7 @@ donde el modelo sí acierta porque ve filas de ejemplo, no solo la cabecera.
 **No se necesitaba de todas formas**: el bloqueo real de los 5 expedientes de
 esta sesión con esta cabecera estaba en la etapa 4 (row de datos, arriba),
 no en la etapa 5 — una vez la tabla se localiza, cae al modelo como ya
-estaba diseñado (CLAUDE.md sección 6), se cachea, y no hace falta el atajo
+estaba diseñado (CONTEXTO.md sección 6), se cachea, y no hace falta el atajo
 determinista. `tests/extraccion/test_mapeo_cabecera.py` guarda este caso
 explícitamente para que no se repita el intento.
 
@@ -443,7 +446,7 @@ para no necesitar esa misma ancla. Probado con fixtures sintéticos de texto
 texto ya extraído), incluida una prueba explícita de que la variante laboral
 NO dispara el patrón.
 
-**d) Documento escaneado (`app/extraccion/texto.py`).** Ver CLAUDE.md secciones 3 y 15
+**d) Documento escaneado (`app/extraccion/texto.py`).** Ver CONTEXTO.md secciones 3 y 15
 de este documento. `es_documento_escaneado` (umbral de caracteres extraídos,
 no cero exacto) marca `6.20/28510.0136_ANEJO_2.pdf` aparte, con un motivo
 ("documento escaneado, sin capa de texto") distinto de "no se extrajo
@@ -454,7 +457,7 @@ mensaje genérico. El documento se salta en la etapa 4 (nunca se abre con
 ### Fixtures de regresión
 
 `engine/tests/fixtures/pdfs/`, seis recortes nuevos de documentos reales
-(nunca el documento completo — CLAUDE.md sección 13):
+(nunca el documento completo — CONTEXTO.md sección 13):
 
 - `6.24_28510.0047_ANEJO_1_p18.pdf`, `6.24_28510.0187_ANEJO_1_p11.pdf`,
   `6.24_28510.0180_ANEJO_1_p18.pdf`: una página cada uno, los tres formatos
@@ -482,7 +485,7 @@ nuevo de más de 2 páginas.
 
 Encargo inicial: descartar en la extracción cualquier fila sin descripción
 **y** sin precio (variante silenciosa del problema ya resuelto con los pies
-de tabla, CLAUDE.md sección 3), contar cuántas había en base de datos y
+de tabla, CONTEXTO.md sección 3), contar cuántas había en base de datos y
 limpiarlas. **Contadas 21** antes de tocar nada
 (`descripcion` vacía y `precio_unitario` nulo).
 
@@ -583,7 +586,7 @@ La auditoría pidió investigar la causa antes de limpiar. Verificado con
 ya fusionaba correctamente repeticiones con la misma `clave_linea`) sino que
 la misma pieza física recibe una `clave_linea` **distinta** según de qué
 tabla del documento viene, porque `calcular_clave_linea` prioriza
-`codigo_precio > matrícula` (CLAUDE.md sección 7) y no todas las tablas que
+`codigo_precio > matrícula` (CONTEXTO.md sección 7) y no todas las tablas que
 repiten un material traen `codigo_precio` propio. Dos mecanismos reales,
 verificados por separado:
 
@@ -632,7 +635,7 @@ fundirse, la clave final sube siempre a la canónica
 primero.
 
 **Deliberadamente NO se aplica a líneas huérfanas** (`lote_id is None`,
-`permitir_fusion_material=False`): CLAUDE.md sección 27 y
+`permitir_fusion_material=False`): CONTEXTO.md sección 27 y
 `app/extraccion/pipeline_anejo.py` ya sufijan la `clave_linea` de las
 huérfanas con su página y posición precisamente para que dos tablas
 ambiguas de **lotes distintos** que comparten `codigo_precio` no se fundan
@@ -771,7 +774,7 @@ real — recién completado, o en curso ahora mismo — y hunde al fondo, sin
 necesitar una regla aparte, lo que nunca se ha podido tocar
 (`esperando_matriz`/`sin_publicar`). "Completados primero" habría enterrado
 un expediente `extrayendo` ahora mismo detrás de uno `completado` hace
-semanas, peor para una pantalla de seguimiento en vivo (CLAUDE.md sección
+semanas, peor para una pantalla de seguimiento en vivo (CONTEXTO.md sección
 11.3). Verificado en la web: los 5 expedientes reprocesados en el punto 1
 de esta sesión (los tocados más recientemente del corpus) aparecen en las
 primeras filas.
@@ -780,7 +783,7 @@ primeras filas.
 
 `/home/lucas/adif` (visto por primera vez en la sesión de pulido a 1280px,
 ver `docs/decisiones.md`, sección 28) no era un repositorio git (`fatal: not a git repository`, sin
-`.git`), solo el esqueleto de la sección 14 de CLAUDE.md (56 ficheros, sin
+`.git`), solo el esqueleto de la sección 14 de CONTEXTO.md (56 ficheros, sin
 `catalogo/`/`revision/`/`mantenimiento/`) — comprobado antes de borrar que
 no había nada que rescatar. Borrado con `rm -rf`. El stack real sigue
 construyéndose desde `/mnt/c/dev/ADIF` sin cambios.
@@ -809,7 +812,7 @@ desbordamiento horizontal en ninguna de las dos páginas
 Durante el reproceso de verificación de la sección 30.4, el ciclo de
 mantenimiento forzado (`trabajos_cola.id = 539`) tardó 30,8 min en vez de
 los ~22 min de la auditoría previa — a primera vista, la reaparición del
-episodio de CLAUDE.md ("problema de rendimiento... probablemente
+episodio de CONTEXTO.md ("problema de rendimiento... probablemente
 inestabilidad de `dockerd`"). Encargo explícito: capturar datos del proceso
 real **sin interrumpirlo**, para decidir si hace falta arreglarlo antes de
 la demo. Nada de lo siguiente cambia comportamiento del sistema — es
@@ -831,7 +834,7 @@ DOS VECES MÁS, ambas con `sindicacion_desactivada: true` (sin red, sin
 descargas): **1.464,5 s y 1.464,1 s** — 24,4 min, prácticamente idénticos
 entre sí, para 42 expedientes (más que los 38 originales, porque ya
 incluyen los 4 nuevos ya descargados). El "problema de rendimiento" del job
-539 no era una reproducción del episodio de CLAUDE.md — era trabajo de red
+539 no era una reproducción del episodio de CONTEXTO.md — era trabajo de red
 real, esperado, simplemente no medido nunca antes en la misma tanda que la
 extracción.
 
@@ -900,7 +903,7 @@ duerme un proceso bloqueado) fue `0` en las 24 muestras activas —
 únicamente pasó a `hrtimer_nanosleep` en la última muestra, tras el
 `completado` del job, que es el `sleep(3)` normal del bucle de sondeo del
 worker ocioso. **Conclusión inequívoca: el proceso estuvo activo en CPU
-todo el tiempo, nunca bloqueado.** Coincide con CLAUDE.md sección 16 ("activo
+todo el tiempo, nunca bloqueado.** Coincide con CONTEXTO.md sección 16 ("activo
 en CPU todo el tiempo" era compatible con inestabilidad de `dockerd`) pero
 con una lectura distinta: aquí no hubo ningún bloqueo que la inestabilidad
 de `dockerd` pudiera explicar — fue trabajo de CPU real y contabilizado
@@ -925,14 +928,14 @@ que una sesión futura no la malinterprete de nuevo.
 ### Conclusión y recomendación
 
 **No hay nada que arreglar.** El episodio que pareció una reproducción del
-problema de rendimiento de CLAUDE.md era, verificado con datos en caliente,
+problema de rendimiento de CONTEXTO.md era, verificado con datos en caliente,
 descubrimiento y descarga real de expedientes nuevos — trabajo esperado que
 nunca se había medido junto con la extracción en la misma tanda. Dos
 reprocesos limpios subsiguientes (sin descargas) fueron idénticos entre sí
 en duración total (24,4 min ambos) y en el perfil por expediente (mismo
 expediente más lento, mismas duraciones dentro de un pequeño margen), sin
 ningún indicio de fuga de memoria, descriptores crecientes, bloqueo o
-consulta atascada. La entrada de CLAUDE.md sección 16 sobre este tema se
+consulta atascada. La entrada de CONTEXTO.md sección 16 sobre este tema se
 actualiza para reflejar que el episodio queda explicado, no que "no se
 reprodujo" — es una conclusión más fuerte que la de la auditoría previa,
 alcanzada por tener, esta vez, un episodio real que diagnosticar en vivo en
@@ -995,7 +998,7 @@ motivo genérico de siempre.
      para OCR — y un defecto real corregido de paso
 
 **Coste/beneficio de montar OCR, sin implementarlo**: `ANEJO_2` (100
-páginas, único documento sin capa de texto de los 187 del corpus, CLAUDE.md
+páginas, único documento sin capa de texto de los 187 del corpus, CONTEXTO.md
 sección 3) se inspeccionó visualmente, página a página vía
 `pdfplumber.to_image()` sobre 11 páginas repartidas por todo el documento
 (1, 2, 5, 50, 60, 70, 80, 90, 95, 99, 100). Las 11 son Pliego de Cláusulas
@@ -1003,7 +1006,7 @@ Administrativas Particulares (cuadro de características, penalidades,
 solvencia) más anejos de formularios en blanco para que el licitador los
 rellene (Anejo Nº 5 "Relación de suministros similares realizados", anejo
 de requisitos de seguridad/RGPD) — la misma familia de documento que
-CLAUDE.md sección 26 ya verificó sin cuadro de precios en 93 páginas reales
+CONTEXTO.md sección 26 ya verificó sin cuadro de precios en 93 páginas reales
 de otro expediente (`6.23/28510.0018_ANEJO_2.pdf`, el PCAP). El cuadro de
 precios real de este expediente ya sale de `6.20_28510.0136_ANEJO_3.pdf`
 (con capa de texto, 40 líneas de catálogo). **Beneficio estimado de OCR: 0
@@ -1024,7 +1027,7 @@ aportaba nada. El chequeo se movió al final de
 (cobertura de lotes, baja) ya se hayan resuelto: si en ese punto no hay
 ningún otro motivo, el documento escaneado se registra como aviso
 informativo (`aviso_documento_escaneado` en el resultado del trabajo, mismo
-espíritu que `aviso_sindicacion`, CLAUDE.md sección 12) sin bloquear
+espíritu que `aviso_sindicacion`, CONTEXTO.md sección 12) sin bloquear
 `completado`; si sí hay otro motivo, se sigue añadiendo como antes, como
 posible causa a mano. Test de regresión:
 `test_documento_escaneado_no_bloquea_si_el_resto_ya_resolvio_el_expediente`
@@ -1039,7 +1042,7 @@ revisión por 41 líneas con `codigo_precio` "con formato no reconocido":
 valores `'1'`, `'2'`, ..., `'41'`, sin ningún prefijo de letra. Verificado
 contra el PDF real (`ANEJO_1`, página 10): la cabecera de la tabla dice
 literalmente **"PARTIDA"**, no "Código de precio" — una quinta variante
-real del identificador de línea de CLAUDE.md sección 2, un número
+real del identificador de línea de CONTEXTO.md sección 2, un número
 secuencial sin prefijo en vez de "P-001". Verificado sin colisiones: las 41
 líneas tienen valores únicos 1..41 dentro del lote.
 

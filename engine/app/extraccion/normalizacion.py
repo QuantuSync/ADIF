@@ -1,4 +1,4 @@
-"""Normalización de números en formato español. CLAUDE.md sección 8: parsear
+"""Normalización de números en formato español. CONTEXTO.md sección 8: parsear
 "1.234.567,89" con `float()` da 1.234 o revienta; hace falta un normalizador
 propio. `Decimal`, nunca `float` — los errores de coma flotante en euros y
 porcentajes salen en la tercera cifra."""
@@ -16,7 +16,7 @@ _NO_DIGITO_NI_SEPARADOR = re.compile(r"[^\d,.\-]")
 # guion ASCII U+002D que el resto del sistema da por hecho ("P-001"). Punto
 # único de normalización: cualquier código que se compare o se guarde pasa
 # por aquí, para que un patrón nuevo que espere un guion no repita el mismo
-# fallo (CLAUDE.md sección 8, "Normalización — errores que van a aparecer").
+# fallo (CONTEXTO.md sección 8, "Normalización — errores que van a aparecer").
 _TRADUCCION_GUIONES = str.maketrans({c: "-" for c in "‐‑‒–—"})
 
 
@@ -84,14 +84,14 @@ def parsear_importe_es(cadena: str) -> Decimal:
 
 def parsear_porcentaje_es(cadena: str) -> Decimal:
     """Devuelve la baja como fracción: "54,00 %" -> Decimal("0.5400"), para
-    que `precio_adjudicado = precio_licitado * (1 - baja)` (CLAUDE.md sección
+    que `precio_adjudicado = precio_licitado * (1 - baja)` (CONTEXTO.md sección
     4) se pueda aplicar directamente sin volver a dividir entre 100."""
     return parsear_numero_es(cadena) / Decimal("100")
 
 
 def limpiar_codigo_celda(valor: str | None) -> str | None:
     """Códigos de precio y matrículas de celda de tabla, sin ningún espacio
-    ni salto de línea: "P-\\n001" -> "P-001" (CLAUDE.md sección 8, columnas
+    ni salto de línea: "P-\\n001" -> "P-001" (CONTEXTO.md sección 8, columnas
     de tabla envueltas por el ancho de columna, no por el contenido). También
     normaliza el guion (ver `normalizar_guiones`), para que el mismo código
     "P‐001"/"P-001" quede siempre igual en el catálogo, sin importar qué

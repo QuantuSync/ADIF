@@ -1,6 +1,6 @@
 """expedientes: columnas de frescura para ejecución incremental
 
-Bloque 1 de la sesión de mantenimiento automático (CLAUDE.md sección 23):
+Bloque 1 de la sesión de mantenimiento automático (CONTEXTO.md sección 23):
 reprocesar tenía que dejar de significar "rehacerlo todo" y pasar a
 significar "procesar solo lo que falta o ha cambiado". Estas cuatro columnas
 son la base de esa decisión, sin abrir ningún documento ni tocar la cascada

@@ -40,7 +40,7 @@ type LineaCatalogo = {
   pagina: number | null;
 };
 
-// Las tres salidas de una línea que hoy solo se podía confirmar (CLAUDE.md
+// Las tres salidas de una línea que hoy solo se podía confirmar (CONTEXTO.md
 // bloque 2): corregir el dato a mano, descartarla del catálogo con motivo, o
 // dejarla pendiente con una nota para consultar. Cada una abre su propio
 // panel bajo la fila -- nunca más de uno a la vez, para no competir con la
@@ -55,7 +55,7 @@ const ETIQUETA_ESTADO_LINEA: Record<string, string> = {
   pendiente: "Pendiente de consulta",
 };
 
-// Ninguna celda vacía sin explicación (CLAUDE.md bloque 3) -- mismo criterio
+// Ninguna celda vacía sin explicación (CONTEXTO.md bloque 3) -- mismo criterio
 // y mismo componente que CatalogoPanel, aplicado a las dos columnas que
 // pueden quedar vacías en esta tabla.
 function celdaCodigoPrecio(linea: LineaCatalogo) {
@@ -197,7 +197,7 @@ export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // El punto principal del rediseño (CLAUDE.md, encargo de la sesión de
+  // El punto principal del rediseño (CONTEXTO.md, encargo de la sesión de
   // pulido de 1280px): el documento y el formulario al lado de la lista,
   // no detrás de un clic. Sin esto, la pantalla se abría con dos tercios en
   // blanco hasta que alguien seleccionaba un caso a mano.
@@ -323,7 +323,7 @@ export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
   const motivos = useMemo(() => interpretarMotivos(detalle?.expediente.error), [detalle]);
 
   // La tabla de líneas vive en `.table-scroll--panel` (scroll horizontal
-  // propio, no el de la página — CLAUDE.md, comentario de esa clase en
+  // propio, no el de la página — CONTEXTO.md, comentario de esa clase en
   // globals.css: comparte columna con el visor de PDF, que no puede
   // desplazarse). Dos defectos de esta sesión, encargo del cliente:
   //

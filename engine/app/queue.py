@@ -49,7 +49,7 @@ def tomar_siguiente_trabajo(
 
 
 def reclamar_trabajos_huerfanos(db: Session, umbral_segundos: float) -> int:
-    """CLAUDE.md sección 17 (pendiente): un trabajo `en_proceso` cuyo
+    """CONTEXTO.md sección 17 (pendiente): un trabajo `en_proceso` cuyo
     `bloqueado_en` supera `umbral_segundos` pertenece a un worker que ya no
     existe (contenedor caído, `dockerd` reiniciado a mitad de ejecución) y
     `tomar_siguiente_trabajo` nunca vuelve a mirarlo porque solo busca
