@@ -253,6 +253,48 @@ def test_confirmar_revision_con_correccion_de_baja_recalcula_precio_adjudicado(c
     assert linea.precio_adjudicado == Decimal("21.6000")  # 24,00 * 0,90
 
 
+def test_confirmar_revision_con_matriz_autorreferenciada_rechaza(cliente, db_session):
+    # Cuarta variante real del bug de autorreferencia de matriz
+    # (docs/identidad-expediente.md, caso 6.23/28510.0109): la corrección
+    # manual desde la cola de revisión es uno de los cinco sitios que
+    # escriben `codigo_matriz`, y también tiene que pasar por el único punto
+    # de comprobación (`app.extraccion.cruce_codigos.asignar_matriz`).
+    expediente, _lote, _doc, _linea = _sembrar_catalogo(db_session, estado=EstadoExpediente.pendiente_revision)
+
+    resp = cliente.post(
+        f"/expedientes/{expediente.id}/revision/confirmar",
+        json={"codigo_matriz": expediente.codigo_expediente},
+    )
+
+    assert resp.status_code == 400
+    db_session.refresh(expediente)
+    assert expediente.codigo_matriz is None
+
+
+def test_crear_expediente_con_matriz_autorreferenciada_rechaza(cliente, db_session):
+    # Mismo guard que la corrección manual, pero en el alta directa
+    # (`POST /expedientes`, routers/expedientes.py) -- otro de los cinco
+    # sitios que escribían `codigo_matriz` sin pasar por
+    # `asignar_matriz` antes de esta sesión.
+    resp = cliente.post(
+        "/expedientes",
+        json={"codigo_expediente": "6.23/28510.0109", "codigo_matriz": "6.23/28510.0109"},
+    )
+
+    assert resp.status_code == 400
+    assert db_session.query(Expediente).count() == 0
+
+
+def test_crear_expediente_con_matriz_valida_la_guarda(cliente, db_session):
+    resp = cliente.post(
+        "/expedientes",
+        json={"codigo_expediente": "6.23/28510.0018", "codigo_matriz": "6.23/28510.0102"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["codigo_matriz"] == "6.23/28510.0102"
+
+
 def test_corregir_linea_catalogo_actualiza_y_marca_corregido(cliente, db_session):
     _expediente, _lote, _doc, linea = _sembrar_catalogo(db_session)
 

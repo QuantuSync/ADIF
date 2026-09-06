@@ -42,7 +42,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.extraccion.campos_pcsp import extraer_campos_anuncio_pcsp
-from app.extraccion.cruce_codigos import normalizar_codigo_expediente
+from app.extraccion.cruce_codigos import asignar_matriz, normalizar_codigo_expediente
 from app.models import Expediente, TipoDocumento, TrazaOrigen
 
 
@@ -101,16 +101,21 @@ def corregir_identidad_expediente(db: Session, expediente: Expediente, documento
 
     codigo_anterior = expediente.codigo_expediente
     expediente.codigo_expediente = codigo_real
-    if not expediente.codigo_matriz:
-        expediente.codigo_matriz = codigo_anterior
-    elif normalizar_codigo_expediente(expediente.codigo_matriz) != normalizar_codigo_expediente(codigo_anterior):
-        # No debería pasar en la práctica (el propio Anuncio suele
-        # autorreferenciarse como su propia matriz cuando la fila está mal
-        # etiquetada), pero si el expediente ya traía una matriz declarada
-        # distinta del código con el que estaba registrado, no se pisa en
-        # silencio -- se marca igual que hace `asegurar_cruce_codigos` para
-        # el mismo tipo de discrepancia (CLAUDE.md sección 20, requisito 1).
-        expediente.matriz_conflicto = True
+    # `codigo_anterior` nunca puede coincidir con el `codigo_expediente` ya
+    # renombrado (se comprobó `codigo_real != codigo_actual` más arriba), así
+    # que `asignar_matriz` nunca lanza `AutoreferenciaMatrizError` aquí --
+    # solo puede devolver `False` porque ya había una matriz declarada
+    # distinta, el caso que gestiona el `if` de abajo.
+    if not asignar_matriz(expediente, codigo_anterior):
+        if normalizar_codigo_expediente(expediente.codigo_matriz) != normalizar_codigo_expediente(codigo_anterior):
+            # No debería pasar en la práctica (el propio Anuncio suele
+            # autorreferenciarse como su propia matriz cuando la fila está
+            # mal etiquetada), pero si el expediente ya traía una matriz
+            # declarada distinta del código con el que estaba registrado, no
+            # se pisa en silencio -- se marca igual que hace
+            # `asegurar_cruce_codigos` para el mismo tipo de discrepancia
+            # (CLAUDE.md sección 20, requisito 1).
+            expediente.matriz_conflicto = True
 
     db.add(TrazaOrigen(
         entidad_tipo="expediente",

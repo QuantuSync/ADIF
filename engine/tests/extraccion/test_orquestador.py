@@ -12,7 +12,13 @@ from types import SimpleNamespace
 import openpyxl
 
 from app.config import settings
-from app.extraccion.orquestador import LOTE_UNICO, _Documento, _detectar_contrato_obra, ejecutar_extraccion_expediente
+from app.extraccion.orquestador import (
+    LOTE_UNICO,
+    _Documento,
+    _detectar_contrato_obra,
+    _detectar_numero_lotes_pcsp,
+    ejecutar_extraccion_expediente,
+)
 from app.extraccion.texto import PaginaTexto
 from app.interfaces.document_storage import DocumentStorage
 from app.models import Documento, EstadoExpediente, Expediente, Lote, LineaCatalogo, TipoDocumento, TrazaOrigen
@@ -573,3 +579,34 @@ def test_detectar_contrato_obra_ignora_documentos_que_no_son_anuncio_pcsp():
     doc = SimpleNamespace(id=1, nombre_archivo="documento_de_pliegos.pdf")
     item = _Documento(documento=doc, tipo=TipoDocumento.pliego, paginas=paginas)
     assert _detectar_contrato_obra([item]) is None
+
+
+# --- Auditoría de ficheros huérfanos (2026-09-06): 6.23/28510.0135, 8 lotes
+# reales, ningún Anuncio PCSP en el expediente -- el único documento con
+# "Nº de Lotes: 8" es un "Documento de Pliegos", clasificado `pliego`. Antes
+# de esta sesión, `_detectar_numero_lotes_pcsp` solo miraba
+# `TipoDocumento.anuncio_pcsp`, así que la cobertura parcial (1 de 8) nunca
+# se detectaba para este expediente -- se quedaba con el motivo genérico "no
+# se extrajo ninguna línea de catálogo", que no explica que hay 7 lotes más
+# sin ningún dato. ---
+
+
+def test_detectar_numero_lotes_pcsp_lo_encuentra_en_documento_de_pliegos():
+    paginas = [PaginaTexto(numero=1, texto="Número de Expediente 3.23/28510.0135\nNº de Lotes: 8\n")]
+    doc = SimpleNamespace(id=1, nombre_archivo="documento_de_pliegos.pdf")
+    item = _Documento(documento=doc, tipo=TipoDocumento.pliego, paginas=paginas, marcador="documento de pliegos")
+
+    assert _detectar_numero_lotes_pcsp([item]) == 8
+
+
+def test_detectar_numero_lotes_pcsp_ignora_pliego_de_clausulas_administrativas():
+    # Un PCAP también es `TipoDocumento.pliego`, pero no comparte la anatomía
+    # de etiquetas fijas del formulario PCSP -- de ahí que haga falta
+    # comprobar el marcador exacto, no basta con el tipo.
+    paginas = [PaginaTexto(numero=1, texto="Nº de Lotes: 8\n")]
+    doc = SimpleNamespace(id=1, nombre_archivo="pcap.pdf")
+    item = _Documento(
+        documento=doc, tipo=TipoDocumento.pliego, paginas=paginas, marcador="pliego de clausulas administrativas"
+    )
+
+    assert _detectar_numero_lotes_pcsp([item]) is None

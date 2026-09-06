@@ -14,13 +14,19 @@ que hace falta para poder ejecutarla.
 - **222 ficheros en disco** (`/data/documentos` dentro del contenedor
   `api`/`worker`, volumen `documentos` de `docker-compose.yml`) — **7 de más**,
   los siete del expediente `3.23/28510.0135` (`ADJUDICACION`, `CONTRATO` ×2,
-  `ANEJO` ×3, `PLIEGO`), que no tiene fila ni en `expedientes` ni en
-  `documentos`. No es el corpus de los 187/222 documentos que sí procesa el
-  sistema: son ficheros sueltos en el volumen, de un expediente que nunca
-  se registró (o cuyo registro se perdió) — invisibles para el catálogo,
-  la cola de revisión y el Excel. Aparte del bloque 5, vale la pena que
-  alguien decida si estos ficheros se registran como expediente de verdad
-  o se descartan; no se ha tocado nada aquí.
+  `ANEJO` ×3, `PLIEGO`), que no tenía fila ni en `expedientes` ni en
+  `documentos`. **Investigado y cerrado en la sesión siguiente**
+  (`docs/auditoria-huerfanos-y-autorreferencia.md`): no era un fallo de
+  registro, sino una limpieza de base de datos anterior
+  (`docs/decisiones-cliente.md`, "Limpieza de la base de datos") que
+  clasificó mal este expediente como "contaminación de pruebas" y borró su
+  fila sin tocar el volumen de documentos. Ficheros verificados íntegros
+  (hash SHA-256[:16] recalculado), expediente registrado y reprocesado —
+  ese mismo reproceso destapó y arregló, de paso, el bug real de extracción
+  multi-lote que `docs/hallazgos-sindicacion.md` ya había medido en 2024
+  para este expediente ("1 de 8 lotes"). Comprobado que no hay ningún otro
+  caso: 43 carpetas en disco, 42 con fila en `documentos` antes de
+  registrar esta, ninguna otra huérfana.
 - **Manifiesto completo** de los 215 documentos trackeados, con SHA-256
   íntegro (no el hash de 16 caracteres que usa `app.scraping.pcsp` para
   deduplicar nombres de fichero al descargar — ese es demasiado corto para

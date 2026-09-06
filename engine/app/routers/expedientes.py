@@ -1,10 +1,10 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.auth import Usuario, get_current_user
 from app.db import get_db
-from app.extraccion.cruce_codigos import asegurar_cruce_codigos
+from app.extraccion.cruce_codigos import AutoreferenciaMatrizError, asegurar_cruce_codigos, asignar_matriz
 from app.models import Expediente
 from app.schemas import ExpedienteCreate, ExpedienteOut
 
@@ -60,16 +60,17 @@ def crear_expediente(
     existente = db.execute(
         select(Expediente).where(Expediente.codigo_expediente == datos.codigo_expediente)
     ).scalar_one_or_none()
-    if existente is not None:
-        if datos.codigo_matriz and not existente.codigo_matriz:
-            existente.codigo_matriz = datos.codigo_matriz
-            db.commit()
-        return existente
+    try:
+        if existente is not None:
+            if asignar_matriz(existente, datos.codigo_matriz):
+                db.commit()
+            return existente
 
-    expediente = Expediente(
-        codigo_expediente=datos.codigo_expediente,
-        codigo_matriz=datos.codigo_matriz,
-    )
+        expediente = Expediente(codigo_expediente=datos.codigo_expediente)
+        asignar_matriz(expediente, datos.codigo_matriz)
+    except AutoreferenciaMatrizError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     db.add(expediente)
     db.commit()
     db.refresh(expediente)

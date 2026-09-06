@@ -39,7 +39,12 @@ from app.extraccion.campos_lc27 import (
 )
 from app.extraccion.campos_pcsp import CampoAnclado, extraer_campos_anuncio_pcsp, importe_como_decimal
 from app.extraccion.clasificador import clasificar, es_pliego_sin_precios
-from app.extraccion.cruce_codigos import asegurar_cruce_codigos, normalizar_codigo_expediente
+from app.extraccion.cruce_codigos import (
+    AutoreferenciaMatrizError,
+    asegurar_cruce_codigos,
+    asignar_matriz,
+    normalizar_codigo_expediente,
+)
 from app.extraccion.herencia_matriz import (
     EstadoResolucionMatriz,
     intentar_heredar_de_matriz,
@@ -116,6 +121,14 @@ class _Documento:
     # entera, nunca un `pliego de prescripciones tecnicas` (ver
     # `app.extraccion.clasificador.es_pliego_sin_precios`).
     pliego_sin_precios: bool = False
+    # Marcador que decidió la clasificación (`ResultadoClasificacion.marcador`,
+    # ver docstring de `app.extraccion.clasificador`): necesario para
+    # distinguir, dentro de `TipoDocumento.pliego`, un "documento de pliegos"
+    # (portada administrativa PCSP con la misma anatomía de etiquetas fijas
+    # que un Anuncio PCSP -- docstring del clasificador) de un "pliego de
+    # clausulas administrativas" (PCAP, sin esos campos). Ver
+    # `_es_documento_de_pliegos_pcsp`.
+    marcador: Optional[str] = None
 
 
 def _traza(
@@ -203,10 +216,14 @@ def _clasificar_documentos(db: Session, storage: DocumentStorage, documentos: li
         # app.extraccion.clasificador).
         tipo = clasificacion.tipo if clasificacion is not None else TipoDocumento.otro
         sin_precios = clasificacion is not None and es_pliego_sin_precios(clasificacion)
+        marcador = clasificacion.marcador if clasificacion is not None else None
         doc.tipo_documento = tipo
         doc.paginas = len(paginas)
         resultado.append(
-            _Documento(documento=doc, tipo=tipo, paginas=paginas, escaneado=escaneado, pliego_sin_precios=sin_precios)
+            _Documento(
+                documento=doc, tipo=tipo, paginas=paginas, escaneado=escaneado,
+                pliego_sin_precios=sin_precios, marcador=marcador,
+            )
         )
     db.commit()
     return resultado
@@ -266,15 +283,38 @@ def _detectar_contrato_obra(documentos: list[_Documento]) -> Optional[CampoAncla
     return None
 
 
+def _es_documento_de_pliegos_pcsp(item: _Documento) -> bool:
+    """Un "Documento de Pliegos" clasifica como `TipoDocumento.pliego`
+    (CLAUDE.md sección 26, criterio del cliente: sin cuadro de precios, se
+    salta la localización de tabla) pero es, en su contenido, la misma
+    portada administrativa PCSP que un Anuncio PCSP -- "comparten
+    exactamente la misma anatomía de etiquetas fijas" (docstring de
+    `app.extraccion.clasificador`, verificado en `6.23/28510.0135`: su único
+    documento con "Nº de Lotes: 8" es justo uno de estos, sin ningún Anuncio
+    PCSP en el expediente). Distinto de un "pliego de clausulas
+    administrativas" (PCAP, sin esos campos) -- de ahí que haga falta el
+    marcador exacto, no basta con `pliego_sin_precios`."""
+    return item.tipo == TipoDocumento.pliego and item.marcador == "documento de pliegos"
+
+
 def _detectar_numero_lotes_pcsp(documentos: list[_Documento]) -> Optional[int]:
     """Sesión de identidad de lote (CLAUDE.md sección 27): el campo
     estructurado "Nº de Lotes:" del Anuncio PCSP es la única fuente de
     "cuántos lotes declara la licitación" para un expediente que no trae
     ninguna Propuesta LC.27 ni Resolución con bloque narrativo por lote —
     caso real verificado: `6.23/28510.0139` ("2 lotes" en el título, "Nº de
-    Lotes: 2" aquí, cero documentos que declaren baja/importe por lote)."""
+    Lotes: 2" aquí, cero documentos que declaren baja/importe por lote).
+
+    También se busca en un "Documento de Pliegos" (`_es_documento_de_pliegos_pcsp`):
+    caso real `6.23/28510.0135` (auditoría de ficheros huérfanos,
+    2026-09-06), 8 lotes reales, un único lote con datos propios en este
+    expediente -- antes de esta guarda, la cobertura parcial (1 de 8) no se
+    detectaba nunca porque el expediente no tiene ningún Anuncio PCSP, solo
+    el Documento de Pliegos con el campo "Nº de Lotes: 8", excluido de esta
+    búsqueda sin motivo real (CLAUDE.md sección 12: "lo que no cuadra va a
+    revisión" -- esto se quedaba silenciosamente sin ir a revisión)."""
     for item in documentos:
-        if item.tipo != TipoDocumento.anuncio_pcsp:
+        if item.tipo != TipoDocumento.anuncio_pcsp and not _es_documento_de_pliegos_pcsp(item):
             continue
         campo = extraer_campos_anuncio_pcsp(item.paginas).numero_lotes
         if campo is not None:
@@ -319,12 +359,21 @@ def _extraer_campos_expediente(
                     importe_como_decimal(campos.importe_adjudicacion), item.documento.id,
                     campos.importe_adjudicacion.pagina, campos.importe_adjudicacion.fragmento,
                 )
-            if campos.codigo_matriz and not expediente.codigo_matriz:
-                expediente.codigo_matriz = campos.codigo_matriz.valor
-                _traza(
-                    db, expediente.id, "codigo_matriz", item.documento.id,
-                    campos.codigo_matriz.pagina, campos.codigo_matriz.fragmento, campos.codigo_matriz.valor,
-                )
+            if campos.codigo_matriz:
+                try:
+                    escrito = asignar_matriz(expediente, campos.codigo_matriz.valor)
+                except AutoreferenciaMatrizError:
+                    # No debería pasar con el campo "Licitación basada en el
+                    # acuerdo marco" (es una etiqueta distinta de la trampa
+                    # "Nº EXPEDIENTE MATRIZ" de CLAUDE.md sección 2), pero la
+                    # comprobación es la misma para cualquier candidato --
+                    # ver docstring de `asignar_matriz`.
+                    escrito = False
+                if escrito:
+                    _traza(
+                        db, expediente.id, "codigo_matriz", item.documento.id,
+                        campos.codigo_matriz.pagina, campos.codigo_matriz.fragmento, campos.codigo_matriz.valor,
+                    )
             if campos.objeto_contrato and objeto_pcsp is None:
                 objeto_pcsp = (
                     campos.objeto_contrato.valor, item.documento.id,

@@ -1,7 +1,15 @@
+from types import SimpleNamespace
+
 import openpyxl
 import pytest
 
-from app.extraccion.cruce_codigos import cruzar_codigo_proyecto
+from app.config import settings
+from app.extraccion.cruce_codigos import (
+    AutoreferenciaMatrizError,
+    asegurar_cruce_codigos,
+    asignar_matriz,
+    cruzar_codigo_proyecto,
+)
 
 
 @pytest.fixture
@@ -66,3 +74,78 @@ def test_no_cruza_no_inventa_nada(excel_codigos):
     assert resultado.codigo_interno is None
     assert resultado.codigo_proyecto is None
     assert resultado.codigo_matriz is None
+
+
+# --- `asignar_matriz`: único punto de escritura de `codigo_matriz`
+# (docs/identidad-expediente.md, cuarta variante real de autorreferencia,
+# caso 6.23/28510.0109) ---
+
+
+def _expediente(**kwargs):
+    base = dict(codigo_expediente=None, codigo_matriz=None, codigos_cruzados=None,
+                codigo_interno=None, matriz_conflicto=None)
+    base.update(kwargs)
+    return SimpleNamespace(**base)
+
+
+def test_asignar_matriz_escribe_cuando_no_hay_autorreferencia():
+    expediente = _expediente(codigo_expediente="6.23/28510.0018")
+
+    assert asignar_matriz(expediente, "6.23/28510.0102 ") is True
+    assert expediente.codigo_matriz == "6.23/28510.0102"
+
+
+def test_asignar_matriz_lanza_en_autorreferencia():
+    expediente = _expediente(codigo_expediente="6.23/28510.0109")
+
+    with pytest.raises(AutoreferenciaMatrizError):
+        asignar_matriz(expediente, "6.23/28510.0109")
+    assert expediente.codigo_matriz is None
+
+
+def test_asignar_matriz_no_pisa_un_valor_existente_sin_pedirlo():
+    expediente = _expediente(codigo_expediente="A", codigo_matriz="B")
+
+    assert asignar_matriz(expediente, "C") is False
+    assert expediente.codigo_matriz == "B"
+
+
+def test_asignar_matriz_sobrescribe_si_se_pide_explicitamente():
+    expediente = _expediente(codigo_expediente="A", codigo_matriz="B")
+
+    assert asignar_matriz(expediente, "C", sobrescribir=True) is True
+    assert expediente.codigo_matriz == "C"
+
+
+def test_asignar_matriz_candidato_vacio_no_hace_nada():
+    expediente = _expediente(codigo_expediente="A")
+
+    assert asignar_matriz(expediente, None) is False
+    assert asignar_matriz(expediente, "  ") is False
+    assert expediente.codigo_matriz is None
+
+
+# --- `asegurar_cruce_codigos`: caso real 6.23/28510.0109, licitación
+# multi-lote cuya fila en el Excel de códigos declara su propia columna
+# MATRIZ igual a su "Nº Expediente" -- ruido heredado del Excel (CLAUDE.md,
+# "Pendiente de resolver"), no un acuerdo marco real. Antes de esta sesión,
+# `asegurar_cruce_codigos` escribía ese valor tal cual en
+# `expediente.codigo_matriz`, dejando al expediente como su propia matriz. ---
+
+
+def test_asegurar_cruce_codigos_matriz_autorreferenciada_en_excel_no_se_escribe(tmp_path, monkeypatch):
+    ruta = tmp_path / "Codigos_de_proyecto.xlsx"
+    libro = openpyxl.Workbook()
+    hoja = libro.active
+    hoja.append(["Nº Interno", "Nº Expediente", "MATRIZ", "ESPECIALIDAD/DISCIPLINA", "DESCRIPCIÓN"])
+    hoja.append([23026, "6.23/28510.0109", "6.23/28510.0109", "Vía", "SUMINISTRO DE BALASTO - 2 LOTES"])
+    libro.save(ruta)
+    monkeypatch.setattr(settings, "codigos_proyecto_path", str(ruta))
+
+    expediente = _expediente(codigo_expediente="6.23/28510.0109")
+    motivo = asegurar_cruce_codigos(None, expediente)
+
+    assert motivo is None
+    assert expediente.codigo_matriz is None
+    assert expediente.codigo_interno == "23026"
+    assert expediente.codigos_cruzados is True

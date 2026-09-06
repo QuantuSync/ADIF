@@ -866,3 +866,25 @@ estructuralmente no existe todavía.
 
 Ver `docs/hallazgos-extraccion.md` sección 31.4 para el recuento conjunto de
 los cinco casos atacados en esta sesión.
+
+---
+
+## 29. Cuarta variante de autorreferencia de matriz, y unificación del punto
+     de escritura (sesión 2026-09-06)
+
+Ver `docs/auditoria-huerfanos-y-autorreferencia.md` sección 2 para el
+detalle completo. Resumen: `6.23/28510.0109` autorreferenciaba su matriz
+(`codigo_matriz == codigo_expediente`) por una vía nueva, no vista en las
+secciones 20-21 ni 27 de arriba — ni el PDF ni la cascada de extracción,
+sino el propio Excel de códigos de referencia (`CODIGOS_PROYECTO_PATH`), que
+declara `MATRIZ` igual al propio "Nº Expediente" para una licitación
+multi-lote sin acuerdo marco real. Comprobación sistémica: **7 filas** con
+el mismo patrón exacto, no solo la que se reportó. Los cinco sitios del
+código que escribían `expediente.codigo_matriz` (Excel, campo PCSP de
+acuerdo marco, corrección de identidad, corrección manual desde la cola de
+revisión, alta por API) se unificaron detrás de un único punto,
+`app.extraccion.cruce_codigos.asignar_matriz`, que comprueba la
+autorreferencia una sola vez para los cinco. Las 7 filas ya corruptas se
+corrigieron con una actualización directa (el cruce con el Excel no se
+repite nunca por diseño, así que el arreglo de código por sí solo no las
+habría corregido).

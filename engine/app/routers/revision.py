@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.auth import Usuario, get_current_user
 from app.catalogo_consulta import fila_a_dict
 from app.db import get_db
+from app.extraccion.cruce_codigos import AutoreferenciaMatrizError, asignar_matriz
 from app.models import Documento, EstadoExpediente, EstadoRevisionLinea, Expediente, LineaCatalogo, Lote
 from app.schemas import (
     ExpedienteCorreccion,
@@ -105,7 +106,10 @@ def confirmar_revision_expediente(
             expediente.baja_global = correccion.baja_global
             baja_cambiada = True
         if correccion.codigo_matriz is not None:
-            expediente.codigo_matriz = correccion.codigo_matriz
+            try:
+                asignar_matriz(expediente, correccion.codigo_matriz, sobrescribir=True)
+            except AutoreferenciaMatrizError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
         if correccion.codigo_interno is not None:
             expediente.codigo_interno = correccion.codigo_interno
 

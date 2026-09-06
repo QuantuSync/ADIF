@@ -529,4 +529,5 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `docs/`: `hallazgos-scraping.md`, `hallazgos-sindicacion.md`,
 `hallazgos-extraccion.md`, `identidad-expediente.md`, `decisiones-cliente.md`,
 `mantenimiento-automatico.md`, `decisiones.md`, `correccion-defectos-auditoria.md`,
+`comparacion-corpus-sharepoint.md`, `auditoria-huerfanos-y-autorreferencia.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.

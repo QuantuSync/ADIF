@@ -46,6 +46,52 @@ def normalizar_codigo_expediente(valor: Optional[str]) -> Optional[str]:
     return limpio or None
 
 
+class AutoreferenciaMatrizError(ValueError):
+    """Un expediente no puede declararse su propia matriz (CLAUDE.md sección
+    2, trampa de vocabulario "Matriz"). Verificada en cuatro variantes reales
+    del mismo síntoma, cada una desde un origen de dato distinto
+    (docs/identidad-expediente.md): el PDF propio ("Nº EXPEDIENTE MATRIZ" de
+    una Propuesta LC.27 multi-lote), el Excel de códigos (columna MATRIZ
+    igual a la propia "Nº Expediente" para una licitación multi-lote sin
+    acuerdo marco real, caso `6.23/28510.0109`), la corrección de identidad
+    (mitigado por diseño: nunca puede autorreferenciarse) y la corrección
+    manual desde la cola de revisión. De ahí que la comprobación viva en un
+    único punto (`asignar_matriz`) en vez de repetirse -- y a veces
+    olvidarse -- en cada sitio que escribe `expediente.codigo_matriz`."""
+
+
+def asignar_matriz(expediente, candidato: Optional[str], *, sobrescribir: bool = False) -> bool:
+    """Único punto de escritura de `expediente.codigo_matriz`. Normaliza el
+    candidato (espacios sobrantes, CLAUDE.md sección 8) y lo compara contra
+    el propio `codigo_expediente` antes de escribir, venga el dato de donde
+    venga (PDF, Excel de códigos, corrección manual).
+
+    Lanza `AutoreferenciaMatrizError` si el candidato (ya normalizado) es
+    igual al propio `codigo_expediente` -- nunca lo escribe en silencio, para
+    que cada llamador decida qué hacer con el intento (motivo de revisión en
+    la cascada, error 400 en la corrección manual).
+
+    `sobrescribir=False` (por defecto) no pisa un valor ya existente -- es
+    "rellenar solo si está vacío", el caso de la cascada de extracción y del
+    cruce con el Excel. `sobrescribir=True` es para una corrección manual
+    explícita, que sí puede reemplazar un valor previo.
+
+    Devuelve `True` si escribió algo, `False` si no había nada que escribir
+    (candidato vacío) o si ya había un valor y `sobrescribir=False`."""
+    candidato_norm = normalizar_codigo_expediente(candidato)
+    if not candidato_norm:
+        return False
+    if candidato_norm == normalizar_codigo_expediente(expediente.codigo_expediente):
+        raise AutoreferenciaMatrizError(
+            f"el expediente {expediente.codigo_expediente} no puede ser su propia matriz "
+            f"(candidato: {candidato})"
+        )
+    if expediente.codigo_matriz and not sobrescribir:
+        return False
+    expediente.codigo_matriz = candidato_norm
+    return True
+
+
 class _IndiceCodigosProyecto:
     """Índice en memoria de `Expedientes.xlsx` (columnas `Nº Interno`,
     `Nº Expediente`, `MATRIZ`), por las dos claves por las que puede cruzar
@@ -173,6 +219,16 @@ def asegurar_cruce_codigos(db: Session, expediente) -> Optional[str]:
             f"la matriz declarada en el Anuncio PCSP ({expediente.codigo_matriz}) no coincide con la "
             f"columna MATRIZ del Excel de códigos ({resultado.codigo_matriz})"
         )
-    if not expediente.codigo_matriz:
-        expediente.codigo_matriz = resultado.codigo_matriz
+    try:
+        asignar_matriz(expediente, resultado.codigo_matriz)
+    except AutoreferenciaMatrizError:
+        # Ruido heredado en el Excel de ejemplo (CLAUDE.md "Pendiente de
+        # resolver"): al menos una fila declara su propia columna MATRIZ
+        # igual a su "Nº Expediente" para una licitación multi-lote sin
+        # acuerdo marco real (caso 6.23/28510.0109, verificado). No es un
+        # dato que el sistema pueda corregir por su cuenta -- se ignora sin
+        # escribir nada, igual que cualquier otro cruce que no aporta un
+        # candidato válido (sección 7: "el sistema nunca inventa una
+        # matriz").
+        pass
     return None
