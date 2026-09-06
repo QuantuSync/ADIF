@@ -635,6 +635,31 @@ suficientes, no ahora.
   compilar ahí -- exactamente el patrón que el invariante 11 de arriba
   prohíbe -- corregido en la misma sesión. Detalle completo, verificación
   en vivo y números en `docs/copias-de-seguridad.md`.
+- **"Failed to fetch" desde el navegador: dos causas reales, ambas
+  corregidas (sesión 2026-09-06).** El cliente reportó las cuatro
+  pantallas fallando desde un navegador real en Windows mientras `curl`
+  respondía bien -- la pista correcta para diagnosticar esto, porque
+  `curl` nunca aplica CORS y un navegador sí. (1) `CORS_ALLOWED_ORIGINS`
+  solo cubría `http://localhost:3000`: un navegador abierto en
+  `http://127.0.0.1:3000` (mismo sitio, origen distinto para CORS) veía la
+  página cargar pero cada `fetch()` a la API fallaba -- el valor por
+  defecto cubre ahora los dos orígenes. (2) Más grave y menos obvio: un
+  corte transitorio de conexión a la base de datos (el mismo `dockerd`/WSL
+  reiniciándose a mitad de sesión) dejaba que `sqlalchemy.exc.OperationalError`
+  se propagara sin capturar desde `get_db()` -- Starlette atrapa eso en su
+  propio `ServerErrorMiddleware`, que envuelve el `CORSMiddleware` de la
+  app por **fuera**, así que esa respuesta nunca llevaba
+  `Access-Control-Allow-Origin` y el navegador lo reportaba como bloqueo de
+  CORS, indistinguible a simple vista de un origen mal configurado.
+  Reproducido de forma determinista (`docker network disconnect` sobre
+  postgres, sin depender de pillar un reinicio real) y arreglado con un
+  `@app.exception_handler(OperationalError)` en `engine/app/main.py` que
+  devuelve un `503` explícito con la cabecera CORS ya puesta -- ese `503`
+  es además justo lo que `useReintentoConexion` (entrada de arriba) ya sabe
+  interpretar como "reintentar", no un error opaco. Verificado con Chromium
+  real (no `curl`): las cuatro pantallas cargan datos reales en una misma
+  pasada. Detalle completo, reproducción y verificación en
+  `docs/estados-carga-web.md`.
 - **Tolerancia a reinicios de `dockerd`: arreglada en lo que sí está en
   mano del motor (sesión 2026-09-06).** `docs/diagnostico-caidas-dockerd.md`
   ya documentaba que Modo de espera moderno reinicia el *init* de WSL con

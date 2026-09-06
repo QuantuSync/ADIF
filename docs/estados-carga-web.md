@@ -105,3 +105,69 @@ Cada reinicio deja una ventana de unos segundos en la que cualquier
 petición (curl o navegador) falla por igual mientras los contenedores
 vuelven a arrancar; distinto del fallo de CORS, que era permanente para el
 origen no cubierto, reinicios aparte.
+
+## Segundo hallazgo, el que de verdad explicaba "sigue fallando" (mismo día)
+
+El arreglo de arriba (cubrir los dos orígenes) era real pero no bastaba: el
+cliente lo confirmó abriendo `http://localhost:3000` -- el origen que **sí**
+estaba cubierto -- y las cuatro pantallas seguían fallando con
+"Failed to fetch" en el navegador. La pista fue suya: contrastar `curl`
+(nunca aplica CORS) contra un navegador real con la consola y la pestaña de
+red abiertas.
+
+Reproducido con Chromium real (Playwright, no `curl`) contra
+`http://localhost:3000`: la consola mostraba, de forma intermitente,
+
+```
+Access to fetch at 'http://localhost:8000/expedientes' from origin
+'http://localhost:3000' has been blocked by CORS policy: No
+'Access-Control-Allow-Origin' header is present on the requested resource.
+```
+
+**con el origen exacto ya cubierto** -- descartando de raíz un problema de
+configuración de orígenes. La causa real: un corte transitorio de conexión
+a la base de datos (el mismo `dockerd`/WSL reiniciándose a mitad de
+sesión, `docs/diagnostico-caidas-dockerd.md`) hace que `get_db()` propague
+`sqlalchemy.exc.OperationalError` sin capturar. Starlette añade su propio
+`ServerErrorMiddleware` **fuera** de los middlewares registrados con
+`add_middleware` -- incluido `CORSMiddleware` -- para atrapar justo las
+excepciones no capturadas: una respuesta generada ahí nunca pasa por
+`CORSMiddleware`, así que nunca lleva `Access-Control-Allow-Origin`. El
+navegador no puede distinguir eso de un origen mal configurado y lo
+reporta como bloqueo de CORS -- un error de infraestructura transitorio
+disfrazado de error de configuración permanente.
+
+Reproducido de forma determinista (sin depender de pillar un reinicio real
+de `dockerd` por casualidad): `docker network disconnect adif_default
+adif-postgres-1` mientras la API seguía arriba. Antes del arreglo, `curl`
+con cabecera `Origin` recibía **"Empty reply from server"** (la conexión se
+cortaba sin ninguna respuesta) contra ese mismo escenario.
+
+Arreglado en `engine/app/main.py`: un `@app.exception_handler(OperationalError)`
+devuelve un `503` explícito, JSON, con la cabecera CORS ya puesta (un
+manejador de excepción registrado en la propia `app` intercepta ANTES de
+`ServerErrorMiddleware`, dentro de `CORSMiddleware`). Verificado con el
+mismo `docker network disconnect`: la respuesta pasó a ser
+`503 Service Unavailable` con `access-control-allow-origin` presente. De
+paso, ese `503` es exactamente lo que `useReintentoConexion` (bloque de
+arriba) ya sabe interpretar como "corte transitorio, reintentar", en vez de
+un "Failed to fetch" opaco.
+
+**Verificación final, las cuatro pantallas, navegador real**: con el
+arreglo desplegado, Chromium (Playwright) contra `http://localhost:3000`
+cargó datos reales en las cuatro pantallas en una misma pasada: 58
+expedientes en "/", 3001 líneas en "/catalogo", los casos reales de
+"/revision", y el histórico real de "/mantenimiento" (frecuencia,
+ejecuciones, resúmenes de ciclo).
+
+**Nota aparte, no resuelta por este arreglo**: durante esta sesión se
+observó que `dockerd` se reiniciaba con una cadencia mucho más alta de lo
+habitual (cada 20-60 s en vez de cada varios minutos). Se probó
+desactivando la tarea programada `ADIF-WSL-Docker-Watchdog` como
+hipótesis -- los reinicios continuaron igual sin ella activa, así que no es
+la causa (la tarea se reactivó tal cual estaba). Sigue sin identificarse
+por qué la cadencia fue tan alta justo en esta sesión; el mecanismo de
+fondo (reanudación de modo de espera moderno) ya está documentado en
+`docs/diagnostico-caidas-dockerd.md`. Con los dos arreglos de esta sesión,
+cada reinicio real ahora se ve en el navegador como una reconexión breve
+(3-9 s, bloque de arriba) en vez de un error de CORS permanente.
