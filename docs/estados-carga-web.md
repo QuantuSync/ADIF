@@ -69,3 +69,39 @@ de la página cada 2 s durante un ciclo completo de caída y recuperación:
 
 Ningún recuento en cero se mostró sin una respuesta confirmada de la API
 en ningún momento de la prueba.
+
+## Hallazgo relacionado: CORS solo cubría un origen (sesión 2026-09-06, más tarde)
+
+Aviso real del cliente: las cuatro pantallas cargaban bien (navegación
+normal, sin CORS de por medio) pero cada `fetch()` a la API fallaba con
+"Failed to fetch" **desde el navegador de Windows**, mientras `curl` desde
+dentro del stack respondía sin problema -- la pista correcta que dio el
+cliente para diagnosticar esto: un contraste entre cliente HTTP simple
+(curl, no aplica CORS) y navegador real (si aplica CORS).
+
+Confirmado en vivo con `curl -H "Origin: ..." -X OPTIONS`: con
+`CORS_ALLOWED_ORIGINS=http://localhost:3000` (el único valor configurado),
+una petición con `Origin: http://127.0.0.1:3000` recibía un `400` sin
+cabecera `Access-Control-Allow-Origin` -- CORS compara el origen exacto
+(esquema+host+puerto), y `localhost` y `127.0.0.1` son dos orígenes
+distintos para el navegador aunque resuelvan al mismo sitio. Quien abriera
+la web por la dirección no cubierta veía la página cargar (la navegación no
+pasa por CORS) y cada llamada a la API fallar con un "Failed to fetch"
+genérico, indistinguible a simple vista de la API estando caída.
+
+Arreglado: `cors_allowed_origins` (`engine/app/config.py`), el valor por
+defecto de `docker-compose.yml` y `.env.example` cubren ahora los dos
+orígenes (`http://localhost:3000,http://127.0.0.1:3000`) de fábrica.
+Verificado desde un navegador Windows real (Chromium vía Playwright, no
+`curl`) contra las dos direcciones: los cuatro endpoints
+(`/expedientes`, `/catalogo`, `/revision`, `/mantenimiento/estado`)
+responden `200` con datos reales desde ambos orígenes.
+
+**Nota del entorno, no del código**: durante esta verificación, `dockerd`
+se reinició solo varias veces en una ventana de pocos minutos (más seguido
+de lo habitual) -- síntoma ya documentado en
+`docs/diagnostico-caidas-dockerd.md`, no una regresión de este arreglo.
+Cada reinicio deja una ventana de unos segundos en la que cualquier
+petición (curl o navegador) falla por igual mientras los contenedores
+vuelven a arrancar; distinto del fallo de CORS, que era permanente para el
+origen no cubierto, reinicios aparte.
