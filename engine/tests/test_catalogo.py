@@ -899,4 +899,182 @@ def test_guardar_lineas_catalogo_absorbe_las_dos_filas_heredadas_cuando_la_clave
     lineas = db_session.query(LineaCatalogo).filter_by(lote_id=lote.id, matricula="643480020").all()
     assert len(lineas) == 1
     assert lineas[0].clave_linea == "P-012"
-    assert lineas[0].cantidad == Decimal("14")  # dato heredado de la segunda fila absorbida
+
+
+# Sesión de limpieza del Excel al cliente, bloque 2 (2026-09-06): tres
+# defectos reales encontrados verificando las dos anotaciones pendientes de
+# la sesión anterior (docs/excel-cliente-correccion.md) contra el corpus
+# real -- ninguno de los tres estaba cubierto por los tests existentes.
+
+
+def test_construir_linea_catalogo_recupera_descripcion_de_columna_fantasma_con_matricula():
+    # Hallazgo real, `6.20/28510.0136_ANEJO_3.pdf` p.4, matrícula
+    # `740540009`: el guard original de `_construir_campos` exigía
+    # `matricula is None` para intentar la recuperación de columna fantasma,
+    # asumiendo que el desplazamiento solo ocurre en filas huérfanas
+    # (partida alzada). Falso -- la misma fila, CON matrícula válida en su
+    # propia columna, trae la descripción vacía y el texto real desplazado
+    # una columna a la derecha. La función de recuperación no toca la
+    # columna de matrícula (ya extraída aparte): exigir su ausencia solo
+    # dejaba la descripción vacía para siempre en una línea que sí se podía
+    # recuperar.
+    mapeo = {"codigo_precio": None, "matricula": 0, "descripcion": 2, "unidad_medida": None, "cantidad": 8, "precio_unitario": 7}
+    fila = ["740540009", "AC 120\nCuMg 0,5", "", "HILO DE CONTACTO DE", "", "ET ADIF\n03.364.291.9", "LAC-HC-AC120-\nCA", "9,29 €/Kg", "70000 Kg"]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=4, documento_origen_id=20, expediente_id=15, baja_lote=None, orden_aparicion=8
+    )
+
+    assert linea is not None
+    assert linea["matricula"] == "740540009"
+    assert linea["descripcion"] == "HILO DE CONTACTO DE"
+    assert linea["precio_unitario"] == Decimal("9.29")
+    assert linea["motivo_revision"] is not None
+
+
+def test_construir_lineas_desde_tabla_encadena_fragmentos_de_descripcion_envuelta():
+    # Mismo hallazgo real, generalizado: el resto de la frase envuelta
+    # ("SECCIÓN CIRCULAR DE", "120 MM2 DE", "ALEACIÓN COBRE-", "MAGNESIO
+    # 0,5 CON", "RANURA TIPO A") sigue en las filas siguientes, cada una sin
+    # ningún otro dato propio (matrícula, precio, cantidad vacíos) -- exactamente
+    # el fenómeno que `_combinar_filas_cabecera` ya resuelve para la cabecera,
+    # aquí para una fila de datos. `construir_lineas_desde_tabla` (no
+    # `construir_linea_catalogo`, que ve una fila a la vez) es quien tiene
+    # acceso a las filas siguientes para encadenarlas.
+    mapeo = {"codigo_precio": None, "matricula": 0, "descripcion": 2, "unidad_medida": None, "cantidad": 8, "precio_unitario": 7}
+    tabla = TablaExtraida(
+        cabecera=["Nº MATRÍCULA", "REF. ADIF", "DESCRIPCIÓN", None, None, "NORMATIVA APLICABLE", "PLANO DE REFERENCIA", "PRECIO DE REFERENCIA", "CANTIDADES DE REFERENCIA"],
+        filas=[
+            ["740540009", "AC 120\nCuMg 0,5", "", "HILO DE CONTACTO DE", "", "ET ADIF\n03.364.291.9", "LAC-HC-AC120-\nCA", "9,29 €/Kg", "70000 Kg"],
+            [None, None, None, "SECCIÓN CIRCULAR DE", None, None, None, None, None],
+            [None, None, None, "120 MM2 DE", None, None, None, None, None],
+            [None, None, None, "ALEACIÓN COBRE-", None, None, None, None, None],
+            [None, None, None, "MAGNESIO 0,5 CON", None, None, None, None, None],
+            [None, None, None, "RANURA TIPO A", None, None, None, None, None],
+            ["642910250", "AC 120\nCuAg 0.1", "HILO DE CONTACTO DE SECCIÓN CIRCULAR", None, None, "ET ADIF\n03.364.291.9", "LAC-HC-AC120-\nCA", "10,61 €/Kg", "70000 Kg"],
+        ],
+        pagina=4,
+        bbox=(0, 0, 0, 0),
+    )
+
+    lineas = construir_lineas_desde_tabla(tabla, mapeo, documento_origen_id=20, expediente_id=15, baja_lote=None, orden_inicial=0)
+
+    assert len(lineas) == 2  # las 5 filas de fragmento se absorben, no generan líneas propias
+    primera = lineas[0]
+    assert primera["matricula"] == "740540009"
+    assert primera["descripcion"] == (
+        "HILO DE CONTACTO DE SECCIÓN CIRCULAR DE 120 MM2 DE ALEACIÓN COBRE- MAGNESIO 0,5 CON RANURA TIPO A"
+    )
+    assert lineas[1]["matricula"] == "642910250"  # la siguiente fila de datos real no se toca
+
+
+def test_linea_sin_descripcion_ni_matricula_con_fragmento_vacio_se_descarta():
+    # Encargo de esta sesión: una fila sin descripción y sin matrícula no
+    # identifica ningún material. Si además el resto de la fila está en
+    # blanco (relleno puro de tabla), se descarta -- ya lo hacía el guard de
+    # `precio_unitario is None`, se deja como fixture de regresión.
+    mapeo = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": None, "cantidad": None, "precio_unitario": 2}
+    fila = [None, None, None]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=5, documento_origen_id=None, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea is None
+
+
+def test_linea_sin_descripcion_ni_matricula_con_precio_va_a_revision():
+    # Variante real del encargo: la fila SÍ trae un precio real (y un
+    # código de precio), pero ni descripción ni matrícula sobreviven a
+    # ningún intento de recuperación -- nadie puede saber qué material es.
+    # No se descarta en silencio (hay contenido real en el fragmento: el
+    # propio precio) ni se inventa una descripción: se conserva marcada para
+    # revisión humana contra el documento de origen.
+    mapeo = {"codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": None, "cantidad": None, "precio_unitario": 3}
+    fila = ["P-099", "", "", "45,00 €"]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=5, documento_origen_id=None, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea is not None
+    assert linea["descripcion"] == ""
+    assert linea["matricula"] is None
+    assert linea["motivo_revision"] is not None
+    assert "sin descripción ni matrícula" in linea["motivo_revision"]
+
+
+def test_combinar_por_clave_funde_por_firma_sin_matricula_dentro_del_mismo_lote():
+    # Hallazgo real, `6.24/28510.0180_ANEJO_1.pdf`: una tabla de "impacto
+    # del fallo del elemento en la seguridad operacional" repite el mismo
+    # material (misma descripción, mismo precio) que ya trae la tabla real
+    # de precios, bajo un `codigo_precio` de numeración propia y sin
+    # matrícula ninguna de las dos veces -- `_firma_material` antes exigía
+    # matrícula, así que estas dos nunca se fundían pese a ser, con
+    # certeza razonable, la misma línea de catálogo.
+    de_precios = {
+        "clave_linea": "PN004", "matricula": None, "descripcion": "m² placa hito hectométrico en fibra",
+        "codigo_precio": "PN004", "precio_unitario": Decimal("367.38"), "cantidad": Decimal("1200"), "pagina": 18,
+    }
+    de_impacto_seguridad = {
+        "clave_linea": "PN004ps", "matricula": None, "descripcion": "m² placa hito hectométrico en fibra",
+        "codigo_precio": "PN004ps", "precio_unitario": Decimal("367.38"), "cantidad": None, "pagina": 23,
+    }
+
+    combinadas = _combinar_por_clave([de_precios, de_impacto_seguridad])
+
+    assert len(combinadas) == 1
+    assert combinadas[0]["cantidad"] == Decimal("1200")  # se conserva el dato que solo traía una de las dos
+    assert "sin matrícula" in combinadas[0]["motivo_revision"]
+
+
+def test_guardar_lineas_catalogo_funde_por_firma_sin_matricula_entre_documentos_distintos(db_session):
+    # Mismo hallazgo, pero cuando las dos tablas viven en documentos
+    # distintos del mismo expediente (`6.23/28510.0042`: ANEJO_1 y
+    # CONTRATO_1) -- dos llamadas a `guardar_lineas_catalogo` separadas,
+    # `_combinar_por_clave` en memoria nunca las ve juntas.
+    lote = _lote(db_session)
+    de_precios = {
+        "clave_linea": "P-016", "expediente_id": lote.expediente_id, "orden_aparicion": 15,
+        "matricula": None, "descripcion": "PÉRTIGA VERIFICADORA", "codigo_precio": "P-016",
+        "precio_unitario": Decimal("2298.82"), "cantidad": None, "unidad_medida": None,
+        "baja_lote": None, "precio_adjudicado": None, "documento_origen_id": 30, "pagina": 10,
+        "fragmento": "", "motivo_revision": None,
+    }
+    de_impacto_seguridad = {
+        "clave_linea": "P-016b", "expediente_id": lote.expediente_id, "orden_aparicion": 15,
+        "matricula": None, "descripcion": "PÉRTIGA VERIFICADORA", "codigo_precio": "P-016b",
+        "precio_unitario": Decimal("2298.82"), "cantidad": None, "unidad_medida": None,
+        "baja_lote": None, "precio_adjudicado": None, "documento_origen_id": 33, "pagina": 105,
+        "fragmento": "", "motivo_revision": None,
+    }
+
+    r1 = guardar_lineas_catalogo(db_session, lote.id, [de_precios])
+    db_session.commit()
+    r2 = guardar_lineas_catalogo(db_session, lote.id, [de_impacto_seguridad])
+    db_session.commit()
+
+    assert r1.creadas == 1
+    assert r2.creadas == 0 and r2.actualizadas == 1
+    lineas = db_session.query(LineaCatalogo).filter_by(lote_id=lote.id, descripcion="PÉRTIGA VERIFICADORA").all()
+    assert len(lineas) == 1
+    assert "sin matrícula" in lineas[0].motivo_revision
+
+
+def test_combinar_por_clave_no_repite_el_motivo_al_fundir_mas_de_dos_firmas_iguales():
+    # Una firma sin matrícula puede absorber más de dos filas (la misma
+    # tabla repetida tres veces): el motivo de revisión no debe repetirse
+    # una vez por cada fusión (CLAUDE.md sección 9, idempotencia).
+    filas = [
+        {
+            "clave_linea": f"C-{i}", "matricula": None, "descripcion": "PARTIDA ALZADA A JUSTIFICAR PARA IMPREVISTOS",
+            "codigo_precio": None, "precio_unitario": Decimal("300000.00"), "pagina": i,
+        }
+        for i in range(3)
+    ]
+
+    combinadas = _combinar_por_clave(filas)
+
+    assert len(combinadas) == 1
+    motivo = combinadas[0]["motivo_revision"]
+    assert motivo.count("sin matrícula") == 1

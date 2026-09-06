@@ -177,6 +177,16 @@ def _acumular_motivo(motivo: Optional[str], nuevo: Optional[str]) -> Optional[st
     return f"{motivo}; {nuevo}" if motivo else nuevo
 
 
+def _acumular_motivo_unico(motivo: Optional[str], nuevo: str) -> str:
+    """Como `_acumular_motivo`, pero no repite `nuevo` si una fusión por
+    firma ya lo dejó anotado en una vuelta anterior (una firma puede
+    absorber más de dos filas, CLAUDE.md sección 9 sobre idempotencia:
+    reprocesar no debe ni duplicar filas ni duplicar texto de motivo)."""
+    if motivo and nuevo in motivo:
+        return motivo
+    return _acumular_motivo(motivo, nuevo)
+
+
 def _valor_en(fila: list[Optional[str]], indice: Optional[int]) -> Optional[str]:
     if indice is None or indice < 0 or indice >= len(fila):
         return None
@@ -411,6 +421,16 @@ def calcular_clave_linea(codigo_precio, matricula, descripcion, orden_aparicion)
     return hashlib.sha256(base.encode("utf-8")).hexdigest()
 
 
+# Marcador estable (no una columna de `LineaCatalogo`): `construir_lineas_desde_tabla`
+# lo busca en `motivo_revision` para saber que la descripción de esta línea
+# se recuperó de una columna fantasma y puede seguir envuelta en las filas
+# siguientes del mismo cuadro (ver docstring de esa función).
+_MOTIVO_DESCRIPCION_COLUMNA_FANTASMA = (
+    "descripción recuperada de la columna siguiente: la cabecera de esta tabla trae una columna "
+    "en blanco de más antes de la descripción en este documento, confirmar antes de dar por buena"
+)
+
+
 def _construir_campos(
     fila: list[Optional[str]], mapeo: dict[str, Optional[int]]
 ) -> tuple[str, Optional[dict]]:
@@ -506,7 +526,19 @@ def _construir_campos(
                 "unitario\" en la cabecera de esta tabla, confirmar antes de dar por buena",
             )
 
-    if not descripcion and matricula is None and precio_unitario is not None:
+    # Hallazgo real (sesión de limpieza del Excel al cliente, 2026-09-06,
+    # `6.20/28510.0136_ANEJO_3.pdf` p.4, matrículas 740540009/740580020): el
+    # guard original exigía `matricula is None` asumiendo que la columna
+    # fantasma solo aparece en filas huérfanas (partida alzada). Falso: el
+    # mismo desplazamiento de columna ocurre en filas CON matrícula válida —
+    # `_recuperar_descripcion_columna_fantasma` no toca la columna de
+    # matrícula (ya extraída antes, de su propia columna), así que exigir su
+    # ausencia solo dejaba sin recuperar una descripción que sí estaba en el
+    # documento. Antes de este arreglo, esas dos filas se guardaban con
+    # `descripcion = ""` para siempre: nadie puede identificar el material
+    # sin descripción, y ninguna otra copia del mismo material existía en el
+    # documento para rellenarla por fusión.
+    if not descripcion and precio_unitario is not None:
         # Exige precio_unitario ya interpretado en su columna de siempre: sin
         # esto, una fila de relleno real (fragmento de descripción envuelta
         # entre páginas, sin precio en ninguna posición cercana) se recuperaría
@@ -519,12 +551,11 @@ def _construir_campos(
         recuperada = _recuperar_descripcion_columna_fantasma(fila, mapeo)
         if recuperada:
             descripcion = recuperada
-            motivo_revision = _acumular_motivo(
-                motivo_revision,
-                "descripción recuperada de la columna siguiente: la cabecera de esta tabla trae "
-                "una columna en blanco de más antes de la descripción en este documento, confirmar "
-                "antes de dar por buena",
-            )
+            # Texto reutilizado tal cual por `construir_lineas_desde_tabla`
+            # (marcador estable, no una columna de `LineaCatalogo`) para
+            # saber que esta línea puede seguir envuelta en las filas
+            # siguientes -- ver `_MOTIVO_DESCRIPCION_COLUMNA_FANTASMA`.
+            motivo_revision = _acumular_motivo(motivo_revision, _MOTIVO_DESCRIPCION_COLUMNA_FANTASMA)
 
     return "ok", {
         "codigo_precio": codigo_precio,
@@ -591,6 +622,27 @@ def construir_linea_catalogo(
         precio_adjudicado = precio_unitario * (Decimal("1") - baja_lote)
 
     descripcion = campos["descripcion"]
+    matricula = campos["matricula"]
+    if not descripcion and matricula is None:
+        # Encargo de esta sesión (limpieza del Excel al cliente, 2026-09-06):
+        # sin descripción NI matrícula, ninguna otra columna identifica qué
+        # material es esta fila -- no es una línea de catálogo utilizable,
+        # aunque traiga un precio real (llegar aquí ya implica precio_unitario
+        # presente: el guard de arriba descarta como relleno cualquier fila
+        # sin descripción que TAMPOCO traiga precio). Con contenido real en
+        # el fragmento de origen (el precio, un código de precio, una
+        # cantidad) se conserva para revisión humana en vez de perderse en
+        # silencio; una fila genuinamente en blanco se descarta como
+        # cualquier otro relleno de tabla.
+        fragmento_bruto = " | ".join((celda or "").strip() for celda in fila)
+        if not fragmento_bruto.replace("|", "").strip():
+            return None
+        campos["motivo_revision"] = _acumular_motivo(
+            campos["motivo_revision"],
+            "línea sin descripción ni matrícula: ningún dato de la fila identifica qué material es, "
+            "confirmar contra el documento de origen",
+        )
+
     return {
         "clave_linea": calcular_clave_linea(
             campos["codigo_precio"], campos["matricula"], descripcion, orden_aparicion
@@ -613,6 +665,22 @@ def construir_linea_catalogo(
     }
 
 
+def _es_fragmento_continuacion_pura(fila: list[Optional[str]], mapeo: dict[str, Optional[int]], indice_fragmento: int) -> bool:
+    """Una fila de continuación de descripción envuelta (sesión de limpieza
+    del Excel al cliente, 2026-09-06) no trae ningún otro dato real -- solo
+    el siguiente trozo de frase en `indice_fragmento`, con el resto de
+    columnas mapeadas vacías. Si cualquier otro campo mapeado trae un valor,
+    esto no es continuación: es la siguiente fila de datos real (o un dato
+    legítimo de otra columna), y no se debe absorber."""
+    for campo, indice in mapeo.items():
+        if indice is None or indice == indice_fragmento:
+            continue
+        valor = _valor_en(fila, indice)
+        if valor and not _es_celda_vacia(valor):
+            return False
+    return _parece_descripcion_recuperable(_valor_en(fila, indice_fragmento))
+
+
 def construir_lineas_desde_tabla(
     tabla: TablaExtraida,
     mapeo: dict[str, Optional[int]],
@@ -624,13 +692,34 @@ def construir_lineas_desde_tabla(
     # Una fila de pie de tabla (CLAUDE.md sección 2, sesión de rodaje
     # 2026-09-03) devuelve None de `construir_linea_catalogo`: se descarta
     # aquí, nunca llega a `guardar_lineas_catalogo`.
-    lineas = (
-        construir_linea_catalogo(
+    filas = tabla.filas
+    resultado: list[dict] = []
+    for indice, fila in enumerate(filas):
+        linea = construir_linea_catalogo(
             fila, mapeo, tabla.pagina, documento_origen_id, expediente_id, baja_lote, orden_inicial + indice
         )
-        for indice, fila in enumerate(tabla.filas)
-    )
-    return [linea for linea in lineas if linea is not None]
+        if linea is None:
+            continue
+        motivo = linea.get("motivo_revision") or ""
+        indice_descripcion = mapeo.get("descripcion")
+        if _MOTIVO_DESCRIPCION_COLUMNA_FANTASMA in motivo and indice_descripcion is not None:
+            # La descripción recuperada de una columna fantasma (más arriba
+            # en `_construir_campos`) puede seguir envuelta en las filas
+            # siguientes -- mismo fenómeno que `_combinar_filas_cabecera` ya
+            # resuelve para la cabecera, aquí aplicado a filas de datos.
+            # Hallazgo real, `6.20/28510.0136_ANEJO_3.pdf` p.4: la
+            # descripción de "HILO DE CONTACTO..." sigue en hasta 5 filas de
+            # continuación tras la fila con matrícula y precio.
+            indice_fragmento = indice_descripcion + 1
+            siguiente = indice + 1
+            while siguiente < len(filas) and _es_fragmento_continuacion_pura(filas[siguiente], mapeo, indice_fragmento):
+                fragmento = limpiar_texto_celda(_valor_en(filas[siguiente], indice_fragmento))
+                if fragmento:
+                    linea["descripcion"] = f"{linea['descripcion']} {fragmento}".strip()
+                    linea["fragmento"] += " | " + fragmento
+                siguiente += 1
+        resultado.append(linea)
+    return resultado
 
 
 @dataclass(frozen=True)
@@ -653,18 +742,40 @@ def _firma_material(datos: dict) -> Optional[tuple]:
     que ninguna fusión por clave exacta las ve nunca como la misma fila sin
     esta firma aparte.
 
-    Solo se activa cuando la matrícula, la descripción y el precio unitario
-    están los tres presentes: es el único triplete que sigue identificando
-    la misma pieza física con o sin código de precio. Sin matrícula, dos
-    filas con la misma descripción y precio bien pueden ser materiales
-    distintos que coinciden por casualidad (líneas huérfanas, códigos
-    genéricos) — no se fusionan por firma."""
+    Con matrícula, descripción y precio unitario presentes, el triplete
+    identifica la misma pieza física con o sin código de precio, sea cual
+    sea el documento de origen. Sin matrícula, se cae a (descripción,
+    precio) igual — hallazgo real, sesión de limpieza del Excel al cliente
+    2026-09-06: una tabla de "impacto del fallo del elemento en la
+    seguridad operacional" o de normativa aplicable (`6.24/28510.0180`,
+    `6.23/28510.0042`, `6.23/28510.0051`) repite el mismo material con su
+    mismo precio bajo un `codigo_precio` DISTINTO de numeración propia, sin
+    matrícula ninguna de las dos veces — igual que una "PARTIDA ALZADA A
+    JUSTIFICAR PARA IMPREVISTOS" (nunca lleva matrícula, CLAUDE.md sección
+    2) puede repetirse como cabecera de sección en varias páginas del mismo
+    cuadro de precios. `_combinar_por_clave` y `guardar_lineas_catalogo`
+    solo llaman a esta función dentro de un lote ya resuelto
+    (`permitir_fusion_material`/`fusion_material`, nunca en huérfanas): dos
+    materiales genéricos que coincidan en descripción y precio POR
+    CASUALIDAD en LOTES o EXPEDIENTES distintos nunca se ven aquí, porque el
+    filtro de lote/expediente ya los separa antes de llegar a esta firma —
+    el riesgo real de "casualidad" que motivaba excluir del todo el caso sin
+    matrícula queda acotado a dentro del propio lote, donde no se ha
+    verificado ningún caso real en el corpus. El llamador marca
+    `motivo_revision` cuando la fusión ocurre sin matrícula (señal más
+    débil que con ella), para que quede confirmable."""
     matricula = datos.get("matricula")
     descripcion = datos.get("descripcion")
     precio_unitario = datos.get("precio_unitario")
-    if not matricula or not descripcion or precio_unitario is None:
+    if not descripcion or precio_unitario is None:
         return None
     return (matricula, descripcion, precio_unitario)
+
+
+_MOTIVO_FUSION_SIN_MATRICULA = (
+    "fila fundida con otra de igual descripción y precio unitario, sin matrícula ni código de "
+    "precio que las distinga como la misma línea con certeza: confirmar que es el mismo material"
+)
 
 
 def _combinar_por_clave(lineas: list[dict], permitir_fusion_material: bool = True) -> list[dict]:
@@ -713,6 +824,10 @@ def _combinar_por_clave(lineas: list[dict], permitir_fusion_material: bool = Tru
             nuevo["clave_linea"] = clave
             combinadas[clave] = nuevo
         else:
+            if firma is not None and firma[0] is None:
+                existente["motivo_revision"] = _acumular_motivo_unico(
+                    existente.get("motivo_revision"), _MOTIVO_FUSION_SIN_MATRICULA
+                )
             for campo, valor in datos.items():
                 if valor is not None:
                     existente[campo] = valor
@@ -786,6 +901,7 @@ def guardar_lineas_catalogo(
         # que se procesan los documentos, así que quedarse solo con
         # `.first()` antes de saber cuál es `existente` podía dejar la
         # tercera fila sin visitar nunca).
+        firma = None
         duplicados_por_firma: list[LineaCatalogo] = []
         if fusion_material:
             firma = _firma_material(datos)
@@ -801,6 +917,12 @@ def guardar_lineas_catalogo(
                 if existente is not None:
                     consulta = consulta.filter(LineaCatalogo.id != existente.id)
                 duplicados_por_firma = consulta.order_by(LineaCatalogo.id).all()
+
+        # Firma sin matrícula (`_firma_material`, docstring): señal más débil
+        # que con ella, se anota en `motivo_revision` para que la fusión
+        # quede confirmable en vez de silenciosa. Se calcula antes de
+        # vaciar `duplicados_por_firma` más abajo.
+        fusion_sin_matricula = firma is not None and firma[0] is None and bool(duplicados_por_firma)
 
         if existente is None and duplicados_por_firma:
             existente = duplicados_por_firma.pop(0)
@@ -866,5 +988,9 @@ def guardar_lineas_catalogo(
                 clave_ideal = existente.codigo_precio.strip()
                 if clave_ideal:
                     existente.clave_linea = clave_ideal
+            if fusion_sin_matricula:
+                existente.motivo_revision = _acumular_motivo_unico(
+                    existente.motivo_revision, _MOTIVO_FUSION_SIN_MATRICULA
+                )
             actualizadas += 1
     return ResultadoGuardadoCatalogo(creadas=creadas, actualizadas=actualizadas)

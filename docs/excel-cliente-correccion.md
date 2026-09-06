@@ -168,13 +168,15 @@ tres siguen en `pendiente_revision`, uno — `6.20/28510.0136` — ya está
 `completado` con el nombre vacío, pendiente de mirar en una sesión aparte
 de extracción, no de exportación).
 
-## Hallazgo menor adicional, sin tocar
+## Hallazgo menor adicional, sin tocar (corregido: ver Bloque 2)
 
-2 líneas (`6.23/28510.0051`, matrículas `740580020` y `740540009`) tienen
-`descripcion = ''` (cadena vacía, no NULL — la columna es `NOT NULL`) con
-matrícula pero sin ninguna descripción real capturada, `sin_revisar`. No es
-uno de los cinco problemas de esta sesión; queda anotado para una sesión de
-extracción.
+2 líneas (~~`6.23/28510.0051`~~ **`6.20/28510.0136`, ANEJO_3 — la atribución
+a `0051` en la redacción original de este punto era un error de esta misma
+sesión, corregido en el Bloque 2**, matrículas `740580020` y `740540009`)
+tenían `descripcion = ''` (cadena vacía, no NULL — la columna es `NOT NULL`)
+con matrícula pero sin ninguna descripción real capturada, `sin_revisar`. No
+era uno de los cinco problemas de esta sesión; arreglado en el Bloque 2 de
+abajo.
 
 ## Verificación final
 
@@ -197,3 +199,185 @@ defecto del Excel que se entrega):
 Suite completa: **332 tests pasan** (319 antes de esta sesión + 13 nuevos:
 6 de exportación, 5 de `validar_ruta_codigos_proyecto`, 2 de política de
 huérfanas en la API).
+
+---
+
+## Bloque 2: los dos residuos pendientes, causa raíz y arreglo (sesión 2026-09-06, continuación)
+
+Cierra los dos hilos que el bloque 1 dejó anotados sin tocar: el residuo de
+32 grupos/67 filas del mecanismo B en expedientes de un solo lote, y las 2
+líneas con `descripcion = ''`.
+
+### 1. Causa raíz del residuo: no es el mecanismo B, es uno nuevo
+
+Verificado contra los PDF reales (no contra hipótesis): el residuo **no**
+era la misma tabla repetida entre ANEJO y CONTRATO (mecanismo B). Es un
+mecanismo distinto: una **segunda tabla del mismo documento** que reutiliza
+el mismo material — descripción y precio idénticos — bajo un `codigo_precio`
+de numeración propia, sin matrícula ninguna de las dos veces. Dos variantes
+reales, ambas confirmadas abriendo el PDF con `pdfplumber`:
+
+- **Tabla de "impacto del fallo del elemento en la seguridad operacional"**
+  (`6.24/28510.0180_ANEJO_1.pdf` p.23, `6.23/28510.0051_CONTRATO_1.pdf`
+  p.174): un anejo de clasificación de seguridad/normativa que vuelve a
+  listar cada material del cuadro de precios real, con su descripción y
+  precio, bajo su propia numeración de referencia — no es un cuadro de
+  precios de licitación, es un anexo de cumplimiento normativo que coincide
+  con los datos reales por diseño.
+- **Línea administrativa repetida entre secciones** (`PARTIDA ALZADA A
+  JUSTIFICAR PARA IMPREVISTOS`, `6.20/28510.0136` y `6.20/28510.0054`): la
+  misma partida de imprevistos del presupuesto aparece como cabecera de más
+  de una sección del mismo cuadro de precios.
+
+`_firma_material` (matrícula + descripción + precio) ya fundía este patrón
+cuando había matrícula (auditoría 2026-09-05); aquí no la hay nunca, así que
+la firma no se disparaba y las dos copias quedaban como filas separadas.
+**Medido sobre el corpus real de esta sesión: 26 grupos / 55 filas** (no 67 —
+la cifra de 67 del bloque 1 fue una estimación de sesión, no una medición
+directa; 55 es el recuento exacto verificado con `SELECT` antes de tocar
+nada).
+
+**Arreglo** (`app/catalogo.py`): `_firma_material` cae a (descripción,
+precio unitario) cuando no hay matrícula, en vez de devolver `None`. Sigue
+sin aplicarse nunca a huérfanas (`permitir_fusion_material`/`fusion_material`
+ya lo garantizaban, sin tocar). El riesgo teórico de fundir por casualidad
+dos materiales genuinamente distintos que compartan descripción y precio
+queda acotado a **dentro del mismo lote** (el filtro de `lote_id` ya separa
+lotes distintos antes de llegar a la firma) — no verificado ningún caso real
+de esa casualidad en el corpus, y la fusión deja `motivo_revision` explícito
+("fila fundida con otra de igual descripción y precio unitario, sin
+matrícula ni código de precio...") para que quede confirmable, a diferencia
+de la fusión por matrícula (señal más fuerte) que no lo anota.
+
+### 2. Las 2 líneas con `descripcion = ''`: expediente mal atribuido, causa real distinta
+
+El expediente correcto es **`6.20/28510.0136`** (ANEJO_3, hilo de contacto),
+no `6.23/28510.0051` como decía la redacción original de este documento —
+verificado contra la base de datos antes de tocar nada.
+
+Causa real, confirmada abriendo el PDF: la fila de la matrícula `740540009`
+envuelve su descripción en **varias filas visuales** ("HILO DE CONTACTO DE"
+/ "SECCIÓN CIRCULAR DE" / "120 MM2 DE" / "ALEACIÓN COBRE-" / "MAGNESIO 0,5
+CON" / "RANURA TIPO A"), y `pdfplumber` intercala además una columna en
+blanco de más entre la matrícula y la descripción en la primera fila — la
+celda de descripción sale vacía y el texto real cae en la columna
+siguiente. `_recuperar_descripcion_columna_fantasma` (la función que ya
+resuelve exactamente este desplazamiento) tenía un guard que exigía
+`matricula is None` para intentarlo, asumiendo que el fenómeno solo ocurre
+en huérfanas (partida alzada) — falso: la función no toca en absoluto la
+columna de matrícula, así que la ausencia de matrícula nunca fue una
+condición necesaria, solo una suposición no verificada.
+
+**Arreglo**, dos partes:
+
+1. `_construir_campos` intenta la recuperación de columna fantasma tenga o
+   no matrícula la fila (se quita la condición `matricula is None`).
+2. `construir_lineas_desde_tabla` (que sí ve la tabla completa, a
+   diferencia de `construir_linea_catalogo`) encadena las filas de
+   continuación siguientes — mismo mecanismo que `_combinar_filas_cabecera`
+   ya usa para la cabecera — hasta la primera fila que vuelve a traer un
+   dato real. La matrícula `740540009` recupera ahora su descripción
+   completa, no solo el primer fragmento.
+
+### 3. Comprobación permanente: sin descripción y sin matrícula, fuera del catálogo
+
+`construir_linea_catalogo`: una línea sin descripción **y** sin matrícula no
+identifica ningún material. Si el resto de la fila (fragmento de origen)
+tiene contenido real, se conserva marcada para revisión humana; si la fila
+está genuinamente en blanco, se descarta como cualquier otro relleno de
+tabla — nunca entra al catálogo en silencio con una celda vacía sin
+explicación.
+
+### 4. Efecto secundario real, no una regresión: 268 huérfanas nuevas por "banda vacía"
+
+Al reprocesar el corpus completo para aplicar los dos arreglos de arriba
+(obligatorio: `VERSION_LOGICA_EXTRACCION` sube a `"2026-09-06.3"`), 5
+expedientes multi-lote (`6.24/28510.0130`, `6.24/28510.0203`,
+`6.25/28510.0019`, `6.25/28510.0027`, `6.25/28510.0028`) pasaron de 933 a
+1.201 líneas — **+268, todas huérfanas nuevas** (`lote_id IS NULL`,
+`pendiente_revision`, motivo "banda vacía: posible continuación de tabla
+partida entre páginas, sin inferir").
+
+**No es un mecanismo nuevo ni una regresión de este bloque**: es el mismo
+"banda vacía" ya conocido y deliberadamente sin resolver
+(`docs/decisiones.md` sección 31, "investigada, NO implementada — el resto
+arriesga atribución cruzada entre tablas distintas"), que hasta esta mañana
+nunca se había disparado para estos 5 expedientes. La causa es una sesión
+**anterior y no relacionada**, la misma mañana de hoy (`docs/auditoria-huerfanos-y-autorreferencia.md`,
+commit `828e2bc`): `_detectar_numero_lotes_pcsp` se amplió para reconocer
+también un "Documento de Pliegos" como fuente de "Nº de Lotes" — estos 5
+expedientes tienen ese documento, así que hoy, por primera vez, se
+clasifican como multi-lote. Sus tablas de referencia ambiguas, que antes se
+resolvían como una sola fila por código, ahora generan una fila huérfana por
+cada banda ambigua de página — el mecanismo de "banda vacía" es el mismo de
+siempre, simplemente nunca se había ejercitado para estos 5 expedientes
+hasta el primer reproceso completo posterior a ese cambio (este mismo).
+
+**Verificado, no solo asumido**: el resto del corpus (~38 expedientes) pasó
+de 1.835 a 1.806 líneas (**-29**, coherente con el arreglo de los puntos 1-2
+de arriba: menos duplicados, alguna línea más con descripción recuperada).
+El total de la base de datos, 2.768 → 3.007 (+239), es exactamente
+268 (banda vacía, expedientes no relacionados) − 29 (arreglo de este
+bloque).
+
+**Decisión del cliente (2026-09-06): dejarlas pendientes de revisión**, sin
+intentar fundirlas en esta sesión — mismo criterio que ya regía para el
+resto de huérfanas "banda vacía": el riesgo de atribución cruzada entre
+lotes distintos es real, y no afectan al Excel entregado (huérfanas
+excluidas por defecto). Sesión aparte, dedicada, si se decide abordar
+`app.extraccion.lote_tabla` en algún momento.
+
+### 5. Unificación del árbol de construcción
+
+Encontrado de pasada, investigando por qué el reproceso tardaba en
+reflejar el código nuevo: `/home/lucas/adif` (WSL, fuera de `git`) había
+reaparecido como fuente real de los contenedores (`docker inspect
+--format '{{json .Config.Labels}}'` →
+`com.docker.compose.project.working_dir`), pese a haberse borrado ya una
+vez por este mismo motivo (`docs/decisiones.md` sección 28,
+`docs/hallazgos-extraccion.md` "Clon viejo en WSL, borrado"). Segunda vez
+que pasa, sin que ninguna sesión lo dejara escrito la primera.
+
+Verificado antes de tocar nada: comparado archivo a archivo contra el
+commit `HEAD` real (con `git stash` para dejar el repositorio en el estado
+exacto del último commit), **todo el código de aplicación de los últimos 3
+commits coincidía exactamente** entre las dos copias — solo `CLAUDE.md`,
+`README.md` y un fichero de `docs/` estaban desactualizados en la copia.
+**Ningún código llegó a correr sin estar en `git`.**
+
+Medido el motivo habitual para mantener una copia nativa de WSL (velocidad
+de build contra `/mnt/c/...`, penalizada por el protocolo 9p): construir
+desde `/mnt/c/dev/ADIF` tardó 3,5 s (capa de Docker ya cacheada; los pasos
+caros del `Dockerfile`, `pip install`/`playwright install`, no dependen de
+la ruta de origen, solo del contenido de `requirements.txt`) — sin
+diferencia medible que justifique una segunda copia.
+
+**Resuelto**: contenedores reconstruidos y verificados por hash
+(`md5sum` dentro del contenedor coincide con el fichero del repositorio) y
+con la suite completa en verde (339 tests) sirviendo desde
+`/mnt/c/dev/ADIF`. `/home/lucas/adif` borrado. Regla explícita añadida en
+`CLAUDE.md` (invariante 11): fuente única de verdad = el repositorio
+versionado; si algún día hace falta una ruta nativa de Linux por
+rendimiento, la única alternativa permitida es un `git worktree` del mismo
+repositorio, nunca una copia de ficheros suelta.
+
+### 6. Verificación final
+
+| Concepto | Valor |
+|---|---|
+| Líneas en base de datos | 3.007 (2.768 antes del reproceso de este bloque) |
+| Líneas en "Materiales" (hoja entregada) | 1.899 |
+| Líneas pendientes de revisión (hoja "Resumen") | 1.108 (797 banda vacía + 183 sin cabecera + 128 lote no registrado) |
+| Grupos de duplicados del mecanismo de este bloque restantes | 0 (26 grupos / 55 filas antes del arreglo) |
+| Líneas con `descripcion = ''` restantes | 0 (2 antes del arreglo) |
+| Líneas sin descripción y sin matrícula en el catálogo | 0 (comprobación permanente activa) |
+| Descripción del material: relleno en "Materiales" | 100,0% (1.899/1.899) |
+| Cantidad / Precio unitario / Precio adjudicado / Baja: tipos de celda | Solo `int`/`float`/vacío — cero texto mixto, verificado columna a columna |
+| Duplicados visibles en "Materiales" (mismo proyecto+lote+matrícula+descripción+precio) | 0 |
+| Huérfanas nuevas por "banda vacía" (efecto secundario, no regresión, ver punto 4) | +268, en 5 expedientes, pendientes de revisión por decisión del cliente |
+
+Suite completa: **339 tests pasan** (332 antes de este bloque + 7 nuevos:
+recuperación de descripción de columna fantasma con matrícula presente,
+encadenado de fragmentos de descripción envuelta, descarte/revisión de
+líneas sin descripción ni matrícula, y fusión por firma sin matrícula
+dentro de un lote y entre documentos distintos).

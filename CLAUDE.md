@@ -321,6 +321,25 @@ Estas reglas no se rompen ni siquiera "solo para la demo".
 10. **Trazabilidad obligatoria.** Cada cifra queda anclada a documento, página y
     fragmento. Es lo que la versión hecha con Copilot no puede ofrecer, y es donde
     se decide la comparación.
+11. **Una sola fuente de verdad: el repositorio versionado.** Los contenedores
+    reales se construyen siempre desde este repositorio (`git`), nunca desde una
+    copia suelta del código fuera de control de versiones — ni en WSL, ni en
+    ningún otro sitio. **Prohibido mantener una segunda copia del árbol de
+    trabajo para acelerar builds o por cualquier otro motivo**: si hace falta una
+    ruta nativa de Linux por rendimiento de compilación (WSL2 penaliza
+    fuertemente compilar contra una ruta `/mnt/c/...`), la única forma permitida
+    es un `git worktree` del mismo repositorio — nunca una copia de ficheros
+    (`cp`/`rsync`) que pueda divergir sin que `git status` lo note. Antes de
+    reconstruir un contenedor y fiarte de su resultado, comprueba con `docker
+    inspect --format '{{json .Config.Labels}}'` desde qué ruta se construyó
+    (`com.docker.compose.project.working_dir`) — si no es este repositorio (o un
+    `git worktree` suyo), párate: el código desplegado puede no ser el
+    versionado. **Ya ha pasado dos veces** (`docs/decisiones.md` sección 28,
+    `docs/hallazgos-extraccion.md` sección "Clon viejo en WSL, borrado", y de
+    nuevo en la sesión de limpieza de duplicados de 2026-09-06): un clon o copia
+    suelta en `/home/lucas/adif` sirviendo los contenedores reales sin que
+    ninguna sesión lo dejara escrito. No es un hallazgo que redescubrir cada vez,
+    es una regla que no se vuelve a romper.
 
 ---
 
@@ -531,13 +550,28 @@ suficientes, no ahora.
   siempre en 6 expedientes, ya corregido con una comprobación de arranque
   permanente. Detalle completo y números finales en
   `docs/excel-cliente-correccion.md`.
-- **Residuo menor sin tocar, mismo día**: 32 grupos (67 filas) de "mismo
-  material, mismo precio, repetido" en expedientes de un solo lote —
-  mecanismo B de `docs/hallazgos-extraccion.md` sección 30.2 (tabla técnica
-  repetida entre ANEJO y CONTRATO), sin fundir porque son líneas sin
-  matrícula y `_firma_material` exige matrícula. Y 2 líneas de
-  `6.23/28510.0051` con `descripcion = ''` (matrícula presente, sin ninguna
-  descripción capturada). Ambos en `docs/excel-cliente-correccion.md`.
+- **Residuo de duplicados y descripciones vacías: corregido (sesión
+  2026-09-06, bloque 2).** Los 26 grupos/55 filas de "mismo material, mismo
+  precio, repetido sin matrícula" no eran el mecanismo B de
+  `docs/hallazgos-extraccion.md` sección 30.2 (tabla repetida entre ANEJO y
+  CONTRATO) sino uno nuevo: una segunda tabla del mismo documento (anejo de
+  "impacto del fallo en la seguridad operacional", o una partida alzada
+  repetida entre secciones) que reutiliza el material sin matrícula bajo un
+  `codigo_precio` propio — `_firma_material` cae ahora a
+  (descripción, precio) cuando no hay matrícula, acotado al mismo lote. Las
+  2 líneas con `descripcion = ''` eran en realidad `6.20/28510.0136` (no
+  `6.23/28510.0051`, error de atribución de la sesión anterior): descripción
+  envuelta en varias filas con una columna fantasma que el guard de
+  recuperación excluía por exigir ausencia de matrícula sin necesitarlo.
+  Añadida comprobación permanente: sin descripción y sin matrícula, la línea
+  no entra al catálogo. Detalle, causa raíz verificada contra los PDF reales
+  y números finales en `docs/excel-cliente-correccion.md` bloque 2. Efecto
+  secundario real (no una regresión de este arreglo): el reproceso disparó
+  por primera vez el mecanismo ya conocido de "banda vacía" en 5 expedientes
+  multi-lote, +268 huérfanas pendientes de revisión — causa en una sesión
+  anterior no relacionada de ese mismo día (ampliación de
+  `_detectar_numero_lotes_pcsp`), dejadas pendientes por decisión del
+  cliente, mismo bloque 2.
 
 ---
 
