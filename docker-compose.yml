@@ -1,6 +1,7 @@
 services:
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-adif}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-adif}
@@ -18,6 +19,7 @@ services:
   api:
     build: ./engine
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    restart: unless-stopped
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-adif}:${POSTGRES_PASSWORD:-adif}@postgres:5432/${POSTGRES_DB:-adif}
       DOCUMENT_STORAGE_PATH: /data/documentos
@@ -54,6 +56,7 @@ services:
   worker:
     build: ./engine
     command: python -m app.worker
+    restart: unless-stopped
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-adif}:${POSTGRES_PASSWORD:-adif}@postgres:5432/${POSTGRES_DB:-adif}
       DOCUMENT_STORAGE_PATH: /data/documentos
@@ -93,6 +96,7 @@ services:
       context: ./web
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    restart: unless-stopped
     environment:
       API_URL: ${API_URL:-http://api:8000}
     ports:
