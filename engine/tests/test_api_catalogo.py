@@ -247,13 +247,15 @@ def test_exportar_catalogo_excluye_huerfanas_por_defecto_y_las_resume(cliente, d
 
     resumen = libro["Resumen"]
     filas_resumen = [[c.value for c in fila] for fila in resumen.iter_rows()]
-    assert ["Líneas en este catálogo", 1] in filas_resumen
-    assert ["Líneas pendientes de revisión (no incluidas arriba)", 1] in filas_resumen
+    assert ["Líneas en este catálogo", 1, None] in filas_resumen
+    assert ["Líneas pendientes de revisión (no incluidas arriba)", 1, None] in filas_resumen
+    # Encargo de esta sesión, punto 4: el motivo se explica en lenguaje llano
+    # (qué ha pasado / qué haría falta), no con la etiqueta técnica interna.
     assert any(
-        fila[0] == "banda vacía: posible continuación de tabla partida entre páginas" and fila[1] == 1
+        fila[1] == 1 and "continuar de una página a la siguiente" in (fila[0] or "")
         for fila in filas_resumen
-        if fila[0] is not None
     )
+    assert any("Código del material" in (fila[0] or "") for fila in filas_resumen)
 
 
 def test_exportar_catalogo_incluir_pendientes_las_devuelve_en_materiales(cliente, db_session, monkeypatch, tmp_path):

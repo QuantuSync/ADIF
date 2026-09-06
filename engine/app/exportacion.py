@@ -35,6 +35,7 @@ import io
 from collections import Counter
 
 from openpyxl import Workbook
+from openpyxl.styles import Alignment
 from sqlalchemy.orm import Session
 
 from app.catalogo_consulta import consultar_catalogo
@@ -92,23 +93,83 @@ _TAMANO_LOTE = 500
 # página/lote concretos, distinto en cada fila -- en un puñado de motivos
 # legibles para el resumen. `_OTRO_MOTIVO` cubre cualquier redacción nueva
 # que aparezca en el futuro sin que el resumen deje de sumar bien.
-_OTRO_MOTIVO = "otro motivo de ambigüedad"
-_SIN_MOTIVO = "(sin motivo registrado)"
+#
+# Cada categoría lleva, además de la etiqueta técnica interna (la que ya usa
+# `motivo_revision`, necesaria para que el `marcador in motivo` de
+# `_categoria_motivo` siga casando), dos frases en lenguaje llano para quien
+# lea el Excel en ADIF sin conocer el funcionamiento interno del sistema:
+# qué ha pasado, y qué haría falta para resolverlo. (Encargo de esta sesión,
+# punto 4: "nadie en ADIF" debe poder entenderlo sin traducir jerga.)
+_OTRO_MOTIVO = "otro_motivo_ambiguedad"
+_SIN_MOTIVO = "sin_motivo_registrado"
 _CATEGORIAS_MOTIVO = (
-    ("banda vacía", "banda vacía: posible continuación de tabla partida entre páginas"),
-    ("varias cabeceras de lote", "varias cabeceras de lote en la misma franja"),
-    ("ninguna cabecera LOTE", "ninguna cabecera de lote reconocible en la franja"),
-    ("no está entre los lotes declarados", "la tabla declara un lote no registrado en el expediente"),
+    (
+        "banda vacía",
+        "banda vacía: posible continuación de tabla partida entre páginas",
+        "Esta tabla de precios parece continuar de una página a la siguiente del documento, y el sistema "
+        "no ha podido confirmar a qué lote pertenece la parte que sigue.",
+        "Que alguien abra el documento original y compruebe a qué lote corresponde esa parte de la tabla.",
+    ),
+    (
+        "varias cabeceras de lote",
+        "varias cabeceras de lote en la misma franja",
+        "En esa parte del documento se mencionan varios lotes a la vez, y el sistema no puede saber con "
+        "seguridad a cuál de ellos pertenecen estos materiales.",
+        "Que alguien mire el documento y decida a qué lote hay que asignar esas filas.",
+    ),
+    (
+        "ninguna cabecera LOTE",
+        "ninguna cabecera de lote reconocible en la franja",
+        "El documento no indica en ningún sitio cercano a qué lote pertenece esta tabla de precios.",
+        "Que alguien revise el documento y asigne el lote a mano.",
+    ),
+    (
+        "no está entre los lotes declarados",
+        "la tabla declara un lote no registrado en el expediente",
+        "La tabla menciona un número de lote que no coincide con ninguno de los lotes ya confirmados de "
+        "ese expediente (puede ser una errata del documento, o un lote real que todavía falta registrar).",
+        "Que alguien compare con el documento y corrija el número de lote, o lo dé de alta si falta.",
+    ),
 )
+_EXPLICACION_OTRO_MOTIVO = (
+    "El sistema detectó una ambigüedad de un tipo que no encaja en los motivos anteriores."
+)
+_RESOLUCION_OTRO_MOTIVO = "Revisión manual del documento correspondiente."
+_EXPLICACION_SIN_MOTIVO = "No se guardó una explicación concreta para esta fila."
+_RESOLUCION_SIN_MOTIVO = "Revisión manual del documento correspondiente."
 
 
 def _categoria_motivo(motivo: str | None) -> str:
     if not motivo:
         return _SIN_MOTIVO
-    for marcador, categoria in _CATEGORIAS_MOTIVO:
+    for marcador, categoria, _explicacion, _resolucion in _CATEGORIAS_MOTIVO:
         if marcador in motivo:
             return categoria
     return _OTRO_MOTIVO
+
+
+# Mapa categoría técnica -> (explicación llana, qué haría falta para resolverlo).
+_EXPLICACIONES_MOTIVO = {
+    categoria: (explicacion, resolucion) for _marcador, categoria, explicacion, resolucion in _CATEGORIAS_MOTIVO
+}
+_EXPLICACIONES_MOTIVO[_OTRO_MOTIVO] = (_EXPLICACION_OTRO_MOTIVO, _RESOLUCION_OTRO_MOTIVO)
+_EXPLICACIONES_MOTIVO[_SIN_MOTIVO] = (_EXPLICACION_SIN_MOTIVO, _RESOLUCION_SIN_MOTIVO)
+
+# CLAUDE.md sección 6/7: "Código del material" solo se rellena cuando el
+# sustantivo principal de la descripción casa contra un vocabulario todavía
+# pequeño (BRIDA, PLACA, JUNTA...); ampliarlo con el modelo cuando no casa
+# nada queda fuera de esta sesión (sin ningún caso real sin casar en el
+# corpus de prueba). El resultado es una columna vacía en la mayoría de las
+# filas *por diseño*, no un fallo de extracción -- se explica aquí para que
+# no parezca un defecto del entregable.
+_NOTA_CODIGO_MATERIAL = (
+    "La columna \"Código del material\" solo se rellena cuando el sistema reconoce con seguridad la "
+    "primera palabra de la descripción (por ejemplo BRIDA, PLACA, JUNTA, GUANTE, TRAVIESA). Hoy reconoce "
+    "una lista corta de palabras, así que queda vacía en la mayoría de las filas -- no es un fallo de "
+    "extracción ni un dato perdido: la descripción completa del material sí está siempre en la columna "
+    "\"Descripción del material\". Ampliar la lista de palabras reconocidas es un trabajo pendiente, no "
+    "una corrección urgente."
+)
 
 
 def _escribir_resumen(
@@ -123,14 +184,31 @@ def _escribir_resumen(
     if incluir_pendientes_sin_lote:
         hoja.append(["Exportado con las líneas pendientes de revisión incluidas en \"Materiales\".", None])
     elif total_excluidas:
+        hoja.append(["Por qué hay líneas pendientes de revisión", None])
         hoja.append([
-            "Motivo (tabla sin lote asignado con seguridad; el material sigue en la cola de revisión interna)",
-            "Líneas",
+            "Son materiales de los que no se sabe con seguridad a qué lote pertenecen, así que se han "
+            "dejado fuera de la hoja \"Materiales\" para no mostrar el mismo material varias veces sin "
+            "poder distinguir una repetición real de un error de lectura del documento. Siguen guardados, "
+            "no se han perdido.",
+            None,
         ])
+        hoja.append([])
+        hoja.append(["Qué ha pasado", "Líneas", "Qué haría falta para resolverlo"])
         for categoria, cantidad in sorted(excluidas_por_categoria.items(), key=lambda kv: -kv[1]):
-            hoja.append([categoria, cantidad])
-    hoja.column_dimensions["A"].width = 75
+            explicacion, resolucion = _EXPLICACIONES_MOTIVO.get(
+                categoria, (_EXPLICACION_OTRO_MOTIVO, _RESOLUCION_OTRO_MOTIVO)
+            )
+            hoja.append([explicacion, cantidad, resolucion])
+    hoja.append([])
+    hoja.append(["Nota sobre la columna \"Código del material\"", None])
+    hoja.append([_NOTA_CODIGO_MATERIAL, None])
+    for fila in hoja.iter_rows():
+        for celda in fila:
+            if isinstance(celda.value, str) and len(celda.value) > 60:
+                celda.alignment = Alignment(wrap_text=True, vertical="top")
+    hoja.column_dimensions["A"].width = 90
     hoja.column_dimensions["B"].width = 12
+    hoja.column_dimensions["C"].width = 60
 
 
 def generar_excel_catalogo(db: Session, incluir_pendientes_sin_lote: bool = False) -> bytes:

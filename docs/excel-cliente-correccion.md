@@ -381,3 +381,122 @@ recuperación de descripción de columna fantasma con matrícula presente,
 encadenado de fragmentos de descripción envuelta, descarte/revisión de
 líneas sin descripción ni matrícula, y fusión por firma sin matrícula
 dentro de un lote y entre documentos distintos).
+
+## Bloque 3: bajas cero, cobertura de matriz, atípicos de precio y hoja Resumen en lenguaje llano (sesión 2026-09-06, segunda continuación)
+
+Lucas verificó el Excel entregado (1.899 filas, 13 columnas, 2 hojas: sin
+duplicados, sin marcadores de texto, columnas numéricas limpias,
+descripción al 100%) y pidió comprobar cuatro puntos antes de cerrar.
+Ninguno resultó ser un fallo de extracción; los tres primeros se
+verificaron contra la base de datos real sin tocar código, y el cuarto sí
+cambió `app/exportacion.py`.
+
+### 1. Las 8 bajas con valor 0 son reales, no un valor por defecto
+
+`trazas_origen` guarda el fragmento de texto exacto de cada baja
+declarada (`app.extraccion.orquestador._traza`, campo `baja_declarada`).
+Los 8 lotes con `baja_lote = 0` (`6.24/28510.0130` lotes 4-6,
+`6.24/28510.0094` lotes 1-3, `6.25/28510.0028` lotes 6-7) tienen su
+fragmento real anclado a documento y página:
+
+- "baja económica del 0,00 % a todos a todos los precios unitarios"
+  (documentos 104 y 132 -- el "a todos a todos" duplicado es una errata
+  real del propio documento, no un artefacto de la extracción: aparece
+  igual en dos documentos de expedientes distintos, consistente con una
+  plantilla compartida)
+- "baja del 0,00% aplicable al conjunto de precios unitarios"
+  (documento 181)
+
+El literal "0,00%" está en el propio PDF. `app.extraccion.baja.
+extraer_baja_declarada` devuelve `None` (nunca 0) cuando no encuentra la
+frase (ver docstring del módulo); el 0 solo aparece cuando el documento la
+declara textualmente. No hace falta ningún arreglo.
+
+### 2. Código matriz: re-confirmado con el fichero de códigos restaurado
+
+Repetida la comprobación de la sección 4 de arriba, ahora con `Códigos de
+proyecto.xlsx` ya restaurado en el árbol de despliegue. Mismo resultado:
+de 58 expedientes, 8 tienen `codigo_matriz` real, y las 8 matrices
+referenciadas (`2.18/04703.0019/0021/0022/0024/0025`,
+`2.24/04110.0035/0036/0037`) existen como expedientes propios en base de
+datos pero siguen en estado `sin_publicar` -- 0 lotes, 0 líneas, nada que
+heredar (`app.extraccion.herencia_matriz`). El cruce de códigos en sí
+funciona (48 de 58 expedientes cruzados); la columna vacía al 100% en
+"Materiales" es consecuencia de que esos 8 expedientes no aportan ninguna
+fila al catálogo, no de un fallo de cruce. La explicación del bloque 1
+seguía siendo válida con el sistema ya arreglado.
+
+### 3. Atípicos de precio: verificados, ninguno es un error de escala
+
+- **Máximo, 1.020.000 €** (`6.24/28510.0203` lote 2): "Partida alzada a
+  justificar para imprevistos", código `PN10`. Partida alzada legítima
+  (CLAUDE.md sección 2), no un error de parseo -- el mismo expediente
+  repite la partida en varios lotes con importes de 780.000 a 1.020.000 €,
+  coherentes entre sí.
+- **Mínimo, 0,142 €** (`6.23/28510.0129` lote 2): "T x km de balasto
+  transportado a punto de carga diferente al ofertado", cantidad
+  600.000 t·km. Precio por unidad de una línea de transporte a granel --
+  el precio bajo es correcto porque la unidad es muy pequeña (euros por
+  tonelada-kilómetro), no euros por unidad de material.
+
+Comparando cada línea con precio contra la mediana de precio de su propio
+expediente (umbral: más de 50 veces la mediana, o menos de 1/50):
+**114 líneas atípicas en 15 expedientes**, de las cuales:
+
+- **50** son "partida alzada" (imprevistos) -- por naturaleza un importe
+  global, no un precio unitario comparable al resto del lote.
+- **10** son componentes caros dentro de un lote dominado por tornillería
+  barata (bobinas de carga para cable de comunicaciones, cupones de
+  carril, chapa de acero) -- precios físicamente razonables para el
+  material descrito.
+- **54** son piezas de fijación baratas (arandelas, tornillos, pasadores)
+  dentro de un lote dominado por carril o material caro -- igual de
+  razonables en el sentido contrario.
+
+Ninguna de las 114 muestra el patrón de un error de escala (p. ej. un cero
+de más o de menos frente a una línea gemela del mismo material). No se ha
+tocado código: son atípicos por diseño del catálogo (lotes con material
+heterogéneo, de tornillería a raíles), no fallos de extracción.
+
+### 4. Hoja "Resumen" traducida a lenguaje llano
+
+`app/exportacion.py`: los tres motivos de exclusión (antes texto técnico
+interno, p. ej. "banda vacía: posible continuación de tabla partida entre
+páginas") ahora se muestran como una explicación en dos partes -- qué ha
+pasado y qué haría falta para resolverlo -- en una tabla de tres columnas
+("Qué ha pasado" / "Líneas" / "Qué haría falta para resolverlo"). Ejemplo
+real:
+
+> "Esta tabla de precios parece continuar de una página a la siguiente
+> del documento, y el sistema no ha podido confirmar a qué lote pertenece
+> la parte que sigue." — "Que alguien abra el documento original y
+> compruebe a qué lote corresponde esa parte de la tabla."
+
+Añadida además una nota fija explicando la columna "Código del material"
+(vacía en el 91,6% de las líneas de catálogo en base de datos hoy, 3.007
+líneas con 253 códigos rellenos): el sistema solo la rellena cuando la
+primera palabra de la descripción casa contra un vocabulario todavía
+corto (`app.extraccion.codigo_material.VOCABULARIO_CODIGO_MATERIAL`, 11
+palabras); ampliarlo con el modelo cuando no casa nada está
+deliberadamente fuera de alcance (CLAUDE.md sección 6, sin ningún caso
+real sin casar en el corpus de prueba) -- se deja explícito en el Excel
+para que una columna casi vacía no se lea como un fallo del entregable.
+
+Tests: `tests/test_exportacion.py` (categorías con explicación no vacía y
+sin jerga interna, contenido de la hoja Resumen) y
+`tests/test_api_catalogo.py` (test de extremo a extremo actualizado al
+nuevo formato de tres columnas).
+
+### Verificación final
+
+| Concepto | Valor |
+|---|---|
+| Líneas en "Materiales" | 1.899 (sin cambio -- este bloque no toca la generación de líneas) |
+| Bajas distintas | 36, de las cuales 1 valor es 0 (8 lotes) -- verificadas contra el fragmento real del PDF vía `trazas_origen` |
+| Código matriz en "Materiales" | 0/1.899 (100% vacío), re-confirmado: los 8 expedientes con matriz real no aportan líneas porque su matriz sigue `sin_publicar` |
+| Precio unitario | máximo 1.020.000 €, mínimo 0,142 €, ambos verificados contra la línea de origen |
+| Líneas atípicas (>50x o <1/50 de la mediana de su propio expediente) | 114, en 15 expedientes (50 partidas alzadas, 10 caras por tipo de material, 54 baratas por tipo de material) |
+| Suite completa | 346 tests pasan (339 antes de este bloque + 7 nuevos de la hoja Resumen) |
+
+Nada de lo verificado en este bloque requirió tocar la lógica de
+extracción o de cálculo -- solo la hoja "Resumen" cambió de código.

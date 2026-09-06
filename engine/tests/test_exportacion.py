@@ -1,8 +1,19 @@
 """CLAUDE.md, encargo de esta sesión (Excel al cliente), punto 1: ninguna
 convención de marcador de texto de la web viaja al Excel -- celda vacía en
 su lugar, para no convertir una columna numérica en texto mixto."""
-from app.exportacion import _categoria_motivo, _celda_matricula, _celda_numero, _celda_texto
+from app.exportacion import (
+    _CATEGORIAS_MOTIVO,
+    _EXPLICACIONES_MOTIVO,
+    _categoria_motivo,
+    _celda_matricula,
+    _celda_numero,
+    _celda_texto,
+    _escribir_resumen,
+)
 from app.models import LineaCatalogo
+from collections import Counter
+
+from openpyxl import Workbook
 
 
 def _linea(**kwargs) -> LineaCatalogo:
@@ -70,8 +81,46 @@ def test_categoria_motivo_lote_no_declarado():
 
 
 def test_categoria_motivo_sin_registrar():
-    assert _categoria_motivo(None) == "(sin motivo registrado)"
+    assert _categoria_motivo(None) == "sin_motivo_registrado"
 
 
 def test_categoria_motivo_desconocido_cae_en_otro():
-    assert _categoria_motivo("una redacción nueva que no existía todavía") == "otro motivo de ambigüedad"
+    assert _categoria_motivo("una redacción nueva que no existía todavía") == "otro_motivo_ambiguedad"
+
+
+# Encargo de esta sesión, punto 4: la hoja "Resumen" tiene que explicarse en
+# lenguaje llano, no en la jerga interna de `motivo_revision`. Cada categoría
+# (incluidas las dos que caen por defecto, "otro" y "sin motivo") debe tener
+# una explicación y una resolución no vacías, y ninguna de las dos puede
+# arrastrar jerga del sistema (nombres de función, "motivo_revision", etc.).
+
+
+def test_todas_las_categorias_tienen_explicacion_llana():
+    categorias = {categoria for _marcador, categoria, _explicacion, _resolucion in _CATEGORIAS_MOTIVO}
+    categorias |= {"otro_motivo_ambiguedad", "sin_motivo_registrado"}
+    for categoria in categorias:
+        explicacion, resolucion = _EXPLICACIONES_MOTIVO[categoria]
+        assert explicacion.strip()
+        assert resolucion.strip()
+        assert "motivo_revision" not in explicacion
+        assert "motivo_revision" not in resolucion
+
+
+def test_escribir_resumen_incluye_motivos_en_lenguaje_llano():
+    libro = Workbook()
+    excluidas = Counter({"banda vacía: posible continuación de tabla partida entre páginas": 5})
+    _escribir_resumen(libro, incluidas=10, excluidas_por_categoria=excluidas, incluir_pendientes_sin_lote=False)
+    hoja = libro["Resumen"]
+    textos = [str(celda.value) for fila in hoja.iter_rows() for celda in fila if celda.value is not None]
+    contenido = "\n".join(textos)
+    assert "parece continuar de una página a la siguiente" in contenido
+    assert "abra el documento original" in contenido
+    assert "Código del material" in contenido
+
+
+def test_escribir_resumen_sin_pendientes_incluye_nota_codigo_material():
+    libro = Workbook()
+    _escribir_resumen(libro, incluidas=10, excluidas_por_categoria=Counter(), incluir_pendientes_sin_lote=False)
+    hoja = libro["Resumen"]
+    textos = [str(celda.value) for fila in hoja.iter_rows() for celda in fila if celda.value is not None]
+    assert any("Código del material" in texto for texto in textos)

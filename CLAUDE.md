@@ -572,6 +572,29 @@ suficientes, no ahora.
   anterior no relacionada de ese mismo día (ampliación de
   `_detectar_numero_lotes_pcsp`), dejadas pendientes por decisión del
   cliente, mismo bloque 2.
+- **Cuatro comprobaciones del Excel entregado: verificadas, ninguna era un
+  fallo de extracción (sesión 2026-09-06, bloque 3).** (1) Las 8 bajas de
+  lote con valor 0 son reales — `trazas_origen` guarda el fragmento
+  textual exacto ("baja económica del 0,00 % ...", "baja del 0,00% ...")
+  anclado a documento y página; la extracción nunca guarda 0 por defecto,
+  solo cuando el propio documento lo declara. (2) Código matriz vacío al
+  100% en el Excel: re-confirmado ya con el fichero de códigos restaurado
+  (bloque 1) — los 8 expedientes con matriz real siguen sin ninguna línea
+  porque sus 8 matrices siguen `sin_publicar` en la Plataforma, no por un
+  fallo de cruce (48/58 expedientes cruzan bien). (3) Precio máximo
+  (1.020.000 €) y mínimo (0,142 €) verificados contra la línea de origen:
+  una partida alzada de imprevistos y un precio por tonelada-kilómetro de
+  transporte de balasto, ambos legítimos. Comparando cada línea contra la
+  mediana de su propio expediente, 114 líneas atípicas en 15 expedientes
+  (50 partidas alzadas, 10 caras y 54 baratas por heterogeneidad de
+  material dentro del mismo lote) — ninguna con patrón de error de escala.
+  (4) La hoja "Resumen" (`app/exportacion.py`) traduce ahora los tres
+  motivos de exclusión a lenguaje llano (qué ha pasado / qué haría falta
+  para resolverlo, tabla de tres columnas) e incluye una nota fija sobre
+  por qué "Código del material" queda vacía en la mayoría de las filas
+  (vocabulario controlado todavía corto, CLAUDE.md sección 6 — no un dato
+  perdido). Detalle completo y números finales en
+  `docs/excel-cliente-correccion.md` bloque 3.
 - **Tolerancia a reinicios de `dockerd`: arreglada en lo que sí está en
   mano del motor (sesión 2026-09-06).** `docs/diagnostico-caidas-dockerd.md`
   ya documentaba que Modo de espera moderno reinicia el *init* de WSL con
