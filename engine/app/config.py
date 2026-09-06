@@ -94,5 +94,25 @@ class Settings(BaseSettings):
     mantenimiento_intervalo_segundos: float = 7 * 24 * 3600.0
     mantenimiento_programado_activo: bool = True
 
+    # Copias de seguridad automáticas (bloque de copias de seguridad,
+    # sesión 2026-09-06): antes no había ninguna periódica, solo volcados
+    # puntuales a mano antes de cada limpieza -- con un entorno que se
+    # reinicia solo varias veces al día (docs/diagnostico-caidas-dockerd.md),
+    # perder el volumen de la base de datos se llevaría el catálogo entero
+    # sin ningún respaldo. Diaria por defecto, mismo mecanismo que
+    # `mantenimiento_intervalo_segundos` (bloque 3): el propio bucle del
+    # worker decide cuándo toca, sin un quinto proceso ni cron del sistema
+    # operativo. `backup_dir` apunta a un volumen de Docker propio, distinto
+    # del de PostgreSQL (docker-compose.yml), para que perder el volumen de
+    # datos no se lleve las copias por delante.
+    backup_dir: str = "/backups"
+    backup_intervalo_segundos: float = 24 * 3600.0
+    backup_activo: bool = True
+    # Copias que se conservan (la más reciente cuenta como una) antes de
+    # borrar las más antiguas -- sin esto, una copia diaria sin límite
+    # acaba llenando el disco. 14 por defecto: dos semanas de histórico.
+    backup_retencion: int = 14
+    backup_timeout_segundos: float = 900.0
+
 
 settings = Settings()

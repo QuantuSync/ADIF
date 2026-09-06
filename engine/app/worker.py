@@ -12,6 +12,8 @@ from app.interfaces.document_storage import LocalDiskStorage
 from app.interfaces.model_provider import APIModelProvider, CachedModelProvider
 from app.mantenimiento.ciclo import TIPO_TRABAJO as TIPO_MANTENIMIENTO_CICLO
 from app.mantenimiento.ciclo import ejecutar_ciclo_mantenimiento
+from app.mantenimiento.copia_seguridad import TIPO_TRABAJO as TIPO_COPIA_SEGURIDAD
+from app.mantenimiento.copia_seguridad import ejecutar_copia_seguridad
 from app.mantenimiento.frescura import (
     contar_lineas_catalogo,
     debe_estampar_extraccion,
@@ -20,7 +22,10 @@ from app.mantenimiento.frescura import (
     estampar_descarga_exitosa,
     estampar_extraccion,
 )
-from app.mantenimiento.programacion import verificar_y_lanzar_ciclo_programado
+from app.mantenimiento.programacion import (
+    verificar_y_lanzar_ciclo_programado,
+    verificar_y_lanzar_copia_programada,
+)
 from app.models import Documento, EstadoExpediente, Expediente
 from app.queue import ejecutar_trabajo as ejecutar_trabajo_generico
 from app.queue import reclamar_trabajos_huerfanos, tomar_siguiente_trabajo
@@ -149,6 +154,7 @@ MANEJADORES = {
     "descargar_expediente": procesar_descargar_expediente,
     "extraer_expediente": procesar_extraer_expediente,
     TIPO_MANTENIMIENTO_CICLO: procesar_mantenimiento_ciclo,
+    TIPO_COPIA_SEGURIDAD: ejecutar_copia_seguridad,
 }
 
 
@@ -165,6 +171,9 @@ def _vuelta_bucle_principal(db) -> None:
     lanzado = verificar_y_lanzar_ciclo_programado(db)
     if lanzado is not None:
         logger.info("ciclo de mantenimiento programado encolado (trabajo %s)", lanzado.id)
+    copia_lanzada = verificar_y_lanzar_copia_programada(db)
+    if copia_lanzada is not None:
+        logger.info("copia de seguridad programada encolada (trabajo %s)", copia_lanzada.id)
     trabajo = tomar_siguiente_trabajo(db)
     if trabajo is not None:
         logger.info("procesando trabajo %s (%s)", trabajo.id, trabajo.tipo)
