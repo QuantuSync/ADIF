@@ -2,6 +2,7 @@ import logging
 import time
 
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 
 from app.config import settings
 from app.db import SessionLocal
@@ -155,21 +156,42 @@ def ejecutar_trabajo(db, trabajo) -> None:
     ejecutar_trabajo_generico(db, trabajo, MANEJADORES)
 
 
+def _vuelta_bucle_principal(db) -> None:
+    """Una vuelta del bucle principal, separada de `bucle_principal` para
+    poder probarla sin depender de un `while True`."""
+    reclamados = reclamar_trabajos_huerfanos(db, settings.worker_orphan_threshold_seconds)
+    if reclamados:
+        logger.warning("reclamados %s trabajos huerfanos (bloqueado_en vencido)", reclamados)
+    lanzado = verificar_y_lanzar_ciclo_programado(db)
+    if lanzado is not None:
+        logger.info("ciclo de mantenimiento programado encolado (trabajo %s)", lanzado.id)
+    trabajo = tomar_siguiente_trabajo(db)
+    if trabajo is not None:
+        logger.info("procesando trabajo %s (%s)", trabajo.id, trabajo.tipo)
+        ejecutar_trabajo(db, trabajo)
+
+
 def bucle_principal() -> None:
     logger.info("worker arrancado, sondeando cada %ss", settings.worker_poll_interval_seconds)
     while True:
         db = SessionLocal()
         try:
-            reclamados = reclamar_trabajos_huerfanos(db, settings.worker_orphan_threshold_seconds)
-            if reclamados:
-                logger.warning("reclamados %s trabajos huerfanos (bloqueado_en vencido)", reclamados)
-            lanzado = verificar_y_lanzar_ciclo_programado(db)
-            if lanzado is not None:
-                logger.info("ciclo de mantenimiento programado encolado (trabajo %s)", lanzado.id)
-            trabajo = tomar_siguiente_trabajo(db)
-            if trabajo is not None:
-                logger.info("procesando trabajo %s (%s)", trabajo.id, trabajo.tipo)
-                ejecutar_trabajo(db, trabajo)
+            _vuelta_bucle_principal(db)
+        except OperationalError as exc:
+            # Tolerancia a reinicios de dockerd (sesión 2026-09-06):
+            # `app.esperar_bd` ya espera a que la base de datos responda
+            # antes de llegar aquí, pero un reinicio real de dockerd puede
+            # dejar la red del stack recreándose todavía unos segundos
+            # después de esa comprobación -- una consulta de este bucle
+            # (no de un trabajo concreto, que ya aísla sus propios fallos en
+            # `app.queue.ejecutar_trabajo`) puede toparse con el mismo DNS
+            # que no resuelve. Antes esto no se atrapaba aquí: la excepción
+            # salía de `bucle_principal()`, mataba el proceso entero, y
+            # `restart: unless-stopped` reiniciaba el contenedor desde cero
+            # -- perdiendo el propio reintento que `esperar_bd` ya había
+            # hecho. Registrar y reintentar en la siguiente vuelta (mismo
+            # `sleep` de siempre) es un reintento más, no una caída.
+            logger.warning("fallo de conexión a la base de datos en esta vuelta, se reintenta: %s", exc.orig or exc)
         finally:
             db.close()
         time.sleep(settings.worker_poll_interval_seconds)

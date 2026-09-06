@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { DatoVacio, DescripcionCelda, esPartidaAlzada, formatearNumero } from "../ui";
 import { interpretarMotivoLinea, interpretarMotivos } from "../motivos";
+import { useReintentoConexion } from "../useReintentoConexion";
 
 type ExpedienteResumen = {
   id: number;
@@ -134,12 +135,19 @@ function ReasonCard({ categoria, texto, tecnico }: { categoria: "contradiccion" 
   );
 }
 
+const INTERVALO_SONDEO_MS = 3000;
+
 export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
   const [lista, setLista] = useState<ExpedienteResumen[]>([]);
   const [seleccionId, setSeleccionId] = useState<number | null>(null);
   const [detalle, setDetalle] = useState<DetalleRevision | null>(null);
   const [documentoActivo, setDocumentoActivo] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // Conexión (sondeo pasivo de la lista, cada pocos segundos): gateado por
+  // `useReintentoConexion`, igual que en ExpedientesPanel/CatalogoPanel.
+  // `errorDetalle` es distinto: carga del detalle seleccionado o confirmar
+  // un expediente son acciones puntuales, avisan al primer fallo.
+  const { error, registrarExito, registrarFallo } = useReintentoConexion();
+  const [errorDetalle, setErrorDetalle] = useState<string | null>(null);
   const [guardando, setGuardando] = useState(false);
   const [correccion, setCorreccion] = useState({
     importe_licitacion: "",
@@ -153,9 +161,9 @@ export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
       const res = await fetch(`${apiUrl}/revision`, { cache: "no-store" });
       if (!res.ok) throw new Error(`la API respondió ${res.status}`);
       setLista(await res.json());
-      setError(null);
+      registrarExito();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      registrarFallo(e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -172,14 +180,20 @@ export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
         baja_global: datos.expediente.baja_global ?? "",
         codigo_matriz: datos.expediente.codigo_matriz ?? "",
       });
-      setError(null);
+      setErrorDetalle(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setErrorDetalle(e instanceof Error ? e.message : String(e));
     }
   }
 
   useEffect(() => {
+    // Tolerancia a reinicios de dockerd (sesión 2026-09-06): antes, la lista
+    // solo se cargaba una vez al montar -- un fallo puntual la dejaba vacía
+    // para siempre, sin reintentar. Sondeo periódico, igual que
+    // ExpedientesPanel: se recupera sola en cuanto la API vuelve.
     cargarLista();
+    const id = setInterval(cargarLista, INTERVALO_SONDEO_MS);
+    return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -219,7 +233,7 @@ export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
       setSeleccionId(null);
       await cargarLista();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setErrorDetalle(e instanceof Error ? e.message : String(e));
     } finally {
       setGuardando(false);
     }
@@ -354,6 +368,7 @@ export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
     <div className="revision-layout">
       <div>
         {error && <p className="error-banner">{error}</p>}
+        {errorDetalle && <p className="error-banner">{errorDetalle}</p>}
         {lista.length === 0 && !error && <p className="empty-state">Sin casos pendientes de revisión.</p>}
         <div className="revision-list">
           {lista.map((exp) => {

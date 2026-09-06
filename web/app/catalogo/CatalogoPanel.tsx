@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useReintentoConexion } from "../useReintentoConexion";
 import {
   DatoVacio,
   DescripcionCelda,
@@ -195,6 +196,7 @@ type RespuestaCatalogo = {
 };
 
 const TAMANO_PAGINA = 25;
+const REINTENTO_MS = 3000;
 
 export default function CatalogoPanel({ apiUrl }: { apiUrl: string }) {
   const [matricula, setMatricula] = useState("");
@@ -204,8 +206,14 @@ export default function CatalogoPanel({ apiUrl }: { apiUrl: string }) {
   const [pagina, setPagina] = useState(1);
   const [datos, setDatos] = useState<RespuestaCatalogo | null>(null);
   const [cargando, setCargando] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { error, registrarExito, registrarFallo } = useReintentoConexion();
   const [seleccion, setSeleccion] = useState<LineaCatalogo | null>(null);
+  // Tolerancia a reinicios de dockerd (sesión 2026-09-06): antes, esta
+  // página solo volvía a pedir datos cuando el usuario cambiaba un filtro
+  // -- un fallo puntual se quedaba así para siempre, sin reintentar solo.
+  // `reintento` no cambia ningún filtro; solo fuerza que el efecto de abajo
+  // se repita cuando la petición anterior falló.
+  const [reintento, setReintento] = useState(0);
 
   useEffect(() => {
     const id = setTimeout(() => {
@@ -223,13 +231,17 @@ export default function CatalogoPanel({ apiUrl }: { apiUrl: string }) {
         })
         .then((json: RespuestaCatalogo) => {
           setDatos(json);
-          setError(null);
+          registrarExito();
         })
-        .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+        .catch((e) => {
+          registrarFallo(e instanceof Error ? e.message : String(e));
+          setTimeout(() => setReintento((r) => r + 1), REINTENTO_MS);
+        })
         .finally(() => setCargando(false));
     }, 300);
     return () => clearTimeout(id);
-  }, [apiUrl, matricula, expediente, lote, q, pagina]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiUrl, matricula, expediente, lote, q, pagina, reintento]);
 
   // Cualquier cambio de filtro vuelve a la página 1 — si no, se puede quedar
   // mirando una página vacía de un resultado mucho más corto.

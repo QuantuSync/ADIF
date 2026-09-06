@@ -4,9 +4,13 @@ expediente -- el PDF es el acto administrativo, la sindicación no tiene su
 misma autoridad. Se guarda como aviso informativo aparte."""
 from datetime import datetime, timezone
 from decimal import Decimal
+from unittest.mock import MagicMock
+
+import pytest
+from sqlalchemy.exc import OperationalError
 
 from app.models import EstadoExpediente, Expediente, SindicacionExpediente
-from app.worker import _contrastar_con_sindicacion
+from app.worker import _contrastar_con_sindicacion, bucle_principal
 
 
 def _expediente(db, **kwargs) -> Expediente:
@@ -81,3 +85,35 @@ def test_expediente_fallido_no_se_contrasta(db_session):
 
     assert exp.aviso_sindicacion is None
     assert exp.error == "fallo real de scraping"
+
+
+# Sesión de tolerancia a reinicios de dockerd (2026-09-06): un fallo de
+# conexión transitorio dentro de una vuelta del bucle (no de un trabajo
+# concreto, que ya aísla los suyos en app.queue.ejecutar_trabajo) mataba el
+# proceso entero -- reproducido en vivo contra el stack real, reiniciando
+# dockerd mientras el worker corría: `reclamar_trabajos_huerfanos` se topó
+# con un DNS que aún no resolvía justo después de que `app.esperar_bd` ya
+# hubiera comprobado conectividad, y la excepción sin atrapar tiró el
+# proceso completo.
+def test_bucle_principal_no_muere_por_un_fallo_de_conexion_transitorio(monkeypatch):
+    marcador_fin_test = RuntimeError("fin del test: segunda vuelta alcanzada")
+    vuelta = MagicMock(side_effect=[OperationalError("SELECT 1", {}, Exception("dns")), marcador_fin_test])
+    monkeypatch.setattr("app.worker._vuelta_bucle_principal", vuelta)
+
+    sesiones_cerradas = []
+
+    def sesion_falsa():
+        db = MagicMock()
+        db.close.side_effect = lambda: sesiones_cerradas.append(db)
+        return db
+
+    monkeypatch.setattr("app.worker.SessionLocal", sesion_falsa)
+    monkeypatch.setattr("app.worker.time.sleep", lambda s: None)
+
+    with pytest.raises(RuntimeError, match="fin del test"):
+        bucle_principal()
+
+    # Dos vueltas: la primera falló por conexión y NO propagó -- si hubiera
+    # matado el proceso, `vuelta` nunca se habría llamado una segunda vez.
+    assert vuelta.call_count == 2
+    assert len(sesiones_cerradas) == 2  # cada vuelta cierra su propia sesión, incluida la que falló

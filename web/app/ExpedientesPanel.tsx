@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { DatoVacio, EstadoTexto, accentClaseEstado, formatearImporte, formatearPorcentaje } from "./ui";
 import { interpretarMotivos } from "./motivos";
+import { useReintentoConexion } from "./useReintentoConexion";
 
 // Un expediente todavía en curso (no ha terminado de descargar/extraer)
 // puede no tener importe/baja por simple falta de tiempo, no porque el
@@ -230,7 +231,12 @@ export default function ExpedientesPanel({
   apiUrl: string;
 }) {
   const [expedientes, setExpedientes] = useState<Expediente[]>(inicial);
-  const [errorConexion, setErrorConexion] = useState<string | null>(null);
+  // Conexión (sondeo pasivo, cada pocos segundos): un fallo puntual no se
+  // muestra hasta que se repite varias veces seguidas -- ver
+  // `useReintentoConexion`. Distinto de `errorAccion`: una acción directa
+  // del usuario (crear, descargar, extraer) sí avisa al primer fallo.
+  const { error: errorConexion, registrarExito, registrarFallo } = useReintentoConexion();
+  const [errorAccion, setErrorAccion] = useState<string | null>(null);
   const [codigoNuevo, setCodigoNuevo] = useState("");
   const [matrizNuevo, setMatrizNuevo] = useState("");
   const [creando, setCreando] = useState(false);
@@ -244,9 +250,9 @@ export default function ExpedientesPanel({
       if (!res.ok) throw new Error(`la API respondió ${res.status}`);
       const datos = await res.json();
       setExpedientes(datos);
-      setErrorConexion(null);
+      registrarExito();
     } catch (e) {
-      setErrorConexion(e instanceof Error ? e.message : String(e));
+      registrarFallo(e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -274,7 +280,7 @@ export default function ExpedientesPanel({
       setMatrizNuevo("");
       await recargar();
     } catch (e) {
-      setErrorConexion(e instanceof Error ? e.message : String(e));
+      setErrorAccion(e instanceof Error ? e.message : String(e));
     } finally {
       setCreando(false);
     }
@@ -287,7 +293,7 @@ export default function ExpedientesPanel({
       if (!res.ok) throw new Error(`la API respondió ${res.status}`);
       await recargar();
     } catch (e) {
-      setErrorConexion(e instanceof Error ? e.message : String(e));
+      setErrorAccion(e instanceof Error ? e.message : String(e));
     } finally {
       setLanzando(null);
     }
@@ -300,7 +306,7 @@ export default function ExpedientesPanel({
       if (!res.ok) throw new Error(`la API respondió ${res.status}`);
       await recargar();
     } catch (e) {
-      setErrorConexion(e instanceof Error ? e.message : String(e));
+      setErrorAccion(e instanceof Error ? e.message : String(e));
     } finally {
       setLanzando(null);
     }
@@ -412,6 +418,7 @@ export default function ExpedientesPanel({
           Error al conectar con la API ({apiUrl}): {errorConexion}
         </p>
       )}
+      {errorAccion && <p className="error-banner">{errorAccion}</p>}
 
       <div className="table-scroll">
         <table className="table">

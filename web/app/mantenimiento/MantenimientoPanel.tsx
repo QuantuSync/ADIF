@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { DatoVacio } from "../ui";
+import { useReintentoConexion } from "../useReintentoConexion";
 
 type Trabajo = {
   id: number;
@@ -81,7 +82,10 @@ function ResumenCiclo({ resultado }: { resultado: Record<string, unknown> | null
 export default function MantenimientoPanel({ apiUrl }: { apiUrl: string }) {
   const [estado, setEstado] = useState<EstadoMantenimiento | null>(null);
   const [historial, setHistorial] = useState<Trabajo[]>([]);
-  const [errorConexion, setErrorConexion] = useState<string | null>(null);
+  // Conexión (sondeo pasivo): gateado, igual que en el resto de paneles.
+  // `errorAccion` es de "lanzar ahora" -- una acción directa, avisa ya.
+  const { error: errorConexion, registrarExito, registrarFallo } = useReintentoConexion();
+  const [errorAccion, setErrorAccion] = useState<string | null>(null);
   const [lanzando, setLanzando] = useState(false);
 
   async function recargar() {
@@ -94,9 +98,9 @@ export default function MantenimientoPanel({ apiUrl }: { apiUrl: string }) {
       if (!resHistorial.ok) throw new Error(`la API respondió ${resHistorial.status}`);
       setEstado(await resEstado.json());
       setHistorial(await resHistorial.json());
-      setErrorConexion(null);
+      registrarExito();
     } catch (e) {
-      setErrorConexion(e instanceof Error ? e.message : String(e));
+      registrarFallo(e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -118,7 +122,7 @@ export default function MantenimientoPanel({ apiUrl }: { apiUrl: string }) {
       if (!res.ok) throw new Error(`la API respondió ${res.status}`);
       await recargar();
     } catch (e) {
-      setErrorConexion(e instanceof Error ? e.message : String(e));
+      setErrorAccion(e instanceof Error ? e.message : String(e));
     } finally {
       setLanzando(false);
     }
@@ -131,6 +135,7 @@ export default function MantenimientoPanel({ apiUrl }: { apiUrl: string }) {
           Error al conectar con la API ({apiUrl}): {errorConexion}
         </p>
       )}
+      {errorAccion && <p className="error-banner">{errorAccion}</p>}
 
       <div className="card" style={{ marginBottom: "1.5rem" }}>
         <p className="section-label">Ejecución programada</p>

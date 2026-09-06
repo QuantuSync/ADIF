@@ -9,25 +9,27 @@ export default async function Home() {
   const apiUrlServidor = process.env.API_URL ?? "http://localhost:8000";
   const apiUrlNavegador = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+  // Tolerancia a reinicios de dockerd (sesión 2026-09-06): antes, un fallo
+  // en este fetch inicial del servidor dejaba la página parada en un
+  // banner de error estático para siempre -- `ExpedientesPanel`, que sí
+  // sondea la API sola cada pocos segundos y se recupera cuando vuelve,
+  // nunca llegaba a montarse. Ahora se monta siempre, con `[]` si el fetch
+  // inicial falló: su propio sondeo se encarga de rellenarlo en cuanto la
+  // API responda, sin que nadie recargue la página.
   let expedientes: Expediente[] = [];
-  let error: string | null = null;
   try {
     const res = await fetch(`${apiUrlServidor}/expedientes`, { cache: "no-store" });
     if (!res.ok) throw new Error(`la API respondió ${res.status}`);
     expedientes = await res.json();
-  } catch (e) {
-    error = e instanceof Error ? e.message : String(e);
+  } catch {
+    expedientes = [];
   }
 
   return (
     <main>
       <h1 className="page-title">Expedientes</h1>
       <p className="page-subtitle">Descarga, extracción y estado de cada expediente del catálogo.</p>
-      {error ? (
-        <p className="error-banner">Error al conectar con la API: {error}</p>
-      ) : (
-        <ExpedientesPanel inicial={expedientes} apiUrl={apiUrlNavegador} />
-      )}
+      <ExpedientesPanel inicial={expedientes} apiUrl={apiUrlNavegador} />
     </main>
   );
 }

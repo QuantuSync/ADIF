@@ -18,7 +18,13 @@ services:
 
   api:
     build: ./engine
-    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    # `esperar_bd` antes de migrar/arrancar (sesión de tolerancia a
+    # reinicios de dockerd, 2026-09-06): `depends_on: condition:
+    # service_healthy` de abajo solo lo respeta `docker compose up` -- un
+    # reinicio de dockerd que restaura los contenedores con
+    # `restart: unless-stopped` los arranca cada uno por su cuenta, sin ese
+    # orden. Ver docstring de app/esperar_bd.py.
+    command: sh -c "python -m app.esperar_bd && alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-adif}:${POSTGRES_PASSWORD:-adif}@postgres:5432/${POSTGRES_DB:-adif}
@@ -55,7 +61,9 @@ services:
 
   worker:
     build: ./engine
-    command: python -m app.worker
+    # Mismo motivo que en "api": esperar a la base de datos dentro del
+    # proceso, no depender del orden de arranque de docker-compose.
+    command: sh -c "python -m app.esperar_bd && python -m app.worker"
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-adif}:${POSTGRES_PASSWORD:-adif}@postgres:5432/${POSTGRES_DB:-adif}

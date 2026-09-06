@@ -572,6 +572,38 @@ suficientes, no ahora.
   anterior no relacionada de ese mismo día (ampliación de
   `_detectar_numero_lotes_pcsp`), dejadas pendientes por decisión del
   cliente, mismo bloque 2.
+- **Tolerancia a reinicios de `dockerd`: arreglada en lo que sí está en
+  mano del motor (sesión 2026-09-06).** `docs/diagnostico-caidas-dockerd.md`
+  ya documentaba que Modo de espera moderno reinicia el *init* de WSL con
+  cierta frecuencia (fuera del alcance de este repositorio, requiere
+  privilegios de administrador de Windows) — esta sesión ataca la
+  consecuencia que sí depende del código: `depends_on: condition:
+  service_healthy` de `docker-compose.yml` solo lo respeta `docker compose
+  up`, nunca la restauración de contenedores que hace `dockerd` al
+  arrancar, así que `api`/`worker` podían arrancar antes de que `postgres`
+  resolviera por DNS y morían con un `OperationalError` sin atrapar,
+  reiniciando el contenedor entero en vez de reintentar. Añadido
+  `app.esperar_bd` (reintentos con espera antes de `alembic upgrade
+  head`/`python -m app.worker`, `engine/tests/test_esperar_bd.py`) y,
+  encontrado verificando en vivo, un segundo fallo real: un hallazgo de
+  conexión transitorio *dentro* del bucle del worker (no de un trabajo
+  concreto, que ya aislaba los suyos) también mataba el proceso entero —
+  atrapado ahora en `bucle_principal`, reintenta en la siguiente vuelta
+  (`engine/tests/test_worker.py`). Verificado contra el stack real,
+  forzando y observando docenas de reinicios reales de `dockerd` en vivo:
+  cero trazas sin atrapar desde el arreglo. Del lado de la web: la home
+  ("/") se quedaba en un banner de error estático para siempre si su fetch
+  inicial del servidor fallaba una sola vez — ahora monta siempre
+  `ExpedientesPanel`, que sondea solo y se recupera; y los cuatro paneles
+  (`ExpedientesPanel`, `CatalogoPanel`, `RevisionPanel`,
+  `MantenimientoPanel`) usan `useReintentoConexion` para no mostrar un
+  banner rojo hasta varios fallos seguidos, ni por un corte de un par de
+  segundos que ya se resolvió solo. `ADIF-WSL-Docker-Watchdog` (tarea
+  programada de Windows, reasegura `docker` cada minuto) y
+  `ADIF-WSL-Docker-Autostart` corregidas para ejecutarse sin ventana
+  visible de consola (`wscript.exe` + `run-hidden.vbs`, antes invocaban
+  `wsl.exe` directamente). Detalle completo, hallazgos en vivo y
+  verificación en `docs/tolerancia-reinicios-dockerd.md`.
 
 ---
 
@@ -581,4 +613,5 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `mantenimiento-automatico.md`, `decisiones.md`, `correccion-defectos-auditoria.md`,
 `comparacion-corpus-sharepoint.md`, `auditoria-huerfanos-y-autorreferencia.md`,
 `excel-cliente-correccion.md`, `diagnostico-caidas-dockerd.md`,
+`tolerancia-reinicios-dockerd.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.
