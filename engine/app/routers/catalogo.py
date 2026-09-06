@@ -55,6 +55,14 @@ def explorar_catalogo(
 
 @router.get("/catalogo/exportar.xlsx")
 def exportar_catalogo(
+    incluir_pendientes: bool = Query(
+        default=False,
+        description=(
+            "Incluye en \"Materiales\" las líneas cuya tabla de origen no se pudo asociar a un "
+            "lote sin ambigüedad (huérfanas, docstring de app.exportacion). Por defecto solo van "
+            "a la hoja \"Resumen\", agrupadas por motivo."
+        ),
+    ),
     db: Session = Depends(get_db),
     usuario: Usuario = Depends(get_current_user),
 ):
@@ -68,7 +76,7 @@ def exportar_catalogo(
         for expediente in sin_cruzar:
             asegurar_cruce_codigos(db, expediente)
         db.commit()
-    contenido = generar_excel_catalogo(db)
+    contenido = generar_excel_catalogo(db, incluir_pendientes_sin_lote=incluir_pendientes)
     return Response(
         content=contenido,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

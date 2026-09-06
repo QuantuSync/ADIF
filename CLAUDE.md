@@ -522,6 +522,22 @@ suficientes, no ahora.
   una prioridad Contrato-vs-Propuesta (solo Propuesta LC.27 vs. Resolución
   de Adjudicación, sección 17). Verificado en
   `docs/auditoria-previa.md` bloque 3, parte A.
+- **Excel al cliente: corregido (sesión 2026-09-06).** Marcadores de texto
+  fuera de las columnas numéricas, precio adjudicado y baja de lote
+  añadidas, huérfanas sin lote excluidas del Excel por defecto (con hoja
+  "Resumen" y parámetro `incluir_pendientes` para volver a incluirlas), 268
+  huérfanas redundantes limpiadas, y un bind-mount de Docker roto en
+  silencio (fichero de códigos ausente) que dejaba el cruce mal para
+  siempre en 6 expedientes, ya corregido con una comprobación de arranque
+  permanente. Detalle completo y números finales en
+  `docs/excel-cliente-correccion.md`.
+- **Residuo menor sin tocar, mismo día**: 32 grupos (67 filas) de "mismo
+  material, mismo precio, repetido" en expedientes de un solo lote —
+  mecanismo B de `docs/hallazgos-extraccion.md` sección 30.2 (tabla técnica
+  repetida entre ANEJO y CONTRATO), sin fundir porque son líneas sin
+  matrícula y `_firma_material` exige matrícula. Y 2 líneas de
+  `6.23/28510.0051` con `descripcion = ''` (matrícula presente, sin ninguna
+  descripción capturada). Ambos en `docs/excel-cliente-correccion.md`.
 
 ---
 
@@ -530,4 +546,5 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `hallazgos-extraccion.md`, `identidad-expediente.md`, `decisiones-cliente.md`,
 `mantenimiento-automatico.md`, `decisiones.md`, `correccion-defectos-auditoria.md`,
 `comparacion-corpus-sharepoint.md`, `auditoria-huerfanos-y-autorreferencia.md`,
+`excel-cliente-correccion.md`, `diagnostico-caidas-dockerd.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.

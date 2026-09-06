@@ -188,6 +188,7 @@ def test_exportar_catalogo_genera_xlsx_con_columnas_del_formato_esperado(cliente
         "Código interno", "Código de proyecto", "Código matriz", "Nombre del proyecto",
         "Matrícula del material", "Descripción del material", "Código del material",
         "Cantidad", "Precio unitario", "Lote", "Comentarios",
+        "Precio adjudicado", "Baja del lote",
     ]
     fila = [c.value for c in next(hoja.iter_rows(min_row=2, max_row=2))]
     assert fila[3] == "SUMINISTRO DE GUANTES CONTRA RIESGO ELECTRICO."
@@ -199,6 +200,76 @@ def test_exportar_catalogo_genera_xlsx_con_columnas_del_formato_esperado(cliente
     # (CLAUDE.md sección 7).
     assert fila[0] is None
     assert fila[1] is None
+    # Encargo de esta sesión, punto 3: precio adjudicado y baja del lote,
+    # al final, sin desplazar las once columnas de siempre.
+    assert fila[11] == 11.04
+    assert fila[12] == 0.54
+
+
+def _agregar_linea_huerfana(db_session, expediente, documento, *, motivo):
+    linea = LineaCatalogo(
+        lote_id=None,
+        expediente_id=expediente.id,
+        clave_linea="P-002@p5y100",
+        orden_aparicion=1,
+        codigo_precio="P-002",
+        descripcion="TORNILLO M8",
+        precio_unitario=Decimal("3.00"),
+        documento_origen_id=documento.id,
+        pagina=5,
+        fragmento="P-002 | TORNILLO M8...",
+        motivo_revision=motivo,
+    )
+    db_session.add(linea)
+    db_session.commit()
+    return linea
+
+
+def test_exportar_catalogo_excluye_huerfanas_por_defecto_y_las_resume(cliente, db_session, tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "codigos_proyecto_path", None)
+    expediente, _lote, documento, _linea = _sembrar_catalogo(db_session)
+    _agregar_linea_huerfana(
+        db_session, expediente, documento,
+        motivo="banda vacía: posible continuación de tabla partida entre páginas, sin inferir",
+    )
+
+    resp = cliente.get("/catalogo/exportar.xlsx")
+
+    ruta = tmp_path / "salida.xlsx"
+    ruta.write_bytes(resp.content)
+    libro = openpyxl.load_workbook(ruta)
+    materiales = libro["Materiales"]
+    # Encargo de esta sesión: la huérfana (sin lote asignado con seguridad)
+    # no sale en "Materiales" por defecto -- solo la línea con lote.
+    assert materiales.max_row == 2
+    descripciones = [c.value for c in materiales["F"]][1:]
+    assert "TORNILLO M8" not in descripciones
+
+    resumen = libro["Resumen"]
+    filas_resumen = [[c.value for c in fila] for fila in resumen.iter_rows()]
+    assert ["Líneas en este catálogo", 1] in filas_resumen
+    assert ["Líneas pendientes de revisión (no incluidas arriba)", 1] in filas_resumen
+    assert any(
+        fila[0] == "banda vacía: posible continuación de tabla partida entre páginas" and fila[1] == 1
+        for fila in filas_resumen
+        if fila[0] is not None
+    )
+
+
+def test_exportar_catalogo_incluir_pendientes_las_devuelve_en_materiales(cliente, db_session, monkeypatch, tmp_path):
+    monkeypatch.setattr(settings, "codigos_proyecto_path", None)
+    expediente, _lote, documento, _linea = _sembrar_catalogo(db_session)
+    _agregar_linea_huerfana(db_session, expediente, documento, motivo="ninguna cabecera LOTE N encontrada")
+
+    resp = cliente.get("/catalogo/exportar.xlsx", params={"incluir_pendientes": "true"})
+
+    ruta = tmp_path / "salida.xlsx"
+    ruta.write_bytes(resp.content)
+    libro = openpyxl.load_workbook(ruta)
+    materiales = libro["Materiales"]
+    assert materiales.max_row == 3
+    descripciones = [c.value for c in materiales["F"]][1:]
+    assert "TORNILLO M8" in descripciones
 
 
 def test_revision_lista_solo_pendientes(cliente, db_session):

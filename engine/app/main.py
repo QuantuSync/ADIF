@@ -2,7 +2,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
+from app.extraccion.cruce_codigos import validar_ruta_codigos_proyecto
 from app.routers import catalogo, documentos, expedientes, health, mantenimiento, revision, trabajos
+
+# Falla de forma visible en el arranque si CODIGOS_PROYECTO_PATH está mal
+# configurada, en vez de dejar que el cruce falle en silencio petición a
+# petición (docstring de `validar_ruta_codigos_proyecto`).
+validar_ruta_codigos_proyecto(settings.codigos_proyecto_path)
 
 app = FastAPI(title="ADIF - Catalogo de materiales")
 

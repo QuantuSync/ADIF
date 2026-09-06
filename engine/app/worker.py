@@ -5,6 +5,7 @@ from sqlalchemy import select
 
 from app.config import settings
 from app.db import SessionLocal
+from app.extraccion.cruce_codigos import validar_ruta_codigos_proyecto
 from app.extraccion.orquestador import ejecutar_extraccion_expediente
 from app.interfaces.document_storage import LocalDiskStorage
 from app.interfaces.model_provider import AnthropicModelProvider, CachedModelProvider
@@ -175,4 +176,9 @@ def bucle_principal() -> None:
 
 
 if __name__ == "__main__":
+    # Mismo arranque visible que `app.main` (docstring de
+    # `validar_ruta_codigos_proyecto`): el worker es el otro proceso que
+    # lee `CODIGOS_PROYECTO_PATH` (cascada de extracción, no solo el
+    # backfill perezoso de la API).
+    validar_ruta_codigos_proyecto(settings.codigos_proyecto_path)
     bucle_principal()

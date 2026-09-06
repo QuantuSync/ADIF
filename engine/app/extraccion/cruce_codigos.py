@@ -131,6 +131,45 @@ class _IndiceCodigosProyecto:
         return None
 
 
+class CodigosProyectoPathInvalida(RuntimeError):
+    """`CODIGOS_PROYECTO_PATH` está configurada pero no apunta a un `.xlsx`
+    legible (sesión del Excel al cliente, encargo del usuario: "que falle de
+    forma visible en vez de continuar con el cruce roto"). Caso real que
+    motiva esto: un bind-mount de Docker cuyo origen no existía creó en su
+    lugar un directorio vacío en la ruta montada -- `asegurar_cruce_codigos`
+    solo atrapa `FileNotFoundError` (pensado para la ruta sin configurar),
+    así que un directorio ahí producía un `IsADirectoryError` sin capturar
+    en la primera petición que tocara un expediente aún sin intentar, y
+    -- porque `codigos_cruzados` no se reintenta nunca una vez escrito
+    (docstring de `asegurar_cruce_codigos`) -- cualquier expediente cuyo
+    intento cayera justo en esa ventana quedaba marcado `codigos_cruzados =
+    False` para siempre, indistinguible de un expediente que de verdad no
+    cruza. Verificar esto al arrancar, una vez, es mucho más barato que
+    perseguirlo expediente a expediente después."""
+
+
+def validar_ruta_codigos_proyecto(ruta: Optional[str]) -> None:
+    """Se llama una vez al arrancar la API y el worker (`app.main`,
+    `app.worker`). Sin ruta configurada no hay nada que validar -- cruce
+    desactivado es una configuración válida (docstring de
+    `asegurar_cruce_codigos`)."""
+    if not ruta:
+        return
+    camino = Path(ruta)
+    if not camino.is_file():
+        raise CodigosProyectoPathInvalida(
+            f"CODIGOS_PROYECTO_PATH={ruta!r} no es un fichero (¿bind-mount con el origen "
+            "ausente, que Docker sustituyó por un directorio vacío?)"
+        )
+    try:
+        libro = openpyxl.load_workbook(camino, read_only=True)
+        libro.close()
+    except Exception as exc:
+        raise CodigosProyectoPathInvalida(
+            f"CODIGOS_PROYECTO_PATH={ruta!r} no se puede abrir como .xlsx: {exc}"
+        ) from exc
+
+
 _cache: dict[str, tuple[float, _IndiceCodigosProyecto]] = {}
 
 

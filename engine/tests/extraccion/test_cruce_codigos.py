@@ -6,9 +6,11 @@ import pytest
 from app.config import settings
 from app.extraccion.cruce_codigos import (
     AutoreferenciaMatrizError,
+    CodigosProyectoPathInvalida,
     asegurar_cruce_codigos,
     asignar_matriz,
     cruzar_codigo_proyecto,
+    validar_ruta_codigos_proyecto,
 )
 
 
@@ -149,3 +151,42 @@ def test_asegurar_cruce_codigos_matriz_autorreferenciada_en_excel_no_se_escribe(
     assert expediente.codigo_matriz is None
     assert expediente.codigo_interno == "23026"
     assert expediente.codigos_cruzados is True
+
+
+# --- `validar_ruta_codigos_proyecto` (encargo de esta sesión: fallar de
+# forma visible al arrancar en vez de dejar el cruce roto en silencio,
+# como pasó con un bind-mount de Docker cuyo origen no existía). ---
+
+
+def test_validar_ruta_codigos_proyecto_sin_configurar_no_hace_nada():
+    validar_ruta_codigos_proyecto(None)
+    validar_ruta_codigos_proyecto("")
+
+
+def test_validar_ruta_codigos_proyecto_acepta_xlsx_valido(excel_codigos):
+    validar_ruta_codigos_proyecto(excel_codigos)
+
+
+def test_validar_ruta_codigos_proyecto_rechaza_directorio(tmp_path):
+    # El caso real que motiva esto: un bind-mount de Docker cuyo origen no
+    # existía, con Docker creando un directorio vacío en su lugar.
+    directorio = tmp_path / "Codigos de proyecto.xlsx"
+    directorio.mkdir()
+
+    with pytest.raises(CodigosProyectoPathInvalida):
+        validar_ruta_codigos_proyecto(str(directorio))
+
+
+def test_validar_ruta_codigos_proyecto_rechaza_fichero_no_xlsx(tmp_path):
+    ruta = tmp_path / "no_es_un_excel.xlsx"
+    ruta.write_text("esto no es un .xlsx")
+
+    with pytest.raises(CodigosProyectoPathInvalida):
+        validar_ruta_codigos_proyecto(str(ruta))
+
+
+def test_validar_ruta_codigos_proyecto_rechaza_ruta_inexistente(tmp_path):
+    ruta = tmp_path / "no_existe.xlsx"
+
+    with pytest.raises(CodigosProyectoPathInvalida):
+        validar_ruta_codigos_proyecto(str(ruta))
