@@ -146,7 +146,7 @@ export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
   // `useReintentoConexion`, igual que en ExpedientesPanel/CatalogoPanel.
   // `errorDetalle` es distinto: carga del detalle seleccionado o confirmar
   // un expediente son acciones puntuales, avisan al primer fallo.
-  const { error, registrarExito, registrarFallo } = useReintentoConexion();
+  const { error, confirmado, cargando: sinConfirmar, registrarExito, registrarFallo } = useReintentoConexion();
   const [errorDetalle, setErrorDetalle] = useState<string | null>(null);
   const [guardando, setGuardando] = useState(false);
   const [correccion, setCorreccion] = useState({
@@ -367,9 +367,14 @@ export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
   return (
     <div className="revision-layout">
       <div>
+        {/* Estados de carga y error (CONTEXTO.md, bloque de estados de carga
+            y error, sesión 2026-09-06): sin respuesta confirmada de la API
+            todavía, no se dice "sin casos pendientes" -- eso solo es cierto
+            una vez confirmado, no por simple falta de respuesta. */}
+        {sinConfirmar && <p className="muted">Cargando cola de revisión…</p>}
         {error && <p className="error-banner">{error}</p>}
         {errorDetalle && <p className="error-banner">{errorDetalle}</p>}
-        {lista.length === 0 && !error && <p className="empty-state">Sin casos pendientes de revisión.</p>}
+        {confirmado && lista.length === 0 && !error && <p className="empty-state">Sin casos pendientes de revisión.</p>}
         <div className="revision-list">
           {lista.map((exp) => {
             const primerMotivo = interpretarMotivos(exp.error)[0];

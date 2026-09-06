@@ -225,9 +225,11 @@ function TablaLotes({ lotes, estadoExpediente }: { lotes: Lote[]; estadoExpedien
 
 export default function ExpedientesPanel({
   inicial,
+  inicialConfirmado,
   apiUrl,
 }: {
   inicial: Expediente[];
+  inicialConfirmado: boolean;
   apiUrl: string;
 }) {
   const [expedientes, setExpedientes] = useState<Expediente[]>(inicial);
@@ -235,7 +237,8 @@ export default function ExpedientesPanel({
   // muestra hasta que se repite varias veces seguidas -- ver
   // `useReintentoConexion`. Distinto de `errorAccion`: una acción directa
   // del usuario (crear, descargar, extraer) sí avisa al primer fallo.
-  const { error: errorConexion, registrarExito, registrarFallo } = useReintentoConexion();
+  const { error: errorConexion, confirmado, cargando, registrarExito, registrarFallo } =
+    useReintentoConexion(inicialConfirmado);
   const [errorAccion, setErrorAccion] = useState<string | null>(null);
   const [codigoNuevo, setCodigoNuevo] = useState("");
   const [matrizNuevo, setMatrizNuevo] = useState("");
@@ -371,48 +374,12 @@ export default function ExpedientesPanel({
         </form>
       </div>
 
-      <p className="muted" style={{ marginBottom: "1.25rem" }}>
-        {expedientes.length} expediente{expedientes.length === 1 ? "" : "s"} · {resumen.completado} completado
-        {resumen.completado === 1 ? "" : "s"} · {resumen.revision} en revisión · {resumen.sinPublicar} no publicado
-        {resumen.sinPublicar === 1 ? "" : "s"}
-        {resumen.enCurso > 0 && ` · ${resumen.enCurso} en curso`}
-      </p>
-
-      <div className="buscador-expedientes">
-        <input
-          className="input"
-          value={busqueda}
-          onChange={(e) => setBusqueda(e.target.value)}
-          placeholder="Buscar por código o nombre de proyecto…"
-          aria-label="Buscar expedientes"
-        />
-        <div className="filtro-estado-grupo" role="group" aria-label="Filtrar por estado">
-          {(
-            [
-              ["todos", "Todos"],
-              ["completado", "Completado"],
-              ["revision", "En revisión"],
-              ["sin_publicar", "No publicado"],
-            ] as [FiltroEstado, string][]
-          ).map(([valor, etiqueta]) => (
-            <button
-              key={valor}
-              type="button"
-              onClick={() => setFiltroEstado(valor)}
-              className={`filtro-estado${filtroEstado === valor ? " active" : ""}`}
-            >
-              {etiqueta}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {hayFiltroActivo && (
-        <p className="muted" style={{ marginBottom: "1.25rem", fontSize: "0.88rem" }}>
-          {filtrados.length} resultado{filtrados.length === 1 ? "" : "s"} con este filtro.
-        </p>
-      )}
-
+      {/* Estados de carga y error (CONTEXTO.md, bloque de estados de carga y
+          error, sesión 2026-09-06): mientras no hay respuesta confirmada de
+          la API, no se enseña ningún recuento -- ni siquiera cero -- para
+          que un corte de conexión no se lea como que se han borrado los
+          expedientes. */}
+      {cargando && <p className="muted" style={{ marginBottom: "1.25rem" }}>Cargando expedientes…</p>}
       {errorConexion && (
         <p className="error-banner">
           Error al conectar con la API ({apiUrl}): {errorConexion}
@@ -420,21 +387,65 @@ export default function ExpedientesPanel({
       )}
       {errorAccion && <p className="error-banner">{errorAccion}</p>}
 
-      <div className="table-scroll">
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Expediente</th>
-              <th>Matriz</th>
-              <th>Estado</th>
-              <th className="num">Licitación</th>
-              <th className="num">Adjudicación</th>
-              <th className="num">Baja</th>
-              <th>Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
-            {normales.map((exp) => {
+      {confirmado && (
+        <>
+          <p className="muted" style={{ marginBottom: "1.25rem" }}>
+            {expedientes.length} expediente{expedientes.length === 1 ? "" : "s"} · {resumen.completado} completado
+            {resumen.completado === 1 ? "" : "s"} · {resumen.revision} en revisión · {resumen.sinPublicar} no publicado
+            {resumen.sinPublicar === 1 ? "" : "s"}
+            {resumen.enCurso > 0 && ` · ${resumen.enCurso} en curso`}
+          </p>
+
+          <div className="buscador-expedientes">
+            <input
+              className="input"
+              value={busqueda}
+              onChange={(e) => setBusqueda(e.target.value)}
+              placeholder="Buscar por código o nombre de proyecto…"
+              aria-label="Buscar expedientes"
+            />
+            <div className="filtro-estado-grupo" role="group" aria-label="Filtrar por estado">
+              {(
+                [
+                  ["todos", "Todos"],
+                  ["completado", "Completado"],
+                  ["revision", "En revisión"],
+                  ["sin_publicar", "No publicado"],
+                ] as [FiltroEstado, string][]
+              ).map(([valor, etiqueta]) => (
+                <button
+                  key={valor}
+                  type="button"
+                  onClick={() => setFiltroEstado(valor)}
+                  className={`filtro-estado${filtroEstado === valor ? " active" : ""}`}
+                >
+                  {etiqueta}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {hayFiltroActivo && (
+            <p className="muted" style={{ marginBottom: "1.25rem", fontSize: "0.88rem" }}>
+              {filtrados.length} resultado{filtrados.length === 1 ? "" : "s"} con este filtro.
+            </p>
+          )}
+
+          <div className="table-scroll">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Expediente</th>
+                  <th>Matriz</th>
+                  <th>Estado</th>
+                  <th className="num">Licitación</th>
+                  <th className="num">Adjudicación</th>
+                  <th className="num">Baja</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {normales.map((exp) => {
               const enCurso = exp.estado === "descargando" || exp.estado === "extrayendo";
               // No reprocesar por accidente un expediente ya completado
               // (encargo de la sesión de pulido): hay que borrarlo y crearlo
@@ -480,43 +491,45 @@ export default function ExpedientesPanel({
                 </tr>
               );
             })}
-          </tbody>
-        </table>
-      </div>
-      {expedientes.length === 0 && <p className="muted" style={{ marginTop: "1rem" }}>Sin expedientes todavía.</p>}
-      {expedientes.length > 0 && filtrados.length === 0 && (
-        <p className="muted" style={{ marginTop: "1rem" }}>Ningún expediente coincide con este filtro.</p>
-      )}
+              </tbody>
+            </table>
+          </div>
+          {expedientes.length === 0 && <p className="muted" style={{ marginTop: "1rem" }}>Sin expedientes todavía.</p>}
+          {expedientes.length > 0 && filtrados.length === 0 && (
+            <p className="muted" style={{ marginTop: "1rem" }}>Ningún expediente coincide con este filtro.</p>
+          )}
 
-      {/* Grupo aparte, plegado por defecto (encargo de esta sesión): un
-          expediente `sin_publicar` está verificado que no existe en la
-          Plataforma (CONTEXTO.md sección 22) — no hay licitación, adjudicación
-          ni baja que mostrar, ni descarga o extracción que tenga sentido
-          lanzar por defecto. Una fila de una sola línea, sin las columnas
-          vacías de la tabla principal. */}
-      {noPublicados.length > 0 && (
-        <details className="grupo-no-publicados">
-          <summary className="chip">
-            {noPublicados.length} expediente{noPublicados.length === 1 ? "" : "s"} no publicado
-            {noPublicados.length === 1 ? "" : "s"}
-          </summary>
-          <ul className="lista-no-publicados">
-            {noPublicados.map((exp) => (
-              <li key={exp.id} className="fila-no-publicado">
-                <span className="mono">{exp.codigo_expediente}</span>
-                <EstadoTexto estado={exp.estado} />
-                <button
-                  onClick={() => lanzarDescarga(exp.id)}
-                  disabled={lanzando === exp.id}
-                  title="Ya se comprobó que no está en la Plataforma — reintentar solo tiene sentido si ha podido publicarse desde entonces"
-                  className="btn btn-ghost btn-sm"
-                >
-                  Reintentar
-                </button>
-              </li>
-            ))}
-          </ul>
-        </details>
+          {/* Grupo aparte, plegado por defecto (encargo de esta sesión): un
+              expediente `sin_publicar` está verificado que no existe en la
+              Plataforma (CONTEXTO.md sección 22) — no hay licitación, adjudicación
+              ni baja que mostrar, ni descarga o extracción que tenga sentido
+              lanzar por defecto. Una fila de una sola línea, sin las columnas
+              vacías de la tabla principal. */}
+          {noPublicados.length > 0 && (
+            <details className="grupo-no-publicados">
+              <summary className="chip">
+                {noPublicados.length} expediente{noPublicados.length === 1 ? "" : "s"} no publicado
+                {noPublicados.length === 1 ? "" : "s"}
+              </summary>
+              <ul className="lista-no-publicados">
+                {noPublicados.map((exp) => (
+                  <li key={exp.id} className="fila-no-publicado">
+                    <span className="mono">{exp.codigo_expediente}</span>
+                    <EstadoTexto estado={exp.estado} />
+                    <button
+                      onClick={() => lanzarDescarga(exp.id)}
+                      disabled={lanzando === exp.id}
+                      title="Ya se comprobó que no está en la Plataforma — reintentar solo tiene sentido si ha podido publicarse desde entonces"
+                      className="btn btn-ghost btn-sm"
+                    >
+                      Reintentar
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </>
       )}
     </div>
   );

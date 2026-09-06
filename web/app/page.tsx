@@ -16,20 +16,29 @@ export default async function Home() {
   // nunca llegaba a montarse. Ahora se monta siempre, con `[]` si el fetch
   // inicial falló: su propio sondeo se encarga de rellenarlo en cuanto la
   // API responda, sin que nadie recargue la página.
+  //
+  // `inicialConfirmado` (bloque de estados de carga y error, sesión
+  // 2026-09-06): un `[]` por fallo de este fetch y un `[]` por éxito real
+  // (cero expedientes de verdad) son indistinguibles para el panel si no se
+  // dice cuál de los dos pasó -- sin esto, un corte justo en el primer
+  // render enseñaba "0 expedientes" como si fuera un dato confirmado.
   let expedientes: Expediente[] = [];
+  let expedientesConfirmado = false;
   try {
     const res = await fetch(`${apiUrlServidor}/expedientes`, { cache: "no-store" });
     if (!res.ok) throw new Error(`la API respondió ${res.status}`);
     expedientes = await res.json();
+    expedientesConfirmado = true;
   } catch {
     expedientes = [];
+    expedientesConfirmado = false;
   }
 
   return (
     <main>
       <h1 className="page-title">Expedientes</h1>
       <p className="page-subtitle">Descarga, extracción y estado de cada expediente del catálogo.</p>
-      <ExpedientesPanel inicial={expedientes} apiUrl={apiUrlNavegador} />
+      <ExpedientesPanel inicial={expedientes} inicialConfirmado={expedientesConfirmado} apiUrl={apiUrlNavegador} />
     </main>
   );
 }

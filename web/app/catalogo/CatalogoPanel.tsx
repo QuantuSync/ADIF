@@ -206,7 +206,7 @@ export default function CatalogoPanel({ apiUrl }: { apiUrl: string }) {
   const [pagina, setPagina] = useState(1);
   const [datos, setDatos] = useState<RespuestaCatalogo | null>(null);
   const [cargando, setCargando] = useState(false);
-  const { error, registrarExito, registrarFallo } = useReintentoConexion();
+  const { error, confirmado, cargando: sinConfirmar, registrarExito, registrarFallo } = useReintentoConexion();
   const [seleccion, setSeleccion] = useState<LineaCatalogo | null>(null);
   // Tolerancia a reinicios de dockerd (sesión 2026-09-06): antes, esta
   // página solo volvía a pedir datos cuando el usuario cambiaba un filtro
@@ -321,9 +321,13 @@ export default function CatalogoPanel({ apiUrl }: { apiUrl: string }) {
         </div>
       </div>
 
+      {/* Estados de carga y error (CONTEXTO.md, bloque de estados de carga y
+          error, sesión 2026-09-06): sin respuesta confirmada de la API
+          todavía, no se enseña "sin resultados" ni un total en cero. */}
+      {sinConfirmar && <p className="muted" style={{ marginBottom: "0.6rem" }}>Cargando catálogo…</p>}
       {error && <p className="error-banner">Error al conectar con la API: {error}</p>}
 
-      {datos && (
+      {confirmado && datos && (
         <>
           <p className="muted" style={{ marginBottom: "0.6rem" }}>
             {cargando ? "Cargando…" : `${datos.total} línea(s) de catálogo`}
