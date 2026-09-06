@@ -1,9 +1,15 @@
-from fastapi import FastAPI
+import logging
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import OperationalError
 
 from app.config import settings
 from app.extraccion.cruce_codigos import validar_ruta_codigos_proyecto
 from app.routers import catalogo, documentos, expedientes, health, mantenimiento, revision, trabajos
+
+logger = logging.getLogger("api")
 
 # Falla de forma visible en el arranque si CODIGOS_PROYECTO_PATH está mal
 # configurada, en vez de dejar que el cruce falle en silencio petición a
@@ -21,6 +27,35 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Sesión de diagnóstico "Failed to fetch" (2026-09-06), segundo hallazgo:
+# `app.esperar_bd` solo protege el arranque -- un corte de conexión a la
+# base de datos DESPUÉS de que la API ya está sirviendo (el mismo
+# `dockerd`/WSL reiniciándose a mitad de sesión, `docs/diagnostico-caidas-
+# dockerd.md`) deja que `sqlalchemy.exc.OperationalError` se propague sin
+# capturar desde un `get_db()` normal. Starlette añade su propio
+# `ServerErrorMiddleware` FUERA de los middlewares registrados con
+# `add_middleware` (incluido `CORSMiddleware`) para atrapar justo esto --
+# así que una excepción que llega hasta ahí sin que ningún manejador la
+# capture antes genera una respuesta que **nunca pasa por `CORSMiddleware`**,
+# sin cabecera `Access-Control-Allow-Origin`. El navegador no puede
+# distinguir eso de un origen mal configurado: lo reporta como "blocked by
+# CORS policy" -- verificado en vivo forzando el corte
+# (`docker network disconnect`) con la web abierta de verdad, no solo con
+# curl. Un `exception_handler` registrado en la propia `app` intercepta
+# ANTES de `ServerErrorMiddleware` (dentro de `CORSMiddleware`), así que la
+# respuesta sí lleva la cabecera -- y de paso le da a `useReintentoConexion`
+# (bloque de estados de carga y error) el 503 real que ya sabe interpretar
+# como "corte transitorio, reintentar", en vez de un error opaco de CORS.
+@app.exception_handler(OperationalError)
+async def error_conexion_bd(request: Request, exc: OperationalError) -> JSONResponse:
+    logger.warning("corte de conexión a la base de datos sirviendo %s: %s", request.url.path, exc)
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "Base de datos no disponible temporalmente, reintenta en unos segundos."},
+    )
+
 
 app.include_router(health.router)
 app.include_router(expedientes.router)
