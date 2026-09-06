@@ -8,7 +8,12 @@ from sqlalchemy.orm import Session
 from app.auth import Usuario, get_current_user
 from app.db import get_db
 from app.mantenimiento.ciclo import TIPO_TRABAJO
-from app.mantenimiento.programacion import DISPARADO_POR_MANUAL, obtener_estado
+from app.mantenimiento.copia_seguridad import TIPO_TRABAJO as TIPO_TRABAJO_COPIA
+from app.mantenimiento.programacion import (
+    DISPARADO_POR_MANUAL,
+    obtener_estado,
+    obtener_estado_copia,
+)
 from app.models import TrabajoCola
 from app.queue import encolar_trabajo
 from app.schemas import EstadoMantenimientoOut, TrabajoOut
@@ -75,4 +80,47 @@ def historial_mantenimiento(
     no una tabla nueva que duplique la misma información."""
     return db.execute(
         select(TrabajoCola).where(TrabajoCola.tipo == TIPO_TRABAJO).order_by(TrabajoCola.created_at.desc()).limit(limite)
+    ).scalars().all()
+
+
+@router.post("/mantenimiento/copias/ejecutar", response_model=TrabajoOut)
+def lanzar_copia_seguridad(
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    """Copias de seguridad automáticas (sesión 2026-09-06): botón manual,
+    mismo trabajo (`copia_seguridad`) que lanza solo la ejecución
+    programada (`app.mantenimiento.programacion`), útil para forzar una
+    copia antes de una operación delicada sin esperar al intervalo
+    configurado."""
+    trabajo = encolar_trabajo(
+        db, tipo=TIPO_TRABAJO_COPIA, payload={"disparado_por": DISPARADO_POR_MANUAL}
+    )
+    return trabajo
+
+
+@router.get("/mantenimiento/copias/estado", response_model=EstadoMantenimientoOut)
+def estado_copia_seguridad(
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    """Igual que `GET /mantenimiento/estado`, para las copias de seguridad
+    automáticas: cuándo fue la última, qué encontró, y cuándo tocaría la
+    próxima."""
+    return obtener_estado_copia(db)
+
+
+@router.get("/mantenimiento/copias/historial", response_model=list[TrabajoOut])
+def historial_copia_seguridad(
+    limite: int = Query(default=20, ge=1, le=200),
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    """Igual que `GET /mantenimiento/historial`, filtrado por
+    `copia_seguridad` -- misma `trabajos_cola`, sin tabla nueva."""
+    return db.execute(
+        select(TrabajoCola)
+        .where(TrabajoCola.tipo == TIPO_TRABAJO_COPIA)
+        .order_by(TrabajoCola.created_at.desc())
+        .limit(limite)
     ).scalars().all()

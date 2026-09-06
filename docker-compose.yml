@@ -46,6 +46,12 @@ services:
       # servicio "worker".
       MANTENIMIENTO_INTERVALO_SEGUNDOS: ${MANTENIMIENTO_INTERVALO_SEGUNDOS:-604800}
       MANTENIMIENTO_PROGRAMADO_ACTIVO: ${MANTENIMIENTO_PROGRAMADO_ACTIVO:-true}
+      # Copias de seguridad automáticas (sesión 2026-09-06): mismo motivo
+      # que las dos variables de arriba -- solo el worker decide cuándo
+      # lanzar la copia, pero la API también las lee para que
+      # GET /mantenimiento/copias/estado muestre la frecuencia real.
+      BACKUP_INTERVALO_SEGUNDOS: ${BACKUP_INTERVALO_SEGUNDOS:-86400}
+      BACKUP_ACTIVO: ${BACKUP_ACTIVO:-true}
     volumes:
       - documentos:/data/documentos
     ports:
@@ -94,9 +100,19 @@ services:
       # MANTENIMIENTO_PROGRAMADO_ACTIVO lo desactiva sin tocar código.
       MANTENIMIENTO_INTERVALO_SEGUNDOS: ${MANTENIMIENTO_INTERVALO_SEGUNDOS:-604800}
       MANTENIMIENTO_PROGRAMADO_ACTIVO: ${MANTENIMIENTO_PROGRAMADO_ACTIVO:-true}
+      # Copias de seguridad automáticas (sesión 2026-09-06): volcado
+      # completo de la base de datos, diario por defecto -- ver
+      # `app.mantenimiento.copia_seguridad`. BACKUP_DIR apunta al volumen
+      # `copias_seguridad_bd` de abajo, distinto del de PostgreSQL, para que
+      # perder ese volumen no se lleve las copias por delante.
+      BACKUP_DIR: /backups
+      BACKUP_INTERVALO_SEGUNDOS: ${BACKUP_INTERVALO_SEGUNDOS:-86400}
+      BACKUP_ACTIVO: ${BACKUP_ACTIVO:-true}
+      BACKUP_RETENCION: ${BACKUP_RETENCION:-14}
     volumes:
       - documentos:/data/documentos
       - ./engine/.cache_modelo_dev:/app/.cache_modelo_dev
+      - copias_seguridad_bd:/backups
     depends_on:
       api:
         condition: service_healthy
@@ -117,3 +133,8 @@ services:
 volumes:
   postgres_data:
   documentos:
+  # Copias de seguridad automáticas (sesión 2026-09-06): volumen propio,
+  # deliberadamente separado de `postgres_data` -- perder ese volumen no
+  # debe llevarse las copias por delante. Ver `app.mantenimiento.copia_seguridad`
+  # y "Copias de seguridad" en README.md.
+  copias_seguridad_bd:

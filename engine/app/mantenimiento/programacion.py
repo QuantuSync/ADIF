@@ -7,11 +7,19 @@ SECONDS`, unos segundos) es una comprobación barata contra `trabajos_cola`
 — nunca red, nunca Playwright aquí.
 
 "Sin solaparse consigo mismo" (bloque 3, punto 2) sale gratis de la misma
-cola que ya existe: si ya hay un trabajo `mantenimiento_ciclo` `pendiente` o
+cola que ya existe: si ya hay un trabajo de un tipo `pendiente` o
 `en_proceso` (programado o disparado a mano, da igual el origen), no se
 encola otro. El histórico (punto 4) es la propia tabla `trabajos_cola`,
 consultable con SQL (CONTEXTO.md sección 10, invariante de la cola): no hace
 falta una tabla nueva que duplique la misma información.
+
+Las funciones privadas de aquí abajo son deliberadamente genéricas por
+`tipo` de trabajo, no solo por `mantenimiento_ciclo`: las copias de
+seguridad automáticas (sesión 2026-09-06, `app.mantenimiento.copia_seguridad`)
+necesitan exactamente el mismo mecanismo de "cada cuánto, sin solaparse
+consigo mismo, con histórico en la propia cola" sobre un segundo tipo de
+trabajo -- duplicar el algoritmo en un módulo aparte lo habría dejado
+divergiendo con el tiempo sin que nada lo obligara a mantenerse igual.
 """
 from __future__ import annotations
 
@@ -24,6 +32,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.mantenimiento.ciclo import TIPO_TRABAJO
+from app.mantenimiento.copia_seguridad import TIPO_TRABAJO as TIPO_TRABAJO_COPIA
 from app.models import EstadoTrabajo, TrabajoCola
 from app.queue import encolar_trabajo
 
@@ -31,21 +40,18 @@ DISPARADO_POR_PROGRAMADO = "programado"
 DISPARADO_POR_MANUAL = "manual"
 
 
-def _ultimo_trabajo_ciclo(db: Session) -> Optional[TrabajoCola]:
+def _ultimo_trabajo(db: Session, tipo: str) -> Optional[TrabajoCola]:
     return db.execute(
-        select(TrabajoCola)
-        .where(TrabajoCola.tipo == TIPO_TRABAJO)
-        .order_by(TrabajoCola.created_at.desc())
-        .limit(1)
+        select(TrabajoCola).where(TrabajoCola.tipo == tipo).order_by(TrabajoCola.created_at.desc()).limit(1)
     ).scalar_one_or_none()
 
 
-def _hay_ciclo_en_curso(db: Session) -> bool:
+def _hay_trabajo_en_curso(db: Session, tipo: str) -> bool:
     return (
         db.execute(
             select(TrabajoCola.id)
             .where(
-                TrabajoCola.tipo == TIPO_TRABAJO,
+                TrabajoCola.tipo == tipo,
                 TrabajoCola.estado.in_((EstadoTrabajo.pendiente, EstadoTrabajo.en_proceso)),
             )
             .limit(1)
@@ -63,15 +69,24 @@ def _con_tz(momento: Optional[datetime]) -> Optional[datetime]:
     return momento
 
 
-def _proxima_ejecucion_desde(ultimo: Optional[TrabajoCola]) -> datetime:
+def _proxima_ejecucion_desde(ultimo: Optional[TrabajoCola], intervalo_segundos: float) -> datetime:
     if ultimo is None:
-        # Nunca ha corrido ningún ciclo: ya tocaba (un instante en el
-        # pasado, no "ahora mismo" -- comparar dos `datetime.now()`
-        # tomados en instantes distintos del mismo `now < próxima` sería
-        # casi siempre `True` por los microsegundos de diferencia, y no
-        # lanzaría nunca el primer ciclo).
+        # Nunca ha corrido ningún trabajo de este tipo: ya tocaba (un
+        # instante en el pasado, no "ahora mismo" -- comparar dos
+        # `datetime.now()` tomados en instantes distintos del mismo
+        # `now < próxima` sería casi siempre `True` por los microsegundos
+        # de diferencia, y no lanzaría nunca la primera ejecución).
         return datetime.fromtimestamp(0, tz=timezone.utc)
-    return _con_tz(ultimo.created_at) + timedelta(seconds=settings.mantenimiento_intervalo_segundos)
+    return _con_tz(ultimo.created_at) + timedelta(seconds=intervalo_segundos)
+
+
+def _debe_lanzar(db: Session, tipo: str, activo: bool, intervalo_segundos: float) -> bool:
+    if not activo:
+        return False
+    if _hay_trabajo_en_curso(db, tipo):
+        return False
+    ultimo = _ultimo_trabajo(db, tipo)
+    return datetime.now(timezone.utc) >= _proxima_ejecucion_desde(ultimo, intervalo_segundos)
 
 
 @dataclass
@@ -83,22 +98,28 @@ class EstadoMantenimiento:
     programado_activo: bool
 
 
-def obtener_estado(db: Session) -> EstadoMantenimiento:
-    """CONTEXTO.md, bloque 3 punto 3: lo que consulta la web para mostrar
-    cuándo fue la última ejecución, qué encontró (`ultima_ejecucion.
-    resultado`), y cuándo será la próxima."""
-    ultimo = _ultimo_trabajo_ciclo(db)
+def _obtener_estado(db: Session, tipo: str, intervalo_segundos: float, programado_activo: bool) -> EstadoMantenimiento:
+    ultimo = _ultimo_trabajo(db, tipo)
     # Para mostrar en la web, "nunca ha corrido" se lee mejor como "ahora"
     # que como el 1 de enero de 1970 (ver el comentario de
     # `_proxima_ejecucion_desde` sobre por qué la decisión interna sí usa
     # el epoch).
-    proxima = datetime.now(timezone.utc) if ultimo is None else _proxima_ejecucion_desde(ultimo)
+    proxima = datetime.now(timezone.utc) if ultimo is None else _proxima_ejecucion_desde(ultimo, intervalo_segundos)
     return EstadoMantenimiento(
         ultima_ejecucion=ultimo,
-        en_curso=_hay_ciclo_en_curso(db),
+        en_curso=_hay_trabajo_en_curso(db, tipo),
         proxima_ejecucion=proxima,
-        intervalo_segundos=settings.mantenimiento_intervalo_segundos,
-        programado_activo=settings.mantenimiento_programado_activo,
+        intervalo_segundos=intervalo_segundos,
+        programado_activo=programado_activo,
+    )
+
+
+def obtener_estado(db: Session) -> EstadoMantenimiento:
+    """CONTEXTO.md, bloque 3 punto 3: lo que consulta la web para mostrar
+    cuándo fue la última ejecución, qué encontró (`ultima_ejecucion.
+    resultado`), y cuándo será la próxima."""
+    return _obtener_estado(
+        db, TIPO_TRABAJO, settings.mantenimiento_intervalo_segundos, settings.mantenimiento_programado_activo
     )
 
 
@@ -119,11 +140,26 @@ def verificar_y_lanzar_ciclo_programado(db: Session) -> Optional[TrabajoCola]:
     réplicas del worker, dos podrían decidir lanzar en la misma vuelta antes
     de que ninguna llegue a insertar — no se ha construido un bloqueo
     distribuido para un caso que la arquitectura actual no tiene."""
-    if not settings.mantenimiento_programado_activo:
-        return None
-    if _hay_ciclo_en_curso(db):
-        return None
-    ultimo = _ultimo_trabajo_ciclo(db)
-    if datetime.now(timezone.utc) < _proxima_ejecucion_desde(ultimo):
+    if not _debe_lanzar(
+        db, TIPO_TRABAJO, settings.mantenimiento_programado_activo, settings.mantenimiento_intervalo_segundos
+    ):
         return None
     return encolar_trabajo(db, tipo=TIPO_TRABAJO, payload={"disparado_por": DISPARADO_POR_PROGRAMADO})
+
+
+def obtener_estado_copia(db: Session) -> EstadoMantenimiento:
+    """Copias de seguridad automáticas (sesión 2026-09-06): mismo cálculo
+    que `obtener_estado`, sobre el tipo de trabajo `copia_seguridad`."""
+    return _obtener_estado(db, TIPO_TRABAJO_COPIA, settings.backup_intervalo_segundos, settings.backup_activo)
+
+
+def verificar_y_lanzar_copia_programada(db: Session) -> Optional[TrabajoCola]:
+    """Mismo mecanismo que `verificar_y_lanzar_ciclo_programado` (activo,
+    sin solaparse consigo mismo, según el intervalo desde la última vez),
+    aplicado a las copias de seguridad automáticas -- diarias por defecto,
+    configurable con `BACKUP_INTERVALO_SEGUNDOS`/`BACKUP_ACTIVO`. Se llama
+    en la misma vuelta del bucle del worker que ya comprueba el ciclo de
+    mantenimiento, sin ningún proceso ni cron nuevo."""
+    if not _debe_lanzar(db, TIPO_TRABAJO_COPIA, settings.backup_activo, settings.backup_intervalo_segundos):
+        return None
+    return encolar_trabajo(db, tipo=TIPO_TRABAJO_COPIA, payload={"disparado_por": DISPARADO_POR_PROGRAMADO})

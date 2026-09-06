@@ -614,6 +614,27 @@ suficientes, no ahora.
   Verificado en vivo contra el stack real, incluido un reinicio real y
   repetido de los cuatro contenedores durante la propia sesión. Detalle
   y capturas en `docs/estados-carga-web.md`.
+- **Copias de seguridad automáticas: montadas (sesión 2026-09-06).** No
+  había ninguna copia periódica de la base de datos, solo volcados
+  puntuales a mano antes de cada limpieza -- con un entorno que se
+  reinicia solo varias veces al día, perder el volumen `postgres_data` se
+  llevaría por delante los expedientes procesados y el catálogo entero.
+  Mismo mecanismo que el ciclo de mantenimiento (sección 10, "cuatro
+  procesos, ni uno más"): un tipo de trabajo más de la cola
+  (`copia_seguridad`), lanzado desde el propio bucle del worker
+  (`app.mantenimiento.programacion`, generalizada por tipo de trabajo en
+  vez de duplicada). `pg_dump --format=custom` diario por defecto
+  (`BACKUP_INTERVALO_SEGUNDOS`/`BACKUP_ACTIVO`), retención configurable
+  (`BACKUP_RETENCION`, 14 por defecto, purga las más antiguas), guardado en
+  un volumen de Docker propio (`copias_seguridad_bd`) deliberadamente
+  distinto del de PostgreSQL. Procedimiento de restauración **probado de
+  verdad**: copia real restaurada en una base limpia, recuentos y `md5` de
+  todas las filas idénticos byte a byte entre origen y restaurada,
+  documentado en `README.md`. Hallazgo de paso: `README.md` todavía
+  instruía a sincronizar el repositorio a `~/adif` dentro de WSL para
+  compilar ahí -- exactamente el patrón que el invariante 11 de arriba
+  prohíbe -- corregido en la misma sesión. Detalle completo, verificación
+  en vivo y números en `docs/copias-de-seguridad.md`.
 - **Tolerancia a reinicios de `dockerd`: arreglada en lo que sí está en
   mano del motor (sesión 2026-09-06).** `docs/diagnostico-caidas-dockerd.md`
   ya documentaba que Modo de espera moderno reinicia el *init* de WSL con
@@ -656,4 +677,5 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `comparacion-corpus-sharepoint.md`, `auditoria-huerfanos-y-autorreferencia.md`,
 `excel-cliente-correccion.md`, `diagnostico-caidas-dockerd.md`,
 `tolerancia-reinicios-dockerd.md`, `estados-carga-web.md`,
+`copias-de-seguridad.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.
