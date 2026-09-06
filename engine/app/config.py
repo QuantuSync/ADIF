@@ -19,7 +19,18 @@ class Settings(BaseSettings):
     # Docker — sin cabeceras CORS, el navegador bloquea la respuesta aunque
     # la petición llegue bien (a diferencia de un servidor a servidor, que no
     # las necesita). Por defecto, el puerto donde corre "web" en local.
-    cors_allowed_origins: str = "http://localhost:3000"
+    #
+    # Los dos orígenes (sesión de diagnóstico "Failed to fetch", 2026-09-06):
+    # CORS compara el origen EXACTO (esquema+host+puerto), y "localhost" y
+    # "127.0.0.1" son dos orígenes distintos para el navegador aunque
+    # resuelvan al mismo sitio. Verificado en vivo: con un único origen
+    # configurado, un navegador abierto en el otro veía la página cargar
+    # bien (la navegación no pasa por CORS) pero cada fetch() a la API
+    # fallaba con "Failed to fetch" sin más detalle -- indistinguible a
+    # simple vista de la API estando caída. Cubrir los dos por defecto evita
+    # que cuál de las dos formas escriba alguien en la barra de direcciones
+    # decida si la web funciona.
+    cors_allowed_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
     # Cruce con el Excel de códigos (CONTEXTO.md sección 7): ruta al
     # `Expedientes.xlsx` de referencia (columnas `Nº Interno`, `Nº

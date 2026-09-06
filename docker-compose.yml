@@ -38,7 +38,7 @@ services:
       # Orígenes permitidos para CORS (app/config.py): el navegador llama a
       # esta API desde fuera de la red de Docker, en el origen donde corre
       # "web". Lista separada por comas si hace falta más de uno.
-      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
       # Bloque 3 (CONTEXTO.md sección 25): solo el worker decide cuándo lanzar
       # el ciclo programado, pero la API también lee estos dos valores para
       # que GET /mantenimiento/estado muestre la frecuencia real, no el
