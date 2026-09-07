@@ -4,13 +4,14 @@ expediente -- el PDF es el acto administrativo, la sindicación no tiene su
 misma autoridad. Se guarda como aviso informativo aparte."""
 from datetime import datetime, timezone
 from decimal import Decimal
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy.exc import OperationalError
 
 from app.models import EstadoExpediente, Expediente, SindicacionExpediente
-from app.worker import _contrastar_con_sindicacion, bucle_principal
+from app.worker import _contrastar_con_sindicacion, bucle_principal, procesar_sindicacion_backfill
 
 
 def _expediente(db, **kwargs) -> Expediente:
@@ -117,3 +118,60 @@ def test_bucle_principal_no_muere_por_un_fallo_de_conexion_transitorio(monkeypat
     # matado el proceso, `vuelta` nunca se habría llamado una segunda vez.
     assert vuelta.call_count == 2
     assert len(sesiones_cerradas) == 2  # cada vuelta cierra su propia sesión, incluida la que falló
+
+
+# Hallazgo real (aviso del cliente, sesión 2026-09-07, caso 6.26/28510.0014):
+# nada llamaba nunca a descubrir_novedades con un mes pasado -- este trabajo
+# de cola es el barrido explícito. Payload: `periodos` manda si viene, si no
+# se resuelve `meses` (por defecto 12) con `periodos_recientes`.
+
+
+def test_procesar_sindicacion_backfill_usa_periodos_explicitos(monkeypatch):
+    llamado_con = {}
+
+    def _backfill_falso(db, periodos):
+        llamado_con["periodos"] = periodos
+        from app.sindicacion.descubrimiento import ResumenBackfill
+        return ResumenBackfill(periodos_procesados=list(periodos), expedientes_nuevos=3)
+
+    monkeypatch.setattr("app.worker.descubrir_backfill", _backfill_falso)
+
+    trabajo = SimpleNamespace(payload={"periodos": ["202501", "202412"]})
+    resultado = procesar_sindicacion_backfill(MagicMock(), trabajo)
+
+    assert llamado_con["periodos"] == ["202501", "202412"]
+    assert resultado["expedientes_nuevos"] == 3
+
+
+def test_procesar_sindicacion_backfill_resuelve_meses_por_defecto(monkeypatch):
+    llamado_con = {}
+
+    def _backfill_falso(db, periodos):
+        llamado_con["periodos"] = periodos
+        from app.sindicacion.descubrimiento import ResumenBackfill
+        return ResumenBackfill(periodos_procesados=list(periodos))
+
+    monkeypatch.setattr("app.worker.descubrir_backfill", _backfill_falso)
+    monkeypatch.setattr("app.worker.periodos_recientes", lambda n: [f"periodo-{n}"])
+
+    trabajo = SimpleNamespace(payload={"meses": 6})
+    procesar_sindicacion_backfill(MagicMock(), trabajo)
+
+    assert llamado_con["periodos"] == ["periodo-6"]
+
+
+def test_procesar_sindicacion_backfill_sin_payload_usa_doce_meses(monkeypatch):
+    llamado_con = {}
+
+    def _backfill_falso(db, periodos):
+        llamado_con["periodos"] = periodos
+        from app.sindicacion.descubrimiento import ResumenBackfill
+        return ResumenBackfill(periodos_procesados=list(periodos))
+
+    monkeypatch.setattr("app.worker.descubrir_backfill", _backfill_falso)
+    monkeypatch.setattr("app.worker.periodos_recientes", lambda n: [f"periodo-{n}"])
+
+    trabajo = SimpleNamespace(payload=None)
+    procesar_sindicacion_backfill(MagicMock(), trabajo)
+
+    assert llamado_con["periodos"] == ["periodo-12"]

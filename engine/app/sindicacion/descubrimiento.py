@@ -11,12 +11,28 @@ sesión): la sindicación no sirve para descargar documentos —
 navegador) siguen siendo el único camino para traer los PDFs. Este módulo
 nunca intenta descargar nada él mismo: como mucho, encola el trabajo de
 descarga de siempre.
+
+Hallazgo real (aviso del cliente, sesión 2026-09-07, caso `6.26/28510.0014`):
+`descubrir_novedades` siempre acepta un `periodo` explícito, pero **nada lo
+llamaba nunca con otra cosa que el mes en curso** — `app.mantenimiento.ciclo`
+(la única llamadora automática) usa `periodo_actual()` por defecto en cada
+ciclo semanal, sin ningún mecanismo que revisite un mes ya pasado. Medido
+contra la base de datos real de esta sesión: solo dos periodos se habían
+ingerido jamás, `202408` (prueba puntual de la sesión original) y `202609`
+(el mes en curso de esta sesión) — **ningún mes intermedio, unos 25 meses,
+se ha comprobado nunca**. Un expediente cuyo único cambio de estado cayó en
+uno de esos meses saltados es invisible para el sistema aunque esté
+publicado en la Plataforma con normalidad (verificado: `6.26/28510.0014`
+existe y el scraper real lo encuentra al momento en cuanto se busca a
+mano). `descubrir_backfill` y `periodos_recientes` de más abajo cierran
+este hueco — un mecanismo explícito para recorrer varios periodos pasados,
+no solo el mes en curso.
 """
 from __future__ import annotations
 
 import logging
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -31,6 +47,14 @@ from app.sindicacion.atom_parser import EntradaSindicacion, entradas_de_zip
 from app.sindicacion.cliente import descargar_zip_periodo
 
 logger = logging.getLogger("sindicacion.descubrimiento")
+
+# Trabajo de cola dedicado (sesión 2026-09-07): un backfill de varios meses
+# no necesita el ciclo completo (descargar/extraer lo que falte,
+# `app.mantenimiento.ciclo`) -- sindicacion_periodo en ese ciclo ya permitía
+# reprocesar UN mes pasado a mano, pero nadie lo había llamado en bucle para
+# los ~25 meses nunca comprobados. Este tipo de trabajo es solo el barrido
+# de descubrimiento, mes a mes, sin el coste de descargar/extraer de paso.
+TIPO_TRABAJO = "sindicacion_backfill"
 
 
 @dataclass
@@ -196,4 +220,73 @@ def descubrir_novedades(
         db.commit()
 
     logger.info("descubrimiento de sindicación terminado: %s", resumen.to_dict())
+    return resumen
+
+
+def periodos_recientes(n: int, hasta: Optional[str] = None) -> list[str]:
+    """Los últimos `n` periodos `AAAAMM` terminando en `hasta` (por defecto
+    el mes en curso), del más reciente al más antiguo -- mismo orden en el
+    que `descubrir_backfill` los procesa, para que una tanda interrumpida a
+    medias deje sin procesar los meses más antiguos, nunca los recientes
+    (los que con más probabilidad traen expedientes todavía activos)."""
+    if n < 1:
+        raise ValueError(f"n debe ser >= 1, recibido {n!r}")
+    base = hasta or periodo_actual()
+    anio, mes = int(base[:4]), int(base[4:6])
+    periodos = []
+    for _ in range(n):
+        periodos.append(f"{anio:04d}{mes:02d}")
+        mes -= 1
+        if mes == 0:
+            mes = 12
+            anio -= 1
+    return periodos
+
+
+@dataclass
+class ResumenBackfill:
+    """Agregado de varios `ResumenDescubrimiento`, uno por periodo -- lo que
+    devuelve `descubrir_backfill`. `periodos_con_error` aísla el fallo de un
+    mes concreto (ZIP no publicado todavía, corte de red) del resto de la
+    tanda, igual que `app.mantenimiento.ciclo` ya aísla el fallo de un
+    documento del resto del expediente: un mes que falla no debe impedir que
+    los demás se procesen."""
+
+    periodos_procesados: list[str] = field(default_factory=list)
+    periodos_con_error: dict[str, str] = field(default_factory=dict)
+    expedientes_nuevos: int = 0
+    expedientes_con_cambio_estado: int = 0
+
+    def to_dict(self) -> dict:
+        return {
+            "periodos_procesados": self.periodos_procesados,
+            "periodos_con_error": self.periodos_con_error,
+            "expedientes_nuevos": self.expedientes_nuevos,
+            "expedientes_con_cambio_estado": self.expedientes_con_cambio_estado,
+        }
+
+
+def descubrir_backfill(db: Session, periodos: list[str]) -> ResumenBackfill:
+    """Recorre varios periodos pasados llamando a `descubrir_novedades` una
+    vez por cada uno (mismo mecanismo de siempre, solo que invocado más de
+    una vez) -- cierra el hueco real de esta sesión: nada, hasta ahora,
+    llamaba a `descubrir_novedades` con un periodo que no fuera el mes en
+    curso. Cada periodo hace su propio `commit` dentro de
+    `descubrir_novedades`; un periodo que falla (ZIP todavía no publicado
+    para un mes muy reciente, corte de red) se anota en
+    `ResumenBackfill.periodos_con_error` y la tanda sigue con el siguiente,
+    nunca aborta el resto."""
+    resumen = ResumenBackfill()
+    for periodo in periodos:
+        try:
+            parcial = descubrir_novedades(db, periodo=periodo)
+        except Exception as exc:  # noqa: BLE001
+            db.rollback()
+            logger.warning("backfill de sindicación: periodo %s falló, se continúa con el resto: %s", periodo, exc)
+            resumen.periodos_con_error[periodo] = str(exc)
+            continue
+        resumen.periodos_procesados.append(periodo)
+        resumen.expedientes_nuevos += parcial.expedientes_nuevos
+        resumen.expedientes_con_cambio_estado += parcial.expedientes_con_cambio_estado
+    logger.info("backfill de sindicación terminado: %s", resumen.to_dict())
     return resumen

@@ -180,11 +180,27 @@ def _cargar_indice(ruta_excel: str) -> _IndiceCodigosProyecto:
     if entrada is not None and entrada[0] == mtime:
         return entrada[1]
 
+    # Hallazgo real (aviso del cliente, sesión 2026-09-07, caso
+    # 6.26/28510.0014): antes solo se leía `libro.worksheets[0]`, la
+    # primera hoja -- el scraper heredado tenía la misma limitación, leía
+    # solo la hoja de expedientes en ejecución. El fichero de ejemplo de
+    # este repositorio solo trae una hoja ("Hoja1"), así que esto no se
+    # pudo reproducir contra datos reales todavía, pero el fichero real que
+    # mantiene ADIF puede traer más de una (p.ej. una hoja separada para
+    # procedimientos en tramitación) -- se leen todas, nunca solo la
+    # primera. Cada hoja tiene su propia cabecera (no se asume el mismo
+    # orden de columnas entre hojas); una fila repetida en dos hojas con el
+    # mismo Nº Expediente se queda con la primera vista, mismo criterio que
+    # ya usa `_IndiceCodigosProyecto` para duplicados dentro de una hoja.
     libro = openpyxl.load_workbook(ruta, read_only=True, data_only=True)
-    hoja = libro.worksheets[0]
-    filas_iter = hoja.iter_rows(values_only=True)
-    cabecera = [str(c).strip() if c is not None else "" for c in next(filas_iter)]
-    filas = [dict(zip(cabecera, fila)) for fila in filas_iter]
+    filas: list[dict] = []
+    for hoja in libro.worksheets:
+        filas_iter = hoja.iter_rows(values_only=True)
+        primera = next(filas_iter, None)
+        if primera is None:
+            continue  # hoja vacía, sin cabecera siquiera
+        cabecera = [str(c).strip() if c is not None else "" for c in primera]
+        filas.extend(dict(zip(cabecera, fila)) for fila in filas_iter)
     libro.close()
 
     indice = _IndiceCodigosProyecto(filas)

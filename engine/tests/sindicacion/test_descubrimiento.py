@@ -3,8 +3,10 @@ sindicación y detección de cambio de estado, contra un ZIP local sintético
 (`ruta_zip=...`, nunca red real en un test)."""
 from datetime import datetime, timezone
 
+import pytest
+
 from app.models import Expediente, EstadoTrabajo, SindicacionExpediente, TrabajoCola
-from app.sindicacion.descubrimiento import descubrir_novedades
+from app.sindicacion.descubrimiento import descubrir_backfill, descubrir_novedades, periodos_recientes
 from tests.sindicacion.fixtures import construir_zip, entrada_xml
 
 
@@ -150,3 +152,76 @@ def test_no_regresa_a_un_dato_de_sindicacion_mas_viejo(tmp_path, db_session, mon
     fila = db_session.query(SindicacionExpediente).filter_by(codigo_expediente="6.24/28510.0088").one()
     assert fila.estado_pcsp == "RES"
     assert str(fila.importe_licitacion_sin_impuestos) == "2000000.0000"
+
+
+# Hallazgo real (aviso del cliente, sesión 2026-09-07, caso 6.26/28510.0014):
+# nada llamaba nunca a `descubrir_novedades` con un periodo que no fuera el
+# mes en curso -- `periodos_recientes` y `descubrir_backfill` cierran ese
+# hueco, sin tocar `descubrir_novedades` en sí (ya aceptaba `periodo`).
+
+
+def test_periodos_recientes_orden_mas_reciente_primero():
+    periodos = periodos_recientes(3, hasta="202609")
+
+    assert periodos == ["202609", "202608", "202607"]
+
+
+def test_periodos_recientes_cruza_el_cambio_de_anio():
+    periodos = periodos_recientes(4, hasta="202601")
+
+    assert periodos == ["202601", "202512", "202511", "202510"]
+
+
+def test_periodos_recientes_rechaza_n_menor_que_uno():
+    with pytest.raises(ValueError):
+        periodos_recientes(0)
+
+
+def test_descubrir_backfill_agrega_varios_periodos(tmp_path, db_session, monkeypatch):
+    from app import config
+    monkeypatch.setattr(config.settings, "sindicacion_departamentos_adif", "28510")
+
+    zip_agosto = construir_zip(
+        tmp_path / "202408.zip",
+        [entrada_xml("6.24/28510.0088", "ADIF - Presidencia", "PUB", "2024-08-05T15:07:29+02:00", "2000000", "2420000")],
+    )
+    zip_septiembre = construir_zip(
+        tmp_path / "202409.zip",
+        [entrada_xml("6.24/28510.0100", "ADIF - Presidencia", "PUB", "2024-09-05T15:07:29+02:00", "500000", "605000")],
+    )
+
+    def _descubrir_falso(db, periodo=None, ruta_zip=None):
+        ruta = {"202408": zip_agosto, "202409": zip_septiembre}[periodo]
+        return descubrir_novedades(db, periodo=periodo, ruta_zip=ruta)
+
+    monkeypatch.setattr("app.sindicacion.descubrimiento.descubrir_novedades", _descubrir_falso)
+
+    resumen = descubrir_backfill(db_session, ["202409", "202408"])
+
+    assert resumen.periodos_procesados == ["202409", "202408"]
+    assert resumen.periodos_con_error == {}
+    assert resumen.expedientes_nuevos == 2
+    codigos = {e.codigo_expediente for e in db_session.query(Expediente).all()}
+    assert {"6.24/28510.0088", "6.24/28510.0100"} <= codigos
+
+
+def test_descubrir_backfill_aisla_el_fallo_de_un_periodo(db_session, monkeypatch):
+    llamados = []
+
+    def _descubrir_falso(db, periodo=None, ruta_zip=None):
+        llamados.append(periodo)
+        if periodo == "202501":
+            raise RuntimeError("ZIP no publicado para este periodo")
+        from app.sindicacion.descubrimiento import ResumenDescubrimiento
+        return ResumenDescubrimiento(periodo=periodo, expedientes_nuevos=1)
+
+    monkeypatch.setattr("app.sindicacion.descubrimiento.descubrir_novedades", _descubrir_falso)
+
+    resumen = descubrir_backfill(db_session, ["202503", "202502", "202501"])
+
+    # El fallo de un periodo no interrumpe la tanda: los otros dos se
+    # intentan igual.
+    assert llamados == ["202503", "202502", "202501"]
+    assert resumen.periodos_procesados == ["202503", "202502"]
+    assert resumen.periodos_con_error == {"202501": "ZIP no publicado para este periodo"}
+    assert resumen.expedientes_nuevos == 2
