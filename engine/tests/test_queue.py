@@ -5,7 +5,13 @@ porque `tomar_siguiente_trabajo` solo mira `estado = pendiente`."""
 from datetime import datetime, timedelta, timezone
 
 from app.models import EstadoTrabajo, TrabajoCola
-from app.queue import ejecutar_trabajo, encolar_trabajo, reclamar_trabajos_huerfanos, tomar_siguiente_trabajo
+from app.queue import (
+    calcular_espera_reintento,
+    ejecutar_trabajo,
+    encolar_trabajo,
+    reclamar_trabajos_huerfanos,
+    tomar_siguiente_trabajo,
+)
 
 
 def _crear_en_proceso(db_session, *, hace_segundos, intentos=1, max_intentos=3):
@@ -114,3 +120,75 @@ def test_ejecutar_trabajo_generico_reintenta_si_quedan_intentos(db_session):
 
     assert trabajo.estado == EstadoTrabajo.pendiente
     assert trabajo.error == "boom"
+
+
+# --- Sesión de límite de tasa (2026-09-07): backoff creciente en
+# reintentos -- 454 descargas fallidas seguidas, sin ninguna espera entre
+# reintentos, coincidieron con un patrón de bloqueo de la Plataforma real.
+
+
+def test_calcular_espera_reintento_crece_y_tiene_tope():
+    assert calcular_espera_reintento(1) == 30.0
+    assert calcular_espera_reintento(2) == 120.0
+    assert calcular_espera_reintento(3) == 480.0
+    # Tope: un `intentos` mayor no sigue creciendo sin límite.
+    assert calcular_espera_reintento(10) == 600.0
+
+
+def test_ejecutar_trabajo_reintento_fija_disponible_en_con_backoff(db_session):
+    trabajo = encolar_trabajo(db_session, tipo="ping")
+    trabajo.intentos = 2
+    trabajo.max_intentos = 3
+    db_session.commit()
+
+    def falla(db, t):
+        raise RuntimeError("boom")
+
+    antes = datetime.now(timezone.utc)
+    ejecutar_trabajo(db_session, trabajo, manejadores={"ping": falla})
+
+    assert trabajo.estado == EstadoTrabajo.pendiente
+    assert trabajo.disponible_en is not None
+    # SQLite (tests) no conserva el huso horario al releer una columna
+    # DateTime(timezone=True) -- se trata como UTC, igual que el resto del
+    # código (ver `_con_tz` en app.sindicacion.descubrimiento).
+    disponible_en = trabajo.disponible_en
+    if disponible_en.tzinfo is None:
+        disponible_en = disponible_en.replace(tzinfo=timezone.utc)
+    # intentos=2 -> espera de calcular_espera_reintento(2) = 120s
+    espera_real = (disponible_en - antes).total_seconds()
+    assert 115 <= espera_real <= 125
+
+
+def test_tomar_siguiente_trabajo_no_recoge_uno_con_disponible_en_futuro(db_session):
+    trabajo = encolar_trabajo(db_session, tipo="ping")
+    trabajo.disponible_en = datetime.now(timezone.utc) + timedelta(seconds=60)
+    db_session.commit()
+
+    assert tomar_siguiente_trabajo(db_session) is None
+
+
+def test_tomar_siguiente_trabajo_recoge_uno_con_disponible_en_pasado(db_session):
+    trabajo = encolar_trabajo(db_session, tipo="ping")
+    trabajo.disponible_en = datetime.now(timezone.utc) - timedelta(seconds=1)
+    db_session.commit()
+
+    tomado = tomar_siguiente_trabajo(db_session)
+
+    assert tomado is not None
+    assert tomado.id == trabajo.id
+
+
+def test_tomar_siguiente_trabajo_salta_al_disponible_aunque_sea_mas_reciente(db_session):
+    # El trabajo más antiguo por `created_at` sigue en backoff -- el
+    # siguiente `pendiente` ya disponible pasa por delante, para que un
+    # reintento en espera no bloquee el resto de la cola.
+    en_backoff = encolar_trabajo(db_session, tipo="ping")
+    en_backoff.disponible_en = datetime.now(timezone.utc) + timedelta(seconds=300)
+    disponible = encolar_trabajo(db_session, tipo="ping")
+    db_session.commit()
+
+    tomado = tomar_siguiente_trabajo(db_session)
+
+    assert tomado is not None
+    assert tomado.id == disponible.id

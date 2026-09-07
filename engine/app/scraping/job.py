@@ -11,6 +11,7 @@ from app.extraccion.herencia_matriz import reencolar_pedidos_esperando_matriz
 from app.interfaces.document_storage import DocumentStorage
 from app.models import Documento, EstadoExpediente, Expediente, TipoDocumento, TrabajoCola
 from app.queue import encolar_trabajo
+from app.scraping.limitador import esperar_turno
 from app.scraping.pcsp import ExpedienteNoPublicadoError, safe, scrape_expediente
 
 CATEGORIA_A_TIPO = {
@@ -30,15 +31,48 @@ def ejecutar_scraping_expediente(db: Session, storage: DocumentStorage, trabajo:
     if expediente is None:
         raise RuntimeError(f"expediente_id {trabajo.expediente_id} no existe")
 
+    # Sesión de límite de tasa (2026-09-07): si este expediente YA tiene
+    # documentos de una descarga anterior con éxito, ningún fallo de ESTE
+    # intento (búsqueda sin resultados, timeout, bloqueo) puede degradarlo
+    # -- comprobado con datos reales que la Plataforma no revoca una
+    # publicación (encargo del cliente: "un expediente que ya tiene
+    # documentos descargados y catálogo extraído no puede pasar nunca a no
+    # publicado por un fallo de búsqueda", y el mismo principio aplica a
+    # `fallido` sin matices: es un fallo transitorio, no una prueba de nada).
+    # `estado_anterior` se captura ANTES de tocar nada, para poder
+    # restaurarlo tal cual si este intento falla -- ni la rama
+    # `ExpedienteNoPublicadoError` ni la genérica añaden ningún documento
+    # nuevo antes de fallar, así que "ya tenía documentos" sigue siendo
+    # válido en el momento de decidir qué hacer con el fallo.
+    estado_anterior = expediente.estado
+    ya_tenia_documentos = (
+        db.execute(select(Documento.id).where(Documento.expediente_id == expediente.id).limit(1)).first()
+        is not None
+    )
+
     expediente.estado = EstadoExpediente.descargando
     expediente.error = None
     db.commit()
 
+    esperar_turno()
     try:
         resultado = asyncio.run(
             scrape_expediente(expediente.codigo_expediente, expediente.codigo_matriz)
         )
     except ExpedienteNoPublicadoError as exc:
+        if ya_tenia_documentos:
+            # Se restaura el estado previo tal cual (nunca `sin_publicar` ni
+            # `fallido`) y se trata como un fallo transitorio normal
+            # (reintentable con el backoff de `app.queue`) -- `raise` deja
+            # que `ejecutar_trabajo` decida si le quedan intentos, sin
+            # tocar los documentos/catálogo que ya tenía.
+            expediente.estado = estado_anterior
+            expediente.error = (
+                f"la búsqueda no encontró el expediente en este reintento, pero ya tenía documentos "
+                f"descargados de antes -- tratado como fallo transitorio, no como 'no publicado': {exc}"
+            )
+            db.commit()
+            raise
         # Resultado negativo determinista (docstring de la excepción): no es
         # "fallido" (que sugiere que reintentar podría cambiar el resultado),
         # es "sin_publicar" (CONTEXTO.md sección 22) -- y no hay razón para
@@ -53,7 +87,7 @@ def ejecutar_scraping_expediente(db: Session, storage: DocumentStorage, trabajo:
             db.commit()
         raise
     except Exception as exc:
-        expediente.estado = EstadoExpediente.fallido
+        expediente.estado = estado_anterior if ya_tenia_documentos else EstadoExpediente.fallido
         expediente.error = str(exc)
         db.commit()
         # Si este expediente es la matriz de algún pedido derivado

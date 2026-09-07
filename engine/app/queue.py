@@ -10,6 +10,26 @@ from app.models import EstadoTrabajo, TrabajoCola
 
 logger = logging.getLogger("worker")
 
+# Backoff creciente en reintentos (sesión de límite de tasa de la
+# Plataforma, 2026-09-07): antes, un trabajo fallido volvía a `pendiente`
+# sin ninguna espera y el worker lo recogía en la siguiente vuelta del
+# bucle (3 s, `WORKER_POLL_INTERVAL_SECONDS`) -- con `descargar_expediente`
+# real, esto machacaba la Plataforma sin pausa entre reintentos. 30 s en el
+# primer reintento, 120 s en el segundo, tope en 600 s: suficiente para que
+# un bloqueo transitorio real (WAF, límite de tasa) se disipe entre
+# intentos, sin alargar en exceso un fallo genuino y aislado (una
+# constraint violada, un bug) que de todos modos no se va a arreglar solo
+# esperando.
+_ESPERA_BASE_SEGUNDOS = 30.0
+_ESPERA_TOPE_SEGUNDOS = 600.0
+
+
+def calcular_espera_reintento(intentos: int) -> float:
+    """`intentos` ya incluye el que acaba de fallar (se incrementa en
+    `tomar_siguiente_trabajo` antes de ejecutar). Backoff exponencial: 30 s,
+    120 s, 480 s... con tope en `_ESPERA_TOPE_SEGUNDOS`."""
+    return min(_ESPERA_BASE_SEGUNDOS * (4 ** max(intentos - 1, 0)), _ESPERA_TOPE_SEGUNDOS)
+
 
 def encolar_trabajo(
     db: Session, tipo: str, payload: Optional[dict] = None, expediente_id: Optional[int] = None
@@ -32,7 +52,15 @@ def tomar_siguiente_trabajo(
     a sí mismo, o que dos ciclos se entrelacen) — el bucle normal del worker
     no pasa este parámetro y sí los recoge, que es como llegan a ejecutarse
     los ciclos programados (bloque 3)."""
-    stmt = select(TrabajoCola).where(TrabajoCola.estado == EstadoTrabajo.pendiente)
+    ahora = datetime.now(timezone.utc)
+    stmt = select(TrabajoCola).where(
+        TrabajoCola.estado == EstadoTrabajo.pendiente,
+        # Backoff de reintento (ver `calcular_espera_reintento`): un
+        # trabajo con `disponible_en` en el futuro no se recoge todavía,
+        # aunque ya le toque por orden de creación -- el siguiente
+        # `pendiente` sin esa espera pasa por delante.
+        (TrabajoCola.disponible_en.is_(None)) | (TrabajoCola.disponible_en <= ahora),
+    )
     if excluir_tipos:
         stmt = stmt.where(TrabajoCola.tipo.notin_(list(excluir_tipos)))
     stmt = stmt.order_by(TrabajoCola.created_at).limit(1).with_for_update(skip_locked=True)
@@ -110,8 +138,12 @@ def ejecutar_trabajo(db: Session, trabajo: TrabajoCola, manejadores: dict) -> No
         # entero del worker en vez de marcar el trabajo como fallido.
         db.rollback()
         logger.exception("fallo procesando trabajo %s", trabajo_id)
-        trabajo.estado = (
-            EstadoTrabajo.pendiente if trabajo.intentos < trabajo.max_intentos else EstadoTrabajo.fallido
-        )
+        if trabajo.intentos < trabajo.max_intentos:
+            trabajo.estado = EstadoTrabajo.pendiente
+            trabajo.disponible_en = datetime.now(timezone.utc) + timedelta(
+                seconds=calcular_espera_reintento(trabajo.intentos)
+            )
+        else:
+            trabajo.estado = EstadoTrabajo.fallido
         trabajo.error = str(exc)
     db.commit()

@@ -516,6 +516,12 @@ class TrabajoCola(Base):
     error = Column(Text, nullable=True)
     bloqueado_por = Column(String(128), nullable=True)
     bloqueado_en = Column(DateTime(timezone=True), nullable=True)
+    # Backoff creciente en reintentos (sesión de límite de tasa de la
+    # Plataforma, 2026-09-07, migración 0020): NULL significa "disponible
+    # ya", como siempre. `tomar_siguiente_trabajo` no recoge un trabajo
+    # `pendiente` cuyo `disponible_en` esté en el futuro -- ver
+    # `app.queue.calcular_espera_reintento`.
+    disponible_en = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),
