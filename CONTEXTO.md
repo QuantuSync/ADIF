@@ -858,7 +858,14 @@ suficientes, no ahora.
   el ZIP mensual supera los 100 MB) — sigue corriendo en la cola del
   sistema de forma asíncrona, consultable en
   `GET /mantenimiento/sindicacion/historial`; números finales en
-  `docs/hallazgos-sindicacion.md` sección 25.
+  `docs/hallazgos-sindicacion.md` sección 25. **Continuado, sesión
+  2026-09-07 (continuación):** ritmo medido con datos reales (~150-160 MB
+  y ~11 min por mes en esta red), reportado antes de lanzarlo entero. Los
+  ~21 meses restantes (`202409`-`202605`) lanzados como un único
+  `sindicacion_backfill` en segundo plano — al ritmo medido, del orden de
+  3,5-4 horas, casi toda en descarga. Números finales pendientes de esta
+  ejecución en
+  `docs/sesion-2026-09-07-adjudicatario-revision-vocabulario.md`.
 - **Descubrimiento inverso matriz → pedidos: implementado (sesión
   2026-09-07, `docs/descubrimiento-inverso-matriz-pedidos.md`).** Hasta
   ahora el sistema solo resolvía pedido → matriz; nunca al revés. Verificado
@@ -884,11 +891,46 @@ suficientes, no ahora.
   guardaba en el camino de lote único implícito (solo el multi-lote
   explícito), y una segunda forma real del campo MATRIZ ("Identificador
   contrato original", sin la sección "Licitación basada en el acuerdo
-  marco"). **Límite real, sin cerrar**: dos de las tres matrices declaran
-  su adjudicación en plantilla Propuesta LC.27, que nunca ha tenido
-  extractor de adjudicatario (ni siquiera para el camino multi-lote) — su
-  descubrimiento automático seguirá señalando el aviso hasta que exista
-  ese extractor, candidato para una sesión futura.
+  marco"). **Cerrado, sesión 2026-09-07 (continuación)**
+  (`docs/sesion-2026-09-07-adjudicatario-revision-vocabulario.md`):
+  `app.extraccion.campos_lc27.extraer_adjudicatario_lc27` añadido (mismo
+  patrón "a la empresa..., con NIF/CIF" que ya usaba el camino multi-lote,
+  generalizado para cubrir una variante real sin la palabra "con"). Las
+  tres matrices de carril tienen ya su adjudicatario extraído y las tres
+  completan el descubrimiento inverso sin aviso. Adjudicatario pasa de 13 a
+  40 de 52 expedientes reprocesados. De paso, sexto formato real de
+  `codigo_precio` encontrado y corregido ("Cod0001", prefijo + 4 dígitos,
+  `4.26/28510.0020`): sin él, una tabla real de 13 filas limpias se
+  descartaba entera como espuria y el expediente quedaba sin catálogo pese
+  a tener la tabla intacta.
+- **Huérfanos de banda vacía: señal informativa añadida, sin descarte
+  automático (sesión 2026-09-07, continuación,
+  `docs/sesion-2026-09-07-adjudicatario-revision-vocabulario.md`).** Un
+  intento de descartar automáticamente una huérfana que coincide en
+  matrícula/descripción/precio con una línea ya resuelta del mismo
+  expediente se revirtió al romper el caso de aceptación multi-lote real
+  (`6.25/28510.0027`, "Suministro de balasto, 6 LOTES"): un precio de
+  referencia ("P-1 Balasto sobre camión en cantera") puede coincidir
+  legítimamente entre lotes distintos de la misma licitación sin ser la
+  misma fila repetida — verificado con datos reales. Como "huérfana de
+  banda vacía" solo existe en expedientes multi-lote por construcción, ese
+  riesgo cubre el 100% del dominio de esta heurística: no se implementa.
+  En su lugar, `app.catalogo.buscar_posible_duplicado_huerfana` calcula la
+  señal (nunca decide) y `RevisionPanel.tsx` la muestra como una
+  comparación de un vistazo con dos botones de un clic (confirmar como
+  distinta / descartar como duplicado, con motivo ya redactado) — de las
+  797 huérfanas reales de banda vacía, cuántas traen la señal tras el
+  reproceso completo queda pendiente de medir (ver doc de la sesión).
+- **Vocabulario del código de material ampliado, con vía de modelo cacheada
+  (sesión 2026-09-07, continuación,
+  `docs/sesion-2026-09-07-adjudicatario-revision-vocabulario.md`).** De 11
+  a ~90 sustantivos reales del corpus (extraídos por frecuencia real, no
+  inventados), con salto de tokens de unidad de medida sueltos y
+  normalización de acentos/plural a forma canónica.
+  `derivar_codigo_material_con_modelo` añade la vía de modelo con caché por
+  término (`cache_codigo_material`, migración 0018, mismo mecanismo que
+  `cache_mapeo_cabecera`) para lo que la regla no casa. Relleno antes: 8,1 %
+  (253/3.121 líneas); número final tras el reproceso completo, pendiente.
 
 ---
 
@@ -900,4 +942,5 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `excel-cliente-correccion.md`, `diagnostico-caidas-dockerd.md`,
 `tolerancia-reinicios-dockerd.md`, `estados-carga-web.md`,
 `copias-de-seguridad.md`, `descubrimiento-inverso-matriz-pedidos.md`,
+`sesion-2026-09-07-adjudicatario-revision-vocabulario.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.
