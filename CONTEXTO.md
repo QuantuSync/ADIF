@@ -229,7 +229,14 @@ que un modelo mayor, a una fracción del coste. Detalle y cifras en
 
 ## 7. Esquema del catálogo
 
-Columnas del entregable y su origen:
+Columnas del entregable y su origen. Las once primeras son el formato
+original del cliente, en su orden exacto — nunca se reordenan. Tres más
+añadidas después, siempre al final, sin desplazar las once: **precio
+adjudicado** y **baja del lote** (sesión de corrección del Excel al
+cliente); **unidad de medida** (aviso del cliente, sesión 2026-09-07: sin
+ella, una Cantidad de 2000 o un Precio unitario de 0,142 no significan nada
+por sí solos — pueden ser metros de cable o toneladas de balasto, o un
+precio por tonelada-kilómetro).
 
 | Columna | Origen | Modelo |
 |---|---|---|
@@ -244,10 +251,22 @@ Columnas del entregable y su origen:
 | Precio unitario | Cuadro de precios | No |
 | Lote | Cabecera de tabla o anuncio | No |
 | Comentarios | Humano | No |
+| Precio adjudicado | Derivado (precio unitario × (1 − baja de lote)) | No |
+| Baja del lote | Declarada en texto en la propuesta/contrato | No |
+| Unidad de medida | Cuadro de precios | No |
 
-Añadir internamente, aunque no salgan al Excel: `codigo_precio`, `unidad_medida`,
-`baja_lote`, `precio_adjudicado`, `documento_origen`, `pagina`, `fragmento`,
-`confianza`, `estado_revision`.
+`unidad_medida` se guarda desde el principio del proyecto (etapa 6 de la
+cascada, junto a cantidad y precio) — lo nuevo en la sesión 2026-09-07 es
+que deja de ser solo interno y pasa a mostrarse en las cuatro pantallas y
+en el Excel, con el mismo criterio de celda vacía (no aplica/no consta) que
+el resto de columnas. 94,6% de las líneas del catálogo la traen; el 5,4%
+restante es, verificado contra el corpus real, un cuadro de precios que de
+verdad no declara ninguna columna de unidad (no un hueco de extracción) —
+ver `docs/excel-cliente-correccion.md` bloque 5.
+
+Añadir internamente, aunque no salgan al Excel como columna propia:
+`codigo_precio`, `documento_origen`, `pagina`, `fragmento`, `confianza`,
+`estado_revision`.
 
 ### Cruce con el Excel de códigos
 
@@ -720,6 +739,43 @@ suficientes, no ahora.
   marcadas), 0 líneas fantasma, 0 líneas con baja y sin precio y 0 claves
   incoherentes en todo el corpus. Detalle completo en
   `docs/excel-cliente-correccion.md` bloque 4.
+- **Cantidad con forma de año, y unidad de medida ausente de las cuatro
+  pantallas: corregido (sesión 2026-09-07).** El cliente detectó que
+  `Cantidad` a veces trae lo que parece un año. Rastreado hasta dos
+  variantes reales de un mismo defecto: el modelo, al mapear una cabecera
+  sin ninguna columna de unidad real, tiende a asignar `unidad_medida` a
+  una columna ajena en vez de devolver `null` — la referencia normativa de
+  un material (`6.20/28510.0054`, traviesas, "E.T." → "03.360.571.8") o un
+  valor de otra columna desplazado por una columna fantasma
+  (`6.20/28510.0094`, candado/llave, "956"/"102"). `cantidad` en sí estaba
+  bien mapeada en ambos casos — el valor con forma de año en las traviesas
+  es el dato real de una columna que el propio documento llama "CANTIDAD DE
+  REFERENCIA", ambiguo en origen, no un fallo de extracción. Arreglado con
+  una validación estructural nueva en `_construir_campos`
+  (`engine/app/catalogo.py`): una `unidad_medida` extraída que sea solo
+  dígitos y puntos nunca es una unidad real, se descarta y se marca para
+  revisión — cubre las dos variantes encontradas y cualquiera futura no
+  vista todavía, sin depender solo de corregir la caché. Las 5 firmas de
+  cabecera ya cacheadas con este mapeo (todas resueltas por el modelo,
+  ninguna por las reglas deterministas) se corrigieron directamente, y las
+  36 líneas ya guardadas con el valor malo se corrigieron en base de datos
+  (el reproceso solo no basta: "un `None` nunca pisa un valor ya
+  conocido" es la regla correcta para el caso contrario). Añadida además
+  una comprobación de `cantidad` implausible (forma de año, o cero) que
+  marca para revisión sin inventar ni descartar el dato nunca — deliberado
+  no automatizar un chequeo de "N veces la mediana del expediente": produce
+  falsos positivos legítimos (material pequeño comprado a granel, toneladas
+  frente a tonelada-kilómetro), mismo hallazgo que ya cerró esto para
+  precios en el bloque 3. Segunda mitad de la sesión: `unidad_medida` ya se
+  guardaba desde el principio del proyecto pero no aparecía en ningún sitio
+  visible — añadida a las cuatro pantallas (tabla de catálogo, detalle con
+  trazabilidad, tabla de la cola de revisión) y al Excel como decimocuarta
+  columna, al final, sin alterar el orden de las once originales. 94,6% de
+  las líneas del catálogo la traen; verificado contra 6 expedientes
+  distintos con `pdfplumber` sobre el documento real que las unidades
+  guardadas son plausibles para su material. Detalle completo, las cuatro
+  sondas de medición y los números finales en
+  `docs/excel-cliente-correccion.md` bloque 5.
 
 ---
 
