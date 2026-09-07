@@ -592,3 +592,155 @@ Reprocesado el expediente (`POST /expedientes/18/extraer`, trabajo 1068,
 Los precios adjudicados de las líneas recuperadas se derivan ya con la baja
 del lote (0,2531): `P-0090` 29.240,23 € → 21.839,5278 €, `P-0091` 38.012,29 €
 → 28.391,3794 €, `P-0058` y `P-0059` 306.351,49 € → 228.813,9279 €.
+
+## Bloque 5: cantidad con forma de año, y unidad de medida visible en todas partes (sesión 2026-09-07)
+
+Origen: el cliente detectó que el campo `Cantidad` del catálogo a veces
+contiene lo que parece un año, no una cantidad de material.
+
+### 1. Medición inicial
+
+**73 líneas** con `cantidad` entre 1900 y 2100, en 4 expedientes (más 1
+línea adicional en 1872, fuera de ese rango pero igual de sospechosa):
+
+| Expediente | Líneas | Rango | Documento |
+|---|---|---|---|
+| `6.20/28510.0054` | 34 (33 en 1996-2005 + 1 en 1872) | traviesas | `ANEJO_8.pdf` p.10 |
+| `6.25/28510.0028` | 35, todas en 2000 | balasto | `ANEJO_1.pdf` |
+| `6.24/28510.0064` | 4, todas en 2000 | cable | `CONTRATO_1.pdf` |
+| `6.24/28510.0203` | 1, en 2000 | traviesa | `CONTRATO_1.pdf` |
+
+### 2. Qué había realmente en la celda (verificado con `pdfplumber` contra los 4 PDF reales)
+
+- **`6.20/28510.0054`**: la tabla real tiene 6 columnas -- `Matricula |
+  Designación | E.T. | (sin cabecera) | PRECIO (€) | CANTIDAD DE
+  REFERENCIA`. La celda "CANTIDAD DE REFERENCIA" trae literalmente esos
+  años (1997, 2004, 2000..., y un "1872"): es el dato real del documento.
+  El problema real está en la celda de al lado: "E.T." (Especificación
+  Técnica, una referencia normativa como `03.360.571.8`) se guardaba como
+  si fuera la unidad de medida.
+- **`6.24/28510.0064`** (cable) y **`6.25/28510.0028`** (balasto):
+  confirmado contra el documento -- cantidades reales y plausibles (2000
+  metros de cable, 2000 toneladas de balasto), coincidencia numérica con
+  un año, no un fallo. Falsos positivos del filtro, descartados como bug.
+
+### 3. Causa: mapeo de "unidad_medida", no de "cantidad" -- y una segunda variante encontrada al arreglarlo
+
+No es una columna fantasma desplazando "Cantidad". Es una mala asignación
+de **"unidad_medida"**, y la hizo **el modelo (LLM), no las reglas
+deterministas** -- confirmado en `cache_mapeo_cabecera`: 5 firmas de
+cabecera distintas (ids 71-75), las 5 con `origen="modelo"`, las 5
+aplicadas solo a `6.20/28510.0054`. "Cantidad" en sí estaba bien mapeada
+(apunta a la columna que el propio documento llama "CANTIDAD DE
+REFERENCIA"); el valor con forma de año es ambiguo en el propio PDF de
+ADIF, no un error de nuestra extracción.
+
+Verificando el fix contra el corpus real (no solo la muestra inicial de 4
+expedientes) apareció una **segunda variante del mismo defecto**, en un
+documento completamente distinto: `6.20/28510.0094` (candado/llave,
+`ANEJO` p.4). La tabla real es `MATRICULA | DENOMINACION | (blank) |
+CANTIDADES [ESTIMADAS] | (blank) | PRECIO`, y el modelo mapeó
+`unidad_medida` a la columna en blanco justo después de la descripción
+(`cache_mapeo_cabecera` id 77, `origen="modelo"`) -- que en realidad trae
+la cantidad ("956", "102") desplazada por una columna fantasma, el mismo
+fenómeno de desfase que ya resuelven `_recuperar_cantidad_columna_fantasma`
+y compañía, aquí aterrizando en `unidad_medida` porque fue el modelo, no
+una regla de recuperación, quien decidió el mapeo. Un vistazo a la
+distribución completa de valores de `unidad_medida` en todo el corpus
+(`select unidad_medida, count(*) ... group by 1`) fue lo que hizo aparecer
+este segundo caso -- dos valores sueltos, "956" y "102", con pinta de
+número puro entre docenas de unidades reales.
+
+Ambas variantes comparten una firma verificable: **ninguna unidad de
+medida real del corpus es nunca solo dígitos y puntos** (ud, UD., m, M, t,
+kg, PA, dm3, m³... siempre llevan alguna letra), mientras que tanto una
+referencia normativa como un valor de cantidad desplazado sí lo son.
+
+### 4. El arreglo
+
+En `engine/app/catalogo.py`, `_construir_campos`:
+
+- Nueva validación estructural: si el valor extraído de `unidad_medida`
+  tiene forma de referencia normativa o de valor puramente numérico
+  (regex `^[\d.]+$`), se descarta (pasa a `null`) y se marca para
+  revisión. Cubre las dos variantes encontradas y cualquier otra no vista
+  todavía, sin depender solo de la caché -- la forma del valor importa más
+  que la firma exacta.
+- Nueva comprobación de `cantidad` implausible: cero, o forma de año
+  (1900-2100, sin parte decimal). Nunca inventa ni descarta el dato -- lo
+  guarda igual y lo marca en `motivo_revision` para confirmación humana.
+  Deliberadamente **no** se automatizó un chequeo de "N veces la mediana
+  del expediente" para cantidad: investigado contra el corpus real,
+  produce falsos positivos legítimos -- `6.24/28510.0130` (pequeño
+  material de sujeción de vía, comprado por decenas de miles de unidades)
+  y `6.25/28510.0028` (tonelada-kilómetro de balasto frente a toneladas)
+  dan cocientes de más de 50x que son reales, mismo hallazgo que ya cerró
+  esto para atípicos de precio en el bloque 3.
+- Las 5 entradas de caché de la primera variante (ids 71-75) y la 1 de la
+  segunda (id 77) corregidas directamente (`unidad_medida: null`).
+- Las 36 líneas ya guardadas con el valor malo (34 + 2) corregidas en base
+  de datos: reprocesar el expediente por sí solo no bastaba, porque
+  `guardar_lineas_catalogo` nunca deja que un `None` entrante pise un
+  valor ya conocido (la regla correcta para el caso contrario: no perder
+  un dato bueno cuando una segunda tabla trae menos columnas) -- así que
+  un `unidad_medida` malo, ya guardado, sobrevive a un reproceso sin
+  tocarlo a mano. La misma corrección, en cambio, sí dejó que
+  `_recuperar_cantidad_columna_fantasma` (ya existente, no nuevo)
+  recuperara sola "956"/"102" como cantidad real en cuanto el mapeo dejó
+  de reclamar esa columna para `unidad_medida`.
+- 8 tests nuevos en `engine/tests/test_catalogo.py`, 70 pasan en ese
+  fichero, 380 en la suite completa.
+
+### 5. Unidad de medida, visible en las cuatro pantallas y en el Excel
+
+`unidad_medida` se guarda desde el principio del proyecto (etapa 6 de la
+cascada) pero no aparecía en ningún sitio visible -- sin ella, una
+`Cantidad` de 2000 o un `Precio unitario` de 0,142 no significan nada por
+sí solos.
+
+**Medición previa** (antes de tocar nada, condición del cliente): 95,8%
+de las líneas del catálogo ya traían `unidad_medida` -- no una columna
+casi vacía, seguía adelante. Tras las correcciones del punto 4 (36
+valores malos limpiados), la cifra real baja ligeramente a **94,6%**
+(2.839/3.001): el punto de partida incluía 36 unidades "rellenas" pero
+incorrectas.
+
+**Verificación de plausibilidad** contra 6 expedientes distintos, con
+`pdfplumber` sobre el documento real (no solo contra la base de datos):
+traviesas (`6.20/28510.0054`, sin unidad tras el arreglo -- la tabla real
+no tiene columna de unidad), cable (`6.24/28510.0064`, "M"), balasto
+(`6.25/28510.0028`, "t"), candado/llave (`6.20/28510.0094`, sin unidad
+tras el arreglo -- misma causa), partida alzada (`6.24/28510.0088`, "PA"),
+aceite de engrase (`6.25/28510.0019`, "KG") -- las seis coinciden
+exactamente con el documento original.
+
+**Dónde se añadió:**
+
+- `web/app/catalogo/CatalogoPanel.tsx`: columna "Unidad" en la tabla
+  (junto a Cantidad), y "Cantidad" (con su unidad) más un sufijo "(por
+  unidad)" en la sección de precio y baja del panel de trazabilidad --
+  antes ese panel no mostraba la cantidad en absoluto.
+- `web/app/revision/RevisionPanel.tsx`: columna "Unidad" junto a Precio
+  unitario en la tabla de líneas de la cola de revisión.
+- `engine/app/exportacion.py`: `Unidad de medida` como decimocuarta
+  columna del Excel, al final de todo, después de Precio adjudicado y
+  Baja del lote -- las once columnas originales del formato del cliente
+  no se tocan ni de posición ni de orden.
+- Mismo criterio de celda vacía que el resto de columnas en las cuatro
+  pantallas (no aplica para partida alzada sin unidad propia, no consta
+  en cualquier otro caso); en el Excel, celda en blanco sin marcador de
+  texto -- la misma convención ya establecida para todas las columnas de
+  texto de este entregable (`app/exportacion.py`, docstring del módulo),
+  para no romper filtros/ordenación en Excel.
+
+### Verificación final
+
+| Concepto | Valor |
+|---|---|
+| Líneas con `unidad_medida` implausible (referencia normativa o numérica pura) tras el arreglo | 0 |
+| Líneas corregidas en base de datos | 36 (34 traviesas + 2 candado/llave) |
+| Firmas de cabecera de caché corregidas | 6 (ids 71-75, 77) |
+| `unidad_medida` en todo el catálogo | 2.839/3.001 (94,6%) |
+| `unidad_medida` en el Excel entregado ("Materiales") | 1.748/1.893 (92,3%) |
+| Columnas del Excel | 14 (11 originales + Precio adjudicado + Baja del lote + Unidad de medida, en ese orden) |
+| Suite completa | 380 tests pasan (372 antes de este bloque + 8 nuevos) |
