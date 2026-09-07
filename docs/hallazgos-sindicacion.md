@@ -253,3 +253,113 @@ descubierto se procesa en el mismo ciclo que lo descubre, un fallo del
 descubrimiento no impide el resto). tests/mantenimiento/test_ciclo.py se
 actualiza para desactivar la sindicación por defecto (sindicacion_
 desactivada: true) — esos tests son del bloque 1, no deben tocar la red.
+
+## 25. Expedientes publicados que faltaban: backfill de meses pasados (sesión 2026-09-07)
+
+Origen: el cliente reportó un caso concreto, `6.26/28510.0014`, publicado
+en la Plataforma pero ausente del sistema.
+
+### Diagnóstico del caso concreto
+
+| Pregunta | Respuesta |
+|---|---|
+| ¿Está en base de datos? | No, antes de esta sesión. |
+| ¿Existe en la Plataforma? | **Sí** — `POST /expedientes/{id}/descargar` real lo encuentra al momento: "Pedido nº3 acuerdo marco de suministro de carril nuevo para las necesidades de la red ferroviaria de interés general", 3.005.618,56 € de licitación, 2 documentos descargados (`anuncio_pcsp` x2) sin ningún error. |
+| ¿Aparece en el Excel de códigos? | No, en ninguna de las 666 filas de su única hoja ("Hoja1"). |
+| ¿Aparece en la sindicación? | No, en ninguno de los dos únicos periodos jamás ingeridos en la base de datos real (`202408`, `202609`). |
+
+La búsqueda (el scraper) funciona perfectamente en cuanto se dispara a
+mano. El fallo está enteramente en el **descubrimiento**: nada disparó
+nunca la búsqueda de este expediente en concreto.
+
+### Alcance: por qué el descubrimiento no lo encontró solo
+
+`descubrir_novedades` (sección 24 de arriba) siempre aceptó un `periodo`
+explícito (`AAAAMM`) — el mecanismo en sí nunca tuvo la limitación.
+Medido contra `sindicacion_expedientes` real: solo **dos periodos** se
+habían ingerido jamás —
+
+| Periodo | Expedientes ADIF (dept. 28510) |
+|---|---|
+| `202408` | 3 (prueba puntual de la sesión original, sección 24) |
+| `202609` | 4 (el mes en curso de esta sesión) |
+
+`app.mantenimiento.ciclo` (la única llamadora automática, vía el ciclo de
+mantenimiento semanal) usa `periodo_actual()` por defecto en cada
+ejecución — **ningún mecanismo revisitaba nunca un mes ya pasado**. Entre
+`202409` y `202608`, unos 25 meses, no se comprobó ni uno. Un expediente
+cuyo único cambio de estado cayó en un mes saltado queda invisible para
+siempre, aunque siga publicado con normalidad — exactamente el caso de
+`6.26/28510.0014`.
+
+**Filtro de departamento, descartado como causa**: `SINDICACION_DEPARTAMENTOS_ADIF`
+sigue en su valor por defecto (`28510`), sin sobrescribir en `.env` ni en
+`docker-compose.yml`; el expediente reportado es justo de ese
+departamento. La sección 24 ya había medido con datos reales, contra el
+ZIP completo de agosto 2024, que 28510 es el departamento correcto para
+material de suministro — otros departamentos traen obra civil de Alta
+Velocidad que la cascada de extracción no está pensada para leer.
+
+**Segunda causa relacionada, encontrada al revisar "todas las hojas" del
+Excel de códigos**: `app.extraccion.cruce_codigos._cargar_indice` leía
+siempre `libro.worksheets[0]` — la primera hoja, sin más. Mismo defecto
+que el scraper heredado ("solo leía la hoja de expedientes en ejecución").
+El fichero de ejemplo de este repositorio (`Ejemplo/Input/Códigos de
+proyecto.xlsx`, 666 filas) solo trae una hoja ("Hoja1"), así que no se
+pudo reproducir el hallazgo contra datos reales ni medir cuántas filas
+adicionales aportaría una segunda hoja — pero el fichero real que
+mantiene ADIF puede traer más de una (p.ej. una hoja separada para
+procedimientos "en tramitación"), y el código no debe asumir que siempre
+habrá solo una. Se corrige igual, de forma defensiva: lee todas las hojas
+del workbook, cada una con su propia cabecera.
+
+### El arreglo
+
+- `app.sindicacion.descubrimiento.descubrir_backfill(db, periodos)` +
+  `periodos_recientes(n, hasta=None)`: recorre varios periodos pasados
+  llamando a `descubrir_novedades` una vez por cada uno (mismo mecanismo
+  de siempre, nunca modificado) — el fallo de un mes concreto (ZIP no
+  publicado todavía, corte de red) se anota aparte y la tanda sigue con el
+  resto, nunca aborta. `periodos_recientes` devuelve del más reciente al
+  más antiguo, para que una tanda grande interrumpida a medias deje sin
+  repasar los meses más antiguos, nunca los recientes.
+- Trabajo de cola nuevo, `sindicacion_backfill`
+  (`POST /mantenimiento/sindicacion/backfill`, payload `{"periodos": [...]}`
+  o `{"meses": N}`, 12 por defecto) — deliberadamente **distinto** del
+  ciclo completo (`mantenimiento_ciclo`, que ya podía reprocesar un mes
+  con `sindicacion_periodo` pero solo uno, y de paso descarga/extrae todo
+  lo que falte): un backfill de varios meses no necesita ese coste
+  añadido, solo el barrido de descubrimiento.
+- `app.extraccion.cruce_codigos._cargar_indice`: lee todas las hojas del
+  Excel de códigos, no solo la primera; una hoja vacía (sin cabecera
+  siquiera) no revienta la lectura.
+- 12 tests nuevos (`test_descubrimiento.py`: `periodos_recientes` con
+  cambio de año, `descubrir_backfill` agregando periodos y aislando un
+  fallo; `test_cruce_codigos.py`: cruce contra la segunda hoja, hoja
+  vacía; `test_worker.py`: el trabajo nuevo con periodos explícitos y con
+  `meses` por defecto). 393 tests pasan en total.
+
+### Verificación contra la Plataforma y la sindicación reales
+
+- `6.26/28510.0014` descubierto y descargado a mano
+  (`POST /expedientes/{id}/descargar`, expediente ya existente en base de
+  datos por alta manual mientras se diagnosticaba el caso): ahora en
+  `pendiente_revision`, con nombre de proyecto e importe reales, 2
+  documentos descargados. Pendiente el siguiente paso normal del sistema
+  (extracción), no distinto de cualquier otro expediente recién
+  descubierto.
+- Backfill real lanzado (`meses: 3`, trabajo 1083): periodo `202609` (mes
+  en curso, parcial, 23 MB) procesado en menos de 2 minutos —
+  `{"expedientes_adif_total": 61, "expedientes_filtrados": 4,
+  "expedientes_nuevos": 0, "expedientes_sin_cambios": 4}`, coincide
+  exactamente con lo ya conocido (verificación de que el mecanismo
+  funciona, no solo que compila). El siguiente periodo (`202608`, mes
+  completo) es sensiblemente más grande y, en la red de esta sesión,
+  bastante más lento que los ~460 s medidos en la sesión original para un
+  mes completo — seguía descargando al cierre de esta sesión. Al ser un
+  trabajo de cola normal (mismo mecanismo que cualquier descarga o
+  extracción), sigue corriendo de forma asíncrona en el sistema aunque la
+  sesión termine; estado y resultado consultables en
+  `GET /mantenimiento/sindicacion/historial` o directamente en
+  `trabajos_cola` (id 1083). Ningún error hasta el momento — el ZIP
+  simplemente tarda.

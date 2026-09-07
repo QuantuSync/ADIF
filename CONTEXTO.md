@@ -800,6 +800,57 @@ suficientes, no ahora.
   (25 filas) pasa de una celda vacía por columna en casi cada fila a solo
   "Pendiente" en Precio adjudicado (baja de lote todavía no declarada para
   ese expediente concreto -- estado real, no un hueco) y nada más.
+- **Expedientes publicados que faltaban: causa real encontrada y arreglada
+  (sesión 2026-09-07, caso `6.26/28510.0014`).** El cliente reportó un
+  expediente ausente que sí está publicado en la Plataforma. Diagnóstico
+  del caso concreto: **existe en la Plataforma** (el scraper real lo
+  encuentra al momento, "Pedido nº3 acuerdo marco de suministro de carril
+  nuevo...", 3.005.618,56 € de licitación, 2 documentos descargados sin
+  ningún problema); **no aparece en el Excel de códigos** (ninguna de las
+  666 filas de su única hoja); **no aparece en la sindicación**, en
+  ninguno de los dos únicos periodos jamás ingeridos. La búsqueda funciona
+  perfectamente en cuanto se dispara — el fallo está en el descubrimiento,
+  nunca llegó a dispararse solo.
+
+  Causa raíz medida contra la base de datos real: `descubrir_novedades`
+  siempre aceptó un `periodo` explícito, pero **nada la llamaba nunca con
+  otra cosa que el mes en curso** — solo dos periodos se habían ingerido
+  jamás, `202408` (prueba puntual de la sesión original) y `202609` (el mes
+  en curso de esta sesión). **Unos 25 meses intermedios nunca se
+  comprobaron.** Un expediente cuyo único cambio de estado cayó en uno de
+  esos meses saltados queda invisible para siempre, aunque esté publicado
+  con normalidad. Segunda comprobación, también real: el cruce con el
+  Excel de códigos (`app.extraccion.cruce_codigos._cargar_indice`) leía
+  siempre `libro.worksheets[0]`, la primera hoja — mismo defecto que tenía
+  el scraper heredado. El fichero de ejemplo de este repositorio solo trae
+  una hoja, así que no se pudo reproducir contra datos reales, pero se
+  corrige igual (lee todas las hojas) porque el fichero real que mantiene
+  ADIF puede traer más de una y el código no debe asumirlo. Filtro de
+  departamento (`SINDICACION_DEPARTAMENTOS_ADIF=28510`) descartado como
+  causa: el expediente es del departamento correcto, y `docs/hallazgos-
+  sindicacion.md` sección 24 ya había medido con datos reales que 28510 es
+  el departamento correcto para material de suministro (obra civil de otros
+  departamentos generaría `pendiente_revision` en masa sin ser un fallo
+  real).
+
+  Arreglo: `app.sindicacion.descubrimiento.descubrir_backfill` +
+  `periodos_recientes`, nuevo trabajo de cola `sindicacion_backfill`
+  (`POST /mantenimiento/sindicacion/backfill`, payload `periodos` o
+  `meses`) — recorre varios periodos pasados llamando a
+  `descubrir_novedades` una vez por cada uno, aislando el fallo de un mes
+  concreto del resto de la tanda. `_cargar_indice` lee ahora todas las
+  hojas del Excel de códigos, no solo la primera. 12 tests nuevos, 393
+  pasan. Verificado en vivo contra la Plataforma y la sindicación reales de
+  esta sesión: expediente descubierto y descargado a mano
+  (`6.26/28510.0014`, ya en `pendiente_revision` con documentos reales);
+  backfill real lanzado para varios meses recientes, mes en curso (202609)
+  procesado correctamente (61 expedientes ADIF totales, 4 del departamento
+  configurado, 0 nuevos — coincide con lo ya conocido). El backfill de
+  meses completos anteriores es lento en esta red (varios minutos por mes,
+  el ZIP mensual supera los 100 MB) — sigue corriendo en la cola del
+  sistema de forma asíncrona, consultable en
+  `GET /mantenimiento/sindicacion/historial`; números finales en
+  `docs/hallazgos-sindicacion.md` sección 25.
 
 ---
 
