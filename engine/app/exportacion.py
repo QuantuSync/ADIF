@@ -2,8 +2,12 @@
 4, y sección 9.8: "El Excel es una vista generada, no la fuente. [...] Se
 regenera a demanda"). Un solo catálogo acumulativo para todos los
 expedientes, con las once columnas y el orden exactos de `Ejemplo/Output/`
-— es el formato que el cliente ya espera recibir — más las dos columnas de
-precio adjudicado y baja de lote al final (encargo de esta sesión, punto 3).
+— es el formato que el cliente ya espera recibir — más precio adjudicado y
+baja de lote (encargo de una sesión anterior, punto 3) y, al final de todo,
+unidad de medida (aviso del cliente, sesión 2026-09-07: sin ella, una
+Cantidad de 2000 o un Precio unitario de 0,142 no significan nada por sí
+solos). Las tres añadidas siempre después de las once originales, nunca
+alterando su orden ni sus posiciones.
 
 El marcador entre paréntesis ("(no consta)", "(no aplica)") es una
 convención de la interfaz web (`app/ui.tsx`, `DatoVacio`) para que una
@@ -11,10 +15,11 @@ persona lea la pantalla sin ambigüedad. **No viaja al Excel** (encargo de
 esta sesión, punto 1): en una columna numérica (Cantidad, Precio unitario,
 Precio adjudicado, Baja del lote) un marcador de texto convierte la columna
 entera en texto mixto y rompe sumar/filtrar/ordenar en Excel. En las
-columnas de texto (Matrícula, Código del material, Lote) se aplica el mismo
-criterio único por consistencia y porque es el que trae el Excel que ya
-maneja el cliente: celda vacía, sin ninguna variante. El motivo por el que
-falta (partida alzada, cruce sin confirmar, tabla ambigua) ya vive en
+columnas de texto (Matrícula, Código del material, Lote, Unidad de medida)
+se aplica el mismo criterio único por consistencia y porque es el que trae
+el Excel que ya maneja el cliente: celda vacía, sin ninguna variante. El
+motivo por el que falta (partida alzada, cruce sin confirmar, tabla
+ambigua, cuadro de precios sin columna de unidad) ya vive en
 `motivo_revision`/la cola de revisión, trazable desde ahí — no se
 inventa aquí un texto nuevo para la casilla.
 
@@ -68,6 +73,13 @@ COLUMNAS = [
     "Comentarios",
     "Precio adjudicado",
     "Baja del lote",
+    # Aviso del cliente (sesión 2026-09-07): sin la unidad, una Cantidad de
+    # 2000 o un Precio unitario de 0,142 no significan nada por sí solos
+    # (pueden ser metros de cable o toneladas de balasto, o un precio por
+    # tonelada-kilómetro). Al final, después de las dos columnas ya añadidas
+    # en una sesión anterior -- no altera el orden ni las posiciones de las
+    # once columnas originales del formato del cliente.
+    "Unidad de medida",
 ]
 
 # Columnas numéricas (1-indexadas, en el orden de COLUMNAS de arriba) a las
@@ -251,6 +263,7 @@ def generar_excel_catalogo(db: Session, incluir_pendientes_sin_lote: bool = Fals
                 linea.comentarios,
                 _celda_numero(linea.precio_adjudicado),
                 _celda_numero(linea.baja_lote),
+                _celda_texto(linea.unidad_medida),
             ])
             hoja.cell(row=fila, column=_COLUMNA_CANTIDAD).number_format = _FORMATO_CANTIDAD
             for columna in _COLUMNAS_IMPORTE:

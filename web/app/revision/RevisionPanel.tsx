@@ -31,6 +31,7 @@ type LineaCatalogo = {
   descripcion: string;
   cantidad: string | null;
   precio_unitario: string | null;
+  unidad_medida: string | null;
   precio_adjudicado: string | null;
   estado_revision: string;
   motivo_revision: string | null;
@@ -79,6 +80,25 @@ function celdaPrecioUnitario(linea: LineaCatalogo) {
       motivo="no-consta"
       titulo={linea.motivo_revision ?? "No se pudo interpretar el precio unitario de esta línea en el documento de origen."}
     />
+  );
+}
+
+// Unidad de medida (CONTEXTO.md, encargo de esta sesión): sin ella, un
+// precio unitario no se entiende por sí solo (0,142 solo tiene sentido
+// sabiendo que es por tonelada-kilómetro) -- mismo criterio na/no-consta
+// que el resto de columnas.
+function celdaUnidadMedida(linea: LineaCatalogo) {
+  if (linea.unidad_medida) return linea.unidad_medida;
+  if (esPartidaAlzada(linea.descripcion)) {
+    return (
+      <DatoVacio
+        motivo="na"
+        titulo="Partida alzada: es una reserva presupuestaria, no un artículo de almacén — no lleva este dato salvo que el documento le dé una unidad propia."
+      />
+    );
+  }
+  return (
+    <DatoVacio motivo="no-consta" titulo="El cuadro de precios de origen no trae unidad de medida para esta línea." />
   );
 }
 
@@ -495,6 +515,7 @@ export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
                         <th>Matrícula</th>
                         <th>Descripción</th>
                         <th className="num">Precio unitario</th>
+                        <th>Unidad</th>
                         <th>Estado</th>
                         <th>Aviso</th>
                         <th />
@@ -514,6 +535,7 @@ export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
                                 <DescripcionCelda texto={linea.descripcion} />
                               </td>
                               <td className="num">{celdaPrecioUnitario(linea)}</td>
+                              <td>{celdaUnidadMedida(linea)}</td>
                               <td>
                                 <span
                                   className={linea.estado_revision === "confirmado" ? "status status-ok" : "status"}
@@ -571,7 +593,7 @@ export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
                             </tr>
                             {panelAbierto && (
                               <tr>
-                                <td colSpan={7} className="linea-accion-panel">
+                                <td colSpan={8} className="linea-accion-panel">
                                   {panelAbierto === "corregir" && (
                                     <div className="field-grid">
                                       <label>

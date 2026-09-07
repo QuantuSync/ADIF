@@ -105,6 +105,7 @@ def _sembrar_catalogo(db_session, *, estado=EstadoExpediente.completado):
         codigo_material="GUANTE",
         cantidad=Decimal("30"),
         precio_unitario=Decimal("24.00"),
+        unidad_medida="UN",
         baja_lote=Decimal("0.5400"),
         precio_adjudicado=Decimal("11.0400"),
         documento_origen_id=documento.id,
@@ -188,7 +189,7 @@ def test_exportar_catalogo_genera_xlsx_con_columnas_del_formato_esperado(cliente
         "Código interno", "Código de proyecto", "Código matriz", "Nombre del proyecto",
         "Matrícula del material", "Descripción del material", "Código del material",
         "Cantidad", "Precio unitario", "Lote", "Comentarios",
-        "Precio adjudicado", "Baja del lote",
+        "Precio adjudicado", "Baja del lote", "Unidad de medida",
     ]
     fila = [c.value for c in next(hoja.iter_rows(min_row=2, max_row=2))]
     assert fila[3] == "SUMINISTRO DE GUANTES CONTRA RIESGO ELECTRICO."
@@ -200,10 +201,13 @@ def test_exportar_catalogo_genera_xlsx_con_columnas_del_formato_esperado(cliente
     # (CONTEXTO.md sección 7).
     assert fila[0] is None
     assert fila[1] is None
-    # Encargo de esta sesión, punto 3: precio adjudicado y baja del lote,
-    # al final, sin desplazar las once columnas de siempre.
+    # Encargo de una sesión anterior, punto 3: precio adjudicado y baja del
+    # lote, sin desplazar las once columnas de siempre.
     assert fila[11] == 11.04
     assert fila[12] == 0.54
+    # Aviso del cliente (sesión 2026-09-07): unidad de medida, al final de
+    # todo, después de las dos columnas ya añadidas.
+    assert fila[13] == "UN"
 
 
 def _agregar_linea_huerfana(db_session, expediente, documento, *, motivo):
