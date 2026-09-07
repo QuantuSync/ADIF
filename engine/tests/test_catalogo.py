@@ -3,6 +3,7 @@ from decimal import Decimal
 from app.catalogo import (
     _combinar_por_clave,
     _normalizar_codigo_precio,
+    buscar_posible_duplicado_huerfana,
     calcular_clave_linea,
     construir_linea_catalogo,
     construir_lineas_desde_tabla,
@@ -735,6 +736,67 @@ def test_guardar_lineas_catalogo_huerfana_sin_lote_no_se_duplica_al_reprocesar(d
     assert r2.creadas == 0 and r2.actualizadas == 1
     huerfanas = db_session.query(LineaCatalogo).filter_by(lote_id=None, expediente_id=lote.expediente_id).all()
     assert len(huerfanas) == 1
+
+
+# --- Bloque 4, sesión de huérfanos de banda vacía (2026-09-07): señal
+# informativa de "posible duplicado" en la cola de revisión, nunca una
+# decisión automática (ver docstring de `buscar_posible_duplicado_huerfana`
+# para el caso real de balasto multi-lote que descartó el descarte automático).
+
+
+def test_buscar_posible_duplicado_huerfana_encuentra_coincidencia_por_firma(db_session):
+    lote = _lote(db_session)
+    mapeo = {"codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": None, "cantidad": None, "precio_unitario": 3}
+    resuelta = construir_linea_catalogo(
+        ["P-1", "601020180", "Balasto sobre camion en cantera", "10,85"], mapeo, 22, None, lote.expediente_id, None, 0
+    )
+    guardar_lineas_catalogo(db_session, lote.id, [resuelta])
+    db_session.commit()
+
+    huerfana_datos = construir_linea_catalogo(
+        ["P-1", "601020180", "Balasto sobre camion en cantera", "10,85"], mapeo, 24, None, lote.expediente_id, None, 0
+    )
+    guardar_lineas_catalogo(db_session, None, [huerfana_datos])
+    huerfana = db_session.query(LineaCatalogo).filter_by(lote_id=None, expediente_id=lote.expediente_id).one()
+
+    resultado = buscar_posible_duplicado_huerfana(db_session, huerfana)
+
+    assert resultado is not None
+    linea_resuelta, lote_resuelto = resultado
+    assert linea_resuelta.codigo_precio == "P-1"
+    assert lote_resuelto.identificador_lote == lote.identificador_lote
+
+
+def test_buscar_posible_duplicado_huerfana_ninguna_coincidencia_devuelve_none(db_session):
+    # Caso real que motivó no descartar automáticamente (6.25/28510.0027):
+    # una huérfana con precio DISTINTO del de la línea resuelta (el
+    # transporte varía por lote, aunque la carga en cantera no) no es un
+    # posible duplicado.
+    lote = _lote(db_session)
+    mapeo = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": None, "cantidad": None, "precio_unitario": 2}
+    resuelta = construir_linea_catalogo(
+        ["P-2", "T de balasto transportado", "21,56"], mapeo, 23, None, lote.expediente_id, None, 0
+    )
+    guardar_lineas_catalogo(db_session, lote.id, [resuelta])
+    db_session.commit()
+
+    huerfana_datos = construir_linea_catalogo(
+        ["P-2", "T de balasto transportado", "12,32"], mapeo, 24, None, lote.expediente_id, None, 0
+    )
+    guardar_lineas_catalogo(db_session, None, [huerfana_datos])
+    huerfana = db_session.query(LineaCatalogo).filter_by(lote_id=None, expediente_id=lote.expediente_id).one()
+
+    assert buscar_posible_duplicado_huerfana(db_session, huerfana) is None
+
+
+def test_buscar_posible_duplicado_huerfana_no_aplica_a_linea_con_lote(db_session):
+    lote = _lote(db_session)
+    mapeo = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": None, "cantidad": None, "precio_unitario": 2}
+    datos = construir_linea_catalogo(["P-1", "Balasto", "10,85"], mapeo, 22, None, lote.expediente_id, None, 0)
+    guardar_lineas_catalogo(db_session, lote.id, [datos])
+    linea = db_session.query(LineaCatalogo).filter_by(lote_id=lote.id).one()
+
+    assert buscar_posible_duplicado_huerfana(db_session, linea) is None
 
 
 # --- Inventario de celdas vacías (2026-09-06, bloque 3): cantidad recuperada

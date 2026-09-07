@@ -16,7 +16,7 @@ from app.extraccion.normalizacion import (
 )
 from app.extraccion.tabla import TablaExtraida
 from app.extraccion.texto import normalizar
-from app.models import LineaCatalogo
+from app.models import LineaCatalogo, Lote
 
 # Sesión de rodaje sobre el corpus completo (2026-09-03): en varias tablas
 # reales, una fila que no es una línea de material (un pie de tabla como
@@ -1015,6 +1015,60 @@ def _firma_material(datos: dict) -> Optional[tuple]:
     if not descripcion or precio_unitario is None:
         return None
     return (matricula, descripcion, precio_unitario)
+
+
+def buscar_posible_duplicado_huerfana(db: Session, linea: LineaCatalogo) -> Optional[tuple[LineaCatalogo, Lote]]:
+    """Bloque 4, sesión de huérfanos de banda vacía (2026-09-07): señal
+    INFORMATIVA para la cola de revisión, nunca una decisión automática.
+
+    Se probó primero descartar en silencio la huérfana cuando coincidía en
+    firma con una línea ya resuelta (mismo mecanismo, un `continue` en vez de
+    un `return`) — revertido antes de llegar a esta sesión: el caso de
+    aceptación real `6.25/28510.0027` ("Suministro de balasto, 6 LOTES")
+    demuestra que un precio de referencia puede coincidir legítimamente entre
+    LOTES DISTINTOS de la misma licitación ("P-1 Balasto sobre camión en
+    cantera" cuesta 10,85 € en los seis lotes por igual — precio fijo,
+    independiente de dónde se ejecute — mientras "P-2 T de balasto
+    transportado..." varía lote a lote, coste real de transporte) sin ser la
+    misma fila repetida. Descartar por firma habría perdido en silencio
+    líneas reales de otros lotes. "Huérfana de banda vacía" solo existe en
+    expedientes multi-lote por construcción (`app.extraccion.lote_tabla`), así
+    que ese riesgo cubre el 100% del dominio donde esto se aplicaría — de ahí
+    que la decisión final del cliente sea mostrar la coincidencia, nunca
+    actuar por su cuenta (mismo principio que CONTEXTO.md sección 12, "un
+    contraste externo puede señalar un desajuste, pero no tiene autoridad
+    para cambiar el estado").
+
+    Solo se calcula para huérfanas (`linea.lote_id is None`, comprobado aquí
+    por si el llamador no lo hizo); usa la misma firma que
+    `_combinar_por_clave`/`guardar_lineas_catalogo` (matrícula+descripción+
+    precio, o descripción+precio sin matrícula) para no introducir un
+    segundo criterio de "misma pieza" que pueda divergir del ya usado para
+    fusionar de verdad dentro de un lote."""
+    if linea.lote_id is not None:
+        return None
+    firma = _firma_material(
+        {
+            "matricula": linea.matricula,
+            "descripcion": linea.descripcion,
+            "precio_unitario": linea.precio_unitario,
+            "motivo_revision": linea.motivo_revision,
+        }
+    )
+    if firma is None:
+        return None
+    matricula, descripcion, precio_unitario = firma
+    return (
+        db.query(LineaCatalogo, Lote)
+        .join(Lote, LineaCatalogo.lote_id == Lote.id)
+        .filter(
+            LineaCatalogo.expediente_id == linea.expediente_id,
+            LineaCatalogo.matricula == matricula,
+            LineaCatalogo.descripcion == descripcion,
+            LineaCatalogo.precio_unitario == precio_unitario,
+        )
+        .first()
+    )
 
 
 _MOTIVO_FUSION_SIN_MATRICULA = (
