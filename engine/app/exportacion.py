@@ -80,6 +80,12 @@ COLUMNAS = [
     # en una sesión anterior -- no altera el orden ni las posiciones de las
     # once columnas originales del formato del cliente.
     "Unidad de medida",
+    # Bloque 1, sesión del Excel de ejecución SAP (2026-09-07): estado del
+    # CONTRATO frente a ADIF ("En ejecución", ...), distinto del estado de
+    # PROCESAMIENTO de este sistema que ya decide si la fila sale en este
+    # Excel. Al final de todo, cuarta columna añadida -- mismo criterio que
+    # las tres anteriores.
+    "Estado del contrato (SAP)",
 ]
 
 # Columnas numéricas (1-indexadas, en el orden de COLUMNAS de arriba) a las
@@ -264,6 +270,7 @@ def generar_excel_catalogo(db: Session, incluir_pendientes_sin_lote: bool = Fals
                 _celda_numero(linea.precio_adjudicado),
                 _celda_numero(linea.baja_lote),
                 _celda_texto(linea.unidad_medida),
+                _celda_texto(expediente.estado_contrato_sap),
             ])
             hoja.cell(row=fila, column=_COLUMNA_CANTIDAD).number_format = _FORMATO_CANTIDAD
             for columna in _COLUMNAS_IMPORTE:

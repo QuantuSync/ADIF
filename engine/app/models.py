@@ -188,6 +188,19 @@ class Expediente(Base):
     # hay con qué filtrar la búsqueda en la Plataforma. Se limpia solo en
     # cuanto la búsqueda consigue lanzarse de verdad.
     aviso_descubrimiento_pedidos = Column(Text, nullable=True)
+    # Bloque 1, sesión del Excel de ejecución SAP (2026-09-07): estado del
+    # CONTRATO frente a ADIF ("En ejecución", ...), distinto de `estado` de
+    # arriba (estado de PROCESAMIENTO de este sistema: descargando,
+    # completado...) — un expediente puede estar `completado` para este
+    # sistema y seguir "En ejecución" para ADIF, o al revés. Dato de negocio
+    # que no existe en ningún documento de la Plataforma (ni PDF ni
+    # sindicación): viene solo de la exportación SAP de ADIF
+    # (`app.extraccion.estado_sap`), cruzado por `codigo_expediente` exacto,
+    # nunca por título. `String` libre, no `Enum`: el único valor visto hasta
+    # ahora es "En ejecución", pero el vocabulario real de SAP no está
+    # documentado y una exportación futura puede traer otros.
+    estado_contrato_sap = Column(String(64), nullable=True)
+    estado_contrato_sap_actualizado_en = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),
