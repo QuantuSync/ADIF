@@ -776,6 +776,30 @@ suficientes, no ahora.
   guardadas son plausibles para su material. Detalle completo, las cuatro
   sondas de medición y los números finales en
   `docs/excel-cliente-correccion.md` bloque 5.
+- **Orden por defecto de `/catalogo`: la primera pantalla sin filtrar daba
+  la impresión contraria a la realidad (corregido, sesión 2026-09-07,
+  mismo día que el punto anterior).** El único orden que existía
+  (alfabético por expediente/lote) aterrizaba siempre en los mismos
+  expedientes — alfabéticamente primeros ("6.20/..." antes que "6.23/...")
+  y, coincidencia del corpus, justo los que tienen las tablas de origen más
+  escasas (`6.20/28510.0054`, `0136`, `0094`: sin columna de código de
+  precio ni de unidad en el documento real, verificado contra el PDF, no un
+  fallo). El cliente veía "No consta"/"No aplica" en casi toda la pantalla
+  al abrir el catálogo sin filtrar, aunque el 94,6%-96,9% del catálogo real
+  esté bien relleno. Nuevo criterio por defecto, "completitud"
+  (`app.catalogo_consulta._puntuacion_completitud`): puntúa de 0 a 4 cuánto
+  trae cada línea (un identificador propio -- código de precio o
+  matrícula, cualquiera de los dos cuenta, nunca se exigen ambos porque la
+  matrícula falta por diseño en buena parte del corpus --, cantidad,
+  unidad de medida, precio unitario) y ordena por eso primero, con el
+  mismo desempate de siempre como segundo criterio para que paginar
+  siga siendo estable. El alfabético de siempre se deja disponible con
+  `?orden=alfabetico` (`ORDENES_VALIDOS`), y un selector visible en
+  `CatalogoPanel.tsx` ("Líneas más completas primero" / "Alfabético").
+  Verificado abriendo `/catalogo` en un navegador real: la primera pantalla
+  (25 filas) pasa de una celda vacía por columna en casi cada fila a solo
+  "Pendiente" en Precio adjudicado (baja de lote todavía no declarada para
+  ese expediente concreto -- estado real, no un hueco) y nada más.
 
 ---
 

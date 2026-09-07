@@ -164,6 +164,64 @@ def test_catalogo_filtra_por_expediente_sin_afectar_a_otros(cliente, db_session)
     assert resp.json()["total"] == 0
 
 
+def _sembrar_linea_escasa(db_session, *, codigo_expediente):
+    # Aviso del cliente (sesión 2026-09-07): una línea sin código de precio,
+    # sin matrícula, sin cantidad y sin unidad -- el caso real de
+    # `6.20/28510.0054`/`6.20/28510.0136`, tablas de origen genuinamente sin
+    # esas columnas. `codigo_expediente` se elige para que ordene ANTES que
+    # `6.24/28510.0008` (la línea completa que ya siembra `_sembrar_catalogo`)
+    # en orden alfabético, y así distinguir de verdad los dos criterios.
+    expediente = Expediente(codigo_expediente=codigo_expediente, estado=EstadoExpediente.completado)
+    db_session.add(expediente)
+    db_session.commit()
+    lote = Lote(expediente_id=expediente.id, identificador_lote="1")
+    db_session.add(lote)
+    db_session.commit()
+    linea = LineaCatalogo(
+        lote_id=lote.id, expediente_id=expediente.id, clave_linea="escasa",
+        orden_aparicion=0, descripcion="LINEA SIN CASI NADA", precio_unitario=Decimal("1.00"),
+    )
+    db_session.add(linea)
+    db_session.commit()
+    return expediente, linea
+
+
+def test_catalogo_orden_por_defecto_pone_primero_las_lineas_completas(cliente, db_session):
+    # Encargo de esta sesión: antes de este arreglo, el orden alfabético
+    # ponía siempre primero a expedientes con tablas de origen escasas
+    # (código de expediente que ordena antes), aunque el resto del catálogo
+    # estuviera lleno -- la primera pantalla sin filtrar, la que ve el
+    # cliente, daba la impresión contraria a la realidad.
+    _sembrar_linea_escasa(db_session, codigo_expediente="6.20/28510.0001")
+    *_, completa = _sembrar_catalogo(db_session)  # "6.24/28510.0008", todos los campos rellenos
+
+    resp = cliente.get("/catalogo")
+
+    assert resp.status_code == 200
+    lineas = resp.json()["lineas"]
+    assert lineas[0]["id"] == completa.id
+    assert lineas[-1]["descripcion"] == "LINEA SIN CASI NADA"
+
+
+def test_catalogo_orden_alfabetico_sigue_disponible(cliente, db_session):
+    # El criterio de siempre se deja disponible sin más que pedirlo --
+    # mismo resultado que antes de este arreglo.
+    escasa, _ = _sembrar_linea_escasa(db_session, codigo_expediente="6.20/28510.0001")
+    _sembrar_catalogo(db_session)  # "6.24/28510.0008"
+
+    resp = cliente.get("/catalogo", params={"orden": "alfabetico"})
+
+    assert resp.status_code == 200
+    lineas = resp.json()["lineas"]
+    assert lineas[0]["codigo_expediente"] == escasa.codigo_expediente
+
+
+def test_catalogo_orden_invalido_rechazado(cliente, db_session):
+    resp = cliente.get("/catalogo", params={"orden": "aleatorio"})
+
+    assert resp.status_code == 422
+
+
 def test_exportar_catalogo_genera_xlsx_con_columnas_del_formato_esperado(cliente, db_session, tmp_path, monkeypatch):
     # Este test comprueba el caso "sin cruce" (fila[0]/fila[1] vacíos) --
     # tiene que valer sea cual sea el entorno local, incluso con un

@@ -9,10 +9,46 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Select, case, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models import Documento, EstadoRevisionLinea, Expediente, LineaCatalogo, Lote
+
+# Órdenes disponibles para `/catalogo` (encargo de esta sesión, 2026-09-07):
+# el cliente ve esta pantalla sin filtrar, y "alfabetico" (el único orden
+# que existía) aterriza siempre en los mismos expedientes -- alfabéticamente
+# primeros ("6.20/..." antes que "6.23/...") y, por pura coincidencia del
+# corpus, justo los que tienen las tablas de origen más escasas (sin columna
+# de código de precio ni de unidad en el documento real, verificado contra
+# el PDF -- no un fallo de extracción). La primera pantalla daba la
+# impresión de un catálogo roto cuando el 94,6% de las líneas sí traen
+# unidad de medida y el 96,9% código de precio.
+ORDENES_VALIDOS = ("completitud", "alfabetico")
+_ORDEN_POR_DEFECTO = "completitud"
+
+
+def _puntuacion_completitud():
+    """Cuenta, de 0 a 4, cuántas de las columnas que de verdad varían de
+    una línea a otra están rellenas: un identificador propio (código de
+    precio O matrícula -- una tabla puede traer solo uno de los dos sin que
+    eso sea un defecto, CONTEXTO.md sección 2: la matrícula "no es clave" y
+    falta en buena parte del corpus por diseño), cantidad, unidad de medida
+    y precio unitario. Descripción no cuenta -- está al 100%, no distingue
+    nada. Ordenar por esto DESC pone primero las líneas que de verdad tienen
+    algo que enseñar, sin fingir que el catálogo es más completo de lo que
+    es: sigue siendo una cifra real por línea, solo cambia qué se ve
+    primero."""
+    tiene_identificador = case(
+        (LineaCatalogo.codigo_precio.is_not(None), 1),
+        (LineaCatalogo.matricula.is_not(None), 1),
+        else_=0,
+    )
+    return (
+        tiene_identificador
+        + case((LineaCatalogo.cantidad.is_not(None), 1), else_=0)
+        + case((LineaCatalogo.unidad_medida.is_not(None), 1), else_=0)
+        + case((LineaCatalogo.precio_unitario.is_not(None), 1), else_=0)
+    )
 
 
 def _aplicar_filtros(
@@ -67,6 +103,7 @@ def consultar_catalogo(
     pagina: int = 1,
     tamano_pagina: int = 50,
     excluir_descartadas: bool = False,
+    orden: str = _ORDEN_POR_DEFECTO,
 ) -> PaginaCatalogo:
     # `Lote` es outerjoin: una línea huérfana (CONTEXTO.md, encargo de esta
     # sesión, punto 3 — su tabla de origen no se pudo asociar a un lote sin
@@ -90,11 +127,17 @@ def consultar_catalogo(
     )
     total = db.execute(conteo_stmt).scalar_one()
 
-    listado_stmt = (
-        base.order_by(Expediente.codigo_expediente, Lote.identificador_lote, LineaCatalogo.orden_aparicion)
-        .offset((pagina - 1) * tamano_pagina)
-        .limit(tamano_pagina)
-    )
+    # Orden estable en los dos casos (mismo desempate de siempre) para que
+    # paginar no salte filas ni las repita: "completitud" solo antepone el
+    # criterio nuevo, nunca sustituye el desempate por expediente/lote/orden
+    # de aparición.
+    desempate = (Expediente.codigo_expediente, Lote.identificador_lote, LineaCatalogo.orden_aparicion)
+    if orden == "alfabetico":
+        criterio = desempate
+    else:
+        criterio = (_puntuacion_completitud().desc(), *desempate)
+
+    listado_stmt = base.order_by(*criterio).offset((pagina - 1) * tamano_pagina).limit(tamano_pagina)
     filas = db.execute(listado_stmt).all()
     return PaginaCatalogo(total=total, filas=[tuple(f) for f in filas])
 

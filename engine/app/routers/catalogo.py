@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth import Usuario, get_current_user
-from app.catalogo_consulta import consultar_catalogo, fila_a_dict
+from app.catalogo_consulta import ORDENES_VALIDOS, consultar_catalogo, fila_a_dict
 from app.db import get_db
 from app.exportacion import generar_excel_catalogo
 from app.extraccion.cruce_codigos import asegurar_cruce_codigos
@@ -22,6 +22,7 @@ def explorar_catalogo(
     lote: str | None = None,
     matricula: str | None = None,
     q: str | None = None,
+    orden: str = Query(default="completitud", pattern="^(" + "|".join(ORDENES_VALIDOS) + ")$"),
     pagina: int = Query(default=1, ge=1),
     tamano_pagina: int = Query(default=50, ge=1, le=_TAMANO_PAGINA_MAX),
     db: Session = Depends(get_db),
@@ -30,10 +31,17 @@ def explorar_catalogo(
     """CONTEXTO.md, encargo de esta sesión, punto 1: catálogo con filtros por
     expediente, lote y material, y búsqueda por matrícula a través de todos
     los expedientes (sin filtro de `expediente`, `matricula` ya cruza todo
-    el catálogo)."""
+    el catálogo).
+
+    `orden` (encargo de la sesión 2026-09-07, `app.catalogo_consulta` para
+    la justificación completa): "completitud" por defecto -- la primera
+    pantalla sin filtrar, la que ve el cliente, ya no aterriza siempre en
+    los mismos expedientes con las tablas de origen más escasas solo por
+    venir primero en orden alfabético. "alfabetico" se deja disponible
+    como antes."""
     resultado = consultar_catalogo(
         db, expediente=expediente, lote=lote, matricula=matricula, q=q,
-        pagina=pagina, tamano_pagina=tamano_pagina,
+        pagina=pagina, tamano_pagina=tamano_pagina, orden=orden,
     )
     # Backfill perezoso del cruce con el Excel de códigos (docstring de
     # `asegurar_cruce_codigos`), solo sobre los expedientes de esta página.
