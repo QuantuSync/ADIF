@@ -475,6 +475,33 @@ suficientes, no ahora.
 
 ## 16. Pendiente de resolver
 
+- **Excel de ejecución SAP (367 expedientes, departamento 28510): estado de
+  contrato incorporado, cobertura del descubrimiento medida (sesión
+  2026-09-07, `docs/sesion-2026-09-07-sap-ejecucion-cobertura.md`).**
+  `expedientes.estado_contrato_sap` (fuente de entrada permanente, igual que
+  el Excel de códigos: `ESTADO_SAP_PATH`, `app.extraccion.estado_sap`,
+  `POST /mantenimiento/estado-sap/cargar`, repetible) implementado, cargado
+  (367 filas, 327 expedientes nuevos, 40 actualizados) y visible en la web y
+  el Excel. **Hallazgo central**: el descubrimiento por sindicación cubre
+  solo el 2,5 % de los 367 (9 expedientes, todos de 2024-2026) — una entrada
+  de sindicación refleja un evento de contratación en ese mes, no "sigue
+  vigente", así que el tercio del SAP anterior a 2021 (127 expedientes) es
+  estructuralmente invisible para ese mecanismo, no solo pendiente de
+  barrer. El Excel de SAP no es un complemento menor, es la única fuente de
+  la que el sistema puede saber que esos expedientes existen. Encolado el
+  proceso de los ≈335 que faltan (29 prioritarios con prefijo `2.`/`3.`/`4.`
+  + un ciclo de mantenimiento para el resto), corriendo sin supervisión
+  detrás del backfill de sindicación de 21 meses que ya ocupaba el único
+  worker — ritmo medido (46 s/descarga, 37,6 s/extracción) y estimación
+  (~8,5 h + lo que quede del backfill) documentados, sin resultado final
+  todavía al cerrar la sesión. **Hallazgo de paso**: los "25 expedientes con
+  prefijo `2.`/`3.`/`4.` dados por no publicados en su día" que traía el
+  encargo no corresponden a ningún dato real del sistema — los únicos
+  `sin_publicar` con esos prefijos son el conjunto fijo de PDFs de prueba de
+  `Ejemplo/Input/` (departamentos 04703/04110/28520/20810/27520, sección 13),
+  no los 25 códigos reales del SAP (departamento 28510), que se crearon
+  nuevos con esta carga y nunca se habían buscado en la Plataforma.
+
 - **Segunda familia de baja: diseñada e implementada de forma acotada**
   (sesión 2026-09-05). Los 3 expedientes conocidos (`6.23/28510.0018`,
   `0102`, `6.25/28510.0016`, todos Acuerdo Marco de carril, ArcelorMittal)
@@ -943,4 +970,5 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `tolerancia-reinicios-dockerd.md`, `estados-carga-web.md`,
 `copias-de-seguridad.md`, `descubrimiento-inverso-matriz-pedidos.md`,
 `sesion-2026-09-07-adjudicatario-revision-vocabulario.md`,
+`sesion-2026-09-07-sap-ejecucion-cobertura.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.

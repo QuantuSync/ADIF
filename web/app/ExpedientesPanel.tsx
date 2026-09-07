@@ -88,6 +88,11 @@ export type Expediente = {
   // mayoría de expedientes, que no son matriz de nadie.
   pedidos: PedidoResumen[];
   aviso_descubrimiento_pedidos: string | null;
+  // Bloque 1, sesión del Excel de ejecución SAP (2026-09-07): estado del
+  // CONTRATO frente a ADIF ("En ejecución", ...), distinto de `estado` de
+  // arriba (estado de PROCESAMIENTO de este sistema) -- un expediente puede
+  // estar `completado` aquí y seguir "En ejecución" para ADIF, o al revés.
+  estado_contrato_sap: string | null;
 };
 
 const INTERVALO_SONDEO_MS = 3000;
@@ -597,6 +602,14 @@ export default function ExpedientesPanel({
                   <td>
                     <EstadoTexto estado={exp.estado} />
                     <ResumenMotivo error={exp.error} />
+                    {exp.estado_contrato_sap && (
+                      <span
+                        className="status-note status-note-tight"
+                        title="Estado del contrato según la exportación SAP de ADIF -- distinto del estado de procesamiento de este sistema, a la izquierda."
+                      >
+                        SAP: {exp.estado_contrato_sap}
+                      </span>
+                    )}
                   </td>
                   <td className="num">{celdaImporte(exp, exp.importe_licitacion)}</td>
                   <td className="num">{celdaImporte(exp, exp.importe_adjudicacion)}</td>

@@ -6,8 +6,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth import Usuario, get_current_user
+from app.config import settings
 from app.db import get_db
 from app.extraccion.descubrimiento_matriz import TIPO_TRABAJO as TIPO_TRABAJO_DESCUBRIMIENTO_PEDIDOS
+from app.extraccion.estado_sap import cargar_estado_sap
 from app.mantenimiento.ciclo import TIPO_TRABAJO
 from app.mantenimiento.copia_seguridad import TIPO_TRABAJO as TIPO_TRABAJO_COPIA
 from app.mantenimiento.programacion import (
@@ -18,7 +20,7 @@ from app.mantenimiento.programacion import (
 )
 from app.models import TrabajoCola
 from app.queue import encolar_trabajo
-from app.schemas import EstadoMantenimientoOut, TrabajoOut
+from app.schemas import EstadoMantenimientoOut, EstadoSapCargaOut, TrabajoOut
 from app.sindicacion.descubrimiento import TIPO_TRABAJO as TIPO_TRABAJO_SINDICACION_BACKFILL
 
 router = APIRouter()
@@ -216,3 +218,20 @@ def historial_descubrimiento_pedidos(
         .order_by(TrabajoCola.created_at.desc())
         .limit(limite)
     ).scalars().all()
+
+
+@router.post("/mantenimiento/estado-sap/cargar", response_model=EstadoSapCargaOut)
+def cargar_estado_contrato_sap(
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    """Bloque 1, sesión del Excel de ejecución SAP (2026-09-07): recarga
+    `estado_contrato_sap` desde `ESTADO_SAP_PATH` (`app.extraccion.estado_sap`)
+    -- fuente de entrada permanente, igual que el Excel de códigos, no una
+    carga puntual. Repetible: se puede llamar tantas veces como haga falta
+    (cada exportación nueva de ADIF se vuelve a montar en la misma ruta) sin
+    duplicar nada, por `codigo_expediente` exacto. Síncrono a propósito, sin
+    pasar por la cola: es una lectura local de un fichero de unos cientos de
+    filas, sin red ni PDFs de por medio -- del mismo orden de coste que
+    `POST /expedientes`, no del ciclo de mantenimiento."""
+    return cargar_estado_sap(db, settings.estado_sap_path)

@@ -248,6 +248,7 @@ def test_exportar_catalogo_genera_xlsx_con_columnas_del_formato_esperado(cliente
         "Matrícula del material", "Descripción del material", "Código del material",
         "Cantidad", "Precio unitario", "Lote", "Comentarios",
         "Precio adjudicado", "Baja del lote", "Unidad de medida",
+        "Estado del contrato (SAP)",
     ]
     fila = [c.value for c in next(hoja.iter_rows(min_row=2, max_row=2))]
     assert fila[3] == "SUMINISTRO DE GUANTES CONTRA RIESGO ELECTRICO."

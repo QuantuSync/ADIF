@@ -85,6 +85,12 @@ class ExpedienteOut(BaseModel):
     # solo "sin adjudicatario extraído todavía") -- mismo patrón informativo
     # que `aviso_sindicacion`, nunca bloqueante.
     aviso_descubrimiento_pedidos: Optional[str] = None
+    # Bloque 1, sesión del Excel de ejecución SAP (2026-09-07): estado del
+    # CONTRATO frente a ADIF, distinto de `estado` de arriba (estado de
+    # PROCESAMIENTO de este sistema) -- ver docstring de
+    # `Expediente.estado_contrato_sap`.
+    estado_contrato_sap: Optional[str] = None
+    estado_contrato_sap_actualizado_en: Optional[datetime] = None
     created_at: datetime
 
 
@@ -216,6 +222,20 @@ class ExpedienteRevisionOut(BaseModel):
 class ExpedienteCreate(BaseModel):
     codigo_expediente: str
     codigo_matriz: Optional[str] = None
+
+
+class EstadoSapCargaOut(BaseModel):
+    """Resumen de `POST /mantenimiento/estado-sap/cargar` (bloque 1, sesión
+    del Excel de ejecución SAP): `configurado=False` significa que
+    `ESTADO_SAP_PATH` no tiene ninguna ruta montada -- no es un error, es la
+    misma configuración vacía por defecto que `codigos_proyecto_path`."""
+
+    configurado: bool
+    filas_leidas: int = 0
+    filas_sin_codigo: int = 0
+    expedientes_nuevos: int = 0
+    expedientes_actualizados: int = 0
+    expedientes_sin_cambios: int = 0
 
 
 class TrabajoOut(BaseModel):

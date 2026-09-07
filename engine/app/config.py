@@ -40,6 +40,13 @@ class Settings(BaseSettings):
     # el propio fichero no está disponible).
     codigos_proyecto_path: Optional[str] = None
 
+    # Bloque 1, sesión del Excel de ejecución SAP (2026-09-07): fuente de
+    # entrada permanente para `estado_contrato_sap` (CONTEXTO.md,
+    # app.extraccion.estado_sap), igual de mecánica que `codigos_proyecto_path`
+    # de arriba -- una ruta montada por bind-mount, vacía por defecto (sin
+    # ella, `POST /mantenimiento/estado-sap/cargar` no tiene nada que leer).
+    estado_sap_path: Optional[str] = None
+
     # Recuperación de trabajos huérfanos (CONTEXTO.md sección 17, pendiente):
     # un trabajo `en_proceso` cuyo `bloqueado_en` supera este umbral se
     # reclama como si el worker que lo tenía hubiera desaparecido (contenedor

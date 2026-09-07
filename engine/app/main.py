@@ -7,6 +7,7 @@ from sqlalchemy.exc import OperationalError
 
 from app.config import settings
 from app.extraccion.cruce_codigos import validar_ruta_codigos_proyecto
+from app.extraccion.estado_sap import validar_ruta_estado_sap
 from app.routers import catalogo, documentos, expedientes, health, mantenimiento, revision, trabajos
 
 logger = logging.getLogger("api")
@@ -15,6 +16,10 @@ logger = logging.getLogger("api")
 # configurada, en vez de dejar que el cruce falle en silencio petición a
 # petición (docstring de `validar_ruta_codigos_proyecto`).
 validar_ruta_codigos_proyecto(settings.codigos_proyecto_path)
+# Mismo motivo, para el estado de contrato SAP (bloque 1, sesión del Excel de
+# ejecución SAP): solo la API lo lee (POST /mantenimiento/estado-sap/cargar),
+# el worker no necesita esta ruta.
+validar_ruta_estado_sap(settings.estado_sap_path)
 
 app = FastAPI(title="ADIF - Catalogo de materiales")
 
