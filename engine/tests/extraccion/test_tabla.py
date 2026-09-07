@@ -129,6 +129,20 @@ def test_codigo_lote_tipo_y_partida_alzada_se_reconocen_como_fila_de_datos():
     assert codigos.count("PA-02") == 2
 
 
+def test_codigo_con_prefijo_cod_se_reconoce_como_fila_de_datos():
+    # Bloque 3, sesión de expedientes en revisión por trabajo pendiente real
+    # (2026-09-07): 4.26/28510.0020, "Cod0001".."Cod0012" en esta página.
+    # Antes del arreglo esta tabla se descartaba entera como espuria y el
+    # expediente quedaba sin ninguna línea de catálogo.
+    with pdfplumber.open(fx.ANEJO_PRECIOS_CODIGO_COD) as pdf:
+        tablas = extraer_tablas_pagina(pdf.pages[0])
+
+    assert len(tablas) == 1
+    assert tablas[0].filas[0][0] == "Cod0001"
+    assert tablas[0].filas[-1][0] == "Cod0012"
+    assert len(tablas[0].filas) == 12
+
+
 def test_matricula_de_9_digitos_se_reconoce_como_fila_de_datos_sin_codigo_precio():
     # 6.20/28510.0136: esta tabla no trae ninguna columna de código de
     # precio, solo matrícula (CONTEXTO.md sección 2: forma fija de 9 dígitos).

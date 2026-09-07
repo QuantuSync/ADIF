@@ -39,6 +39,14 @@ PROPUESTA_LC27_UTE = FIXTURES_DIR / "6.24_28510.0088_ADJUDICACION_1.pdf"
 # en licitación y adjudicación, baja declarada del 4,50 %.
 RESOLUCION_ADJUDICACION = FIXTURES_DIR / "6.24_28510.0124_ADJUDICACION_1.pdf"
 
+# Propuesta LC.27, camino de lote único, matriz de carril real
+# (6.23/28510.0102): redacción real distinta de PROPUESTA_LC27_PRECIOS_UNITARIOS
+# para el adjudicatario -- "...S.A.– NIF:" con guion en vez de la palabra
+# "con" delante de NIF/CIF (docs/descubrimiento-inverso-matriz-pedidos.md
+# sección 7). Recorte a la página 1 (Ejemplo/Input/6.23_28510.0102_
+# ADJUDICACION_1.pdf, la página 2 solo trae el bloque de firmantes).
+PROPUESTA_LC27_ADJUDICATARIO_SIN_CON = FIXTURES_DIR / "6.23_28510.0102_ADJUDICACION_1_p1.pdf"
+
 # Contrato (plantilla L9_AF.06, "PARTES CONTRATANTES"). Mismo expediente que
 # PROPUESTA_LC27_PRECIOS_UNITARIOS: la baja del 54,00 % declarada aquí debe
 # coincidir con la de la propuesta.
@@ -125,6 +133,16 @@ ANEJO_PRECIOS_LOTE_TIPO_Y_PARTIDA_ALZADA = FIXTURES_DIR / "6.24_28510.0094_CONTR
 # Tabla sin ninguna columna de código: la matrícula de 9 dígitos es el único
 # identificador de fila — hilo de contacto, 6.20/28510.0136.
 TABLA_PRECIOS_SOLO_MATRICULA = FIXTURES_DIR / "6.20_28510.0136_ANEJO_3_p3.pdf"
+
+# Sexto formato de código de precio, bloque 3 de la sesión de expedientes en
+# revisión por trabajo pendiente real (2026-09-07): prefijo "Cod" + 4 dígitos
+# ("Cod0001".."Cod0305") — instalaciones de seguridad, 4.26/28510.0020.
+# Página 39 (índice 38) del `ANEJO_1.pdf` real. Antes del arreglo,
+# `_es_fila_de_datos` no reconocía ninguna fila y la tabla entera (13 filas
+# limpias, cabecera "Código"/"DESCRIPCION"/"PRECIO") se descartaba como
+# espuria — el expediente entero quedaba sin ninguna línea de catálogo pese a
+# tener la tabla intacta.
+ANEJO_PRECIOS_CODIGO_COD = FIXTURES_DIR / "4.26_28510.0020_ANEJO_1_p39.pdf"
 
 # Sesión de identidad de lote (CONTEXTO.md sección 27): expedientes multi-lote
 # reales cuya redacción del bloque de adjudicación por lote NO coincide con

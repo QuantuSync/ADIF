@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session
 from app.catalogo import guardar_lineas_catalogo
 from app.extraccion.baja import BajaDeclarada, elegir_baja_preferida, extraer_baja_declarada
 from app.extraccion.campos_lc27 import (
+    extraer_adjudicatario_lc27,
     extraer_importe_adjudicacion_lc27,
     extraer_importe_licitacion_lc27,
     extraer_objeto_contrato_lc27,
@@ -343,6 +344,7 @@ def _extraer_campos_expediente(
     licitacion_pcsp = adjudicacion_pcsp = None
     licitacion_lc27 = adjudicacion_lc27 = None
     objeto_pcsp = objeto_lc27 = None
+    adjudicatario_lc27 = None
     # Sesión de descubrimiento inverso, hallazgo de paso: el Anuncio PCSP ya
     # traía este campo por etiqueta fija (`campos_pcsp.CamposAnuncioPcsp.
     # adjudicatario`), pero el camino de lote único implícito (el que usan
@@ -405,12 +407,15 @@ def _extraer_campos_expediente(
             lic = extraer_importe_licitacion_lc27(item.paginas)
             adj = extraer_importe_adjudicacion_lc27(item.paginas)
             obj = extraer_objeto_contrato_lc27(item.paginas)
+            adjc = extraer_adjudicatario_lc27(item.paginas)
             if lic and licitacion_lc27 is None:
                 licitacion_lc27 = (parsear_importe_es(lic.valor), item.documento.id, lic.pagina, lic.fragmento)
             if adj and adjudicacion_lc27 is None:
                 adjudicacion_lc27 = (parsear_importe_es(adj.valor), item.documento.id, adj.pagina, adj.fragmento)
             if obj and objeto_lc27 is None:
                 objeto_lc27 = (obj.valor, item.documento.id, obj.pagina, obj.fragmento)
+            if adjc and adjudicatario_lc27 is None:
+                adjudicatario_lc27 = (adjc.valor, item.documento.id, adjc.pagina, adjc.fragmento)
 
         if registrar_baja_importe and item.tipo in _TIPOS_CON_BAJA_DECLARADA:
             baja = extraer_baja_declarada(item.paginas, tipo_documento=item.tipo)
@@ -440,12 +445,18 @@ def _extraer_campos_expediente(
             baja_preferida.pagina, baja_preferida.fragmento, baja_preferida.baja,
         )
 
-    if adjudicatario_pcsp:
-        _traza(db, expediente.id, "adjudicatario", *adjudicatario_pcsp[1:], adjudicatario_pcsp[0])
+    # Prioridad Anuncio PCSP sobre LC.27/Resolución, mismo criterio que
+    # licitación/adjudicación de arriba (CONTEXTO.md sección 4): LC.27 es la
+    # reserva para expedientes sin Anuncio PCSP, verificado con las 3
+    # matrices de carril (ninguna trae Anuncio PCSP, docs/descubrimiento-
+    # inverso-matriz-pedidos.md sección 7).
+    fuente_adjudicatario = adjudicatario_pcsp or adjudicatario_lc27
+    if fuente_adjudicatario:
+        _traza(db, expediente.id, "adjudicatario", *fuente_adjudicatario[1:], fuente_adjudicatario[0])
 
     importe_licitacion = fuente_licitacion[0] if fuente_licitacion else None
     importe_adjudicacion = fuente_adjudicacion[0] if fuente_adjudicacion else None
-    adjudicatario = adjudicatario_pcsp[0] if adjudicatario_pcsp else None
+    adjudicatario = fuente_adjudicatario[0] if fuente_adjudicatario else None
     return importe_licitacion, importe_adjudicacion, baja_preferida, adjudicatario
 
 

@@ -12,6 +12,7 @@ _TABLAS = [
     models.LineaCatalogo.__table__,
     models.TrazaOrigen.__table__,
     models.MapeoCabeceraCache.__table__,
+    models.CacheCodigoMaterial.__table__,
     models.TrabajoCola.__table__,
     models.SindicacionExpediente.__table__,
     models.CandidatoAcuerdoMarco.__table__,

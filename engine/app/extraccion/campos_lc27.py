@@ -13,6 +13,25 @@ sacados del PDF real.
 Se extraen solo los campos que hacen falta para ese caso: importe de
 licitación, importe adjudicado y número de expediente. Adjudicatario y
 matriz de LC.27 quedan fuera de alcance de esta sesión.
+
+**Adjudicatario añadido en la sesión de descubrimiento inverso, bloque 1**
+(`docs/descubrimiento-inverso-matriz-pedidos.md` sección 7, "límite real, no
+arreglado en esta sesión"): dos de las tres matrices de carril
+(`6.23/28510.0102`, `6.25/28510.0016`) declaran su adjudicación solo en
+Propuesta LC.27, sin ningún Anuncio PCSP en el expediente — sin este
+extractor, el descubrimiento inverso nunca tiene adjudicatario con el que
+acotar su búsqueda y se queda señalando el aviso para siempre. Verificado
+contra los 21 documentos `propuesta_lc27` reales del corpus (los de camino
+de lote único, sin ningún "LOTE N" en el texto — los multi-lote ya cubrían
+esto con `app.extraccion.lotes._ADJUDICATARIO_RE`): misma redacción base "a
+la empresa <nombre>, con NIF/CIF: <código>" en 9 de 10, y una variante real
+sin "con" (`6.23/28510.0102`: "a la empresa ARCELORMITTAL ESPAÑA, S.A.–
+NIF:", guion en vez de la palabra "con") que la regex de `lotes.py` no
+cubría. Misma función sirve también para `resolucion_adjudicacion`
+(verificado contra `6.24/28510.0185` y `6.26/28510.0016`, camino de lote
+único: idéntica redacción "a la empresa: <nombre>, con NIF: <código>") — el
+orquestador ya trata ambas plantillas en la misma rama por declarar los
+mismos hechos (CONTEXTO.md sección 17).
 """
 from __future__ import annotations
 
@@ -62,6 +81,17 @@ _OBJETO_CONTRATO_RE = re.compile(
     r"(?:PROPUESTA|RESOLUCI[OÓ]N) DE ADJUDICACI[OÓ]N DEL CONTRATO DE\s+(.+?)\s+EXPEDIENTE",
     re.IGNORECASE | re.DOTALL,
 )
+# Mismo ancla que `app.extraccion.lotes._ADJUDICATARIO_RE` ("a la
+# empresa/empresas... con NIF/CIF"), generalizada con el separador
+# `[\s,–-]*(?:con\s+)?` en vez de exigir literalmente "con": cubre
+# también la variante real de `6.23/28510.0102` ("...S.A.– NIF:", guion en
+# vez de "con") sin dejar de casar el resto del corpus ("con NIF:"/"con
+# CIF:"). `.+?` perezoso más DOTALL para cruzar el salto de línea real entre
+# el nombre y el NIF/CIF (`6.23/28510.0102`: "...S.A.– NIF:\nA81046856").
+_ADJUDICATARIO_RE = re.compile(
+    r"a\s+la[s]?\s+empresa[s]?:?\s*(.+?)[\s,–-]*(?:con\s+)?(?:NIF|CIF):?",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 def _buscar_en_paginas(paginas: list[PaginaTexto], patron: re.Pattern) -> Optional[CampoAnclado]:
@@ -89,3 +119,10 @@ def extraer_objeto_contrato_lc27(paginas: list[PaginaTexto]) -> Optional[CampoAn
     if campo is None:
         return None
     return CampoAnclado(valor=re.sub(r"\s+", " ", campo.valor), pagina=campo.pagina, fragmento=campo.fragmento)
+
+
+def extraer_adjudicatario_lc27(paginas: list[PaginaTexto]) -> Optional[CampoAnclado]:
+    campo = _buscar_en_paginas(paginas, _ADJUDICATARIO_RE)
+    if campo is None:
+        return None
+    return CampoAnclado(valor=re.sub(r"\s+", " ", campo.valor).strip(), pagina=campo.pagina, fragmento=campo.fragmento)
