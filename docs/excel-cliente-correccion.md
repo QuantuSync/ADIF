@@ -500,3 +500,95 @@ nuevo formato de tres columnas).
 
 Nada de lo verificado en este bloque requirió tocar la lógica de
 extracción o de cálculo -- solo la hoja "Resumen" cambió de código.
+
+## Bloque 4: la fila que fusionaba dos líneas de precio y la fila fantasma de descripción (sesión 2026-09-06, tercera continuación; cerrado el 2026-09-07)
+
+Origen: revisando el catálogo de `6.23/28510.0051` aparecían líneas con la
+baja del lote heredada pero **sin precio unitario ninguno**, es decir sin
+nada de lo que derivar el precio adjudicado — indistinguibles en el Excel de
+una línea genuinamente pendiente de revisión. Rastreadas hasta el documento
+original (`6.23_28510.0051_ANEJO_1.pdf` p.57 y p.59, y la misma tabla
+repetida en `6.23_28510.0051_CONTRATO_2.pdf` p.153 y p.155), resultaron ser
+**dos defectos distintos de la misma tabla**, más un tercero que solo
+apareció al verificar el arreglo contra la base de datos real.
+
+### 1. La causa física: un desfase de una línea entre la columna de descripción y el resto
+
+En esa tabla la primera línea de cada descripción envuelta cae, visualmente,
+dentro de la banda de la fila **anterior**. `pdfplumber` corta las filas por
+esa banda, así que el desfase produce dos artefactos opuestos:
+
+- **Fila fantasma**: un trozo de descripción se emite como fila propia, con
+  todas las demás columnas en blanco. No es un material nuevo — el material
+  real, con su código, su unidad y su precio, ya se cuenta en la fila vecina.
+- **Fila fusionada**: dos filas de datos reales y consecutivas no difieren lo
+  bastante en altura y se funden en **una sola** fila extraída. El código de
+  precio y el precio unitario traen entonces dos valores reales dentro de la
+  misma celda (`"P-0090\nP-0091"`, `"29.240,23 €\n38.012,29 €"`).
+
+Antes del arreglo, la fila fantasma se guardaba como línea de catálogo (baja
+heredada, ningún precio) y la fila fusionada dejaba un código imposible
+(`"P-0090P-0091"`) que no casaba con ningún formato conocido, con el precio
+sin interpretar: los dos síntomas que veía el cliente.
+
+### 2. Los dos arreglos en `app/catalogo.py`
+
+- `construir_linea_catalogo` **descarta** la fila fantasma (solo descripción,
+  sin código, matrícula, cantidad, unidad ni precio), igual que ya descartaba
+  un pie de tabla o una fila de relleno.
+- `_dividir_fila_multiple` **separa** la fila fusionada en las N líneas
+  reales. Solo actúa cuando el código de precio Y el precio unitario se
+  dividen en el mismo número N≥2 de líneas no vacías **y** cada valor por
+  separado ya tiene forma de código/precio válida; la unidad de medida, si la
+  cabecera la declara, debe dividirse en N o venir vacía. Nunca a ciegas: dos
+  valores que no casen como códigos y precios reales dejan la fila como
+  estaba, camino normal y a revisión como hasta ahora.
+
+La descripción **nunca se reparte** entre las N líneas: el desfase de una
+línea hace que sus fragmentos no se correspondan 1:1 con el resto de columnas
+(CONTEXTO.md sección 8, nunca inventar un reparto que no se pueda verificar).
+Cada línea resultante se queda con el bloque entero y se marca con
+`_MOTIVO_FILA_FUSIONADA` para que un humano confirme la descripción contra el
+documento, aunque el precio (y el precio adjudicado derivado) ya sea correcto.
+
+### 3. El tercer defecto, encontrado verificando contra la base de datos real
+
+Separar la fila **no bastaba**. Las dos líneas que salen de una fila fusionada
+comparten descripción (el bloque entero, que a propósito no se reparte), no
+tienen matrícula, y pueden tener el mismo precio: exactamente la firma de
+`_firma_material` — `(matrícula, descripción, precio unitario)` — que
+`_combinar_por_clave` y `guardar_lineas_catalogo` usan para fundir un material
+repetido en dos tablas. Resultado real medido en base de datos: de la fila
+`P-0058`/`P-0059` (306.351,49 € los dos, mismo precio por coincidencia) se
+guardaba **una sola línea**, con `clave_linea = "P-0058"` y
+`codigo_precio = "P-0059"`, y el material `P-0058` desaparecía del catálogo
+entero. El mismo fallo que el arreglo venía a corregir, un paso más allá y con
+peor pinta: la línea superviviente parece correcta.
+
+Arreglo: `_firma_material` **no da firma** a una línea recuperada de una fila
+fusionada. Su descripción es un bloque compartido, no una identidad. Cada una
+se guarda con su propio `codigo_precio` como clave. Si alguna resultara ser de
+verdad un duplicado de otra tabla, quedará como línea repetida a revisar —
+verificable por un humano, y muy preferible a perder un material real sin
+dejar rastro. Las tres pruebas nuevas de este punto fallan las tres con el
+arreglo retirado (comprobado ejecutándolas contra una copia del árbol sin el
+descarte) y pasan con él.
+
+### Verificación final, contra el corpus real
+
+Reprocesado el expediente (`POST /expedientes/18/extraer`, trabajo 1068,
+`completado` sin error) contra el stack real:
+
+| Concepto | Valor |
+|---|---|
+| Filas fusionadas separadas | 3 (`P-0058`/`P-0059`, `P-0090`/`P-0091`, `P-0099`/`P-0100`), 6 líneas de catálogo, todas marcadas para revisión |
+| Material recuperado por el arreglo del punto 3 | `P-0058`, que había desaparecido del catálogo |
+| Líneas fantasma en todo el corpus (solo descripción, sin ningún otro dato) | 0 |
+| Líneas con baja de lote y sin precio unitario, en todo el corpus | 0 |
+| Líneas con `clave_linea` distinta de su `codigo_precio` dentro de un lote | 0 |
+| Líneas de catálogo del expediente / del corpus | 1.069 / 3.001 |
+| Suite completa | 372 tests pasan (369 antes del punto 3 + 3 nuevos) |
+
+Los precios adjudicados de las líneas recuperadas se derivan ya con la baja
+del lote (0,2531): `P-0090` 29.240,23 € → 21.839,5278 €, `P-0091` 38.012,29 €
+→ 28.391,3794 €, `P-0058` y `P-0059` 306.351,49 € → 228.813,9279 €.
