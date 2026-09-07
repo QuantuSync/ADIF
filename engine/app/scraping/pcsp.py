@@ -42,13 +42,39 @@ from app.config import settings
 class ExpedienteNoPublicadoError(RuntimeError):
     """Ninguna variante de búsqueda (matriz, expediente, separadores `/`, `_`,
     `-`, sin separador) encontró una fila en la tabla de resultados de la
-    Plataforma. Distinto de un `RuntimeError` genérico (timeout, WAF,
-    formulario no localizado): esto es un resultado negativo determinista, no
-    un fallo transitorio -- `app.scraping.job` lo trata aparte para marcar el
-    expediente `sin_publicar` en vez de `fallido` y no gastar reintentos en
-    repetir una búsqueda que no va a cambiar de resultado (sesión de
-    expedientes sin publicar, CONTEXTO.md sección 22: comprobado a mano que
-    estos códigos no están en la Plataforma, no es un problema del scraper)."""
+    Plataforma **con una confirmación explícita** de "sin resultados" (ver
+    `wait_results`). Distinto de un `RuntimeError` genérico (timeout, WAF,
+    formulario no localizado) o de `BloqueoTransitorioError`: esto es un
+    resultado negativo determinista, no un fallo transitorio -- `app.scraping.job`
+    lo trata aparte para marcar el expediente `sin_publicar` en vez de
+    `fallido` y no gastar reintentos en repetir una búsqueda que no va a
+    cambiar de resultado (sesión de expedientes sin publicar, CONTEXTO.md
+    sección 22: comprobado a mano que estos códigos no están en la
+    Plataforma, no es un problema del scraper).
+
+    **Corregido, sesión de límite de tasa (2026-09-07)**: `try_open` antes
+    convertía CUALQUIER excepción de cualquier variante de búsqueda (un
+    timeout esperando resultados, un WAF, el formulario sin localizar) en
+    "sigue con la siguiente variante", y si todas fallaban así, en esta
+    excepción -- confundiendo "la Plataforma no respondió/bloqueó la
+    petición" con "el expediente no existe". Verificado con datos reales:
+    una matriz de carril conocida y publicada (`6.25/28510.0016`) quedó
+    marcada `sin_publicar` tras una tanda de cientos de descargas seguidas
+    sin ninguna pausa. Ahora solo se lanza cuando `wait_results` confirma de
+    verdad el mensaje de "sin resultados" en cada variante intentada --
+    cualquier otra excepción se propaga tal cual, nunca se traduce a "no
+    publicado"."""
+
+
+class BloqueoTransitorioError(RuntimeError):
+    """La Plataforma devolvió una página reconocible de bloqueo/límite de
+    tasa (WAF, "demasiadas peticiones", 429/503) en vez de la tabla de
+    resultados o de la confirmación normal de "sin resultados" -- sesión de
+    límite de tasa (2026-09-07). Nunca se traduce a `ExpedienteNoPublicadoError`;
+    es un fallo transitorio como cualquier otro (reintentable, con backoff,
+    `app.queue.calcular_espera_reintento`), pero con una causa identificada
+    en el mensaje en vez de un timeout genérico -- útil para saber, sin
+    adivinar, si lo que está pasando es un bloqueo real."""
 
 BASE = "https://contrataciondelestado.es"
 SEARCH = BASE + "/wps/portal/plataforma/buscadores/busqueda"
@@ -234,10 +260,32 @@ async def click_search(page: Page) -> None:
     await btn.click()
 
 
+# Frases reconocibles de bloqueo/límite de tasa, verificadas contra el
+# hallazgo real de esta sesión (docstring del módulo: el WAF de la
+# Plataforma responde "Request Rejected" a peticiones que no vienen de
+# navegación real) y las respuestas habituales de un límite de tasa HTTP
+# genérico. Sin pretender ser exhaustiva -- lo que no case aquí sigue
+# cayendo al timeout genérico de `wait_results`, nunca a
+# `ExpedienteNoPublicadoError`.
+_FRASES_BLOQUEO = (
+    "request rejected", "acceso denegado", "access denied",
+    "demasiadas peticiones", "too many requests", "429",
+    "no disponible temporalmente", "servicio no disponible", "service unavailable", "503",
+)
+
+
 async def wait_results(page: Page):
-    """Devuelve el frame con la tabla de resultados, None si no hay resultados."""
+    """Devuelve el frame con la tabla de resultados, o `None` cuando la
+    Plataforma confirma explícitamente "sin resultados" en el texto de la
+    página -- la única señal que cuenta como negativo determinista
+    (`ExpedienteNoPublicadoError`, ver su docstring). Cualquier otro
+    desenlace se lanza como excepción, nunca como `None`: un bloqueo
+    reconocible (`BloqueoTransitorioError`) o, si no hay ninguna frase
+    reconocible, un timeout genérico con el último cuerpo visto para
+    diagnóstico."""
     start = time.monotonic()
     deadline = start + NAV_MS / 1000
+    ultimo_cuerpo = ""
     while time.monotonic() < deadline:
         for fr in page.frames:
             try:
@@ -251,11 +299,19 @@ async def wait_results(page: Page):
                     body = norm(await fr.locator("body").inner_text())
                 except Exception:
                     continue
+                if not body:
+                    continue
+                ultimo_cuerpo = body
                 if any(x in body for x in ("no se han encontrado resultados", "sin resultados",
                                            "no existen resultados", "no se encontraron resultados")):
                     return None
+                if any(x in body for x in _FRASES_BLOQUEO):
+                    raise BloqueoTransitorioError(
+                        f"la Plataforma devolvió una página de bloqueo/límite de tasa reconocible: "
+                        f"{body[:200]!r}"
+                    )
         await page.wait_for_timeout(400)
-    raise RuntimeError("Timeout esperando resultados")
+    raise RuntimeError(f"timeout esperando resultados (último cuerpo visto: {ultimo_cuerpo[:200]!r})")
 
 
 async def _on_results(page: Page) -> bool:
@@ -382,17 +438,40 @@ async def open_detail(page: Page, fr, code: str) -> bool:
     return await _detail_ready(page)
 
 
+async def _intentar_variante(page: Page, code: str, q: str) -> bool:
+    """Un único intento de búsqueda (una variante concreta del código):
+    `True` si abre la ficha, `False` si la Plataforma confirma "sin
+    resultados" para ESTA variante. Puede lanzar cualquier excepción
+    (`BloqueoTransitorioError`, timeout, formulario no localizado) -- el
+    llamador decide si tolerarla (`try_open`, uso de mejor esfuerzo del
+    descubrimiento inverso) o propagarla (`scrape_expediente`, donde
+    confundirla con un negativo real marcaría un expediente publicado como
+    `sin_publicar`)."""
+    field = await ensure_form(page)
+    await field.click()
+    await field.fill("")
+    await field.fill(q)
+    await click_search(page)
+    fr = await wait_results(page)
+    if fr is None:
+        return False
+    return await open_detail(page, fr, code)
+
+
 async def try_open(page: Page, code: str) -> bool:
-    """Busca un código (con sus variantes) y abre su ficha. True si lo consigue."""
+    """Busca un código (con sus variantes) y abre su ficha. `True` si lo
+    consigue. Tolerante al fallo de una variante concreta -- pensado para
+    `leer_matriz_declarada`/`descubrir_candidatos_acuerdo_marco`, que ya
+    recorren muchos candidatos en su propio bucle y no deben abortar el
+    lote entero porque una búsqueda puntual falle; un candidato que falla
+    así simplemente se trata como no resuelto, nunca como "confirmado sin
+    resultados". **No usar en el camino de `scrape_expediente`** (descarga
+    real de un expediente): ahí una excepción real nunca debe disolverse en
+    "sigue probando" -- ver `ExpedienteNoPublicadoError` y el hallazgo de la
+    sesión de límite de tasa en su docstring."""
     for q in search_variants(code):
         try:
-            field = await ensure_form(page)
-            await field.click()
-            await field.fill("")
-            await field.fill(q)
-            await click_search(page)
-            fr = await wait_results(page)
-            if fr and await open_detail(page, fr, code):
+            if await _intentar_variante(page, code, q):
                 return True
         except Exception:
             continue
@@ -909,10 +988,27 @@ async def scrape_expediente(codigo_expediente: str, codigo_matriz: Optional[str]
         page.set_default_timeout(UI_MS)
         page.set_default_navigation_timeout(NAV_MS)
         try:
+            # A propósito, distinto de `try_open`: ninguna excepción se
+            # traga aquí. Cada variante de cada candidato llama a
+            # `_intentar_variante` directamente -- si alguna lanza
+            # (`BloqueoTransitorioError`, timeout, formulario no
+            # localizado), se propaga tal cual tan pronto ocurre. Nunca se
+            # sigue probando otra variante ni el siguiente candidato tras un
+            # fallo real: un entorno que bloquea o da timeout en una
+            # consulta probablemente da el mismo resultado en cualquier
+            # otra, así que seguir insistiendo no distingue nada y solo
+            # añade carga a una Plataforma que ya está fallando (ver
+            # docstring de `ExpedienteNoPublicadoError`, hallazgo real de la
+            # sesión de límite de tasa). Solo llegar limpiamente al final
+            # de todos los candidatos, con cada variante confirmando "sin
+            # resultados" de verdad, cuenta como negativo determinista.
             matched = None
             for code in candidatos:
-                if await try_open(page, code):
-                    matched = code
+                for q in search_variants(code):
+                    if await _intentar_variante(page, code, q):
+                        matched = code
+                        break
+                if matched:
                     break
             if not matched:
                 raise ExpedienteNoPublicadoError(

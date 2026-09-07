@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import logging
 import tempfile
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -266,23 +267,66 @@ class ResumenBackfill:
         }
 
 
+# Sesión de límite de tasa (2026-09-07): un backfill real de 21 meses hizo
+# fallar 11 periodos SEGUIDOS con "File is not a zip file" justo después de
+# 10 correctos -- patrón de bloqueo/límite de tasa bajo carga, no de 11
+# meses genuinamente sin publicar (que la Plataforma real respondería con
+# 404, no con un cuerpo de bloqueo servido como 200 -- ver
+# `app.sindicacion.cliente.DescargaSindicacionInvalidaError`). Antes, un
+# solo intento fallido por periodo se daba por perdido inmediatamente y se
+# pasaba al siguiente sin ninguna pausa, machacando la fuente real sin
+# tregua durante los 11 periodos.
+_ESPERA_ENTRE_PERIODOS_SEGUNDOS = 15.0
+_REINTENTOS_POR_PERIODO = 3
+_ESPERA_BASE_REINTENTO_SEGUNDOS = 60.0
+
+
+def _descubrir_periodo_con_reintentos(db: Session, periodo: str) -> ResumenDescubrimiento:
+    """Reintenta un periodo hasta `_REINTENTOS_POR_PERIODO` veces con espera
+    creciente (60 s, 120 s...) antes de darlo por fallido de verdad --
+    distingue un bloqueo transitorio real (se recupera solo tras esperar)
+    de un mes genuinamente sin publicar (sigue fallando igual tras esperar,
+    y ahí sí se anota en `periodos_con_error` sin gastar más tiempo)."""
+    ultimo_error: Exception = RuntimeError(f"periodo {periodo}: sin ningún intento realizado")
+    for intento in range(1, _REINTENTOS_POR_PERIODO + 1):
+        try:
+            return descubrir_novedades(db, periodo=periodo)
+        except Exception as exc:  # noqa: BLE001
+            db.rollback()
+            ultimo_error = exc
+            if intento < _REINTENTOS_POR_PERIODO:
+                espera = _ESPERA_BASE_REINTENTO_SEGUNDOS * (2 ** (intento - 1))
+                logger.warning(
+                    "backfill de sindicación: periodo %s falló (intento %s/%s), reintentando en %ss: %s",
+                    periodo, intento, _REINTENTOS_POR_PERIODO, espera, exc,
+                )
+                time.sleep(espera)
+    raise ultimo_error
+
+
 def descubrir_backfill(db: Session, periodos: list[str]) -> ResumenBackfill:
     """Recorre varios periodos pasados llamando a `descubrir_novedades` una
-    vez por cada uno (mismo mecanismo de siempre, solo que invocado más de
-    una vez) -- cierra el hueco real de esta sesión: nada, hasta ahora,
-    llamaba a `descubrir_novedades` con un periodo que no fuera el mes en
-    curso. Cada periodo hace su propio `commit` dentro de
-    `descubrir_novedades`; un periodo que falla (ZIP todavía no publicado
-    para un mes muy reciente, corte de red) se anota en
+    vez por cada uno (mismo mecanismo de siempre) -- cierra el hueco real de
+    esta sesión: nada, hasta ahora, llamaba a `descubrir_novedades` con un
+    periodo que no fuera el mes en curso. Cada periodo se reintenta con
+    espera creciente (`_descubrir_periodo_con_reintentos`) y hay una pausa
+    mínima entre periodos distintos (`_ESPERA_ENTRE_PERIODOS_SEGUNDOS`),
+    para no encadenar descargas reales sin ninguna pausa (sesión de límite
+    de tasa, 2026-09-07, ver docstring de arriba). Un periodo que sigue
+    fallando tras agotar sus reintentos se anota en
     `ResumenBackfill.periodos_con_error` y la tanda sigue con el siguiente,
     nunca aborta el resto."""
     resumen = ResumenBackfill()
-    for periodo in periodos:
+    for indice, periodo in enumerate(periodos):
+        if indice > 0:
+            time.sleep(_ESPERA_ENTRE_PERIODOS_SEGUNDOS)
         try:
-            parcial = descubrir_novedades(db, periodo=periodo)
+            parcial = _descubrir_periodo_con_reintentos(db, periodo)
         except Exception as exc:  # noqa: BLE001
-            db.rollback()
-            logger.warning("backfill de sindicación: periodo %s falló, se continúa con el resto: %s", periodo, exc)
+            logger.warning(
+                "backfill de sindicación: periodo %s falló tras %s intentos, se continúa con el resto: %s",
+                periodo, _REINTENTOS_POR_PERIODO, exc,
+            )
             resumen.periodos_con_error[periodo] = str(exc)
             continue
         resumen.periodos_procesados.append(periodo)

@@ -85,6 +85,12 @@ class Settings(BaseSettings):
     scraping_ui_timeout_ms: int = 35000
     scraping_contract_max_keep: int = 2
     scraping_require_contract_qr_csv_hint: bool = True
+    # Sesión de límite de tasa (2026-09-07): espaciado mínimo entre
+    # peticiones reales de scraping (`descargar_expediente`) -- 454
+    # descargas seguidas sin ninguna pausa entre sí, en esta misma sesión,
+    # coincidieron con un patrón de bloqueo/timeout bajo carga en la
+    # Plataforma real. Ver `app.scraping.limitador.esperar_turno`.
+    scraping_separacion_minima_segundos: float = 5.0
 
     # Bloque 2, descubrimiento por sindicación (CONTEXTO.md sección 24): ZIP
     # mensual de "licitacionesPerfilesContratanteCompleto3" bajo la

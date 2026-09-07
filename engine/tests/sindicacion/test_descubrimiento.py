@@ -178,6 +178,9 @@ def test_periodos_recientes_rechaza_n_menor_que_uno():
 
 
 def test_descubrir_backfill_agrega_varios_periodos(tmp_path, db_session, monkeypatch):
+    # Sesión de límite de tasa (2026-09-07): pausa mínima real entre
+    # periodos -- sin esto, el test tardaría de verdad varios segundos.
+    monkeypatch.setattr("app.sindicacion.descubrimiento.time.sleep", lambda *_: None)
     from app import config
     monkeypatch.setattr(config.settings, "sindicacion_departamentos_adif", "28510")
 
@@ -206,6 +209,11 @@ def test_descubrir_backfill_agrega_varios_periodos(tmp_path, db_session, monkeyp
 
 
 def test_descubrir_backfill_aisla_el_fallo_de_un_periodo(db_session, monkeypatch):
+    # Sesión de límite de tasa (2026-09-07): un periodo que sigue fallando
+    # ahora se reintenta `_REINTENTOS_POR_PERIODO` veces (con espera
+    # creciente real entre intentos) antes de darlo por perdido -- sin
+    # anular `time.sleep`, este test tardaría varios minutos.
+    monkeypatch.setattr("app.sindicacion.descubrimiento.time.sleep", lambda *_: None)
     llamados = []
 
     def _descubrir_falso(db, periodo=None, ruta_zip=None):
@@ -220,8 +228,35 @@ def test_descubrir_backfill_aisla_el_fallo_de_un_periodo(db_session, monkeypatch
     resumen = descubrir_backfill(db_session, ["202503", "202502", "202501"])
 
     # El fallo de un periodo no interrumpe la tanda: los otros dos se
-    # intentan igual.
-    assert llamados == ["202503", "202502", "202501"]
+    # intentan igual. "202501" se reintenta 3 veces (mismo error cada vez)
+    # antes de darse por vencido.
+    assert llamados == ["202503", "202502", "202501", "202501", "202501"]
     assert resumen.periodos_procesados == ["202503", "202502"]
     assert resumen.periodos_con_error == {"202501": "ZIP no publicado para este periodo"}
     assert resumen.expedientes_nuevos == 2
+
+
+def test_descubrir_backfill_recupera_tras_un_fallo_transitorio(db_session, monkeypatch):
+    # Distingue un bloqueo transitorio real (se recupera solo al reintentar)
+    # de un mes genuinamente sin publicar (sección de arriba): si el
+    # segundo intento tiene éxito, el periodo cuenta como procesado, no
+    # como error.
+    monkeypatch.setattr("app.sindicacion.descubrimiento.time.sleep", lambda *_: None)
+    intentos_202501 = []
+
+    def _descubrir_falso(db, periodo=None, ruta_zip=None):
+        from app.sindicacion.descubrimiento import ResumenDescubrimiento
+        if periodo == "202501":
+            intentos_202501.append(1)
+            if len(intentos_202501) < 2:
+                raise RuntimeError("la Plataforma devolvió una página de bloqueo/límite de tasa reconocible")
+        return ResumenDescubrimiento(periodo=periodo, expedientes_nuevos=1)
+
+    monkeypatch.setattr("app.sindicacion.descubrimiento.descubrir_novedades", _descubrir_falso)
+
+    resumen = descubrir_backfill(db_session, ["202501"])
+
+    assert len(intentos_202501) == 2
+    assert resumen.periodos_procesados == ["202501"]
+    assert resumen.periodos_con_error == {}
+    assert resumen.expedientes_nuevos == 1
