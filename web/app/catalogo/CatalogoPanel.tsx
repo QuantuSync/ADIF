@@ -226,6 +226,12 @@ export default function CatalogoPanel({ apiUrl }: { apiUrl: string }) {
   const [expediente, setExpediente] = useState("");
   const [lote, setLote] = useState("");
   const [q, setQ] = useState("");
+  // "completitud" por defecto (encargo de esta sesión, 2026-09-07): sin
+  // esto, la primera pantalla sin filtrar -- la que ve el cliente -- caía
+  // siempre en los mismos expedientes con las tablas de origen más escasas,
+  // por venir antes en orden alfabético (justificación completa en
+  // `app.catalogo_consulta`). "alfabetico" se deja disponible como antes.
+  const [orden, setOrden] = useState<"completitud" | "alfabetico">("completitud");
   const [pagina, setPagina] = useState(1);
   const [datos, setDatos] = useState<RespuestaCatalogo | null>(null);
   const [cargando, setCargando] = useState(false);
@@ -241,7 +247,11 @@ export default function CatalogoPanel({ apiUrl }: { apiUrl: string }) {
   useEffect(() => {
     const id = setTimeout(() => {
       setCargando(true);
-      const params = new URLSearchParams({ pagina: String(pagina), tamano_pagina: String(TAMANO_PAGINA) });
+      const params = new URLSearchParams({
+        pagina: String(pagina),
+        tamano_pagina: String(TAMANO_PAGINA),
+        orden,
+      });
       if (matricula.trim()) params.set("matricula", matricula.trim());
       if (expediente.trim()) params.set("expediente", expediente.trim());
       if (lote.trim()) params.set("lote", lote.trim());
@@ -264,7 +274,7 @@ export default function CatalogoPanel({ apiUrl }: { apiUrl: string }) {
     }, 300);
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [apiUrl, matricula, expediente, lote, q, pagina, reintento]);
+  }, [apiUrl, matricula, expediente, lote, q, orden, pagina, reintento]);
 
   // Cualquier cambio de filtro vuelve a la página 1 — si no, se puede quedar
   // mirando una página vacía de un resultado mucho más corto.
@@ -335,6 +345,23 @@ export default function CatalogoPanel({ apiUrl }: { apiUrl: string }) {
               placeholder="brida, P-014…"
               className="input"
             />
+          </div>
+          <div className="field">
+            <label className="field-label" htmlFor="filtro-orden">
+              Orden
+            </label>
+            <select
+              id="filtro-orden"
+              value={orden}
+              onChange={(e) => {
+                setOrden(e.target.value as "completitud" | "alfabetico");
+                setPagina(1);
+              }}
+              className="input"
+            >
+              <option value="completitud">Líneas más completas primero</option>
+              <option value="alfabetico">Alfabético (expediente/lote)</option>
+            </select>
           </div>
           <div className="field field-action">
             <a href={`${apiUrl}/catalogo/exportar.xlsx`} className="btn btn-primary">
