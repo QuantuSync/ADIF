@@ -125,5 +125,16 @@ class Settings(BaseSettings):
     backup_retencion: int = 14
     backup_timeout_segundos: float = 900.0
 
+    # Descubrimiento inverso matriz -> pedidos (sesión de descubrimiento
+    # inverso, app.extraccion.descubrimiento_matriz): abre una ficha real por
+    # candidato nuevo -- con 92 candidatos reales para un solo adjudicatario
+    # en la muestra de esta sesión, es caro. Semanal por defecto, mismo
+    # razonamiento que `mantenimiento_intervalo_segundos`: los pedidos nuevos
+    # de un acuerdo marco aparecen cada semanas, no cada hora, y la caché de
+    # `candidatos_acuerdo_marco` ya evita reabrir lo ya comprobado aunque el
+    # intervalo fuera más corto.
+    descubrimiento_pedidos_intervalo_segundos: float = 7 * 24 * 3600.0
+    descubrimiento_pedidos_activo: bool = True
+
 
 settings = Settings()

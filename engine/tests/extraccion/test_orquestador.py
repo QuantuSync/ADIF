@@ -438,6 +438,26 @@ def test_expediente_0124_lote_2_de_dos_no_usa_sentinela(db_session):
     assert "cobertura parcial: 1 de 2" in expediente.error
 
 
+def test_lote_unico_guarda_adjudicatario_del_anuncio_pcsp(db_session):
+    """Hallazgo de paso (sesión de descubrimiento inverso): el Anuncio PCSP
+    ya traía el adjudicatario por etiqueta fija (`campos_pcsp`), pero el
+    camino de lote único implícito -- el que usan la mayoría de expedientes
+    del corpus, incluidas las tres matrices de carril de esa sesión -- nunca
+    lo guardaba en `lotes.adjudicatario` (solo el camino multi-lote
+    explícito lo hacía, desde otra fuente). Sin él, el descubrimiento
+    inverso (`app.extraccion.descubrimiento_matriz`) no tiene con qué
+    acotar su búsqueda de pedidos en la Plataforma."""
+    expediente = _crear_expediente_con_documentos(
+        db_session, "6.24/28510.0193", [("ADJUDICACION", fx.ANUNCIO_PCSP_SIN_MATRIZ)],
+    )
+    trabajo = SimpleNamespace(expediente_id=expediente.id)
+
+    ejecutar_extraccion_expediente(db_session, _StorageDirecta(), trabajo, model_provider=None)
+
+    lote = db_session.query(Lote).filter_by(expediente_id=expediente.id, identificador_lote=LOTE_UNICO).one()
+    assert lote.adjudicatario == "Enclavamientos Señaliza Ferroviaria"
+
+
 def test_tres_lotes_completos_no_generan_motivo_de_cobertura_parcial(db_session):
     # 6.24/28510.0117: los tres lotes de la licitación traen baja/importe en
     # el mismo documento -- ninguna cobertura parcial que señalar, aunque el

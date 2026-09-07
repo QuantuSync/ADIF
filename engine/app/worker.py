@@ -7,6 +7,8 @@ from sqlalchemy.exc import OperationalError
 from app.config import settings
 from app.db import SessionLocal
 from app.extraccion.cruce_codigos import validar_ruta_codigos_proyecto
+from app.extraccion.descubrimiento_matriz import TIPO_TRABAJO as TIPO_DESCUBRIMIENTO_PEDIDOS
+from app.extraccion.descubrimiento_matriz import descubrir_pedidos_de_matrices_conocidas
 from app.extraccion.orquestador import ejecutar_extraccion_expediente
 from app.interfaces.document_storage import LocalDiskStorage
 from app.interfaces.model_provider import APIModelProvider, CachedModelProvider
@@ -25,6 +27,7 @@ from app.mantenimiento.frescura import (
 from app.mantenimiento.programacion import (
     verificar_y_lanzar_ciclo_programado,
     verificar_y_lanzar_copia_programada,
+    verificar_y_lanzar_descubrimiento_pedidos_programado,
 )
 from app.models import Documento, EstadoExpediente, Expediente
 from app.sindicacion.descubrimiento import TIPO_TRABAJO as TIPO_SINDICACION_BACKFILL
@@ -168,6 +171,16 @@ def procesar_sindicacion_backfill(db, trabajo) -> dict:
     return resumen.to_dict()
 
 
+def procesar_descubrimiento_pedidos(db, trabajo) -> dict:
+    """Descubrimiento inverso matriz -> pedidos (sesión de descubrimiento
+    inverso, app.extraccion.descubrimiento_matriz): payload opcional
+    `matriz_expediente_id` para acotar a una sola matriz (botón manual desde
+    su ficha); sin él, recorre todas las matrices ya conocidas."""
+    payload = trabajo.payload or {}
+    resumen = descubrir_pedidos_de_matrices_conocidas(db, matriz_expediente_id=payload.get("matriz_expediente_id"))
+    return resumen.to_dict()
+
+
 MANEJADORES = {
     "ping": procesar_ping,
     "descargar_expediente": procesar_descargar_expediente,
@@ -175,6 +188,7 @@ MANEJADORES = {
     TIPO_MANTENIMIENTO_CICLO: procesar_mantenimiento_ciclo,
     TIPO_COPIA_SEGURIDAD: ejecutar_copia_seguridad,
     TIPO_SINDICACION_BACKFILL: procesar_sindicacion_backfill,
+    TIPO_DESCUBRIMIENTO_PEDIDOS: procesar_descubrimiento_pedidos,
 }
 
 
@@ -194,6 +208,9 @@ def _vuelta_bucle_principal(db) -> None:
     copia_lanzada = verificar_y_lanzar_copia_programada(db)
     if copia_lanzada is not None:
         logger.info("copia de seguridad programada encolada (trabajo %s)", copia_lanzada.id)
+    descubrimiento_lanzado = verificar_y_lanzar_descubrimiento_pedidos_programado(db)
+    if descubrimiento_lanzado is not None:
+        logger.info("descubrimiento de pedidos programado encolado (trabajo %s)", descubrimiento_lanzado.id)
     trabajo = tomar_siguiente_trabajo(db)
     if trabajo is not None:
         logger.info("procesando trabajo %s (%s)", trabajo.id, trabajo.tipo)

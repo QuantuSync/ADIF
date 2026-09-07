@@ -40,6 +40,27 @@ export type Lote = {
   importe_licitacion: string | null;
   importe_adjudicacion: string | null;
   adjudicatario: string | null;
+  // Segunda familia de baja (CONTEXTO.md sección 16, docs/identidad-
+  // expediente.md sección 28): "indexado_por_pedido" explica por qué
+  // `baja_lote` es null a propósito -- ese modelo fija la baja en cada
+  // pedido futuro contra el Acuerdo Marco, nunca en la licitación. Se
+  // propaga también a los lotes de los pedidos heredados (sesión de
+  // descubrimiento inverso): sin esto, un pedido de esta familia se leía
+  // como un fallo de extracción.
+  modelo_precio: "fijo" | "indexado_por_pedido";
+  coeficiente_transformacion: string | null;
+};
+
+// Resumen ligero de un pedido derivado, en la lista `pedidos` de su matriz
+// (sesión de descubrimiento inverso, punto 2: "la matriz con sus precios de
+// referencia y sus pedidos con la baja de cada uno").
+export type PedidoResumen = {
+  id: number;
+  codigo_expediente: string;
+  nombre_proyecto: string | null;
+  estado: string;
+  baja_global: string | null;
+  importe_adjudicacion: string | null;
 };
 
 export type Expediente = {
@@ -62,6 +83,11 @@ export type Expediente = {
   lotes: Lote[];
   estado: string;
   error: string | null;
+  // Descubrimiento inverso (sesión de descubrimiento inverso): pedidos ya
+  // enlazados a este expediente como acuerdo marco. Vacío en la inmensa
+  // mayoría de expedientes, que no son matriz de nadie.
+  pedidos: PedidoResumen[];
+  aviso_descubrimiento_pedidos: string | null;
 };
 
 const INTERVALO_SONDEO_MS = 3000;
@@ -135,11 +161,32 @@ function celdaImporte(expediente: Expediente, valor: string | null) {
   return <DatoVacio motivo="no-consta" titulo="No se pudo determinar este importe en los documentos de este expediente." />;
 }
 
+// Segunda familia de baja (CONTEXTO.md sección 16): el modelo indexado por
+// pedido no tiene baja única de lote que extraer -- ni de la licitación ni,
+// para un pedido heredado, de la matriz (docs/identidad-expediente.md
+// sección 28). Sin esto, un `baja_lote` vacío se leía como el mismo fallo
+// que "no consta" (encargo de esta sesión, ajuste 4).
+function esModeloIndexado(lotes: Lote[]): boolean {
+  return lotes.length >= 1 && lotes.every((l) => l.modelo_precio === "indexado_por_pedido");
+}
+
+function NotaModeloIndexado() {
+  return (
+    <span
+      className="status-note status-note-tight"
+      title="Acuerdo marco de precio indexado por pedido: la baja se fija pedido a pedido en el futuro, junto con un índice de actualización de precios (Kt) — no existe todavía en ningún documento de la licitación, no es un dato que el sistema no haya encontrado."
+    >
+      Baja indexada por pedido
+    </span>
+  );
+}
+
 // Baja vacía (fuera del caso "varía por lote", que ya se explica solo):
 // mismo criterio pendiente/no consta que el resto de importes.
 function celdaBajaTexto(expediente: Expediente) {
   const texto = formatearPorcentaje(expediente.baja_global);
   if (texto) return <strong>{texto}</strong>;
+  if (esModeloIndexado(expediente.lotes)) return <NotaModeloIndexado />;
   if (ESTADOS_EN_CURSO.includes(expediente.estado)) {
     return <DatoVacio motivo="pendiente" titulo="El expediente todavía se está procesando." />;
   }
@@ -192,6 +239,70 @@ function celdaLote(estadoExpediente: string, valor: string | null, formatear: (v
   return <DatoVacio motivo="no-consta" titulo="No se pudo determinar este dato para este lote en los documentos del expediente." />;
 }
 
+function celdaBajaLote(lote: Lote, estadoExpediente: string) {
+  if (lote.baja_lote === null && lote.modelo_precio === "indexado_por_pedido") {
+    return <NotaModeloIndexado />;
+  }
+  return celdaLote(estadoExpediente, lote.baja_lote, formatearPorcentaje);
+}
+
+// Punto 2 del encargo de descubrimiento inverso: "que la web los presente
+// juntos: el acuerdo marco con sus precios de referencia y sus pedidos con
+// la baja de cada uno". El acuerdo marco (con sus precios) ya es la propia
+// fila de la tabla principal -- esto añade, debajo de su código, la lista
+// plegable de pedidos ya enlazados y el botón para buscar más.
+function CeldaPedidos({
+  expediente,
+  buscando,
+  onBuscar,
+}: {
+  expediente: Expediente;
+  buscando: boolean;
+  onBuscar: () => void;
+}) {
+  if (expediente.pedidos.length === 0 && !expediente.aviso_descubrimiento_pedidos) return null;
+  return (
+    <div style={{ marginTop: "0.35rem", fontWeight: 400 }}>
+      {expediente.pedidos.length > 0 ? (
+        <details>
+          <summary className="chip" style={{ display: "inline-flex" }}>
+            {expediente.pedidos.length} pedido{expediente.pedidos.length === 1 ? "" : "s"}
+          </summary>
+          <table className="table" style={{ marginTop: "0.5rem", width: "auto", fontSize: "0.85rem" }}>
+            <thead>
+              <tr>
+                <th>Pedido</th>
+                <th>Estado</th>
+                <th className="num">Baja</th>
+                <th className="num">Adjudicación</th>
+              </tr>
+            </thead>
+            <tbody>
+              {expediente.pedidos.map((p) => (
+                <tr key={p.id}>
+                  <td className="mono">{p.codigo_expediente}</td>
+                  <td>
+                    <EstadoTexto estado={p.estado} />
+                  </td>
+                  <td className="num">{formatearPorcentaje(p.baja_global) || "—"}</td>
+                  <td className="num">{formatearImporte(p.importe_adjudicacion) || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <button type="button" onClick={onBuscar} disabled={buscando} className="btn btn-ghost btn-sm" style={{ marginTop: "0.4rem" }}>
+            {buscando ? "Buscando…" : "Buscar más pedidos"}
+          </button>
+        </details>
+      ) : (
+        <span className="status-note status-note-tight" title={expediente.aviso_descubrimiento_pedidos ?? undefined}>
+          {expediente.aviso_descubrimiento_pedidos}
+        </span>
+      )}
+    </div>
+  );
+}
+
 function TablaLotes({ lotes, estadoExpediente }: { lotes: Lote[]; estadoExpediente: string }) {
   return (
     <table className="table" style={{ marginTop: "0.5rem", width: "auto", fontSize: "0.85rem" }}>
@@ -208,7 +319,7 @@ function TablaLotes({ lotes, estadoExpediente }: { lotes: Lote[]; estadoExpedien
         {lotes.map((lote) => (
           <tr key={lote.id}>
             <td>{lote.identificador_lote}</td>
-            <td className="num">{celdaLote(estadoExpediente, lote.baja_lote, formatearPorcentaje)}</td>
+            <td className="num">{celdaBajaLote(lote, estadoExpediente)}</td>
             <td className="num">{celdaLote(estadoExpediente, lote.importe_licitacion, formatearImporte)}</td>
             <td className="num">{celdaLote(estadoExpediente, lote.importe_adjudicacion, formatearImporte)}</td>
             <td>
@@ -244,6 +355,7 @@ export default function ExpedientesPanel({
   const [matrizNuevo, setMatrizNuevo] = useState("");
   const [creando, setCreando] = useState(false);
   const [lanzando, setLanzando] = useState<number | null>(null);
+  const [buscandoPedidos, setBuscandoPedidos] = useState<number | null>(null);
   const [busqueda, setBusqueda] = useState("");
   const [filtroEstado, setFiltroEstado] = useState<FiltroEstado>("todos");
 
@@ -299,6 +411,26 @@ export default function ExpedientesPanel({
       setErrorAccion(e instanceof Error ? e.message : String(e));
     } finally {
       setLanzando(null);
+    }
+  }
+
+  // Descubrimiento inverso (sesión de descubrimiento inverso, punto 2):
+  // botón manual sobre una matriz concreta, mismo trabajo que la ejecución
+  // programada semanal (app.extraccion.descubrimiento_matriz).
+  async function lanzarDescubrimientoPedidos(id: number) {
+    setBuscandoPedidos(id);
+    try {
+      const res = await fetch(`${apiUrl}/mantenimiento/descubrimiento-pedidos/ejecutar`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ matriz_expediente_id: id }),
+      });
+      if (!res.ok) throw new Error(`la API respondió ${res.status}`);
+      await recargar();
+    } catch (e) {
+      setErrorAccion(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBuscandoPedidos(null);
     }
   }
 
@@ -453,7 +585,14 @@ export default function ExpedientesPanel({
               const completado = exp.estado === "completado";
               return (
                 <tr key={exp.id} className={`row-accent ${accentClaseEstado(exp.estado)}`}>
-                  <td style={{ fontWeight: 600 }}>{exp.codigo_expediente}</td>
+                  <td style={{ fontWeight: 600 }}>
+                    {exp.codigo_expediente}
+                    <CeldaPedidos
+                      expediente={exp}
+                      buscando={buscandoPedidos === exp.id}
+                      onBuscar={() => lanzarDescubrimientoPedidos(exp.id)}
+                    />
+                  </td>
                   <td>{celdaMatriz(exp)}</td>
                   <td>
                     <EstadoTexto estado={exp.estado} />

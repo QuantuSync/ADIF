@@ -324,7 +324,7 @@ def _detectar_numero_lotes_pcsp(documentos: list[_Documento]) -> Optional[int]:
 
 def _extraer_campos_expediente(
     db: Session, expediente: Expediente, documentos: list[_Documento], registrar_baja_importe: bool = True,
-) -> tuple[Optional[Decimal], Optional[Decimal], Optional[BajaDeclarada]]:
+) -> tuple[Optional[Decimal], Optional[Decimal], Optional[BajaDeclarada], Optional[str]]:
     """Etapa 2: nombre del proyecto y matriz (siempre) e importes de
     licitación/adjudicación y baja declarada a nivel de expediente (solo
     cuando `registrar_baja_importe`). Prioridad de importes: Anuncio PCSP
@@ -343,6 +343,17 @@ def _extraer_campos_expediente(
     licitacion_pcsp = adjudicacion_pcsp = None
     licitacion_lc27 = adjudicacion_lc27 = None
     objeto_pcsp = objeto_lc27 = None
+    # Sesión de descubrimiento inverso, hallazgo de paso: el Anuncio PCSP ya
+    # traía este campo por etiqueta fija (`campos_pcsp.CamposAnuncioPcsp.
+    # adjudicatario`), pero el camino de lote único implícito (el que usan
+    # estas tres matrices de carril, y la mayoría del corpus) nunca lo leía
+    # -- solo el camino multi-lote explícito lo guardaba, desde una fuente
+    # distinta (`LoteDeclarado.adjudicatario`, app.extraccion.lotes). Sin
+    # esto, `lotes.adjudicatario` se quedaba `NULL` para casi todo el
+    # corpus, y el descubrimiento inverso (que necesita el adjudicatario
+    # para acotar su búsqueda en la Plataforma, ajuste 1 del encargo) nunca
+    # tenía con qué buscar los pedidos de estas matrices reales.
+    adjudicatario_pcsp = None
     candidatos_baja: list[BajaDeclarada] = []
     baja_doc: dict[int, int] = {}  # id(BajaDeclarada) -> documento.id
 
@@ -379,6 +390,11 @@ def _extraer_campos_expediente(
                     campos.objeto_contrato.valor, item.documento.id,
                     campos.objeto_contrato.pagina, campos.objeto_contrato.fragmento,
                 )
+            if campos.adjudicatario and adjudicatario_pcsp is None:
+                adjudicatario_pcsp = (
+                    campos.adjudicatario.valor, item.documento.id,
+                    campos.adjudicatario.pagina, campos.adjudicatario.fragmento,
+                )
         elif item.tipo in (TipoDocumento.propuesta_lc27, TipoDocumento.resolucion_adjudicacion):
             # Misma familia de etiquetas fijas en ambas plantillas (CONTEXTO.md
             # sección 17: Propuesta y Resolución declaran los mismos importes
@@ -408,7 +424,7 @@ def _extraer_campos_expediente(
         _traza(db, expediente.id, "nombre_proyecto", *fuente_objeto[1:], fuente_objeto[0])
 
     if not registrar_baja_importe:
-        return None, None, None
+        return None, None, None, None
 
     fuente_licitacion = licitacion_pcsp or licitacion_lc27
     fuente_adjudicacion = adjudicacion_pcsp or adjudicacion_lc27
@@ -424,9 +440,13 @@ def _extraer_campos_expediente(
             baja_preferida.pagina, baja_preferida.fragmento, baja_preferida.baja,
         )
 
+    if adjudicatario_pcsp:
+        _traza(db, expediente.id, "adjudicatario", *adjudicatario_pcsp[1:], adjudicatario_pcsp[0])
+
     importe_licitacion = fuente_licitacion[0] if fuente_licitacion else None
     importe_adjudicacion = fuente_adjudicacion[0] if fuente_adjudicacion else None
-    return importe_licitacion, importe_adjudicacion, baja_preferida
+    adjudicatario = adjudicatario_pcsp[0] if adjudicatario_pcsp else None
+    return importe_licitacion, importe_adjudicacion, baja_preferida, adjudicatario
 
 
 def _procesar_lotes_declarados(
@@ -668,7 +688,9 @@ def ejecutar_extraccion_expediente(
                 # una matriz, la herencia de más abajo puede resolverla
                 # todavía — el motivo genérico de "no se pudo determinar la
                 # baja" solo se compone al final, después de intentarlo.
-                importe_licitacion, importe_adjudicacion, baja_preferida = _extraer_campos_expediente(db, expediente, items)
+                importe_licitacion, importe_adjudicacion, baja_preferida, adjudicatario = _extraer_campos_expediente(
+                    db, expediente, items
+                )
 
                 # Segunda familia de baja (migración 0016, sesión de trabajo
                 # pendiente real 2026-09-05): antes de intentar la baja
@@ -716,6 +738,8 @@ def ejecutar_extraccion_expediente(
                 lote.baja_lote = baja_efectiva
                 lote.importe_licitacion = importe_licitacion
                 lote.importe_adjudicacion = importe_adjudicacion
+                if adjudicatario is not None:
+                    lote.adjudicatario = adjudicatario
                 if modelo_indexado is not None:
                     lote.modelo_precio = ModeloPrecio.indexado_por_pedido
                     lote.coeficiente_transformacion = modelo_indexado.coeficiente_transformacion

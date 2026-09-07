@@ -27,6 +27,7 @@ from app.models import (
     Expediente,
     LineaCatalogo,
     Lote,
+    ModeloPrecio,
     TipoDocumento,
     TrabajoCola,
     TrazaOrigen,
@@ -330,6 +331,68 @@ def test_matriz_sin_publicar_va_a_revision_distinguible_de_fallido(db_session):
 
     assert resultado.motivo_revision is not None
     assert "sin_publicar" in resultado.motivo_revision
+
+
+def test_hereda_modelo_precio_indexado_sin_marcarlo_como_fallo(db_session):
+    """Ajuste 4 del encargo de descubrimiento inverso: un pedido derivado de
+    una matriz de segunda familia (docs/identidad-expediente.md sección 28)
+    no tiene, en sus propios documentos, ningún marcador que le permita
+    detectar el modelo indexado por pedido -- verificado en vivo contra los
+    18 documentos reales de los 9 pedidos conocidos (sesión de descubrimiento
+    inverso): son formularios PCSP sin cuadro de precios propio. Sin esta
+    propagación, el pedido se quedaba con `modelo_precio=fijo` (su valor por
+    defecto) y `baja_lote=None`, indistinguible de un fallo real de
+    extracción."""
+    matriz = _crear_expediente(db_session, "6.23/28510.0018", estado=EstadoExpediente.completado)
+    lote_matriz = _crear_lote(
+        db_session, matriz.id,
+        modelo_precio=ModeloPrecio.indexado_por_pedido, coeficiente_transformacion=Decimal("1.2760"),
+    )
+    db_session.add(LineaCatalogo(
+        lote_id=lote_matriz.id, expediente_id=matriz.id, clave_linea="P-1", orden_aparicion=0,
+        codigo_precio="P-1", descripcion="CARRIL 54E1", precio_unitario=Decimal("99.55"),
+    ))
+    db_session.commit()
+
+    pedido = _crear_expediente(db_session, "6.24/28510.0040", codigo_matriz="6.23/28510.0018")
+    lote_pedido = _crear_lote(db_session, pedido.id)
+
+    resultado = intentar_heredar_de_matriz(db_session, pedido, matriz, lote_pedido, total_lineas_propias=0)
+
+    assert resultado.motivo_revision is None
+    db_session.refresh(lote_pedido)
+    assert lote_pedido.modelo_precio == ModeloPrecio.indexado_por_pedido
+    assert lote_pedido.coeficiente_transformacion == Decimal("1.2760")
+    # La baja sigue sin existir (no hay dato que inventar), pero ya no se lee
+    # como un hueco sin explicar -- `modelo_precio` es la marca explícita.
+    assert lote_pedido.baja_lote is None
+
+
+def test_revierte_modelo_precio_si_la_matriz_deja_de_declararlo(db_session):
+    # Idempotencia (mismo criterio que app.extraccion.orquestador): un
+    # reproceso de la matriz que ya no detecta el marcador no debe dejar un
+    # `indexado_por_pedido` obsoleto colgando del pedido.
+    matriz = _crear_expediente(db_session, "6.23/28510.0018", estado=EstadoExpediente.completado)
+    lote_matriz = _crear_lote(db_session, matriz.id, baja_lote=Decimal("0.10"))
+    db_session.add(LineaCatalogo(
+        lote_id=lote_matriz.id, expediente_id=matriz.id, clave_linea="P-001", orden_aparicion=0,
+        codigo_precio="P-001", descripcion="X", precio_unitario=Decimal("10.00"),
+        baja_lote=Decimal("0.10"), precio_adjudicado=Decimal("9.00"),
+    ))
+    db_session.commit()
+
+    pedido = _crear_expediente(db_session, "6.24/28510.0040", codigo_matriz="6.23/28510.0018")
+    lote_pedido = _crear_lote(
+        db_session, pedido.id,
+        modelo_precio=ModeloPrecio.indexado_por_pedido, coeficiente_transformacion=Decimal("1.2760"),
+    )
+
+    resultado = intentar_heredar_de_matriz(db_session, pedido, matriz, lote_pedido, total_lineas_propias=0)
+
+    assert resultado.motivo_revision is None
+    db_session.refresh(lote_pedido)
+    assert lote_pedido.modelo_precio == ModeloPrecio.fijo
+    assert lote_pedido.coeficiente_transformacion is None
 
 
 # --- reencolar_pedidos_esperando_matriz ----------------------------------
