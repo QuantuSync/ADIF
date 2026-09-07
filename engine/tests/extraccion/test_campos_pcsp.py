@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 from app.extraccion.campos_pcsp import extraer_campos_anuncio_pcsp, importe_como_decimal
-from app.extraccion.texto import extraer_texto
+from app.extraccion.texto import PaginaTexto, extraer_texto
 from tests import fixtures as fx
 
 
@@ -36,6 +36,41 @@ def test_tipo_contrato_ausente_en_pedido_derivado_no_revienta():
     # sintético de más abajo para el campo cuando sí aparece).
     campos = extraer_campos_anuncio_pcsp(extraer_texto(fx.ANUNCIO_PCSP_CON_MATRIZ))
     assert campos.tipo_contrato is None
+
+
+def test_matriz_por_identificador_contrato_original_cuando_falta_la_forma_estricta():
+    # Sesión de descubrimiento inverso, caso real `6.26/28510.0014`: ni el
+    # Anuncio de adjudicación ni el de formalización de este pedido traían
+    # la sección "Licitación basada en el acuerdo marco" (verificado contra
+    # los dos documentos reales) — solo "Identificador contrato original",
+    # en "Proceso de Licitación", con el mismo dato. Sin este fallback la
+    # matriz quedaba sin extraer aunque el documento sí la declarara.
+    texto = (
+        "Número de Expediente 6.26/28510.0014\n"
+        "Sistema de Contratación Contrato basado en un Acuerdo Marco\n"
+        "Proceso de Licitación\n"
+        "Identificador contrato original 6.25/28510.0016\n"
+        "Procedimiento Abierto\n"
+    )
+    campos = extraer_campos_anuncio_pcsp([PaginaTexto(numero=1, texto=texto)])
+
+    assert campos.codigo_matriz.valor == "6.25/28510.0016"
+
+
+def test_forma_estricta_manda_sobre_la_alternativa_si_ambas_aparecen():
+    # Verificado también contra un documento real (`6.24/28510.0040`): los
+    # dos campos coinciden cuando ambos aparecen, pero por si algún día no
+    # coincidieran, la forma estricta (más específica, dedicada a este dato)
+    # es la que manda -- nunca la alternativa en silencio.
+    texto = (
+        "Licitación basada en el acuerdo marco\n"
+        "Expediente 6.23/28510.0018\n"
+        "Proceso de Licitación\n"
+        "Identificador contrato original 6.23/28510.0018\n"
+    )
+    campos = extraer_campos_anuncio_pcsp([PaginaTexto(numero=1, texto=texto)])
+
+    assert campos.codigo_matriz.valor == "6.23/28510.0018"
 
 
 def test_anuncio_sin_matriz_no_inventa_una():

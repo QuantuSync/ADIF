@@ -8,8 +8,10 @@ from app.mantenimiento.programacion import (
     DISPARADO_POR_PROGRAMADO,
     obtener_estado,
     obtener_estado_copia,
+    obtener_estado_descubrimiento_pedidos,
     verificar_y_lanzar_ciclo_programado,
     verificar_y_lanzar_copia_programada,
+    verificar_y_lanzar_descubrimiento_pedidos_programado,
 )
 from app.models import EstadoTrabajo, TrabajoCola
 
@@ -33,6 +35,12 @@ def _trabajo_ciclo(db, *, hace_segundos: float, estado=EstadoTrabajo.completado,
 
 def _trabajo_copia(db, *, hace_segundos: float, estado=EstadoTrabajo.completado, disparado_por=None) -> TrabajoCola:
     return _trabajo(db, tipo="copia_seguridad", hace_segundos=hace_segundos, estado=estado, disparado_por=disparado_por)
+
+
+def _trabajo_descubrimiento(db, *, hace_segundos: float, estado=EstadoTrabajo.completado, disparado_por=None) -> TrabajoCola:
+    return _trabajo(
+        db, tipo="descubrimiento_pedidos", hace_segundos=hace_segundos, estado=estado, disparado_por=disparado_por
+    )
 
 
 def test_nunca_corrio_lanza_ahora(db_session, monkeypatch):
@@ -190,4 +198,64 @@ def test_obtener_estado_copia(db_session, monkeypatch):
     assert estado.ultima_ejecucion.id == trabajo.id
     assert estado.en_curso is False
     assert estado.intervalo_segundos == 86400.0
+    assert estado.proxima_ejecucion > datetime.now(timezone.utc)
+
+
+# Descubrimiento inverso matriz -> pedidos (sesión de descubrimiento
+# inverso): mismo mecanismo genérico, semanal por defecto -- ajuste 2 del
+# encargo ("que no sea caro... los pedidos nuevos aparecen cada semanas, no
+# cada hora").
+
+
+def test_descubrimiento_nunca_corrio_lanza_ahora(db_session, monkeypatch):
+    monkeypatch.setattr(config.settings, "descubrimiento_pedidos_intervalo_segundos", 3600.0)
+    monkeypatch.setattr(config.settings, "descubrimiento_pedidos_activo", True)
+
+    lanzado = verificar_y_lanzar_descubrimiento_pedidos_programado(db_session)
+
+    assert lanzado is not None
+    assert lanzado.tipo == "descubrimiento_pedidos"
+    assert lanzado.payload["disparado_por"] == DISPARADO_POR_PROGRAMADO
+
+
+def test_descubrimiento_no_lanza_antes_de_tiempo(db_session, monkeypatch):
+    monkeypatch.setattr(config.settings, "descubrimiento_pedidos_intervalo_segundos", 3600.0)
+    monkeypatch.setattr(config.settings, "descubrimiento_pedidos_activo", True)
+    _trabajo_descubrimiento(db_session, hace_segundos=10)
+
+    lanzado = verificar_y_lanzar_descubrimiento_pedidos_programado(db_session)
+
+    assert lanzado is None
+
+
+def test_descubrimiento_no_solapa_consigo_mismo(db_session, monkeypatch):
+    monkeypatch.setattr(config.settings, "descubrimiento_pedidos_intervalo_segundos", 1.0)
+    monkeypatch.setattr(config.settings, "descubrimiento_pedidos_activo", True)
+    _trabajo_descubrimiento(db_session, hace_segundos=100, estado=EstadoTrabajo.en_proceso)
+
+    lanzado = verificar_y_lanzar_descubrimiento_pedidos_programado(db_session)
+
+    assert lanzado is None
+    assert db_session.query(TrabajoCola).count() == 1
+
+
+def test_descubrimiento_desactivado_nunca_lanza(db_session, monkeypatch):
+    monkeypatch.setattr(config.settings, "descubrimiento_pedidos_intervalo_segundos", 1.0)
+    monkeypatch.setattr(config.settings, "descubrimiento_pedidos_activo", False)
+    _trabajo_descubrimiento(db_session, hace_segundos=100)
+
+    lanzado = verificar_y_lanzar_descubrimiento_pedidos_programado(db_session)
+
+    assert lanzado is None
+
+
+def test_obtener_estado_descubrimiento(db_session, monkeypatch):
+    monkeypatch.setattr(config.settings, "descubrimiento_pedidos_intervalo_segundos", 604800.0)
+    trabajo = _trabajo_descubrimiento(db_session, hace_segundos=10, disparado_por=DISPARADO_POR_MANUAL)
+
+    estado = obtener_estado_descubrimiento_pedidos(db_session)
+
+    assert estado.ultima_ejecucion.id == trabajo.id
+    assert estado.en_curso is False
+    assert estado.intervalo_segundos == 604800.0
     assert estado.proxima_ejecucion > datetime.now(timezone.utc)

@@ -492,6 +492,14 @@ suficientes, no ahora.
   esta familia u otras variantes (p. ej. el hilo de cobre indexado a LME de
   `6.20/28510.0136`) sin identificar: no lo des por supuesto. Ver
   `docs/identidad-expediente.md` sección 28.
+  **Cerrado, sesión 2026-09-07** (`docs/descubrimiento-inverso-matriz-
+  pedidos.md`): comprobado con los documentos reales de los 9 pedidos
+  conocidos de las 3 matrices (no solo con los de la matriz, ya cerrado en
+  la sesión de 2026-09-05) que el "Coeficiente de baja" **no está publicado
+  en ningún documento de la Plataforma** — ni de la matriz ni del pedido.
+  No es una limitación del sistema, es que ADIF y el adjudicatario lo
+  acuerdan fuera de la Plataforma. Nada más que implementar aquí sin
+  inventar un dato.
 - **Confirmar con el cliente si `Precio unitario` en el catálogo es el
   licitado o el adjudicado.** Sigue usándose el licitado — decisión de
   sesión, no confirmación del cliente (`docs/hallazgos-extraccion.md`
@@ -851,6 +859,36 @@ suficientes, no ahora.
   sistema de forma asíncrona, consultable en
   `GET /mantenimiento/sindicacion/historial`; números finales en
   `docs/hallazgos-sindicacion.md` sección 25.
+- **Descubrimiento inverso matriz → pedidos: implementado (sesión
+  2026-09-07, `docs/descubrimiento-inverso-matriz-pedidos.md`).** Hasta
+  ahora el sistema solo resolvía pedido → matriz; nunca al revés. Verificado
+  en vivo que ni la ficha de la matriz ni la sindicación enlazan sus
+  pedidos, pero el buscador de la Plataforma sí permite acotar por
+  `Sistema de contratación = Contrato basado en un Acuerdo Marco` +
+  Órgano + Adjudicatario — encontró los 9 pedidos conocidos entre 92
+  candidatos reales. Cada candidato se confirma abriendo su propia ficha
+  ("Acuerdo Marco → Expediente") porque un adjudicatario puede tener más de
+  un acuerdo marco a lo largo de los años; el resultado se cachea
+  (`candidatos_acuerdo_marco`, migración `0017`) para no reabrir fichas ya
+  comprobadas, y corre semanalmente (`descubrimiento_pedidos`, mismo
+  mecanismo que el ciclo de mantenimiento y las copias de seguridad) o a
+  mano por matriz. Si una matriz no tiene adjudicatario extraído, lo señala
+  (`Expediente.aviso_descubrimiento_pedidos`) en vez de saltársela en
+  silencio. `Expediente.pedidos` (relación inversa) y `ExpedientesPanel.tsx`
+  ya presentan la matriz junto a sus pedidos. Procesados los 9 pedidos
+  reales contra el stack: 9/9 `completado`, 120 líneas de catálogo
+  heredadas, 13 matrículas pasan a aparecer en 12 expedientes cada una (su
+  matriz + sus 3 pedidos, × 3 familias) — confirma con datos reales que los
+  expedientes de carril comparten matrículas entre sí. Dos hallazgos de
+  paso corregidos en la misma sesión: `lotes.adjudicatario` nunca se
+  guardaba en el camino de lote único implícito (solo el multi-lote
+  explícito), y una segunda forma real del campo MATRIZ ("Identificador
+  contrato original", sin la sección "Licitación basada en el acuerdo
+  marco"). **Límite real, sin cerrar**: dos de las tres matrices declaran
+  su adjudicación en plantilla Propuesta LC.27, que nunca ha tenido
+  extractor de adjudicatario (ni siquiera para el camino multi-lote) — su
+  descubrimiento automático seguirá señalando el aviso hasta que exista
+  ese extractor, candidato para una sesión futura.
 
 ---
 
@@ -861,5 +899,5 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `comparacion-corpus-sharepoint.md`, `auditoria-huerfanos-y-autorreferencia.md`,
 `excel-cliente-correccion.md`, `diagnostico-caidas-dockerd.md`,
 `tolerancia-reinicios-dockerd.md`, `estados-carga-web.md`,
-`copias-de-seguridad.md`,
+`copias-de-seguridad.md`, `descubrimiento-inverso-matriz-pedidos.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.

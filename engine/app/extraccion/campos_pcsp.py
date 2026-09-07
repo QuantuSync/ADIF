@@ -28,6 +28,19 @@ _MATRIZ_RE = re.compile(
     r"Licitaci[oó]n basada en el acuerdo marco\s*\n?\s*Expediente\s+(" + CODIGO_EXPEDIENTE_RE.pattern + r")",
     re.IGNORECASE,
 )
+# Forma alternativa, verificada contra un documento real (sesión de
+# descubrimiento inverso, `6.26/28510.0014`): la sección "Licitación basada
+# en el acuerdo marco" (arriba) no siempre se publica en el Anuncio de
+# adjudicación/formalización de un pedido -- pero el campo "Identificador
+# contrato original", en "Proceso de Licitación", trae el mismo dato
+# (verificado también en los documentos donde SÍ aparece la forma estricta,
+# p.ej. `6.24/28510.0040`: los dos campos coinciden). Solo se intenta si la
+# forma estricta no encontró nada, mismo criterio que las variantes laxas de
+# la baja (CONTEXTO.md sección 4).
+_MATRIZ_ALTERNATIVA_RE = re.compile(
+    r"Identificador contrato original\s+(" + CODIGO_EXPEDIENTE_RE.pattern + r")",
+    re.IGNORECASE,
+)
 _IMPORTE_LICITACION_RE = re.compile(
     r"Presupuesto base de licitaci[oó]n.*?Importe \(sin impuestos\)\s*([\d.,]+)\s*EUR",
     re.IGNORECASE | re.DOTALL,
@@ -98,9 +111,10 @@ def _buscar_objeto(paginas: list[PaginaTexto]) -> Optional[CampoAnclado]:
 
 
 def extraer_campos_anuncio_pcsp(paginas: list[PaginaTexto]) -> CamposAnuncioPcsp:
+    codigo_matriz = _buscar_en_paginas(paginas, _MATRIZ_RE) or _buscar_en_paginas(paginas, _MATRIZ_ALTERNATIVA_RE)
     return CamposAnuncioPcsp(
         numero_expediente=_buscar_en_paginas(paginas, _NUMERO_EXPEDIENTE_RE),
-        codigo_matriz=_buscar_en_paginas(paginas, _MATRIZ_RE),
+        codigo_matriz=codigo_matriz,
         importe_licitacion=_buscar_en_paginas(paginas, _IMPORTE_LICITACION_RE),
         importe_adjudicacion=_buscar_en_paginas(paginas, _IMPORTE_ADJUDICACION_RE),
         adjudicatario=_buscar_en_paginas(paginas, _ADJUDICATARIO_RE),

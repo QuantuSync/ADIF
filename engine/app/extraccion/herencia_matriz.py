@@ -43,6 +43,7 @@ from app.models import (
     Expediente,
     LineaCatalogo,
     Lote,
+    ModeloPrecio,
     TrabajoCola,
     TrazaOrigen,
 )
@@ -227,6 +228,27 @@ def intentar_heredar_de_matriz(
             )
         )
     lote_matriz = lotes_matriz[0]
+
+    # Ajuste 4 del encargo (descubrimiento inverso, hallazgo de paso): un
+    # pedido heredado de una matriz de segunda familia (CONTEXTO.md sección
+    # 16, docs/identidad-expediente.md sección 28) se quedaba con `baja_lote`
+    # NULL sin ninguna marca de que fuera a propósito -- `modelo_precio` del
+    # pedido seguía en `fijo` (su valor por defecto) porque sus propios
+    # documentos nunca traen el marcador literal que lo detecta (solo vive en
+    # los de la matriz, verificado en la sesión de descubrimiento inverso:
+    # los 18 documentos reales de los 9 pedidos conocidos son formularios
+    # PCSP sin cuadro de precios ni marcador). Sin esto, un `baja_lote` vacío
+    # se leía igual que un fallo real de extracción. Idempotente en el mismo
+    # sentido que `app.extraccion.orquestador`: un reproceso en el que la
+    # matriz ya no declare el modelo indexado no deja un valor heredado
+    # obsoleto en el pedido.
+    if lote_matriz.modelo_precio == ModeloPrecio.indexado_por_pedido:
+        lote_pedido.modelo_precio = ModeloPrecio.indexado_por_pedido
+        lote_pedido.coeficiente_transformacion = lote_matriz.coeficiente_transformacion
+    elif lote_pedido.modelo_precio == ModeloPrecio.indexado_por_pedido:
+        lote_pedido.modelo_precio = ModeloPrecio.fijo
+        lote_pedido.coeficiente_transformacion = None
+    db.commit()
 
     lineas_matriz = db.execute(
         select(LineaCatalogo)

@@ -7,12 +7,14 @@ from sqlalchemy.orm import Session
 
 from app.auth import Usuario, get_current_user
 from app.db import get_db
+from app.extraccion.descubrimiento_matriz import TIPO_TRABAJO as TIPO_TRABAJO_DESCUBRIMIENTO_PEDIDOS
 from app.mantenimiento.ciclo import TIPO_TRABAJO
 from app.mantenimiento.copia_seguridad import TIPO_TRABAJO as TIPO_TRABAJO_COPIA
 from app.mantenimiento.programacion import (
     DISPARADO_POR_MANUAL,
     obtener_estado,
     obtener_estado_copia,
+    obtener_estado_descubrimiento_pedidos,
 )
 from app.models import TrabajoCola
 from app.queue import encolar_trabajo
@@ -163,6 +165,54 @@ def historial_backfill_sindicacion(
     return db.execute(
         select(TrabajoCola)
         .where(TrabajoCola.tipo == TIPO_TRABAJO_SINDICACION_BACKFILL)
+        .order_by(TrabajoCola.created_at.desc())
+        .limit(limite)
+    ).scalars().all()
+
+
+class DescubrimientoPedidosPeticion(BaseModel):
+    # Sin dar, recorre todas las matrices ya conocidas (botón general de
+    # `/mantenimiento`); con él, acota a una sola (botón de su propia ficha
+    # en `/expedientes`).
+    matriz_expediente_id: Optional[int] = None
+
+
+@router.post("/mantenimiento/descubrimiento-pedidos/ejecutar", response_model=TrabajoOut)
+def lanzar_descubrimiento_pedidos(
+    peticion: DescubrimientoPedidosPeticion = Body(default_factory=DescubrimientoPedidosPeticion),
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    """Descubrimiento inverso matriz -> pedidos (sesión de descubrimiento
+    inverso): botón manual, mismo trabajo que lanza solo la ejecución
+    programada semanal."""
+    payload = {"matriz_expediente_id": peticion.matriz_expediente_id, "disparado_por": DISPARADO_POR_MANUAL}
+    trabajo = encolar_trabajo(db, tipo=TIPO_TRABAJO_DESCUBRIMIENTO_PEDIDOS, payload=payload)
+    return trabajo
+
+
+@router.get("/mantenimiento/descubrimiento-pedidos/estado", response_model=EstadoMantenimientoOut)
+def estado_descubrimiento_pedidos(
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    """Igual que `GET /mantenimiento/estado`, para el descubrimiento inverso
+    matriz -> pedidos: cuándo fue la última ejecución, qué encontró, y cuándo
+    tocaría la próxima."""
+    return obtener_estado_descubrimiento_pedidos(db)
+
+
+@router.get("/mantenimiento/descubrimiento-pedidos/historial", response_model=list[TrabajoOut])
+def historial_descubrimiento_pedidos(
+    limite: int = Query(default=20, ge=1, le=200),
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    """Igual que `GET /mantenimiento/historial`, filtrado por
+    `descubrimiento_pedidos`."""
+    return db.execute(
+        select(TrabajoCola)
+        .where(TrabajoCola.tipo == TIPO_TRABAJO_DESCUBRIMIENTO_PEDIDOS)
         .order_by(TrabajoCola.created_at.desc())
         .limit(limite)
     ).scalars().all()

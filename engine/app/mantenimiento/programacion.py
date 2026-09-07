@@ -31,6 +31,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.extraccion.descubrimiento_matriz import TIPO_TRABAJO as TIPO_TRABAJO_DESCUBRIMIENTO_PEDIDOS
 from app.mantenimiento.ciclo import TIPO_TRABAJO
 from app.mantenimiento.copia_seguridad import TIPO_TRABAJO as TIPO_TRABAJO_COPIA
 from app.models import EstadoTrabajo, TrabajoCola
@@ -163,3 +164,27 @@ def verificar_y_lanzar_copia_programada(db: Session) -> Optional[TrabajoCola]:
     if not _debe_lanzar(db, TIPO_TRABAJO_COPIA, settings.backup_activo, settings.backup_intervalo_segundos):
         return None
     return encolar_trabajo(db, tipo=TIPO_TRABAJO_COPIA, payload={"disparado_por": DISPARADO_POR_PROGRAMADO})
+
+
+def obtener_estado_descubrimiento_pedidos(db: Session) -> EstadoMantenimiento:
+    """Descubrimiento inverso matriz -> pedidos: mismo cálculo que
+    `obtener_estado`, sobre el tipo de trabajo `descubrimiento_pedidos`."""
+    return _obtener_estado(
+        db, TIPO_TRABAJO_DESCUBRIMIENTO_PEDIDOS,
+        settings.descubrimiento_pedidos_intervalo_segundos, settings.descubrimiento_pedidos_activo,
+    )
+
+
+def verificar_y_lanzar_descubrimiento_pedidos_programado(db: Session) -> Optional[TrabajoCola]:
+    """Mismo mecanismo que `verificar_y_lanzar_copia_programada` (activo, sin
+    solaparse consigo mismo, según el intervalo desde la última vez),
+    aplicado al descubrimiento inverso -- semanal por defecto, ver
+    `Settings.descubrimiento_pedidos_intervalo_segundos`."""
+    if not _debe_lanzar(
+        db, TIPO_TRABAJO_DESCUBRIMIENTO_PEDIDOS,
+        settings.descubrimiento_pedidos_activo, settings.descubrimiento_pedidos_intervalo_segundos,
+    ):
+        return None
+    return encolar_trabajo(
+        db, tipo=TIPO_TRABAJO_DESCUBRIMIENTO_PEDIDOS, payload={"disparado_por": DISPARADO_POR_PROGRAMADO}
+    )

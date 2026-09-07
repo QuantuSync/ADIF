@@ -180,6 +180,14 @@ class Expediente(Base):
     # distinto, o sacaba de completado un expediente correcto): se guarda
     # aquí como aviso, y `estado`/`error` no se tocan.
     aviso_sindicacion = Column(Text, nullable=True)
+    # Descubrimiento inverso matriz -> pedidos (sesión de descubrimiento
+    # inverso): por qué NO se pudo lanzar la búsqueda de pedidos de esta
+    # matriz, para que el hueco se vea como una condición señalada, nunca
+    # como un silencio. Hoy el único motivo real es "sin adjudicatario
+    # extraído todavía" (app.extraccion.descubrimiento_matriz) -- sin eso no
+    # hay con qué filtrar la búsqueda en la Plataforma. Se limpia solo en
+    # cuanto la búsqueda consigue lanzarse de verdad.
+    aviso_descubrimiento_pedidos = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),
@@ -192,7 +200,15 @@ class Expediente(Base):
     documentos = relationship("Documento", back_populates="expediente")
     # Autorreferencial: la matriz de este expediente, si ya se resolvió
     # (app.extraccion.herencia_matriz.resolver_o_encolar_matriz).
-    matriz = relationship("Expediente", remote_side=[id], foreign_keys=[matriz_expediente_id])
+    matriz = relationship(
+        "Expediente", remote_side=[id], foreign_keys=[matriz_expediente_id], back_populates="pedidos"
+    )
+    # Lado inverso (sesión de descubrimiento inverso, punto 2 del encargo):
+    # los pedidos que ya se sabe que cuelgan de este expediente como acuerdo
+    # marco -- antes solo existía la dirección pedido -> matriz.
+    pedidos = relationship(
+        "Expediente", foreign_keys=[matriz_expediente_id], back_populates="matriz"
+    )
 
 
 class Lote(Base):
@@ -409,6 +425,37 @@ class SindicacionExpediente(Base):
     )
 
     expediente = relationship("Expediente")
+
+
+class CandidatoAcuerdoMarco(Base):
+    """Caché del descubrimiento inverso matriz -> pedidos
+    (app.extraccion.descubrimiento_matriz): una fila por cada código de
+    expediente que la búsqueda "Contrato basado en un Acuerdo Marco" de la
+    Plataforma ha devuelto alguna vez como candidato, con la matriz que su
+    propia ficha declaró al comprobarlo (sección "Acuerdo Marco -> Expediente"
+    de la ficha, distinta de la búsqueda que lo encontró).
+
+    Existe porque verificar un candidato cuesta abrir su ficha en un
+    navegador real -- con 92 candidatos reales para un solo adjudicatario
+    (sesión de descubrimiento inverso), repetir esa apertura en cada ciclo
+    sería caro sin necesidad: la matriz que declara un candidato no cambia
+    una vez adjudicado, así que se lee una vez y se reutiliza siempre,
+    también para las búsquedas de OTRAS matrices que puedan devolver el
+    mismo candidato (el mismo adjudicatario puede tener varios acuerdos marco
+    a lo largo de los años, sección 1 del encargo).
+
+    `codigo_matriz_declarado` en `None` significa "se abrió la ficha y no
+    declaraba ninguna matriz" (candidato que coincidió con el filtro de
+    búsqueda pero no es en realidad un pedido derivado, o cuya ficha no se
+    pudo leer) -- distinto de la fila no existir todavía (candidato nunca
+    comprobado)."""
+
+    __tablename__ = "candidatos_acuerdo_marco"
+
+    id = Column(Integer, primary_key=True)
+    codigo_expediente_candidato = Column(String(64), nullable=False, unique=True)
+    codigo_matriz_declarado = Column(String(64), nullable=True)
+    verificado_en = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class TrabajoCola(Base):

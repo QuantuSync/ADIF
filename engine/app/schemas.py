@@ -30,6 +30,24 @@ class LoteOut(BaseModel):
     coeficiente_transformacion: Optional[Decimal] = None
 
 
+class ExpedientePedidoOut(BaseModel):
+    """Resumen ligero de un pedido derivado, para la lista `pedidos` de su
+    matriz (ExpedienteOut) -- solo lo que hace falta para presentarlos
+    juntos (punto 2 del encargo de descubrimiento inverso: "la matriz con
+    sus precios de referencia y sus pedidos con la baja de cada uno"). No es
+    un ExpedienteOut completo a propósito: evita anidar `lotes`/`pedidos`
+    recursivamente por algo que la web no necesita en esta vista."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    codigo_expediente: str
+    nombre_proyecto: Optional[str] = None
+    estado: str
+    baja_global: Optional[Decimal] = None
+    importe_adjudicacion: Optional[Decimal] = None
+
+
 class ExpedienteOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -58,6 +76,15 @@ class ExpedienteOut(BaseModel):
     # nunca bloqueante (el PDF es el acto administrativo, la sindicación no
     # tiene su misma autoridad) — informativo, distinto de `error`.
     aviso_sindicacion: Optional[str] = None
+    # Descubrimiento inverso (sesión de descubrimiento inverso, punto 2 del
+    # encargo): los pedidos que ya se sabe que cuelgan de este expediente
+    # como acuerdo marco -- vacío en la inmensa mayoría de expedientes, que
+    # no son un acuerdo marco de nadie.
+    pedidos: list[ExpedientePedidoOut] = []
+    # Por qué no se pudo lanzar la búsqueda de pedidos de esta matriz (hoy,
+    # solo "sin adjudicatario extraído todavía") -- mismo patrón informativo
+    # que `aviso_sindicacion`, nunca bloqueante.
+    aviso_descubrimiento_pedidos: Optional[str] = None
     created_at: datetime
 
 

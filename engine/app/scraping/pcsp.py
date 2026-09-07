@@ -400,6 +400,135 @@ async def try_open(page: Page, code: str) -> bool:
 
 
 # --------------------------------------------------------------------------- #
+# Descubrimiento inverso: candidatos a pedido de un Acuerdo Marco
+# --------------------------------------------------------------------------- #
+# Sesión de descubrimiento inverso: verificado en vivo contra la Plataforma
+# real que la ficha de un Acuerdo Marco NO enlaza sus pedidos, y que la
+# sindicación tampoco trae ese campo estructurado (docs/hallazgos-
+# sindicacion.md sección 17.1) -- pero el buscador SÍ permite acotar por
+# "Sistema de contratación = Contrato basado en un Acuerdo Marco" (id de
+# formulario `tipoSistemaContratacion`, valor "3"), combinado con Órgano de
+# contratación y Adjudicatario. No existe un campo "Expediente del Acuerdo
+# Marco" (las 23 etiquetas del formulario avanzado no traen ninguno) -- por
+# eso cada candidato que devuelve la búsqueda hay que abrirlo y leer su
+# propia sección "Acuerdo Marco -> Expediente" para confirmar de cuál cuelga
+# de verdad (el mismo adjudicatario puede tener más de un Acuerdo Marco a lo
+# largo de los años, verificado con 92 resultados reales para un único
+# adjudicatario en la muestra de esta sesión).
+ORGANO_INPUT = "viewns_Z7_AVEQAI930OBRD02JPMTPG21004_:form1:texoorganoMAQ"
+SISTEMA_CONTRATACION_SELECT = "viewns_Z7_AVEQAI930OBRD02JPMTPG21004_:form1:tipoSistemaContratacion"
+ADJUDICATARIO_INPUT = "viewns_Z7_AVEQAI930OBRD02JPMTPG21004_:form1:texAdjudicatarioMAQ"
+# Valor real del <option> "Contrato basado en un Acuerdo Marco" del select
+# "Sistema de contratación" -- verificado en vivo, no inventado (los otros
+# valores del mismo select son "Establecimiento del Acuerdo Marco" = "1",
+# "Sistema Dinámico de Adquisición" en sus dos variantes = "2"/"4").
+SISTEMA_CONTRATO_BASADO_EN_ACUERDO_MARCO = "3"
+# El botón de paginación es un <input type="submit"> cuyo `id` cambia entre
+# cargas de página (hash generado por JSF) -- localizarlo por su `value`
+# visible es lo único estable, verificado en vivo.
+BOTON_SIGUIENTE_PAGINA = 'input[value="Siguiente >>"]'
+
+_ACUERDO_MARCO_EXPEDIENTE_RE = re.compile(
+    r"Acuerdo Marco\s*\n\s*Expediente\s*\n\s*([^\n]+)", re.IGNORECASE
+)
+
+
+async def buscar_candidatos_acuerdo_marco(page: Page, adjudicatario: str, organo: str = "ADIF") -> list[str]:
+    """Rellena el formulario avanzado (Órgano, Sistema de contratación =
+    Contrato basado en un Acuerdo Marco, Adjudicatario) y recorre todas las
+    páginas de resultado, devolviendo cada código de expediente encontrado
+    (con repetidos posibles si se llama varias veces -- el llamador dedupe).
+    No abre ninguna ficha todavía, solo la lista de candidatos."""
+    field = await ensure_form(page)
+    await field.click()
+    await field.fill("")
+
+    organo_campo = await find_in_frames(page, f'input[id="{ORGANO_INPUT}"]')
+    if organo_campo:
+        await organo_campo.fill(organo)
+    sistema_campo = await find_in_frames(page, f'select[id="{SISTEMA_CONTRATACION_SELECT}"]')
+    if sistema_campo:
+        await sistema_campo.select_option(SISTEMA_CONTRATO_BASADO_EN_ACUERDO_MARCO)
+    adjudicatario_campo = await find_in_frames(page, f'input[id="{ADJUDICATARIO_INPUT}"]')
+    if adjudicatario_campo:
+        await adjudicatario_campo.fill(adjudicatario)
+
+    await click_search(page)
+    fr = await wait_results(page)
+    if fr is None:
+        return []
+
+    codigos: list[str] = []
+    for _ in range(50):  # tope defensivo, muy por encima de cualquier resultado real visto
+        rows = fr.locator("table#myTablaBusquedaCustom tbody tr")
+        for i in range(await rows.count()):
+            try:
+                texto = await rows.nth(i).inner_text()
+            except Exception:
+                continue
+            primera_linea = texto.split("\n", 1)[0].strip()
+            if primera_linea:
+                codigos.append(primera_linea)
+        siguiente = fr.locator(BOTON_SIGUIENTE_PAGINA)
+        if not await siguiente.count() or not await siguiente.first.is_enabled():
+            break
+        try:
+            await siguiente.first.click()
+            await page.wait_for_timeout(1200)
+            await page.wait_for_load_state("domcontentloaded")
+        except Exception:
+            break
+    return codigos
+
+
+async def leer_matriz_declarada(page: Page, codigo_candidato: str) -> Optional[str]:
+    """Abre la ficha de `codigo_candidato` (búsqueda normal, misma vía que
+    `try_open`) y lee su sección 'Acuerdo Marco -> Expediente', si la trae.
+    `None` si no se pudo abrir la ficha o no declara ninguna matriz."""
+    if not await try_open(page, codigo_candidato):
+        return None
+    for f in page.frames:
+        try:
+            body = await f.locator("body").inner_text()
+        except Exception:
+            continue
+        if not any(m in norm(body) for m in DETAIL_MARKERS):
+            continue
+        m = _ACUERDO_MARCO_EXPEDIENTE_RE.search(body)
+        if m:
+            return m.group(1).strip()
+    return None
+
+
+async def descubrir_candidatos_acuerdo_marco(
+    adjudicatario: str, ya_verificados: set[str], organo: str = "ADIF"
+) -> tuple[list[str], dict[str, Optional[str]]]:
+    """Punto de entrada de esta sección: una única sesión de navegador para
+    buscar y, de los candidatos que `ya_verificados` no cubra todavía, abrir
+    su ficha y leer la matriz que declaran. Devuelve
+    (todos_los_candidatos_de_esta_busqueda, {candidato_nuevo: matriz_o_None})
+    -- el llamador (app.extraccion.descubrimiento_matriz) decide qué hacer
+    con cada uno contra la base de datos real."""
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(headless=True)
+        context = await browser.new_context(locale="es-ES", accept_downloads=True)
+        page = await context.new_page()
+        page.set_default_timeout(UI_MS)
+        page.set_default_navigation_timeout(NAV_MS)
+        try:
+            candidatos = await buscar_candidatos_acuerdo_marco(page, adjudicatario, organo)
+            nuevas_verificaciones: dict[str, Optional[str]] = {}
+            for codigo in dict.fromkeys(candidatos):  # dedup preservando orden
+                if codigo in ya_verificados:
+                    continue
+                nuevas_verificaciones[codigo] = await leer_matriz_declarada(page, codigo)
+            return candidatos, nuevas_verificaciones
+        finally:
+            await context.close()
+            await browser.close()
+
+
+# --------------------------------------------------------------------------- #
 # Detalle: localizar y volcar las filas de documentos
 # --------------------------------------------------------------------------- #
 async def doc_frame(page: Page):
