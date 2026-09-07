@@ -28,6 +28,76 @@ from app.models import LineaCatalogo
 # la señal de que esta fila no es lo que el mapeo de cabecera cree que es.
 _MATRICULA_VALIDA_RE = re.compile(r"^\d+$")
 
+# Hallazgo real (aviso del cliente, sesión 2026-09-07): el modelo, cuando
+# una tabla no trae ninguna columna de unidad de medida de verdad, tiende a
+# mapear "unidad_medida" a una columna en blanco o ajena en vez de devolver
+# `null` -- dos variantes reales distintas, las dos resueltas por el
+# modelo, ninguna por las reglas deterministas:
+# - `6.20/28510.0054` ANEJO_8 p.10 (traviesas): mapeó "unidad_medida" a la
+#   columna "E.T." (Especificación Técnica, una referencia normativa como
+#   "03.360.571.8") en 5 variantes de la misma cabecera
+#   (`cache_mapeo_cabecera` ids 71-75, `origen="modelo"`).
+# - `6.20/28510.0094` ANEJO p.4 (candado/llave): mapeó "unidad_medida" a
+#   una columna sin cabecera de texto (`id` 77, `origen="modelo"`) que en
+#   realidad trae el valor de "CANTIDADES ESTIMADAS" desplazado una
+#   columna a la izquierda por una columna fantasma -- el mismo fenómeno de
+#   desfase que ya resuelven `_recuperar_cantidad_columna_fantasma` y
+#   companía, aquí aterrizando en unidad_medida en vez de cantidad porque
+#   el modelo, no una regla de recuperación de columna fantasma, fue quien
+#   decidió el mapeo.
+# Ninguna unidad de medida real del corpus es nunca solo dígitos y puntos
+# (ud, UD., m, M, t, kg, PA, dm3, m³... siempre llevan alguna letra) --
+# tanto una referencia normativa como un valor de cantidad desplazado sí
+# lo son. Igual que `_MATRICULA_VALIDA_RE` arriba: la FORMA del valor
+# extraído es la señal de que la columna no es la que el mapeo cree que
+# es, sin importar de dónde vino el mapeo (modelo o determinista) ni
+# cuántas variantes de cabecera existan sin descubrir todavía.
+_UNIDAD_MEDIDA_IMPLAUSIBLE_RE = re.compile(r"^[\d.]+$")
+
+# Mismo aviso del cliente: en la misma tabla, la columna "CANTIDAD DE
+# REFERENCIA" del documento original trae valores en un rango que parece un
+# año (1872, 1996-2005, la mayoría exactamente "2000") en vez de una
+# cantidad de material plausible. A diferencia de "unidad_medida" arriba,
+# aquí el mapeo SÍ es correcto -- la cabecera del documento dice literalmente
+# "CANTIDAD DE REFERENCIA" y el valor extraído coincide con esa columna) --
+# así que no hay nada que "arreglar" en el mapeo: es la propia tabla del
+# documento la que trae un valor ambiguo (¿cantidad real de existencias
+# redondas, o un año de referencia/homologación mal etiquetado en el propio
+# documento?). Verificado que un valor en este rango NO siempre es un error
+# -- `6.24/28510.0064` (cable, "2000 M") y `6.25/28510.0028` (balasto,
+# "2.000,00 t") tienen la misma cifra y son cantidades reales plausibles,
+# confirmadas contra su documento de origen -- así que este rango nunca se
+# usa para "corregir" nada, solo para marcar la línea y que un humano lo
+# confirme contra el documento, igual de barato si acaba siendo una
+# cantidad real que si acaba siendo un año.
+_CANTIDAD_ANIO_MIN = 1900
+_CANTIDAD_ANIO_MAX = 2100
+
+
+def _cantidad_parece_implausible(cantidad: Decimal) -> Optional[str]:
+    """Devuelve el motivo de revisión si `cantidad` no parece una cantidad de
+    material plausible, o `None` si no hay nada que marcar. Solo señales
+    baratas y sin falsos positivos costosos (una cantidad real marcada de
+    más solo cuesta una confirmación humana, nunca se descarta ni se
+    corrige sola): un valor en rango de año, o cero. Nunca se usan aquí
+    umbrales de "N veces la mediana del expediente" -- investigado en la
+    misma sesión (aviso del cliente): en `6.24/28510.0130` (pequeño material
+    de sujeción de vía, comprado por decenas de miles de unidades) y en
+    `6.25/28510.0028` (toneladas-kilómetro de balasto frente a toneladas),
+    la heterogeneidad de unidades y de tipo de material dentro de un mismo
+    expediente produce cocientes de más de 50x que son legítimos -- ningún
+    caso real de escala incorrecta en el corpus, igual que ya se concluyó
+    para los atípicos de precio en `docs/excel-cliente-correccion.md`
+    bloque 3. Un umbral así aquí solo añadiría ruido, no señal."""
+    if cantidad == 0:
+        return "cantidad es 0: confirmar si es un valor real del documento (p.ej. un elemento de catálogo sin pedido estimado en este contrato) o un dato perdido"
+    if cantidad == cantidad.to_integral_value() and _CANTIDAD_ANIO_MIN <= cantidad <= _CANTIDAD_ANIO_MAX:
+        return (
+            f"cantidad ({cantidad:.0f}) está en un rango que parece un año, no una cantidad de material: "
+            "confirmar contra el documento original"
+        )
+    return None
+
 # Coincidencia exacta (tras normalizar y quitar espacios): estas filas no son
 # una línea de material, son el resumen de la tabla — se descartan enteras,
 # no se guardan con matrícula vacía ni con ningún otro campo relleno.
@@ -457,6 +527,21 @@ def _construir_campos(
 
     motivo_revision: Optional[str] = motivo_codigo_precio
 
+    if unidad_medida and _UNIDAD_MEDIDA_IMPLAUSIBLE_RE.match(unidad_medida):
+        # Ver docstring de `_UNIDAD_MEDIDA_IMPLAUSIBLE_RE`: esto es solo
+        # dígitos y puntos -- una referencia normativa (p.ej.
+        # "03.360.571.8") o un valor de otra columna desplazado a esta
+        # (p.ej. "956"), nunca una unidad de medida real. La columna que el
+        # mapeo cree que es "unidad_medida" no lo es de verdad -- se
+        # descarta en vez de guardarse como si fuera una unidad real.
+        motivo_revision = _acumular_motivo(
+            motivo_revision,
+            f"unidad de medida descartada por ser solo numérica, no una unidad real (p.ej. \"ud\", "
+            f"\"m\", \"t\"): {unidad_medida!r} — puede ser una referencia normativa o un valor "
+            f"desplazado de otra columna, revisar el mapeo de esta cabecera",
+        )
+        unidad_medida = None
+
     if matricula is not None and not _MATRICULA_VALIDA_RE.match(matricula):
         clave = normalizar(matricula).replace(" ", "")
         if _es_pie_de_tabla(clave):
@@ -504,6 +589,11 @@ def _construir_campos(
                 "cantidad recuperada de una columna fantasma sin etiquetar junto a \"cantidad\" en la "
                 "cabecera de esta tabla, confirmar antes de dar por buena",
             )
+
+    if cantidad is not None:
+        motivo_cantidad = _cantidad_parece_implausible(cantidad)
+        if motivo_cantidad is not None:
+            motivo_revision = _acumular_motivo(motivo_revision, motivo_cantidad)
 
     precio_bruto = _valor("precio_unitario")
     precio_unitario = None

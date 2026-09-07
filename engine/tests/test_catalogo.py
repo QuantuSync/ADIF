@@ -1323,3 +1323,145 @@ def test_combinar_por_clave_no_repite_el_motivo_al_fundir_mas_de_dos_firmas_igua
     assert len(combinadas) == 1
     motivo = combinadas[0]["motivo_revision"]
     assert motivo.count("sin matrícula") == 1
+
+
+# Aviso del cliente, sesión 2026-09-07: el campo Cantidad del catálogo a
+# veces contiene lo que parece un año. Rastreado hasta `6.20/28510.0054`
+# ANEJO_8 p.10 (traviesas): el modelo mapeó "unidad_medida" a la columna
+# "E.T." (referencia normativa, no una unidad -- `cache_mapeo_cabecera` ids
+# 71-75, las 5 variantes de esta cabecera resueltas por el modelo) en vez de
+# a ninguna columna. "cantidad" en sí SÍ está bien mapeada -- la cabecera
+# del documento dice literalmente "CANTIDAD DE REFERENCIA" -- pero su valor
+# real en el documento cae en un rango que parece un año (1872, 1996-2005).
+
+
+def test_construir_linea_catalogo_descarta_unidad_medida_con_forma_de_normativa():
+    # Mismo hallazgo: "03.360.571.8" tiene la forma de una referencia
+    # normativa de ADIF (varios grupos numéricos separados por puntos), no
+    # de una unidad de medida real -- se descarta en vez de guardarse como
+    # si fuera "ud" o "m".
+    mapeo = {"codigo_precio": None, "matricula": 0, "descripcion": 1, "unidad_medida": 2, "cantidad": 3, "precio_unitario": 4}
+    fila = ["607000000", "TRAVIESA AI-VE", "03.360.571.8", "1997", "73,15 €"]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=10, documento_origen_id=241, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea is not None
+    assert linea["unidad_medida"] is None
+    assert "solo numérica" in linea["motivo_revision"]
+
+
+def test_construir_linea_catalogo_descarta_unidad_medida_puramente_numerica():
+    # Segunda variante real del mismo hallazgo: `6.20/28510.0094` ANEJO p.4
+    # (candado/llave) -- el modelo mapeó "unidad_medida" a una columna en
+    # blanco que en realidad trae la cantidad ("956") desplazada por una
+    # columna fantasma, no una referencia normativa con puntos como la otra
+    # variante. El mismo patrón (solo dígitos, sin ninguna letra) cubre las
+    # dos. Con el mapeo tal cual quedó cacheado ANTES de corregirlo (id 77,
+    # `unidad_medida: 2`), esta prueba solo cubre la red de seguridad de
+    # `_construir_campos`: descarta el valor, pero `cantidad` sigue sin
+    # recuperar porque el propio mapeo sigue reclamando el índice 2 para
+    # "unidad_medida" (`_recuperar_columna_fantasma` nunca le quita un
+    # valor a otro campo del mapeo, aunque ese campo acabe descartado más
+    # tarde) -- la siguiente prueba cubre el mapeo ya corregido.
+    mapeo = {"codigo_precio": None, "matricula": 0, "descripcion": 1, "unidad_medida": 2, "cantidad": 3, "precio_unitario": 5}
+    fila = ["690540008", "CANDADO 70mm CERRAMIENTO LINEAS FERROVIARIAS", "956", None, None, "83,47 €"]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=4, documento_origen_id=229, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea is not None
+    assert linea["unidad_medida"] is None
+    assert linea["cantidad"] is None
+
+
+def test_construir_linea_catalogo_recupera_cantidad_tras_corregir_el_mapeo():
+    # Mismo caso real, con el mapeo ya corregido en `cache_mapeo_cabecera`
+    # (id 77, `unidad_medida: null`, sesión 2026-09-07): sin nada
+    # reclamando el índice 2, `_recuperar_cantidad_columna_fantasma` (ya
+    # existente, no nuevo) sí encuentra "956" ahí -- arreglar el mapeo, no
+    # solo la validación de `_construir_campos`, es lo que de verdad
+    # recupera la cantidad perdida en este caso real.
+    mapeo = {"codigo_precio": None, "matricula": 0, "descripcion": 1, "unidad_medida": None, "cantidad": 3, "precio_unitario": 5}
+    fila = ["690540008", "CANDADO 70mm CERRAMIENTO LINEAS FERROVIARIAS", "956", None, None, "83,47 €"]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=4, documento_origen_id=229, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea is not None
+    assert linea["unidad_medida"] is None
+    assert linea["cantidad"] == Decimal("956")
+
+
+def test_construir_linea_catalogo_no_descarta_unidad_medida_real():
+    # Contraste: una unidad de medida real de verdad ("UD.", "M", "t") no
+    # tiene la forma de una referencia normativa y no se toca.
+    mapeo = {"codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": 3, "cantidad": 4, "precio_unitario": 5}
+    fila = ["P-009", "", "CABLE ARMADO DE Cu", "M", "2.000,00", "4,79 €"]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=115, documento_origen_id=95, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea is not None
+    assert linea["unidad_medida"] == "M"
+
+
+def test_construir_linea_catalogo_marca_cantidad_con_forma_de_anio():
+    mapeo = {"codigo_precio": None, "matricula": 0, "descripcion": 1, "unidad_medida": None, "cantidad": 2, "precio_unitario": 3}
+    fila = ["607010254", "TRAVIESA PR-VE 54E1", "2004", "76,19 €"]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=10, documento_origen_id=241, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea is not None
+    assert linea["cantidad"] == Decimal("2004")
+    assert "parece un año" in linea["motivo_revision"]
+
+
+def test_construir_linea_catalogo_marca_cantidad_cero():
+    mapeo = {"codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": 3, "cantidad": 4, "precio_unitario": 5}
+    fila = ["P-0087", "", "Semicambio dcha (doble) SIN cruz obtuso", "UD.", "0", "29.525,82 €"]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=17, documento_origen_id=36, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea is not None
+    assert linea["cantidad"] == Decimal("0")
+    assert "cantidad es 0" in linea["motivo_revision"]
+
+
+def test_construir_linea_catalogo_no_marca_cantidad_plausible():
+    # Contraste: una cantidad real y corriente (30 unidades) no dispara
+    # ningún motivo de revisión por este mecanismo.
+    mapeo = {"codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": 3, "cantidad": 4, "precio_unitario": 5}
+    fila = ["P-001", "697500900", "GUANTE X", "UN", "30", "24,00"]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=1, documento_origen_id=None, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea is not None
+    assert linea["cantidad"] == Decimal("30")
+    assert linea["motivo_revision"] is None
+
+
+def test_construir_linea_catalogo_no_marca_cantidad_redonda_fuera_de_rango_de_anio():
+    # Una cantidad real y grande (2500 metros de cable) que cae fuera del
+    # rango de año no se marca -- el rango es deliberadamente estrecho
+    # (1900-2100) para no generar ruido sobre cantidades legítimas mayores.
+    mapeo = {"codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": 3, "cantidad": 4, "precio_unitario": 5}
+    fila = ["P-010", "", "CABLE ARMADO DE Cu", "M", "2.500,00", "5,20 €"]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=1, documento_origen_id=None, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea is not None
+    assert linea["cantidad"] == Decimal("2500")
+    assert linea["motivo_revision"] is None

@@ -171,6 +171,29 @@ function celdaCantidad(linea: LineaCatalogo) {
   );
 }
 
+// Unidad de medida: sin ella, una cantidad de 2000 o un precio de 0,142 no
+// significan nada por sí solos (pueden ser metros de cable o toneladas de
+// balasto) -- CONTEXTO.md, encargo de esta sesión. Mismo criterio de celda
+// vacía que matrícula: una partida alzada (reserva presupuestaria, no un
+// artículo de almacén) no lleva unidad si el documento no la da una
+// propia ("PA" aparece a veces, y entonces se muestra igual que cualquier
+// otra); cualquier otra línea sin unidad es un hueco real del documento de
+// origen, no una partida alzada.
+function celdaUnidadMedida(linea: LineaCatalogo, partida: boolean) {
+  return celdaConCausaDeVacio(
+    linea.unidad_medida,
+    partida,
+    "El cuadro de precios de origen no trae unidad de medida para esta línea."
+  );
+}
+
+// Precio unitario y precio adjudicado son siempre "por unidad" -- este
+// sufijo hace explícito de qué unidad se trata en el título de la sección,
+// en vez de dejar que el lector lo infiera solo de la cantidad de arriba.
+function sufijoUnidad(unidad: string | null): string {
+  return unidad ? ` (por ${unidad})` : "";
+}
+
 // Precio unitario vacío: siempre un hueco real de extracción (a diferencia
 // de cantidad, ningún cuadro de precios licita sin precio) -- verificado
 // contra el corpus real que casi todos los casos ya se recuperan solos en
@@ -342,6 +365,7 @@ export default function CatalogoPanel({ apiUrl }: { apiUrl: string }) {
                   <th>Código</th>
                   <th>Descripción</th>
                   <th className="num">Cantidad</th>
+                  <th>Unidad</th>
                   <th className="num">Precio unitario</th>
                   <th className="num">Precio adjudicado</th>
                   <th>Revisión</th>
@@ -372,6 +396,7 @@ export default function CatalogoPanel({ apiUrl }: { apiUrl: string }) {
                         <DescripcionCelda texto={linea.descripcion} />
                       </td>
                       <td className="num">{celdaCantidad(linea)}</td>
+                      <td>{celdaUnidadMedida(linea, partida)}</td>
                       <td className="num">{celdaPrecioUnitario(linea)}</td>
                       <td className="num">{celdaPrecioAdjudicado(linea)}</td>
                       <td>{celdaRevision(linea)}</td>
@@ -438,10 +463,20 @@ export default function CatalogoPanel({ apiUrl }: { apiUrl: string }) {
                   <dd>{seleccion.nombre_proyecto}</dd>
                 </dl>
               )}
+              <dl className="trace-field">
+                <dt>Cantidad</dt>
+                <dd>
+                  {seleccion.cantidad ? (
+                    `${formatearNumero(seleccion.cantidad, 2)}${seleccion.unidad_medida ? ` ${seleccion.unidad_medida}` : ""}`
+                  ) : (
+                    <span className="muted">no consta</span>
+                  )}
+                </dd>
+              </dl>
             </div>
 
             <div>
-              <p className="section-label">Precio y baja</p>
+              <p className="section-label">Precio y baja{sufijoUnidad(seleccion.unidad_medida)}</p>
               {seleccion.baja_lote ? (
                 <div className="formula">
                   <span>{formatearImporte(seleccion.precio_unitario)}</span>
