@@ -17,6 +17,7 @@ from app.mantenimiento.programacion import (
 from app.models import TrabajoCola
 from app.queue import encolar_trabajo
 from app.schemas import EstadoMantenimientoOut, TrabajoOut
+from app.sindicacion.descubrimiento import TIPO_TRABAJO as TIPO_TRABAJO_SINDICACION_BACKFILL
 
 router = APIRouter()
 
@@ -121,6 +122,47 @@ def historial_copia_seguridad(
     return db.execute(
         select(TrabajoCola)
         .where(TrabajoCola.tipo == TIPO_TRABAJO_COPIA)
+        .order_by(TrabajoCola.created_at.desc())
+        .limit(limite)
+    ).scalars().all()
+
+
+class SindicacionBackfillPeticion(BaseModel):
+    # Hallazgo real (sesión 2026-09-07, caso 6.26/28510.0014): el ciclo
+    # normal solo revisa el mes en curso -- este es el botón manual para
+    # barrer varios meses pasados de una vez, sin el coste de
+    # descargar/extraer que llevaría el ciclo completo. `periodos` manda si
+    # se da; si no, `meses` (los últimos N, mes en curso incluido).
+    periodos: Optional[list[str]] = None
+    meses: int = 12
+
+
+@router.post("/mantenimiento/sindicacion/backfill", response_model=TrabajoOut)
+def lanzar_backfill_sindicacion(
+    peticion: SindicacionBackfillPeticion = Body(default_factory=SindicacionBackfillPeticion),
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    """Barrido de descubrimiento por sindicación sobre varios periodos
+    pasados (`app.sindicacion.descubrimiento.descubrir_backfill`) -- cierra
+    el hueco real de que nada, hasta esta sesión, comprobaba un mes que no
+    fuera el actual."""
+    payload = {"periodos": peticion.periodos, "meses": peticion.meses}
+    trabajo = encolar_trabajo(db, tipo=TIPO_TRABAJO_SINDICACION_BACKFILL, payload=payload)
+    return trabajo
+
+
+@router.get("/mantenimiento/sindicacion/historial", response_model=list[TrabajoOut])
+def historial_backfill_sindicacion(
+    limite: int = Query(default=20, ge=1, le=200),
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    """Igual que `GET /mantenimiento/historial`, filtrado por
+    `sindicacion_backfill`."""
+    return db.execute(
+        select(TrabajoCola)
+        .where(TrabajoCola.tipo == TIPO_TRABAJO_SINDICACION_BACKFILL)
         .order_by(TrabajoCola.created_at.desc())
         .limit(limite)
     ).scalars().all()

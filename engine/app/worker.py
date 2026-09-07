@@ -27,6 +27,8 @@ from app.mantenimiento.programacion import (
     verificar_y_lanzar_copia_programada,
 )
 from app.models import Documento, EstadoExpediente, Expediente
+from app.sindicacion.descubrimiento import TIPO_TRABAJO as TIPO_SINDICACION_BACKFILL
+from app.sindicacion.descubrimiento import descubrir_backfill, periodos_recientes
 from app.queue import ejecutar_trabajo as ejecutar_trabajo_generico
 from app.queue import reclamar_trabajos_huerfanos, tomar_siguiente_trabajo
 from app.scraping.job import ejecutar_scraping_expediente
@@ -149,12 +151,30 @@ def procesar_mantenimiento_ciclo(db, trabajo) -> dict:
     return ejecutar_ciclo_mantenimiento(db, storage, model_provider, MANEJADORES, trabajo)
 
 
+def procesar_sindicacion_backfill(db, trabajo) -> dict:
+    """Hallazgo real (aviso del cliente, sesión 2026-09-07, caso
+    `6.26/28510.0014`): el ciclo de mantenimiento nunca comprueba un mes
+    pasado de sindicación por su cuenta, solo el mes en curso -- este
+    trabajo es el barrido explícito que faltaba. Payload: `periodos` (lista
+    `AAAAMM`) o, si no viene, `meses` (entero, por defecto 12) resuelto con
+    `periodos_recientes` -- el mes en curso primero, hacia atrás, para que
+    una tanda grande interrumpida a medias no deje sin repasar los meses
+    más recientes."""
+    payload = trabajo.payload or {}
+    periodos = payload.get("periodos")
+    if not periodos:
+        periodos = periodos_recientes(int(payload.get("meses", 12)))
+    resumen = descubrir_backfill(db, periodos)
+    return resumen.to_dict()
+
+
 MANEJADORES = {
     "ping": procesar_ping,
     "descargar_expediente": procesar_descargar_expediente,
     "extraer_expediente": procesar_extraer_expediente,
     TIPO_MANTENIMIENTO_CICLO: procesar_mantenimiento_ciclo,
     TIPO_COPIA_SEGURIDAD: ejecutar_copia_seguridad,
+    TIPO_SINDICACION_BACKFILL: procesar_sindicacion_backfill,
 }
 
 

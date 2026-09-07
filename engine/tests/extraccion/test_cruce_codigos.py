@@ -190,3 +190,43 @@ def test_validar_ruta_codigos_proyecto_rechaza_ruta_inexistente(tmp_path):
 
     with pytest.raises(CodigosProyectoPathInvalida):
         validar_ruta_codigos_proyecto(str(ruta))
+
+
+# Aviso del cliente (sesión 2026-09-07, caso 6.26/28510.0014): antes solo se
+# leía la primera hoja del Excel de códigos -- un expediente cuya única fila
+# vive en una segunda hoja (p.ej. "en tramitación", separada de "en
+# ejecución") nunca cruzaba.
+
+
+def test_cruza_con_un_codigo_que_solo_vive_en_la_segunda_hoja(tmp_path):
+    ruta = tmp_path / "Codigos_de_proyecto_multi_hoja.xlsx"
+    libro = openpyxl.Workbook()
+    hoja1 = libro.active
+    hoja1.title = "En ejecución"
+    hoja1.append(["Nº Interno", "Nº Expediente", "MATRIZ", "ESPECIALIDAD/DISCIPLINA", "DESCRIPCIÓN"])
+    hoja1.append([24001, "6.24/28510.0128", None, "Señalización", "Equipos de medida"])
+    hoja2 = libro.create_sheet("En tramitación")
+    hoja2.append(["Nº Interno", "Nº Expediente", "MATRIZ", "ESPECIALIDAD/DISCIPLINA", "DESCRIPCIÓN"])
+    hoja2.append([26014, "6.26/28510.0014", None, "Vía", "Pedido nº3 acuerdo marco de carril"])
+    libro.save(ruta)
+
+    resultado = cruzar_codigo_proyecto(str(ruta), "6.26/28510.0014")
+
+    assert resultado.cruzado is True
+    assert resultado.codigo_interno == "26014"
+
+
+def test_hoja_vacia_no_revienta_la_lectura(tmp_path):
+    ruta = tmp_path / "Codigos_de_proyecto_hoja_vacia.xlsx"
+    libro = openpyxl.Workbook()
+    hoja1 = libro.active
+    hoja1.title = "En ejecución"
+    hoja1.append(["Nº Interno", "Nº Expediente", "MATRIZ", "ESPECIALIDAD/DISCIPLINA", "DESCRIPCIÓN"])
+    hoja1.append([24001, "6.24/28510.0128", None, "Señalización", "Equipos de medida"])
+    libro.create_sheet("Hoja vacía")  # sin ninguna fila, ni cabecera
+    libro.save(ruta)
+
+    resultado = cruzar_codigo_proyecto(str(ruta), "6.24/28510.0128")
+
+    assert resultado.cruzado is True
+    assert resultado.codigo_interno == "24001"
