@@ -24,8 +24,24 @@ type Documento = {
   paginas: number | null;
 };
 
+// Bloque 4, sesión de huérfanos de banda vacía (2026-09-07): la línea YA
+// resuelta (con lote) del mismo expediente con la que una huérfana coincide
+// en matrícula/descripción/precio — señal informativa, nunca calculada por
+// el sistema como duplicado real (ver docstring de
+// `app.catalogo.buscar_posible_duplicado_huerfana`: un precio de referencia
+// puede coincidir legítimamente entre lotes distintos sin ser la misma fila).
+type PosibleDuplicado = {
+  linea_id: number;
+  identificador_lote: string;
+  codigo_precio: string | null;
+  matricula: string | null;
+  descripcion: string;
+  precio_unitario: string | null;
+};
+
 type LineaCatalogo = {
   id: number;
+  lote_id: number | null;
   codigo_precio: string | null;
   matricula: string | null;
   descripcion: string;
@@ -39,6 +55,7 @@ type LineaCatalogo = {
   documento_origen_id: number | null;
   documento_origen_nombre: string | null;
   pagina: number | null;
+  posible_duplicado_de: PosibleDuplicado | null;
 };
 
 // Las tres salidas de una línea que hoy solo se podía confirmar (CONTEXTO.md
@@ -261,6 +278,27 @@ export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
 
   async function confirmarLinea(lineaId: number) {
     await fetch(`${apiUrl}/catalogo/lineas/${lineaId}/confirmar`, { method: "POST" });
+    if (seleccionId !== null) await cargarDetalle(seleccionId);
+  }
+
+  // Bloque 4 (2026-09-07): la única acción de un clic específica de la señal
+  // de "posible duplicado" — descartar. "Confirmar como distinta" reutiliza
+  // el botón "Confirmar" de siempre (`confirmarLinea`), porque es la misma
+  // decisión que ya existía: esta línea es material real del catálogo. El
+  // motivo queda anclado a la línea con la que coincidía, para que quede
+  // trazado por qué se descartó, no solo que se descartó.
+  async function descartarComoDuplicado(linea: LineaCatalogo) {
+    const d = linea.posible_duplicado_de;
+    if (!d) return;
+    const referencia = d.codigo_precio ?? d.matricula ?? "misma descripción y precio";
+    const motivo = `Descartada por coincidir con la línea ${d.linea_id} del LOTE ${d.identificador_lote} (${referencia}, ${
+      formatearNumero(d.precio_unitario) || "—"
+    } €) — confirmado como duplicado desde la señal de la cola de revisión.`;
+    await fetch(`${apiUrl}/catalogo/lineas/${linea.id}/descartar`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ motivo }),
+    });
     if (seleccionId !== null) await cargarDetalle(seleccionId);
   }
 
@@ -591,6 +629,52 @@ export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
                                 </div>
                               </td>
                             </tr>
+                            {linea.posible_duplicado_de && !esFinal && (
+                              <tr>
+                                <td colSpan={8} className="linea-accion-panel duplicado-panel">
+                                  <p className="duplicado-titulo">
+                                    Posible duplicado: coincide en matrícula/descripción/precio con una línea ya
+                                    resuelta de este mismo expediente. No es una decisión del sistema — puede ser el
+                                    mismo material repetido en el documento, o un precio de referencia que
+                                    legítimamente se repite entre lotes distintos (pasa en licitaciones reales).
+                                    Compara y decide:
+                                  </p>
+                                  <div className="duplicado-comparacion">
+                                    <div>
+                                      <span className="duplicado-label">Esta línea (sin lote)</span>
+                                      <span className="mono">{linea.codigo_precio ?? linea.matricula ?? "—"}</span>
+                                      <div>{linea.descripcion}</div>
+                                      <div className="num">{formatearNumero(linea.precio_unitario) || "—"} €</div>
+                                    </div>
+                                    <div>
+                                      <span className="duplicado-label">
+                                        Ya resuelta — LOTE {linea.posible_duplicado_de.identificador_lote}
+                                      </span>
+                                      <span className="mono">
+                                        {linea.posible_duplicado_de.codigo_precio ??
+                                          linea.posible_duplicado_de.matricula ??
+                                          "—"}
+                                      </span>
+                                      <div>{linea.posible_duplicado_de.descripcion}</div>
+                                      <div className="num">
+                                        {formatearNumero(linea.posible_duplicado_de.precio_unitario) || "—"} €
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className="button-row" style={{ marginTop: "0.75rem" }}>
+                                    <button onClick={() => confirmarLinea(linea.id)} className="btn btn-secondary btn-sm">
+                                      Confirmar como línea distinta
+                                    </button>
+                                    <button
+                                      onClick={() => descartarComoDuplicado(linea)}
+                                      className="btn btn-primary btn-sm"
+                                    >
+                                      Descartar como duplicado
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
                             {panelAbierto && (
                               <tr>
                                 <td colSpan={8} className="linea-accion-panel">

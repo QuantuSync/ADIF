@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth import Usuario, get_current_user
+from app.catalogo import buscar_posible_duplicado_huerfana
 from app.catalogo_consulta import fila_a_dict
 from app.db import get_db
 from app.extraccion.cruce_codigos import AutoreferenciaMatrizError, asignar_matriz
@@ -17,6 +18,7 @@ from app.schemas import (
     LineaCatalogoDescartar,
     LineaCatalogoOut,
     LineaCatalogoPendiente,
+    LineaCatalogoPosibleDuplicado,
 )
 
 router = APIRouter()
@@ -45,6 +47,25 @@ def listar_cola_revision(
         .where(Expediente.estado == EstadoExpediente.pendiente_revision)
         .order_by(Expediente.updated_at.desc())
     ).scalars().all()
+
+
+def _linea_out_con_posible_duplicado(db: Session, linea: LineaCatalogo, fila: tuple) -> LineaCatalogoOut:
+    """Bloque 4 (2026-09-07): añade la señal de "posible duplicado" a una
+    huérfana antes de construir la salida -- ver docstring de
+    `buscar_posible_duplicado_huerfana` para por qué es solo informativa."""
+    datos = fila_a_dict(*fila)
+    encontrado = buscar_posible_duplicado_huerfana(db, linea)
+    if encontrado is not None:
+        linea_resuelta, lote_resuelto = encontrado
+        datos["posible_duplicado_de"] = LineaCatalogoPosibleDuplicado(
+            linea_id=linea_resuelta.id,
+            identificador_lote=lote_resuelto.identificador_lote,
+            codigo_precio=linea_resuelta.codigo_precio,
+            matricula=linea_resuelta.matricula,
+            descripcion=linea_resuelta.descripcion,
+            precio_unitario=linea_resuelta.precio_unitario,
+        )
+    return LineaCatalogoOut(**datos)
 
 
 def _cargar_expediente_o_404(db: Session, expediente_id: int) -> Expediente:
@@ -77,7 +98,7 @@ def detalle_revision_expediente(
     return ExpedienteRevisionOut(
         expediente=ExpedienteOut.model_validate(expediente),
         documentos=documentos,
-        lineas=[LineaCatalogoOut(**fila_a_dict(*fila)) for fila in filas],
+        lineas=[_linea_out_con_posible_duplicado(db, fila[0], fila) for fila in filas],
     )
 
 
@@ -183,7 +204,7 @@ def _fila_linea(db: Session, linea_id: int) -> LineaCatalogoOut:
         .outerjoin(Documento, LineaCatalogo.documento_origen_id == Documento.id)
         .where(LineaCatalogo.id == linea_id)
     ).one()
-    return LineaCatalogoOut(**fila_a_dict(*fila))
+    return _linea_out_con_posible_duplicado(db, fila[0], fila)
 
 
 @router.post("/catalogo/lineas/{linea_id}/descartar", response_model=LineaCatalogoOut)

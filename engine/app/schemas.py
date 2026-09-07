@@ -98,6 +98,27 @@ class DocumentoOut(BaseModel):
     procesado_en: Optional[datetime] = None
 
 
+class LineaCatalogoPosibleDuplicado(BaseModel):
+    """Bloque 4, sesión de huérfanos de banda vacía (2026-09-07): señal
+    informativa para la cola de revisión, nunca una decisión automática
+    (CONTEXTO.md, "un contraste externo puede señalar un desajuste, pero no
+    tiene autoridad para cambiar el estado" -- mismo principio aplicado
+    aquí). Los datos de la línea YA resuelta con la que coincide una
+    huérfana en matrícula/descripción/precio, para comparar de un vistazo
+    sin abrir el PDF -- confirmar o descartar sigue siendo una decisión
+    humana, con los endpoints de siempre
+    (`POST /catalogo/lineas/{id}/confirmar` o `/descartar`)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    linea_id: int
+    identificador_lote: str
+    codigo_precio: Optional[str] = None
+    matricula: Optional[str] = None
+    descripcion: str
+    precio_unitario: Optional[Decimal] = None
+
+
 class LineaCatalogoOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -138,6 +159,11 @@ class LineaCatalogoOut(BaseModel):
     documento_origen_nombre: Optional[str] = None
     pagina: Optional[int] = None
     fragmento: Optional[str] = None
+    # Bloque 4 (2026-09-07): solo se calcula para huérfanas (`lote_id is
+    # None`) que coinciden en matrícula/descripción/precio con una línea ya
+    # resuelta del mismo expediente -- `None` en cualquier otro caso,
+    # incluida una huérfana sin ninguna coincidencia real.
+    posible_duplicado_de: Optional[LineaCatalogoPosibleDuplicado] = None
 
 
 class CatalogoRespuesta(BaseModel):
