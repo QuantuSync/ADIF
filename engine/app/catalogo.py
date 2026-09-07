@@ -610,6 +610,33 @@ def construir_linea_catalogo(
     if estado == "pie_de_tabla":
         return None
 
+    if (
+        campos["descripcion"]
+        and campos["codigo_precio"] is None
+        and campos["matricula"] is None
+        and campos["cantidad"] is None
+        and campos["precio_unitario"] is None
+        and campos["unidad_medida"] is None
+    ):
+        # Fila fantasma de desbordamiento de descripción (arreglo de
+        # 6.23/28510.0051, sesión 2026-09-06): en tablas donde la primera
+        # línea de una descripción envuelta cae en la banda visual de la
+        # fila ANTERIOR (desfase de una línea entre la columna de
+        # descripción y el resto -- ver `docs/excel-cliente-correccion.md`
+        # bloque 4 para el caso real completo), `pdfplumber` extrae ese
+        # fragmento en su propia fila, con todas las demás columnas en
+        # blanco. No es una línea de material nueva -- el material real,
+        # con su código, su unidad y su precio, ya se cuenta en la fila
+        # vecina (la fusión que `_dividir_fila_multiple` puede tener que
+        # deshacer, o una fila normal que arrastra el fragmento en su
+        # propia celda de descripción) -- así que se descarta aquí, igual
+        # que un pie de tabla o una fila de relleno (más abajo en esta
+        # misma función). Sin este descarte quedaba como un material
+        # fantasma con la baja del lote heredada pero sin ningún precio que
+        # derivar: indistinguible en el catálogo de una línea genuinamente
+        # pendiente de revisión.
+        return None
+
     if not campos["descripcion"] and campos["precio_unitario"] is None:
         recuperados = _intentar_recuperar_desalineacion(fila, mapeo)
         if recuperados is None:
@@ -681,6 +708,88 @@ def _es_fragmento_continuacion_pura(fila: list[Optional[str]], mapeo: dict[str, 
     return _parece_descripcion_recuperable(_valor_en(fila, indice_fragmento))
 
 
+# Marcador estable, mismo patrón que `_MOTIVO_DESCRIPCION_COLUMNA_FANTASMA`:
+# `_dividir_fila_multiple` lo añade a cada línea recuperada de una fila
+# fusionada -- la descripción de esas líneas puede traer texto de la línea
+# vecina (nunca se reparte, ver docstring de esa función), así que un
+# humano debe confirmarla antes de darla por buena aunque el precio ya sea
+# correcto y derivable.
+_MOTIVO_FILA_FUSIONADA = (
+    "línea recuperada de una fila que fusionaba varias líneas de precio en una sola celda del "
+    "documento (código y precio unitario con más de un valor); la descripción puede incluir texto "
+    "de la línea vecina, confirmar contra el documento original"
+)
+
+
+def _dividir_fila_multiple(
+    fila: list[Optional[str]], mapeo: dict[str, Optional[int]]
+) -> Optional[list[list[Optional[str]]]]:
+    """Arreglo de 6.23/28510.0051 (sesión 2026-09-06): en tablas donde el
+    desfase de una línea entre la columna de descripción y el resto (ver
+    la fila fantasma que descarta `construir_linea_catalogo`) hace que dos
+    filas de datos reales y consecutivas no difieran lo bastante en altura,
+    `pdfplumber` las funde en una sola fila extraída -- el código de precio
+    y el precio unitario de esa fila fusionada traen entonces dos valores
+    reales, uno por línea de texto dentro de la misma celda
+    (`"P-0090\\nP-0091"`, `"29.240,23 €\\n38.012,29 €"`), en vez de uno solo.
+
+    Solo se activa cuando el código de precio Y el precio unitario --las
+    dos columnas que de verdad identifican y valoran una línea-- se dividen
+    en el MISMO número N>=2 de líneas nunca vacías, y cada una por separado
+    ya tiene forma de código/precio válido (nunca a ciegas: dos valores que
+    no casen como códigos o precios reales no dividen la fila, se dejan
+    para que el camino normal los mande a revisión como hasta ahora). La
+    unidad de medida, si la cabecera la declara, debe dividirse también en
+    N o venir vacía en las dos.
+
+    La descripción NUNCA se reparte entre las N filas resultantes -- el
+    desfase de una línea hace que sus fragmentos no se correspondan 1:1 con
+    el resto de columnas (CONTEXTO.md sección 8: nunca inventar un reparto
+    que no se pueda verificar). Cada fila resultante se queda con el mismo
+    bloque de descripción completo tal cual; `construir_lineas_desde_tabla`
+    marca cada una con `_MOTIVO_FILA_FUSIONADA` para que un humano la
+    confirme, aunque el precio (y por tanto el precio adjudicado derivado)
+    ya sea correcto.
+
+    Devuelve `None` cuando no aplica: la fila sigue su camino normal, de
+    una sola línea por campo."""
+    indice_codigo = mapeo.get("codigo_precio")
+    indice_precio = mapeo.get("precio_unitario")
+    if indice_codigo is None or indice_precio is None:
+        return None
+
+    def _lineas_no_vacias(indice: Optional[int]) -> list[str]:
+        valor = _valor_en(fila, indice)
+        if not valor:
+            return []
+        return [linea.strip() for linea in valor.splitlines() if linea.strip()]
+
+    codigos = _lineas_no_vacias(indice_codigo)
+    precios = _lineas_no_vacias(indice_precio)
+    n = len(codigos)
+    if n < 2 or len(precios) != n:
+        return None
+    if not all(_CODIGO_PRECIO_VALIDO_RE.match(limpiar_codigo_celda(c) or "") for c in codigos):
+        return None
+    if not all(_parece_precio_recuperable(p) for p in precios):
+        return None
+
+    indice_unidad = mapeo.get("unidad_medida")
+    unidades = _lineas_no_vacias(indice_unidad) if indice_unidad is not None else []
+    if unidades and len(unidades) != n:
+        return None
+
+    filas_divididas = []
+    for i in range(n):
+        nueva_fila = list(fila)
+        nueva_fila[indice_codigo] = codigos[i]
+        nueva_fila[indice_precio] = precios[i]
+        if unidades:
+            nueva_fila[indice_unidad] = unidades[i]
+        filas_divididas.append(nueva_fila)
+    return filas_divididas
+
+
 def construir_lineas_desde_tabla(
     tabla: TablaExtraida,
     mapeo: dict[str, Optional[int]],
@@ -695,8 +804,28 @@ def construir_lineas_desde_tabla(
     filas = tabla.filas
     resultado: list[dict] = []
     for indice, fila in enumerate(filas):
+        # `_dividir_fila_multiple` (arreglo de 6.23/28510.0051, sesión
+        # 2026-09-06): una fila que fusiona varias líneas de precio en una
+        # sola celda del documento se reparte aquí en varias líneas de
+        # catálogo reales, cada una marcada para revisión -- la descripción
+        # puede traer texto de la línea vecina, nunca se reparte. Una fila
+        # fusionada no participa en la absorción de fragmentos de más abajo
+        # (esa lógica es para una fila normal, de una sola línea real).
+        sub_filas = _dividir_fila_multiple(fila, mapeo)
+        if sub_filas is not None:
+            for sub_fila in sub_filas:
+                linea = construir_linea_catalogo(
+                    sub_fila, mapeo, tabla.pagina, documento_origen_id, expediente_id, baja_lote,
+                    orden_inicial + len(resultado),
+                )
+                if linea is None:
+                    continue
+                linea["motivo_revision"] = _acumular_motivo(linea["motivo_revision"], _MOTIVO_FILA_FUSIONADA)
+                resultado.append(linea)
+            continue
+
         linea = construir_linea_catalogo(
-            fila, mapeo, tabla.pagina, documento_origen_id, expediente_id, baja_lote, orden_inicial + indice
+            fila, mapeo, tabla.pagina, documento_origen_id, expediente_id, baja_lote, orden_inicial + len(resultado)
         )
         if linea is None:
             continue
@@ -763,7 +892,27 @@ def _firma_material(datos: dict) -> Optional[tuple]:
     matrícula queda acotado a dentro del propio lote, donde no se ha
     verificado ningún caso real en el corpus. El llamador marca
     `motivo_revision` cuando la fusión ocurre sin matrícula (señal más
-    débil que con ella), para que quede confirmable."""
+    débil que con ella), para que quede confirmable.
+
+    Una línea recuperada de una fila fusionada (`_MOTIVO_FILA_FUSIONADA`,
+    `_dividir_fila_multiple`) no tiene firma: su descripción es el bloque
+    entero de la fila del documento, el MISMO para las N líneas que salen de
+    ella porque ahí nunca se reparte a ciegas. Sin este descarte, dos
+    materiales reales y distintos de una misma fila fusionada que además
+    coincidan en precio (caso real `6.23/28510.0051`, P-0058 y P-0059,
+    306.351,49 € los dos) comparten firma exacta —matrícula nula,
+    descripción idéntica, mismo precio— y `_combinar_por_clave` los funde en
+    una sola línea: uno de los dos códigos desaparece del catálogo, y el que
+    queda hereda la clave del otro. Es justo el fallo que este arreglo venía
+    a corregir, disimulado un paso más allá. La descripción compartida no es
+    una identidad válida para estas líneas, así que no participan en la
+    fusión por firma: cada una se guarda con su propio `codigo_precio` como
+    clave, marcada para revisión. Si alguna de ellas resultara ser de verdad
+    un duplicado de otra tabla, quedará como línea repetida a revisar —
+    verificable por un humano, y muy preferible a perder un material real
+    sin dejar rastro."""
+    if _MOTIVO_FILA_FUSIONADA in (datos.get("motivo_revision") or ""):
+        return None
     matricula = datos.get("matricula")
     descripcion = datos.get("descripcion")
     precio_unitario = datos.get("precio_unitario")

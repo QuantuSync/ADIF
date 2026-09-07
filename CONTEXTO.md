@@ -692,6 +692,34 @@ suficientes, no ahora.
   visible de consola (`wscript.exe` + `run-hidden.vbs`, antes invocaban
   `wsl.exe` directamente). Detalle completo, hallazgos en vivo y
   verificación en `docs/tolerancia-reinicios-dockerd.md`.
+- **Líneas con baja pero sin precio en `6.23/28510.0051`: corregido
+  (sesión 2026-09-06, cerrado el 2026-09-07).** En esa tabla la primera
+  línea de cada descripción envuelta cae en la banda visual de la fila
+  anterior, y ese desfase de una línea producía dos artefactos opuestos en
+  `pdfplumber`: una **fila fantasma** (solo un trozo de descripción, el
+  resto de columnas en blanco) que se guardaba como línea de catálogo con
+  la baja del lote heredada y ningún precio del que derivar el adjudicado,
+  y una **fila fusionada** (dos filas de datos reales fundidas en una) cuyo
+  código y precio traían dos valores dentro de la misma celda
+  (`"P-0090\nP-0091"`), imposibles de interpretar. `construir_linea_catalogo`
+  descarta ahora la primera y `_dividir_fila_multiple` separa la segunda en
+  sus N líneas reales — solo cuando código Y precio se dividen en el mismo
+  N≥2 y cada valor por separado ya tiene forma válida, nunca a ciegas. La
+  descripción no se reparte entre ellas (el desfase impide una
+  correspondencia 1:1 verificable, sección 8): cada línea se queda el bloque
+  entero y se marca para revisión. Tercer defecto, encontrado verificando el
+  arreglo contra la base de datos real y no cubierto por las pruebas de
+  unidad: esas líneas comparten descripción, no tienen matrícula y pueden
+  compartir precio, así que `_firma_material` las veía como el mismo
+  material y `_combinar_por_clave` las volvía a fundir — de `P-0058`/`P-0059`
+  quedaba una sola fila, con la clave de uno y el código del otro, y un
+  material real desaparecía del catálogo. `_firma_material` ya no da firma a
+  una línea recuperada de una fila fusionada: su descripción es un bloque
+  compartido, no una identidad. Verificado reprocesando el expediente
+  entero contra el stack real: 3 filas fusionadas separadas (6 líneas, todas
+  marcadas), 0 líneas fantasma, 0 líneas con baja y sin precio y 0 claves
+  incoherentes en todo el corpus. Detalle completo en
+  `docs/excel-cliente-correccion.md` bloque 4.
 
 ---
 

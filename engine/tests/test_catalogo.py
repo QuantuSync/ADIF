@@ -241,6 +241,251 @@ def test_construir_linea_catalogo_descarta_fila_totales_de_pie_de_tabla():
     assert linea is None
 
 
+def test_construir_linea_catalogo_descarta_fila_fantasma_de_desbordamiento_de_descripcion():
+    # Expediente real 6.23/28510.0051 (CONTRATO_2 p.153, sesión 2026-09-06):
+    # en esta tabla la primera línea de una descripción envuelta cae en la
+    # banda visual de la fila ANTERIOR, así que pdfplumber emite una fila
+    # propia solo con ese fragmento de texto y todas las demás columnas en
+    # blanco -- no es una línea de material nueva (el material real, con su
+    # código, su unidad y su precio, se cuenta en la fila de al lado). Antes
+    # de este arreglo se guardaba como línea de catálogo con la baja del
+    # lote heredada pero sin ningún precio que derivar.
+    mapeo = {"codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": 3, "cantidad": None, "precio_unitario": 5}
+    fila = [None, None, "I-TC", None, "ALTO", None]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=153, documento_origen_id=40, expediente_id=18, baja_lote=Decimal("0.2531"), orden_aparicion=0
+    )
+
+    assert linea is None
+
+
+def test_construir_linea_catalogo_no_descarta_fila_con_codigo_aunque_no_tenga_precio():
+    # Contraste de la prueba anterior: una fila que sí trae código de precio
+    # (identifica un material real) pero no precio por otro motivo no es una
+    # fila fantasma -- sigue su camino normal, a revisión si hace falta,
+    # nunca se descarta en silencio.
+    mapeo = {"codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": 3, "cantidad": None, "precio_unitario": 5}
+    fila = ["P-100", None, "Material real sin precio", "UD.", "ALTO", None]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=1, documento_origen_id=None, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea is not None
+    assert linea["codigo_precio"] == "P-100"
+
+
+def test_construir_linea_catalogo_no_separa_si_los_precios_no_casan_uno_a_uno():
+    # Dos códigos fusionados pero un solo precio (no dos): no hay pareja
+    # código-precio uno a uno que recuperar sin adivinar cuál de los dos
+    # códigos se queda sin precio. Esta prueba llama directamente a
+    # `construir_linea_catalogo` (sin pasar por `_dividir_fila_multiple`,
+    # que solo interviene desde `construir_lineas_desde_tabla`), para
+    # comprobar el camino normal de siempre: el precio único sí se
+    # interpreta bien, pero el código fusionado sigue sin reconocerse.
+    mapeo = {"codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": 3, "cantidad": None, "precio_unitario": 5}
+    fila = ["P-0058\nP-0059", None, "CAM1H-60-1500-TC-D\nCAM1H-60-1500-TC-I", "UD.\nUD.", "ALTO\nALTO", "306.351,49 €"]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=153, documento_origen_id=None, expediente_id=1, baja_lote=Decimal("0.10"), orden_aparicion=0
+    )
+
+    assert linea is not None
+    assert linea["precio_unitario"] == Decimal("306351.49")
+    assert linea["codigo_precio"] == "P-0058P-0059"
+    assert "no reconocido" in linea["motivo_revision"]
+
+
+def test_construir_lineas_desde_tabla_no_separa_si_los_precios_no_casan_uno_a_uno():
+    # Mismo caso, pero pasando por `construir_lineas_desde_tabla` (donde sí
+    # interviene `_dividir_fila_multiple`): con solo un precio para dos
+    # códigos, la fila no se separa -- sigue como una única línea, igual que
+    # la prueba anterior.
+    mapeo = {"codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": 3, "cantidad": None, "precio_unitario": 5}
+    tabla = TablaExtraida(
+        cabecera=["CÓDIGO", "MATRÍCULA", "DESCRIPCIÓN", "UNIDAD", "IMPACTO", "PRECIO"],
+        filas=[
+            ["P-0058\nP-0059", None, "CAM1H-60-1500-TC-D\nCAM1H-60-1500-TC-I", "UD.\nUD.", "ALTO\nALTO", "306.351,49 €"],
+        ],
+        pagina=153,
+        bbox=(0.0, 0.0, 100.0, 100.0),
+    )
+
+    lineas = construir_lineas_desde_tabla(tabla, mapeo, None, expediente_id=1, baja_lote=None, orden_inicial=0)
+
+    assert len(lineas) == 1
+    assert lineas[0]["codigo_precio"] == "P-0058P-0059"
+
+
+def test_construir_lineas_desde_tabla_separa_fila_fusionada_con_dos_precios():
+    # Expediente real 6.23/28510.0051 (CONTRATO_2 p.155, sesión 2026-09-06):
+    # dos filas de datos reales y consecutivas (P-0090, P-0091) sin
+    # suficiente diferencia de altura entre ellas se funden en una sola fila
+    # extraída por pdfplumber, con el código y el precio unitario trayendo
+    # dos valores reales -- uno por línea de texto -- en la misma celda.
+    # Antes de este arreglo, "P-0090P-0091" no encajaba en ningún formato de
+    # código conocido, el precio quedaba sin interpretar, y la línea se
+    # guardaba con la baja del lote pero sin precio adjudicado que derivar
+    # (el bug reportado por el cliente). La fila fantasma final (solo
+    # descripción) no debe generar ninguna línea de catálogo.
+    mapeo = {"codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": 3, "cantidad": None, "precio_unitario": 5}
+    tabla = TablaExtraida(
+        cabecera=["CÓDIGO", "MATRÍCULA", "DESCRIPCIÓN", "UNIDAD", "IMPACTO", "PRECIO"],
+        filas=[
+            ["P-0089", None, "cruz obtuso DMRDH-G-60-\n250-0,11-CR-D-TC\nSemicambio izq (sencillo)", "UD.", "ALTO", "38.012,29 €"],
+            [
+                "P-0090\nP-0091", None,
+                "DMRDH-G-60-250-0,11-CR-\nD-TC con 2 motores\nSemicambio dcha (doble) SIN\ncruz obtuso DMRDH-G-60-",
+                "UD.\nUD.", "ALTO\nALTO", "29.240,23 €\n38.012,29 €",
+            ],
+            [None, None, "250-0,11-CR-D-TC con 2\nmotores\nSemicambio izq (sencillo)", None, None, None],
+        ],
+        pagina=155,
+        bbox=(0.0, 0.0, 100.0, 100.0),
+    )
+
+    lineas = construir_lineas_desde_tabla(tabla, mapeo, 40, expediente_id=18, baja_lote=Decimal("0.2531"), orden_inicial=0)
+
+    por_codigo = {linea["codigo_precio"]: linea for linea in lineas}
+    assert set(por_codigo) == {"P-0089", "P-0090", "P-0091"}
+    assert por_codigo["P-0090"]["precio_unitario"] == Decimal("29240.23")
+    assert por_codigo["P-0091"]["precio_unitario"] == Decimal("38012.29")
+    esperado_90 = Decimal("29240.23") * (Decimal("1") - Decimal("0.2531"))
+    esperado_91 = Decimal("38012.29") * (Decimal("1") - Decimal("0.2531"))
+    assert por_codigo["P-0090"]["precio_adjudicado"] == esperado_90
+    assert por_codigo["P-0091"]["precio_adjudicado"] == esperado_91
+    for codigo in ("P-0090", "P-0091"):
+        assert "línea recuperada de una fila que fusionaba" in por_codigo[codigo]["motivo_revision"]
+    assert len(lineas) == 3
+
+
+def test_construir_lineas_desde_tabla_separa_fila_fusionada_con_precios_iguales():
+    # Mismo documento, P-0058/P-0059: dos códigos reales con precio igual
+    # por casualidad (no un valor duplicado dentro de la celda de un único
+    # código -- eso ya lo cubre `_resolver_valor_duplicado`). Debe separarse
+    # en dos líneas de catálogo con su propio código, no fundirse en una.
+    mapeo = {"codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": 3, "cantidad": None, "precio_unitario": 5}
+    tabla = TablaExtraida(
+        cabecera=["CÓDIGO", "MATRÍCULA", "DESCRIPCIÓN", "UNIDAD", "IMPACTO", "PRECIO"],
+        filas=[
+            [
+                "P-0058\nP-0059", None, "CAM1H-60-1500-TC-D\nCAM1H-60-1500-TC-I",
+                "UD.\nUD.", "ALTO\nALTO", "306.351,49 €\n306.351,49 €",
+            ],
+        ],
+        pagina=153,
+        bbox=(0.0, 0.0, 100.0, 100.0),
+    )
+
+    lineas = construir_lineas_desde_tabla(tabla, mapeo, None, expediente_id=1, baja_lote=None, orden_inicial=0)
+
+    assert len(lineas) == 2
+    assert {linea["codigo_precio"] for linea in lineas} == {"P-0058", "P-0059"}
+    assert all(linea["precio_unitario"] == Decimal("306351.49") for linea in lineas)
+
+
+def test_combinar_por_clave_no_funde_dos_lineas_de_la_misma_fila_fusionada():
+    # Defecto encontrado verificando el arreglo de la fila fusionada contra
+    # la base de datos real (expediente 18, lote 179): separar la fila en
+    # P-0058 y P-0059 no bastaba. Las dos líneas salen con la MISMA
+    # descripción (el bloque entero de la fila, que nunca se reparte a
+    # ciegas), sin matrícula, y con el mismo precio -- firma de material
+    # idéntica, así que `_combinar_por_clave` volvía a fundirlas en una
+    # sola: en la base de datos quedaba UNA fila, con `clave_linea="P-0058"`
+    # y `codigo_precio="P-0059"`, y el material P-0058 desaparecía del
+    # catálogo entero. El mismo fallo que el arreglo venía a corregir, un
+    # paso más allá y con peor pinta (la línea superviviente parece
+    # correcta). `_firma_material` no da firma a estas líneas.
+    mapeo = {"codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": 3, "cantidad": None, "precio_unitario": 5}
+    tabla = TablaExtraida(
+        cabecera=["CÓDIGO", "MATRÍCULA", "DESCRIPCIÓN", "UNIDAD", "IMPACTO", "PRECIO"],
+        filas=[
+            [
+                "P-0058\nP-0059", None, "CAM1H-60-1500-TC-D\nCAM1H-60-1500-TC-I",
+                "UD.\nUD.", "ALTO\nALTO", "306.351,49 €\n306.351,49 €",
+            ],
+        ],
+        pagina=57,
+        bbox=(0.0, 0.0, 100.0, 100.0),
+    )
+    lineas = construir_lineas_desde_tabla(tabla, mapeo, None, expediente_id=18, baja_lote=None, orden_inicial=0)
+
+    combinadas = _combinar_por_clave(lineas)
+
+    assert len(combinadas) == 2
+    assert {linea["codigo_precio"] for linea in combinadas} == {"P-0058", "P-0059"}
+    assert {linea["clave_linea"] for linea in combinadas} == {"P-0058", "P-0059"}
+
+
+def test_guardar_lineas_catalogo_no_pierde_un_codigo_de_una_fila_fusionada(db_session):
+    # El mismo defecto, comprobado donde de verdad dolía: contra la base de
+    # datos. Antes del arreglo esto guardaba una sola fila; ahora guarda los
+    # dos materiales reales, cada uno con su código como clave y los dos
+    # marcados para revisión (su descripción es el bloque compartido de la
+    # fila del documento, hay que confirmarla contra el original).
+    lote = _lote(db_session)
+    mapeo = {"codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": 3, "cantidad": None, "precio_unitario": 5}
+    tabla = TablaExtraida(
+        cabecera=["CÓDIGO", "MATRÍCULA", "DESCRIPCIÓN", "UNIDAD", "IMPACTO", "PRECIO"],
+        filas=[
+            [
+                "P-0058\nP-0059", None, "CAM1H-60-1500-TC-D\nCAM1H-60-1500-TC-I",
+                "UD.\nUD.", "ALTO\nALTO", "306.351,49 €\n306.351,49 €",
+            ],
+        ],
+        pagina=57,
+        bbox=(0.0, 0.0, 100.0, 100.0),
+    )
+    lineas = construir_lineas_desde_tabla(
+        tabla, mapeo, None, expediente_id=lote.expediente_id, baja_lote=None, orden_inicial=0
+    )
+
+    resultado = guardar_lineas_catalogo(db_session, lote.id, lineas)
+    db_session.commit()
+
+    assert resultado.creadas == 2
+    guardadas = db_session.query(LineaCatalogo).filter_by(lote_id=lote.id).all()
+    assert {linea.codigo_precio for linea in guardadas} == {"P-0058", "P-0059"}
+    assert {linea.clave_linea for linea in guardadas} == {"P-0058", "P-0059"}
+    assert all(linea.precio_unitario == Decimal("306351.49") for linea in guardadas)
+    assert all("fusionaba" in (linea.motivo_revision or "") for linea in guardadas)
+
+
+def test_guardar_lineas_catalogo_fila_fusionada_reprocesada_no_duplica(db_session):
+    # Contrapartida de la prueba anterior: quitarle la firma de material a
+    # estas líneas no puede romper la idempotencia del reproceso (el ciclo
+    # de mantenimiento vuelve a extraer los mismos documentos cada semana).
+    # Su `clave_linea` es su propio código, que sí es estable: la segunda
+    # pasada actualiza las dos filas, no crea dos más.
+    lote = _lote(db_session)
+    mapeo = {"codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": 3, "cantidad": None, "precio_unitario": 5}
+    tabla = TablaExtraida(
+        cabecera=["CÓDIGO", "MATRÍCULA", "DESCRIPCIÓN", "UNIDAD", "IMPACTO", "PRECIO"],
+        filas=[
+            [
+                "P-0058\nP-0059", None, "CAM1H-60-1500-TC-D\nCAM1H-60-1500-TC-I",
+                "UD.\nUD.", "ALTO\nALTO", "306.351,49 €\n306.351,49 €",
+            ],
+        ],
+        pagina=57,
+        bbox=(0.0, 0.0, 100.0, 100.0),
+    )
+
+    def _lineas():
+        return construir_lineas_desde_tabla(
+            tabla, mapeo, None, expediente_id=lote.expediente_id, baja_lote=None, orden_inicial=0
+        )
+
+    primera = guardar_lineas_catalogo(db_session, lote.id, _lineas())
+    segunda = guardar_lineas_catalogo(db_session, lote.id, _lineas())
+    db_session.commit()
+
+    assert (primera.creadas, primera.actualizadas) == (2, 0)
+    assert (segunda.creadas, segunda.actualizadas) == (0, 2)
+    assert db_session.query(LineaCatalogo).filter_by(lote_id=lote.id).count() == 2
+
+
 def test_construir_linea_catalogo_fragmento_wrap_sin_precio_se_descarta():
     # Expediente real 6.20/28510.0136 (ANEJO_3, hilo de contacto): fila de
     # continuación de una descripción envuelta entre filas de `pdfplumber`
