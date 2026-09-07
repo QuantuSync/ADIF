@@ -47,6 +47,12 @@ wsl -d Ubuntu-24.04 -u root -- systemctl start docker
 
 ### Segunda causa de caída: reanudación del modo de espera moderno de Windows
 
+**Cerrada de raíz el 2026-09-07** (ver más abajo, "Modo de espera moderno
+desactivado a nivel de firmware"). Lo de debajo es el diagnóstico y la
+mitigación aplicados mientras seguía activa; se deja tal cual para quien
+llegue a una máquina donde el modo de espera moderno no se pueda
+desactivar y necesite las mismas mitigaciones.
+
 Diagnóstico completo en `docs/diagnostico-caidas-dockerd.md`. Resumen: tras
 corregir lo de arriba, la VM seguía sin caerse por inactividad, pero al
 reanudar el portátil desde el modo de espera moderno (S0ix) — típicamente
@@ -90,15 +96,34 @@ la demo:
    ```
    Unregister-ScheduledTask -TaskName "ADIF-WSL-Docker-Autostart" -Confirm:$false
    ```
-4. **Tarea programada `ADIF-WSL-Docker-Watchdog`** (Programador de tareas
-   de Windows, se repite cada minuto): reasegura que `dockerd` sigue activo
-   dentro de la distro, para cubrir el hueco entre que WSL se reinicia y la
-   tarea de arranque de sesión (punto 3) llega a ejecutarse. Ambas tareas
-   arrancan `wsl.exe` a través de `wscript.exe` + un script `.vbs` (no
-   directamente), para no abrir una ventana de consola visible en cada
-   disparo (`docs/tolerancia-reinicios-dockerd.md`). Para revertirla:
+4. **Tarea programada `ADIF-WSL-Docker-Keepalive`** (Programador de tareas
+   de Windows, dispara al iniciar sesión): mantiene una sesión `wsl.exe`
+   conectada de forma **permanente** (no periódica). Arranca
+   `wscript.exe` + un script `.vbs` oculto (mismo patrón que el punto 3,
+   sin ventana de consola visible,
+   `docs/tolerancia-reinicios-dockerd.md`), que a su vez ejecuta en bucle
+   `wsl.exe -d Ubuntu-24.04 -u root -- bash -c "systemctl start docker;
+   exec sleep infinity"`: la sesión nunca se desconecta por sí sola
+   (`sleep infinity`), y si `wsl.exe` muriera de verdad el bucle reconecta
+   a los 2s.
+
+   **Sustituye a una tarea anterior, `ADIF-WSL-Docker-Watchdog`** (se
+   repetía cada minuto, se conectaba, ejecutaba `systemctl start docker` y
+   se desconectaba — retirada el 2026-09-07). Causa: sesión de diagnóstico
+   2026-09-07, `docs/diagnostico-caidas-dockerd.md` sección "causa 3" —
+   WSL apaga sola la instancia entera unos 25-30s después de que se
+   desconecta el último cliente `wsl.exe`, sin relación con el modo de
+   espera moderno y pese a `systemd=true`/`vmIdleTimeout=-1`. El Watchdog
+   periódico revivía el sistema a tiempo, pero cada reconexión forzaba un
+   derribo completo de los cuatro contenedores (incluida la base de
+   datos) — una sesión permanente evita el apagado por completo, en vez
+   de recuperarse de él cada minuto. Verificado con una sonda de 16
+   minutos desde Windows: **0 cortes** (antes, con el Watchdog periódico:
+   12 cortes de ~40s en 11 minutos). Para revertir esta tarea (queda solo
+   el arranque de sesión del punto 3, sin ninguna red de seguridad
+   adicional durante la sesión):
    ```
-   Unregister-ScheduledTask -TaskName "ADIF-WSL-Docker-Watchdog" -Confirm:$false
+   Unregister-ScheduledTask -TaskName "ADIF-WSL-Docker-Keepalive" -Confirm:$false
    ```
 5. **`restart: unless-stopped` en los cuatro servicios de
    `docker-compose.yml`** (postgres, api, worker, web): cierra el hueco
@@ -119,6 +144,37 @@ la demo:
    Terminar la distro entera y disparar la tarea programada (sin ejecutar
    nada más a mano) dejó los cuatro contenedores arriba y la API y la web
    respondiendo (`GET /health` → `200`, `GET /` de la web → `200`).
+
+### Modo de espera moderno desactivado a nivel de firmware (2026-09-07)
+
+Cambio de esta máquina, no del proyecto — cierra la causa 2 de raíz en vez
+de solo mitigarla (los cinco puntos de arriba siguen aplicados, no hacen
+falta para esto pero tampoco estorban). Vía registro (`PlatformAoAcOverride`,
+ACPI Away Mode / Modo de espera moderno):
+
+```
+reg add "HKLM\SYSTEM\CurrentControlSet\Control\Power" /v PlatformAoAcOverride /t REG_DWORD /d 0 /f
+```
+
+Requiere reiniciar el equipo para que surta efecto. Confirmar con
+`powercfg /a`: debe listar solo **Modo de espera (S3)** e **Hibernar**
+como estados disponibles — si sigue apareciendo "Modo de espera (inactivo
+de baja energía S0)", el cambio no se aplicó o falta el reinicio.
+
+Verificado en sesión (`docs/diagnostico-caidas-dockerd.md`, "Causa 2:
+cerrada de raíz"): más de 20 minutos de sondeo sin un solo evento
+`Kernel-Power` de suspensión/reanudación en el registro de sucesos.
+
+Para revertir (volver al Modo de espera moderno de fábrica):
+
+```
+reg delete "HKLM\SYSTEM\CurrentControlSet\Control\Power" /v PlatformAoAcOverride /f
+```
+
+También requiere reiniciar. **Nota:** al revertirlo vuelve la causa 2
+original (reanudación de S0ix reiniciando el *init* de WSL) — las
+mitigaciones de los puntos 1-5 de arriba siguen aplicadas y la cubren,
+pero solo con una tolerancia de segundos por reinicio, no eliminándola.
 
 ### Dónde vive el proyecto para `docker compose`
 

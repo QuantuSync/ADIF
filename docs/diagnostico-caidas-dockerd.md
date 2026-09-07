@@ -248,3 +248,128 @@ sí se suspendió y reanudó varias veces por otros motivos (madrugadas,
 cierres de tapa) sin volver a producir el suceso — así que ni siquiera es
 un 100% de correlación observada, pero es el único patrón consistente con
 la evidencia y el que mantener el equipo despierto elimina por completo.
+
+---
+
+## Causa 2: cerrada de raíz (sesión 2026-09-07) — y una causa 3 nueva, distinta, encontrada al verificarlo
+
+El usuario desactivó el Modo de espera moderno a nivel de firmware
+(`PlatformAoAcOverride = 0` en el registro, fuera del alcance de este
+repositorio — requiere privilegios de administrador de Windows) y
+reinició el equipo. Confirmado con `powercfg /a`: el sistema ya solo
+ofrece **Modo de espera (S3)** e **Hibernar** — el S0ix que causaba la
+causa 2 ya no existe como estado posible. Revertir: `README.md`.
+
+**Verificación de que la causa 2 en sí ya no puede dispararse:** en toda
+la ventana de esta sesión (más de 20 minutos de sondeo activo) no hubo
+**ni un solo evento `Kernel-Power`** en el registro de sucesos de Windows
+— ni suspensión, ni reanudación, ni cambio de tapa, ni cambio de fuente de
+energía salvo los del propio arranque. El mecanismo que investigaba este
+documento (reanudación de S0ix forzando un reinicio del *init* de la
+distro) no tiene ningún evento de reanudación del que dispararse. Causa 2:
+**cerrada**, con evidencia, no solo con la ausencia teórica del estado de
+energía.
+
+### Pero el stack se seguía cayendo — mucho más seguido que antes
+
+Con la tarea `ADIF-WSL-Docker-Autostart` disparada con éxito al iniciar
+sesión (confirmado, `LastTaskResult 0`, 16s después del arranque), el
+navegador seguía dando `ERR_CONNECTION_REFUSED` media hora después. Cuatro
+sondas sucesivas desde Windows (`Invoke-WebRequest` a `http://localhost:3000/`
+cada 3s, sin tocar WSL durante la medición, mismo método que la sección 6
+de `docs/tolerancia-reinicios-dockerd.md`) aislaron la causa:
+
+| Sonda | Configuración | Resultado |
+|---|---|---|
+| 1 | `ADIF-WSL-Docker-Watchdog` activo (cada 1 min), 11 min | **12 cortes, ~40s cada uno, uno por minuto** |
+| 2 | Watchdog desactivado, 4 min | 1 corte — **no se recuperó en todo el tramo** |
+| 3 | Watchdog desactivado, arranque limpio inmediatamente antes, 2:30 min | Igual: cae a los 14s de desactivarlo y no vuelve |
+| 4 | Watchdog desactivado, con una sesión `wsl.exe` **persistente** conectada (`wsl.exe -d Ubuntu-24.04 -- sleep 200`, sin relación con Docker) | **0 cortes, 0 fallos en 170s** |
+
+`journalctl` dentro de WSL, durante una de las ventanas de corte de la
+sonda 1, confirma el mecanismo exacto:
+
+```
+Sep 07 09:33:29 Lucas unknown: WSL (2 - init-systemd(Ubuntu-24.04)) ERROR:
+InitTerminateInstanceInternal:2763: systemctl poweroff did not terminate
+the instance in 10000 ms, calling reboot(RB_POWER_OFF)
+```
+
+Ese mensaje aparece, en cada ciclo, entre 25 y 30 segundos después de que
+el único cliente `wsl.exe` conectado en ese momento (la propia tarea
+`ADIF-WSL-Docker-Watchdog`, que se conecta, ejecuta `systemctl start
+docker` y se desconecta — patrón de un solo tiro, sin esperar) se
+desconecta. **`WSL apaga sola la instancia entera en cuanto no queda
+ningún cliente conectado**, sin relación ninguna con el modo de espera
+moderno (no hay reanudación de por medio: `journalctl --list-boots` no
+muestra ningún arranque de kernel nuevo en toda la ventana — es la
+instancia de WSL derribando y relanzando su propio *init*, no la VM
+reiniciándose) y **pese a `systemd=true` en `/etc/wsl.conf` y
+`vmIdleTimeout=-1` en `.wslconfig`**, que en teoría debían bastar para
+mantenerla viva de forma persistente. Es un mecanismo de WSL (build
+2.7.10.0 de esta máquina) distinto y no documentado en la sección de
+arriba, que esta sesión no había visto porque en las sesiones anteriores
+siempre había alguna otra actividad de WSL (una terminal abierta, VS Code
+conectado) manteniendo un cliente adjunto casi todo el tiempo — con la
+máquina recién reiniciada y solo el Watchdog tocando WSL, cada
+desconexión del Watchdog deja una ventana de ~25-30s sin ningún cliente,
+tiempo de sobra para que se dispare.
+
+Cada vez que esto ocurre, derriba el *init* entero — no solo `dockerd` —
+así que los cuatro contenedores mueren a la fuerza (`Container failed to
+exit within 10s of signal 15 - using the force`, visible en el log de
+`dockerd` en cada ciclo) y se reconstruyen desde cero al arrancar de
+nuevo, **incluida `postgres`**, cuando el siguiente disparo del Watchdog
+(un minuto después) reconecta y relanza la instancia. El propio Watchdog,
+pensado como red de seguridad para la causa 2, era sin darse cuenta el
+mecanismo que mantenía vivo el sistema frente a esta causa 3 — pero al
+precio de un derribo completo del stack cada minuto.
+
+### El arreglo: una sesión persistente, no una reconexión periódica
+
+La sonda 4 señala la solución directamente: si nunca se desconecta ningún
+cliente, WSL no tiene ventana en la que apagar la instancia. Sustituida
+`ADIF-WSL-Docker-Watchdog` (reconexión de un solo tiro cada minuto) por
+**`ADIF-WSL-Docker-Keepalive`**: una tarea programada al iniciar sesión
+que ejecuta, oculta (mismo patrón `wscript.exe` + `.vbs` de siempre, ver
+sección 5 de `docs/tolerancia-reinicios-dockerd.md`), un bucle que
+mantiene un único `wsl.exe` conectado sin parar:
+
+```vbscript
+Do
+    objShell.Run "wsl.exe -d Ubuntu-24.04 -u root -- bash -c ""systemctl start docker; exec sleep infinity""", 0, True
+    WScript.Sleep 2000
+Loop
+```
+
+`exec sleep infinity` nunca termina por sí solo, así que la sesión queda
+conectada indefinidamente; si `wsl.exe` muriera de verdad (un fallo real,
+no el autoapagado por inactividad, que ya no puede darse con un cliente
+siempre conectado), el bucle reconecta a los 2s. `systemctl start docker`
+se repite en cada reconexión, idempotente, por si acaso. Detalle de la
+tarea programada y cómo revertirla: `README.md`.
+
+**Verificación final:** sonda de 16 minutos (960s, sondeo cada 3s, 307
+sondeos) con `ADIF-WSL-Docker-Keepalive` activo y
+`ADIF-WSL-Docker-Watchdog` ya retirado — **0 sondeos fallidos, 0 cortes**.
+Contraste directo con la sonda 1 de la tabla de arriba, misma metodología:
+12 cortes de ~40s en 11 minutos con el Watchdog periódico, 0 cortes en 16
+minutos con la sesión permanente.
+
+### Causa 2 vs. causa 3 — qué cierra cada cosa
+
+- **Causa 2 (Modo de espera moderno, reanudación real):** cerrada por el
+  cambio de registro del usuario, `PlatformAoAcOverride = 0` — fuera de
+  este repositorio, ver revertir en `README.md`. Nada en el motor ni en la
+  infraestructura del proyecto la cierra por sí sola; dependía de una
+  máquina con ese firmware desactivado.
+- **Causa 3 (autoapagado de la instancia de WSL sin cliente conectado):**
+  cerrada por `ADIF-WSL-Docker-Keepalive`, dentro del alcance de este
+  repositorio (tarea programada de Windows, igual que las otras, no
+  código del motor). Sigue sin identificarse la causa raíz exacta dentro
+  de WSL (¿un cambio de comportamiento entre versiones de WSL, un ajuste
+  de `.wslconfig` más específico que `vmIdleTimeout` que la haría
+  innecesaria? No investigado esta sesión) — el arreglo aplicado es un
+  mitigante que la evidencia (sonda 4) confirma que funciona, no una
+  corrección de WSL en sí, que está fuera del alcance de este
+  repositorio.
