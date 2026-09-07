@@ -151,11 +151,17 @@ def _es_celda_vacia(valor: Optional[str]) -> bool:
 # sección 3 solo menciona "P-001, P-067"; el corpus real trae más variantes,
 # todas confirmadas: "P-001" (con guion), "P1"/"P01" (sin guion, 1-2
 # dígitos), "PN001"/"PN09" (prefijo de señalización), "PA-01" (partida
-# alzada numerada), "L01-T01" (lote+tipo, traviesas). Un codigo_precio que no
-# encaje aquí no se guarda en silencio (encargo de esta sesión, punto 1):
-# ver `_normalizar_codigo_precio`.
-_CODIGO_PRECIO_NUCLEO_RE = re.compile(r"(?:P|PN|PA)-?\d{1,4}|L\d{1,2}-T\d{1,2}")
-_CODIGO_PRECIO_VALIDO_RE = re.compile(rf"^(?:{_CODIGO_PRECIO_NUCLEO_RE.pattern})$")
+# alzada numerada), "L01-T01" (lote+tipo, traviesas). "COD0001" añadido en el
+# bloque 3 de la sesión de expedientes en revisión (2026-09-07,
+# `4.26/28510.0020_ANEJO_1.pdf`, instalaciones de seguridad): sin esta
+# variante, `app.extraccion.tabla._es_fila_de_datos` no reconocía ninguna
+# fila de la tabla real como fila de datos y la tabla entera se descartaba
+# antes de llegar aquí -- se añade también aquí para que, una vez aceptada
+# en la etapa 4, no vuelva a caer en "formato no reconocido" en esta segunda
+# validación. Un codigo_precio que no encaje aquí no se guarda en silencio
+# (encargo de esta sesión, punto 1): ver `_normalizar_codigo_precio`.
+_CODIGO_PRECIO_NUCLEO_RE = re.compile(r"(?:P|PN|PA|COD)-?\d{1,4}|L\d{1,2}-T\d{1,2}", re.IGNORECASE)
+_CODIGO_PRECIO_VALIDO_RE = re.compile(rf"^(?:{_CODIGO_PRECIO_NUCLEO_RE.pattern})$", re.IGNORECASE)
 
 # Quinto formato, sesión de expedientes en revisión (2026-09-05),
 # `6.26/28510.0016`: la cabecera real de esa tabla dice literalmente
@@ -1121,7 +1127,34 @@ def guardar_lineas_catalogo(
     encontrar cualquiera de las dos filas heredadas — absorber la otra pase
     lo que pase es lo único que no depende de ese orden. Nunca se hace para
     huérfanas, por la misma razón que `_combinar_por_clave` tampoco fusiona
-    por firma ahí."""
+    por firma ahí.
+
+    **Huérfanas "copia exacta de una línea ya resuelta", bloque 4 de la
+    sesión de huérfanos de banda vacía (2026-09-07): investigado, NO
+    implementado a propósito.** Un primer intento fundía (descartaba) una
+    huérfana cuando su firma de material (`_firma_material`) coincidía con
+    una línea ya resuelta del mismo expediente, en cualquier lote. Contra el
+    corpus real medía 186 casos así — pero verificar el caso de aceptación
+    multi-lote (`tests/extraccion/test_orquestador.py::
+    test_expediente_0027_multi_lote_produce_baja_correcta_por_lote`, 6.25/
+    28510.0027) destapó que la coincidencia de firma NO implica "misma fila
+    repetida": en una licitación de balasto a 6 lotes, "P-1 Balasto sobre
+    camión en cantera" cuesta 10,85 € EN LOS SEIS LOTES por igual (precio de
+    referencia fijo, independiente del lote), mientras "P-2 T de balasto
+    transportado..." varía lote a lote (coste de transporte, sí depende de
+    la geografía) — el propio documento real de prueba. Fundir por firma
+    habría descartado en silencio líneas reales y distintas de otros lotes
+    solo porque coinciden en precio con la del lote ya resuelto. Los dos
+    expedientes reales que aportaban los 186 casos (`6.25/28510.0019`, 9
+    lotes; `6.24/28510.0203`, 6 lotes) son ambos multi-lote — exactamente el
+    contexto donde este riesgo aplica, y "huérfana de banda vacía" solo
+    existe en expedientes multi-lote por construcción (`app.extraccion.
+    lote_tabla` no tiene ambigüedad de lote que resolver con uno solo). Sin
+    una señal que distinga "de verdad la misma fila repetida" de "coincidencia
+    de precio de referencia entre lotes", este descarte automático es
+    inseguro en todo su dominio de aplicación — no se implementa. Ver el
+    informe de la sesión para el detalle completo y la propuesta pendiente de
+    aprobación del cliente."""
     creadas = 0
     actualizadas = 0
     fusion_material = lote_id is not None

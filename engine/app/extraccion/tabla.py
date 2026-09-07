@@ -46,6 +46,20 @@ fila. Verificado documento a documento contra el corpus real (no inventado):
 - Tablas sin ninguna columna de código: la fila de datos se identifica por su
   matrícula de 9 dígitos en su lugar (`6.20/28510.0136_ANEJO_3.pdf`, hilo de
   contacto) — CONTEXTO.md sección 2, la matrícula tiene forma fija de 9 dígitos.
+
+Sexto formato, sesión de expedientes en revisión por trabajo pendiente real
+(bloque 3, 2026-09-07), `4.26/28510.0020_ANEJO_1.pdf` (instalaciones de
+seguridad): `Cod0001`..`Cod0305`, prefijo "Cod" + 4 dígitos, consistente en
+las 8 páginas de la tabla real. Sin esta variante, `find_tables()` sí
+encontraba la tabla (13 filas limpias, cabecera "Código"/"DESCRIPCION"/
+"PRECIO") pero `_indice_primera_fila_datos` no reconocía ninguna fila como
+fila de datos y la tabla entera se descartaba como espuria -- el expediente
+quedaba en revisión con "no se extrajo ninguna línea de catálogo de los
+documentos descargados", indistinguible en el motivo de un expediente
+genuinamente sin cuadro de precios publicado (CONTEXTO.md sección 16,
+`6.24/28510.0025`/`0193`) aunque la tabla estuviera ahí, intacta, esperando
+a leerse. `IGNORECASE` porque no hay garantía de que el corpus mantenga
+siempre "Cod" con esa capitalización exacta.
 """
 from __future__ import annotations
 
@@ -60,7 +74,7 @@ FILA = list[CELDA]
 # Alternativas verificadas contra el corpus real (ver docstring del módulo,
 # hallazgo 6): un guion opcional cubre "P-001" y "P1"/"P01" a la vez, sin
 # necesitar una rama aparte para cada uno.
-_CODIGO_PRECIO_RE = re.compile(r"^(?:P-?\d+|PN\d+|PA-\d+|L\d+-T\d+)$")
+_CODIGO_PRECIO_RE = re.compile(r"^(?:P-?\d+|PN\d+|PA-\d+|L\d+-T\d+|COD\d+)$", re.IGNORECASE)
 # Matrícula como identificador de fila cuando la tabla no trae ninguna
 # columna de código en absoluto (CONTEXTO.md sección 2: forma fija de 9
 # dígitos) — señal aparte, nunca se confunde con un código de precio.

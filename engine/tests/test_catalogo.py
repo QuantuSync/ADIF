@@ -892,6 +892,15 @@ def test_normalizar_codigo_precio_formato_conocido_pasa_sin_motivo():
     assert _normalizar_codigo_precio("P01") == ("P01", None)
 
 
+def test_normalizar_codigo_precio_prefijo_cod_pasa_sin_motivo():
+    # Bloque 3, sesión de expedientes en revisión por trabajo pendiente real
+    # (2026-09-07): 4.26/28510.0020, "Cod0001".."Cod0305" — sexto formato real
+    # de codigo_precio, ausente hasta esta sesión de ambos regex de esta capa
+    # (`app.extraccion.tabla` ya lo acepta antes de llegar aquí).
+    assert _normalizar_codigo_precio("Cod0001") == ("Cod0001", None)
+    assert _normalizar_codigo_precio("Cod0305") == ("Cod0305", None)
+
+
 def test_normalizar_codigo_precio_numero_suelto_bajo_cabecera_partida():
     # Caso real, 6.26/28510.0016 (sesión de trabajo pendiente real,
     # 2026-09-05): la cabecera de la tabla dice literalmente "PARTIDA", no

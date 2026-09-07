@@ -21,6 +21,7 @@ import pdfplumber
 from sqlalchemy.orm import Session
 
 from app.catalogo import construir_lineas_desde_tabla
+from app.extraccion.codigo_material import derivar_codigo_material_con_modelo
 from app.extraccion.localizador import ResultadoLocalizacion, localizar_paginas_candidatas
 from app.extraccion.lote_tabla import asociar_lote_tabla
 from app.extraccion.mapeo_cabecera import mapear_cabecera
@@ -142,6 +143,18 @@ def procesar_anejo(
                         # lote.
                         linea["clave_linea"] = f"{linea['clave_linea']}@p{tabla.pagina}y{int(tabla.bbox[1])}"
                 lineas.extend(lineas_tabla)
+
+    # `Código del material`, vía de modelo (CONTEXTO.md sección 6, bloque 5 de
+    # la sesión de vocabulario): `construir_lineas_desde_tabla` (dentro de
+    # `construir_linea_catalogo`) ya intentó el vocabulario determinista sin
+    # `db`/`model_provider` -- aquí, con las líneas ya construidas y `db`/
+    # `model_provider` a mano, se completa lo que la regla no casó, una
+    # llamada por término candidato nuevo, cacheada (nunca por línea).
+    for linea in lineas:
+        if linea.get("codigo_material") is None and linea.get("descripcion"):
+            linea["codigo_material"] = derivar_codigo_material_con_modelo(
+                linea["descripcion"], db, model_provider
+            )
 
     return ResultadoProcesamientoAnejo(
         lineas=lineas,

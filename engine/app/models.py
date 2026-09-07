@@ -379,6 +379,25 @@ class MapeoCabeceraCache(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
+class CacheCodigoMaterial(Base):
+    """Caché del `Código del material` (CONTEXTO.md sección 6, bloque 5 de la
+    sesión de vocabulario): una llamada al modelo por término candidato
+    nuevo, nunca por línea ni por descripción completa -- mismo mecanismo
+    que `MapeoCabeceraCache`, aplicado al término (primera palabra con forma
+    de sustantivo de la descripción) en vez de a una firma de cabecera.
+    `codigo_material` admite `NULL`: el modelo confirmando "esto no es un
+    sustantivo de material" (p.ej. un código de catálogo puro como
+    "DSF-A-45-...") también se cachea, para no volver a preguntarlo."""
+
+    __tablename__ = "cache_codigo_material"
+
+    id = Column(Integer, primary_key=True)
+    termino = Column(String(64), nullable=False, unique=True)
+    codigo_material = Column(String(64), nullable=True)
+    origen = Column(String(16), nullable=False)  # "modelo"
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class SindicacionExpediente(Base):
     """Bloque 2, descubrimiento por sindicación (CONTEXTO.md sección 24):
     última instantánea conocida de un expediente en el XML CODICE de
