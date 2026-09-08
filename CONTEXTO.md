@@ -979,11 +979,60 @@ suficientes, no ahora.
   no es un bug nuevo, es el límite ya documentado más arriba ("Separar de
   verdad [...] en expedientes de lote reales [...] fuera de alcance de un
   arreglo urgente"), que con 45-52 expedientes nunca llegó a manifestarse y
-  ahora, con 467, sí. (3) `GET /revision` no está paginado (a diferencia de
+  ahora, con 467, sí. **Cerrado, sesión 2026-09-08:** `Documento` pasa a
+  relación muchos-a-muchos con `Expediente` vía `DocumentoExpediente`
+  (migración 0021) — el fichero físico (hash, tipo, ruta) se separa de la
+  relación con cada expediente que lo referencia, así que un documento
+  puede enlazarse con más de uno sin duplicar el fichero. (3) `GET
+  /revision` no está paginado (a diferencia de
   `/catalogo`): 255 ms / 400 KB por respuesta con 303 casos, sondeado cada 3
   segundos por la web — sigue siendo rápido en términos absolutos, pero es
   la única de las cuatro pantallas sin paginación de servidor y el primer
   sitio donde se notará si la cola de revisión sigue creciendo.
+- **Verificación del Excel de 6.599 líneas: tres defectos de origen
+  corregidos, cuarto analizado sin implementar (sesión 2026-09-08,
+  `docs/sesion-2026-09-08-verificacion-excel-6599.md`).** Causa central:
+  `app.extraccion.firma_cabecera.calcular_firma_cabecera([])` hashea igual
+  cualquier tabla sin cabecera detectada (típico de una tabla que continúa
+  sin repetir cabecera), así que el mapeo del modelo aprendido para la
+  PRIMERA tabla así del corpus se reaplicaba a ciegas a todas las demás,
+  con columnas en otro orden — origen de las líneas sin expediente, sin
+  descripción y con precio a cero que reportó el cliente (`6.24/28510.0184`,
+  `0209`, `6.21/28510.0108`, `0109`). Arreglado: una cabecera sin ninguna
+  celda con texto real nunca se cachea ni se lee de caché
+  (`app.extraccion.mapeo_cabecera.mapear_cabecera`). Dos causas más,
+  puntuales, detrás de las 38 líneas sin descripción: un patrón nuevo,
+  imagen especular del "fila fantasma" de 2026-09-06 (el precio, no la
+  descripción, llega en la fila siguiente —
+  `app.catalogo._es_fila_precio_continuacion`) y una partida alzada cuyo
+  texto cae en una columna que el mapeo no reclama para nada
+  (`app.catalogo._recuperar_descripcion_ultimo_recurso`). **Gap de
+  idempotencia encontrado de paso, sin corregir:** `guardar_lineas_catalogo`
+  no borra una fila de una extracción anterior que ya no aparece en la
+  nueva — invisible mientras la clave de línea es estable, pero una fila
+  sin `codigo_precio` ni matrícula usa `hash(descripción + orden)` como
+  clave, así que si la descripción cambia entre dos reprocesos de la misma
+  fila (justo lo que hacen los dos arreglos de arriba) la fila vieja queda
+  huérfana en vez de sustituirse. 5 filas así, limpiadas a mano tras
+  verificar cada una contra su reemplazo real; una poda automática
+  necesitaría decidir primero qué pasa si solo se reprocesa un subconjunto
+  de las tablas de un documento, fuera de esta sesión. **Cuarto punto,
+  analizado sin tocar código:** el motivo mayoritario de las 3.102 líneas
+  pendientes ("ninguna cabecera LOTE N", 2.001 líneas) concentra el 79,7 %
+  en un único documento de 37 páginas compartido por dos expedientes
+  hermanos (`6.22/28510.0122`/`0156`) — una tabla de 17 páginas bajo un
+  solo lote, cuya cabecera "Lote 1" solo aparece una vez, nunca repetida en
+  las páginas de continuación. `app.extraccion.lote_tabla` ya había
+  decidido, explícita y deliberadamente, no implementar herencia de lote
+  entre páginas hasta medir el impacto real (docstring del módulo,
+  variante "banda vacía" ya documentada, 821 líneas) — lo que el corpus a
+  467 expedientes añade es que hay una SEGUNDA variante del mismo
+  fenómeno, más grande, no contemplada en esa medición: una página de
+  continuación cuya franja trae texto (pie de página, nota) pero nunca la
+  palabra "LOTE", que cae en el cubo "ninguna cabecera" en vez de en
+  "banda vacía" y por eso nunca se sumó al mismo problema. Propuesta de
+  herencia de lote entre páginas de continuación, con el tamaño real
+  medido, pendiente de aprobación del cliente — no implementada.
 
 ---
 
@@ -998,4 +1047,6 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `sesion-2026-09-07-adjudicatario-revision-vocabulario.md`,
 `sesion-2026-09-07-sap-ejecucion-cobertura.md`,
 `analisis-corpus-467-expedientes.md`,
+`sesion-2026-09-08-cobertura-sap-367.md`,
+`sesion-2026-09-08-verificacion-excel-6599.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.

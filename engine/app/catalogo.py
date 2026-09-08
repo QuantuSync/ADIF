@@ -18,6 +18,10 @@ from app.extraccion.tabla import TablaExtraida
 from app.extraccion.texto import normalizar
 from app.models import LineaCatalogo, Lote
 
+# `LineaCatalogo.codigo_precio` es `String(32)` (app/models.py) -- se lee del
+# propio modelo, no se repite el número a mano, para que no puedan divergir.
+_CODIGO_PRECIO_LONGITUD_MAXIMA = LineaCatalogo.codigo_precio.type.length
+
 # Sesión de rodaje sobre el corpus completo (2026-09-03): en varias tablas
 # reales, una fila que no es una línea de material (un pie de tabla como
 # "PRESUPUESTO DE LICITACIÓN", "IVA", "TOTAL CON IVA", o una partida alzada
@@ -242,6 +246,21 @@ def _normalizar_codigo_precio(bruto: Optional[str]) -> tuple[Optional[str], Opti
             f"sin código recuperable ({limpio!r})"
         )
 
+    # Mismo tipo de fallo que la matrícula (comentario de cabecera de este
+    # módulo): una celda de "REFERENCIA DEL FABRICANTE"/código con varias
+    # filas fundidas en una (`_dividir_fila_multiple` no aplica sin una
+    # columna de precio con la que dividir en el mismo N, CONTEXTO.md
+    # sección 8) puede superar los 32 caracteres de la columna y reventar el
+    # INSERT completo del lote entero, no solo esta línea (hallazgo real,
+    # `6.24/28510.0208`, tabla de reparación de repuestos sin columna de
+    # importe unitario). Se descarta en vez de truncar -- truncar
+    # inventaría un código distinto que no está en el documento.
+    if len(limpio) > _CODIGO_PRECIO_LONGITUD_MAXIMA:
+        return None, (
+            f"codigo_precio descartado: {len(limpio)} caracteres, no cabe en la columna "
+            f"({_CODIGO_PRECIO_LONGITUD_MAXIMA} máx.), probablemente varias filas fundidas en una: {limpio!r}"
+        )
+
     return limpio, (
         f"codigo_precio con formato no reconocido en el corpus, revisar antes de dar por bueno: {limpio!r}"
     )
@@ -342,6 +361,42 @@ def _recuperar_descripcion_columna_fantasma(
     if not _parece_descripcion_recuperable(candidata):
         return None
     return limpiar_texto_celda(candidata)
+
+
+# Sesión de verificación del Excel exportado (2026-09-08): último recurso
+# antes de dar una fila por "sin descripción ni matrícula" -- verificado
+# contra dos documentos reales (`6.22/28510.0039` p.14, `6.25/28510.0213`
+# p.18) que a una "PARTIDA ALZADA A JUSTIFICAR..." (CONTEXTO.md sección 2:
+# legítima, nunca lleva matrícula ni código de material propio) le faltan
+# columnas intermedias respecto al resto de la tabla, así que su único texto
+# real cae en la columna que la cabecera de ESA tabla llama "código de
+# precio" o "código ADIF" -- una columna que el mapeo, correctamente para el
+# resto de filas, no asigna nunca a `descripcion` (a veces ni siquiera a
+# ningún campo: la cabecera no encajó con ningún alias determinista y quedó
+# sin mapear del todo). Distinto de `_recuperar_descripcion_columna_fantasma`
+# (que solo prueba la columna siguiente a la de descripción, con el índice
+# de descripción ya conocido): aquí no hay ninguna columna "de al lado" que
+# probar porque la propia columna de descripción sale vacía Y no hay
+# matrícula con la que orientarse, así que se explora toda la fila.
+def _recuperar_descripcion_ultimo_recurso(
+    fila: list[Optional[str]], mapeo: dict[str, Optional[int]]
+) -> Optional[str]:
+    """Solo se llama cuando descripción Y matrícula salieron vacías con el
+    mapeo normal (ninguna otra columna del mapeo identifica el material).
+    Prueba cualquier columna de la fila que el mapeo no reclame para NINGÚN
+    campo -- nunca le quita el valor a un campo que sí lo reclama. Solo se
+    acepta si hay EXACTAMENTE una columna candidata con pinta de descripción
+    real: con dos o más, no hay forma de saber cuál es la buena sin
+    adivinar, y se deja la fila como estaba (a revisión, sin inventar)."""
+    reclamadas = {indice for indice in mapeo.values() if indice is not None}
+    candidatas = [
+        indice
+        for indice in range(len(fila))
+        if indice not in reclamadas and _parece_descripcion_recuperable(_valor_en(fila, indice))
+    ]
+    if len(candidatas) != 1:
+        return None
+    return limpiar_texto_celda(_valor_en(fila, candidatas[0]))
 
 
 # Sesión de inventario de celdas vacías (2026-09-06, bloque 3): antes de
@@ -747,24 +802,40 @@ def construir_linea_catalogo(
     descripcion = campos["descripcion"]
     matricula = campos["matricula"]
     if not descripcion and matricula is None:
-        # Encargo de esta sesión (limpieza del Excel al cliente, 2026-09-06):
-        # sin descripción NI matrícula, ninguna otra columna identifica qué
-        # material es esta fila -- no es una línea de catálogo utilizable,
-        # aunque traiga un precio real (llegar aquí ya implica precio_unitario
-        # presente: el guard de arriba descarta como relleno cualquier fila
-        # sin descripción que TAMPOCO traiga precio). Con contenido real en
-        # el fragmento de origen (el precio, un código de precio, una
-        # cantidad) se conserva para revisión humana en vez de perderse en
-        # silencio; una fila genuinamente en blanco se descarta como
-        # cualquier otro relleno de tabla.
-        fragmento_bruto = " | ".join((celda or "").strip() for celda in fila)
-        if not fragmento_bruto.replace("|", "").strip():
-            return None
-        campos["motivo_revision"] = _acumular_motivo(
-            campos["motivo_revision"],
-            "línea sin descripción ni matrícula: ningún dato de la fila identifica qué material es, "
-            "confirmar contra el documento de origen",
-        )
+        # Último recurso antes de dar la fila por ilegible del todo (ver
+        # docstring de `_recuperar_descripcion_ultimo_recurso`): una partida
+        # alzada real cuyo único texto cayó en una columna que el mapeo no
+        # reclama para nada -- se recupera como descripción en vez de
+        # perderse, siempre marcada para confirmar contra el documento.
+        recuperada = _recuperar_descripcion_ultimo_recurso(fila, mapeo)
+        if recuperada:
+            descripcion = recuperada
+            campos["motivo_revision"] = _acumular_motivo(
+                campos["motivo_revision"],
+                "descripción recuperada de una columna sin asignar en el mapeo de esta cabecera "
+                "(probable partida alzada con columnas intermedias ausentes en esta fila), "
+                "confirmar antes de dar por buena",
+            )
+        else:
+            # Encargo de esta sesión (limpieza del Excel al cliente,
+            # 2026-09-06): sin descripción NI matrícula, ninguna otra columna
+            # identifica qué material es esta fila -- no es una línea de
+            # catálogo utilizable, aunque traiga un precio real (llegar aquí
+            # ya implica precio_unitario presente: el guard de arriba
+            # descarta como relleno cualquier fila sin descripción que
+            # TAMPOCO traiga precio). Con contenido real en el fragmento de
+            # origen (el precio, un código de precio, una cantidad) se
+            # conserva para revisión humana en vez de perderse en silencio;
+            # una fila genuinamente en blanco se descarta como cualquier otro
+            # relleno de tabla.
+            fragmento_bruto = " | ".join((celda or "").strip() for celda in fila)
+            if not fragmento_bruto.replace("|", "").strip():
+                return None
+            campos["motivo_revision"] = _acumular_motivo(
+                campos["motivo_revision"],
+                "línea sin descripción ni matrícula: ningún dato de la fila identifica qué material es, "
+                "confirmar contra el documento de origen",
+            )
 
     return {
         "clave_linea": calcular_clave_linea(
@@ -802,6 +873,51 @@ def _es_fragmento_continuacion_pura(fila: list[Optional[str]], mapeo: dict[str, 
         if valor and not _es_celda_vacia(valor):
             return False
     return _parece_descripcion_recuperable(_valor_en(fila, indice_fragmento))
+
+
+# Sesión de verificación del Excel exportado (2026-09-08, 38 líneas sin
+# descripción): imagen especular de `_MOTIVO_DESCRIPCION_COLUMNA_FANTASMA` de
+# arriba. Ahí la descripción de una fila real se desborda hacia las filas
+# SIGUIENTES; aquí es el PRECIO el que llega tarde -- la banda visual de la
+# columna de precio de esta tabla queda desplazada una fila hacia abajo
+# respecto a matrícula/descripción (verificado contra el documento real,
+# `6.19/28510.0194_ANEJO_1.pdf` p.9 y `6.20/28510.0029_ANEJO_1.pdf` p.4: la
+# fila con matrícula y descripción sale con su propia celda de precio vacía,
+# y el precio real aparece solo, sin ningún otro dato, en la fila
+# inmediatamente siguiente). Sin este arreglo, `construir_linea_catalogo`
+# guardaba DOS líneas por cada una real: la línea con matrícula/descripción
+# pero sin precio (silenciosa, sin motivo_revision, indistinguible de un
+# precio genuinamente no publicado) y una segunda línea fantasma con solo el
+# precio, sin descripción ni matrícula -- exactamente la fila "sin
+# expediente, ni matrícula, ni descripción, solo un precio" que aparecía en
+# el Excel entregado al cliente. `_recuperar_precio_columna_fantasma`
+# (arriba) no cubre este caso porque no es una columna fantasma DENTRO de la
+# misma fila -- es una fila entera de más, y probar la celda vecina ahí
+# puede recuperar por error un valor plausible pero equivocado (verificado:
+# en `6.20/28510.0029` recuperaba la cantidad "1" de "PEDIDO INICIAL" como si
+# fuera el precio).
+_MOTIVO_PRECIO_FILA_SIGUIENTE = (
+    "precio unitario recuperado de la fila siguiente: la banda de precio de esta tabla queda "
+    "desplazada una fila respecto a la matrícula/descripción, confirmar contra el documento de origen"
+)
+
+
+def _es_fila_precio_continuacion(fila: list[Optional[str]], mapeo: dict[str, Optional[int]]) -> bool:
+    """Verdadero cuando `fila` no trae más dato real que un precio unitario
+    con pinta válida -- mismo patrón que `_es_fragmento_continuacion_pura`,
+    aplicado a la columna de precio en vez de a la de descripción. Nunca se
+    llama si la propia fila de origen ya trae su precio: ver
+    `construir_lineas_desde_tabla`."""
+    indice_precio = mapeo.get("precio_unitario")
+    if indice_precio is None:
+        return False
+    for campo, indice in mapeo.items():
+        if indice is None or indice == indice_precio:
+            continue
+        valor = _valor_en(fila, indice)
+        if valor and not _es_celda_vacia(valor):
+            return False
+    return _parece_precio_recuperable(_valor_en(fila, indice_precio))
 
 
 # Marcador estable, mismo patrón que `_MOTIVO_DESCRIPCION_COLUMNA_FANTASMA`:
@@ -899,7 +1015,13 @@ def construir_lineas_desde_tabla(
     # aquí, nunca llega a `guardar_lineas_catalogo`.
     filas = tabla.filas
     resultado: list[dict] = []
+    # Filas ya absorbidas como el precio de la fila anterior (ver más abajo,
+    # `_es_fila_precio_continuacion`): no se procesan una segunda vez como si
+    # fueran su propia línea.
+    saltadas: set[int] = set()
     for indice, fila in enumerate(filas):
+        if indice in saltadas:
+            continue
         # `_dividir_fila_multiple` (arreglo de 6.23/28510.0051, sesión
         # 2026-09-06): una fila que fusiona varias líneas de precio en una
         # sola celda del documento se reparte aquí en varias líneas de
@@ -920,11 +1042,34 @@ def construir_lineas_desde_tabla(
                 resultado.append(linea)
             continue
 
+        # Precio desplazado a la fila siguiente (ver docstring de
+        # `_MOTIVO_PRECIO_FILA_SIGUIENTE`): se recupera ANTES de construir la
+        # línea, parcheando una copia de la fila, para que
+        # `_recuperar_precio_columna_fantasma` (dentro de `_construir_campos`)
+        # nunca llegue a disparar sobre una celda de precio que en realidad no
+        # está vacía por desplazamiento de columna, sino por desplazamiento de
+        # fila entera -- confundir los dos casos recuperaba un valor vecino
+        # plausible pero equivocado (verificado, `6.20/28510.0029` recuperaba
+        # la cantidad "1" de "PEDIDO INICIAL" como si fuera el precio).
+        indice_precio = mapeo.get("precio_unitario")
+        precio_de_fila_siguiente: Optional[str] = None
+        valor_precio_propio = _valor_en(fila, indice_precio) if indice_precio is not None else None
+        if indice_precio is not None and (not valor_precio_propio or _es_celda_vacia(valor_precio_propio)):
+            siguiente_precio = indice + 1
+            if siguiente_precio < len(filas) and _es_fila_precio_continuacion(filas[siguiente_precio], mapeo):
+                precio_de_fila_siguiente = _valor_en(filas[siguiente_precio], indice_precio)
+                fila = list(fila)
+                fila[indice_precio] = precio_de_fila_siguiente
+
         linea = construir_linea_catalogo(
             fila, mapeo, tabla.pagina, documento_origen_id, expediente_id, baja_lote, orden_inicial + len(resultado)
         )
         if linea is None:
             continue
+        if precio_de_fila_siguiente is not None:
+            saltadas.add(siguiente_precio)
+            linea["motivo_revision"] = _acumular_motivo(linea["motivo_revision"], _MOTIVO_PRECIO_FILA_SIGUIENTE)
+            linea["fragmento"] += " | " + precio_de_fila_siguiente.strip()
         motivo = linea.get("motivo_revision") or ""
         indice_descripcion = mapeo.get("descripcion")
         if _MOTIVO_DESCRIPCION_COLUMNA_FANTASMA in motivo and indice_descripcion is not None:

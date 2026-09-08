@@ -1284,6 +1284,52 @@ def test_construir_lineas_desde_tabla_encadena_fragmentos_de_descripcion_envuelt
     assert lineas[1]["matricula"] == "642910250"  # la siguiente fila de datos real no se toca
 
 
+def test_construir_lineas_desde_tabla_recupera_precio_de_la_fila_siguiente():
+    # Verificación del Excel exportado (2026-09-08): imagen especular de
+    # `test_construir_lineas_desde_tabla_encadena_fragmentos_de_descripcion_envuelta`
+    # de arriba -- ahí el fragmento que se desborda es la descripción, aquí
+    # es el precio. Fixture real, `6.19/28510.0194_ANEJO_1.pdf` p.9: la
+    # banda visual del precio queda una fila por debajo de matrícula y
+    # descripción, tanto para una fila normal como para una partida alzada.
+    # Sin este arreglo, cada material generaba DOS líneas de catálogo: la
+    # real sin precio (sin ningún motivo_revision, indistinguible de un
+    # precio genuinamente no publicado) y una fantasma con solo el precio,
+    # sin descripción ni matrícula -- la fila "sin expediente, ni matrícula,
+    # ni descripción, solo un precio" del Excel entregado al cliente.
+    mapeo = {
+        "codigo_precio": None, "matricula": 0, "descripcion": 1,
+        "unidad_medida": 2, "cantidad": 5, "precio_unitario": 6,
+    }
+    tabla = TablaExtraida(
+        cabecera=["MATRICULA", "DESIGNACIÓN", "MEDIDA", None, "ET", "PEDIDO INICIAL", "PRECIO"],
+        filas=[
+            ["650400190", "SISTEMA DE TRANSFERENCIA ESTÁTICO", "Unidad", None, "", "28", ""],
+            [None, None, None, None, None, None, "1.264,59 €"],
+            [None, None, None, None, None, None, ""],
+            ["", "Partida alzada a justificar de repuestos para cubrir necesidades", "", None, "", "", ""],
+            [None, None, None, None, None, None, "9.105,05 €"],
+            [None, None, None, None, None, None, ""],
+        ],
+        pagina=9,
+        bbox=(0, 0, 0, 0),
+    )
+
+    lineas = construir_lineas_desde_tabla(tabla, mapeo, documento_origen_id=20, expediente_id=15, baja_lote=None, orden_inicial=0)
+
+    # Las dos filas fantasma de precio se absorben; las dos filas en blanco
+    # finales (precio también vacío) se descartan como siempre.
+    assert len(lineas) == 2
+    primera, segunda = lineas
+    assert primera["matricula"] == "650400190"
+    assert primera["descripcion"] == "SISTEMA DE TRANSFERENCIA ESTÁTICO"
+    assert primera["precio_unitario"] == Decimal("1264.59")
+    assert "precio unitario recuperado de la fila siguiente" in primera["motivo_revision"]
+    assert segunda["matricula"] is None
+    assert segunda["descripcion"].startswith("Partida alzada")
+    assert segunda["precio_unitario"] == Decimal("9105.05")
+    assert "precio unitario recuperado de la fila siguiente" in segunda["motivo_revision"]
+
+
 def test_linea_sin_descripcion_ni_matricula_con_fragmento_vacio_se_descarta():
     # Encargo de esta sesión: una fila sin descripción y sin matrícula no
     # identifica ningún material. Si además el resto de la fila está en
@@ -1318,6 +1364,72 @@ def test_linea_sin_descripcion_ni_matricula_con_precio_va_a_revision():
     assert linea["matricula"] is None
     assert linea["motivo_revision"] is not None
     assert "sin descripción ni matrícula" in linea["motivo_revision"]
+
+
+def test_linea_partida_alzada_recupera_descripcion_de_columna_codigo_precio_sin_mapear():
+    # Verificación del Excel exportado (2026-09-08), fixture real
+    # `6.22/28510.0039_ANEJO_1.pdf` p.14: la cabecera dice "CODIFICACIÓN DEL
+    # PRECIO" (no casa con el alias "codigo" de `codigo_precio`, así que esa
+    # columna queda sin mapear del todo) y "Nº MATRÍCULA"/"DESCRIPCIÓN" en
+    # sus columnas de siempre. La fila de la partida alzada solo trae dos
+    # valores reales: su texto en la columna sin mapear, y el precio en la
+    # suya -- sin este arreglo, la línea se guardaba sin descripción, sin
+    # matrícula y sin código de expediente cruzado.
+    mapeo = {
+        "codigo_precio": None, "matricula": 1, "descripcion": 3,
+        "unidad_medida": 4, "cantidad": 5, "precio_unitario": 6,
+    }
+    fila = ["Partida alzada a justificar para imprevistos", None, None, None, None, None, "624.050\n,00€"]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=14, documento_origen_id=None, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea is not None
+    assert linea["descripcion"] == "Partida alzada a justificar para imprevistos"
+    assert linea["matricula"] is None
+    assert linea["precio_unitario"] == Decimal("624050.00")
+    assert "columna sin asignar en el mapeo" in linea["motivo_revision"]
+
+
+def test_linea_partida_alzada_recupera_descripcion_de_columna_codigo_adif_sin_mapear():
+    # Mismo hallazgo, segunda variante real, `6.25/28510.0213_ANEJO_1.pdf`
+    # p.18: aquí SÍ hay `codigo_precio` real ("P-06"), pero "matricula" no
+    # se reconoció para esta cabecera ("CÓDIGO ADIF" no casa con ningún
+    # alias) y es esa columna sin mapear la que se lleva el texto real.
+    mapeo = {
+        "codigo_precio": 0, "matricula": None, "descripcion": 2,
+        "unidad_medida": 3, "cantidad": 7, "precio_unitario": 8,
+    }
+    fila = ["P-06", "PARTIDA ALZADA A JUSTIFICAR PARA IMPREVISTOS", None, None, None, None, None, None, "30.000,00 €"]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=18, documento_origen_id=None, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea is not None
+    assert linea["descripcion"] == "PARTIDA ALZADA A JUSTIFICAR PARA IMPREVISTOS"
+    assert linea["codigo_precio"] == "P-06"
+    assert linea["matricula"] is None
+    assert linea["precio_unitario"] == Decimal("30000.00")
+    assert "columna sin asignar en el mapeo" in linea["motivo_revision"]
+
+
+def test_linea_sin_descripcion_ni_matricula_con_dos_columnas_candidatas_no_adivina():
+    # Guard de `_recuperar_descripcion_ultimo_recurso`: con DOS columnas sin
+    # mapear que parecen descripción, no hay forma de saber cuál es la
+    # buena -- se deja la línea como antes (a revisión), sin adivinar.
+    mapeo = {"codigo_precio": None, "matricula": None, "descripcion": 2, "unidad_medida": None, "cantidad": None, "precio_unitario": 3}
+    fila = ["Texto candidato uno", "Texto candidato dos", None, "45,00 €"]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=5, documento_origen_id=None, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea is not None
+    assert linea["descripcion"] == ""
+    assert "sin descripción ni matrícula" in linea["motivo_revision"]
+    assert "columna sin asignar" not in linea["motivo_revision"]
 
 
 def test_combinar_por_clave_funde_por_firma_sin_matricula_dentro_del_mismo_lote():
