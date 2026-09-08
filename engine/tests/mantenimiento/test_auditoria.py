@@ -8,6 +8,8 @@ from decimal import Decimal
 from app.extraccion.firma_cabecera import calcular_firma_cabecera
 from app.mantenimiento.auditoria import TIPO_TRABAJO, ejecutar_auditoria
 from app.models import (
+    Documento,
+    DocumentoExpediente,
     EstadoRevisionLinea,
     EstadoTrabajo,
     Expediente,
@@ -19,6 +21,7 @@ from app.models import (
 from app.queue import encolar_trabajo
 
 _contador_clave = iter(range(1_000_000))
+_contador_hash = iter(range(1_000_000))
 
 
 def _expediente(db, codigo="6.24/28510.0001", **kwargs) -> Expediente:
@@ -48,6 +51,17 @@ def _linea(db, expediente_id, lote_id=None, **kwargs) -> LineaCatalogo:
     db.add(linea)
     db.commit()
     return linea
+
+
+def _vincular_documento(db, expediente_id, documento=None) -> Documento:
+    if documento is None:
+        h = f"hash-{next(_contador_hash)}"
+        documento = Documento(tipo_documento="anuncio_pcsp", hash=h, ruta_almacenamiento=f"x/{h}.pdf")
+        db.add(documento)
+        db.commit()
+    db.add(DocumentoExpediente(documento_id=documento.id, expediente_id=expediente_id, nombre_archivo="x.pdf"))
+    db.commit()
+    return documento
 
 
 def _trabajo(db) -> TrabajoCola:
@@ -258,3 +272,69 @@ def test_lineas_descartadas_no_cuentan_para_ningun_hallazgo(db_session):
 
     assert resultado["total_lineas"] == 0
     assert resultado["hallazgos"] == []
+
+
+def test_importe_licitacion_compartido_entre_expedientes_distintos(db_session):
+    """Encargo del cliente, medición del alcance "Nº Lote: NNN" (2026-09-08):
+    dos expedientes que comparten el mismo documento de origen (un Anuncio
+    de adjudicación multi-lote) y el mismo importe de licitación son
+    sospechosos -- caso real, `6.20/28510.0041` y su familia."""
+    exp1 = _expediente(db_session, codigo="6.20/28510.0041")
+    exp2 = _expediente(db_session, codigo="6.20/28510.0042")
+    documento = _vincular_documento(db_session, exp1.id)
+    _vincular_documento(db_session, exp2.id, documento=documento)
+    _lote(db_session, exp1.id, importe_licitacion=Decimal("22000000"), importe_adjudicacion=Decimal("500000"))
+    _lote(db_session, exp2.id, importe_licitacion=Decimal("22000000"), importe_adjudicacion=Decimal("812000"))
+
+    resultado = ejecutar_auditoria(db_session, _trabajo(db_session))
+
+    hallazgo = next(
+        h for h in resultado["hallazgos"] if h["categoria"] == "importe_licitacion_compartido_entre_expedientes"
+    )
+    assert hallazgo["gravedad"] == "aviso"
+    assert set(hallazgo["expedientes"]) == {"6.20/28510.0041", "6.20/28510.0042"}
+
+
+def test_importe_licitacion_distinto_entre_expedientes_no_da_hallazgo(db_session):
+    exp1 = _expediente(db_session, codigo="6.20/28510.0041")
+    exp2 = _expediente(db_session, codigo="6.20/28510.0042")
+    documento = _vincular_documento(db_session, exp1.id)
+    _vincular_documento(db_session, exp2.id, documento=documento)
+    _lote(db_session, exp1.id, importe_licitacion=Decimal("500000"), importe_adjudicacion=Decimal("500000"))
+    _lote(db_session, exp2.id, importe_licitacion=Decimal("812000"), importe_adjudicacion=Decimal("812000"))
+
+    resultado = ejecutar_auditoria(db_session, _trabajo(db_session))
+
+    categorias = {h["categoria"] for h in resultado["hallazgos"]}
+    assert "importe_licitacion_compartido_entre_expedientes" not in categorias
+
+
+def test_importe_licitacion_compartido_sin_documento_comun_no_da_hallazgo(db_session):
+    # Mismo importe por coincidencia real, pero documentos de origen
+    # distintos -- no es la firma del defecto (dos licitaciones
+    # independientes pueden compartir presupuesto por casualidad).
+    exp1 = _expediente(db_session, codigo="6.20/28510.0041")
+    exp2 = _expediente(db_session, codigo="6.20/28510.0042")
+    _vincular_documento(db_session, exp1.id)
+    _vincular_documento(db_session, exp2.id)
+    _lote(db_session, exp1.id, importe_licitacion=Decimal("500000"))
+    _lote(db_session, exp2.id, importe_licitacion=Decimal("500000"))
+
+    resultado = ejecutar_auditoria(db_session, _trabajo(db_session))
+
+    categorias = {h["categoria"] for h in resultado["hallazgos"]}
+    assert "importe_licitacion_compartido_entre_expedientes" not in categorias
+
+
+def test_importe_licitacion_repetido_en_lotes_del_mismo_expediente(db_session):
+    exp = _expediente(db_session)
+    _lote(db_session, exp.id, identificador="1", importe_licitacion=Decimal("100000"))
+    _lote(db_session, exp.id, identificador="2", importe_licitacion=Decimal("100000"))
+
+    resultado = ejecutar_auditoria(db_session, _trabajo(db_session))
+
+    hallazgo = next(
+        h for h in resultado["hallazgos"] if h["categoria"] == "importe_licitacion_repetido_en_el_mismo_expediente"
+    )
+    assert hallazgo["gravedad"] == "aviso"
+    assert exp.codigo_expediente in hallazgo["expedientes"]
