@@ -228,7 +228,20 @@ async def ensure_form(page: Page):
     """Localiza el input de búsqueda. En headless, igual que con ventana, el
     input no siempre está visible tras cargar: hay que abrir antes la tarjeta
     'Licitaciones' (verificado en vivo — este es el camino que se toma siempre,
-    no solo de vez en cuando)."""
+    no solo de vez en cuando).
+
+    **Corregido, sesión de límite de tasa, continuación (2026-09-08)**: el
+    presupuesto de espera antes era fijo y corto (900 ms + 1000 ms + 3×700 ms
+    ≈ 4 s en total, sin relación con ningún ajuste de configuración) --
+    verificado en vivo que, bajo carga, el formulario puede tardar bastante
+    más en aparecer (~7,5 s medido de forma reproducible) sin que eso
+    signifique nada sobre si el expediente existe. Ahora sondea hasta
+    `NAV_MS` (el mismo presupuesto "grande" que ya usa `wait_results` para
+    la tabla de resultados, no uno propio inventado) antes de rendirse --
+    mismo principio que el resto del módulo: un timeout agotado nunca debe
+    traducirse en un resultado determinista, así que más vale un
+    presupuesto generoso aquí, donde ni siquiera se ha llegado a buscar
+    nada todavía."""
     await page.goto(SEARCH, wait_until="domcontentloaded")
     await page.wait_for_timeout(900)
     await accept_cookies(page)
@@ -237,26 +250,39 @@ async def ensure_form(page: Page):
     if loc:
         return loc
 
-    try:
-        card = page.locator(f'span[id="{CARD}"]').first
-        if await card.count():
-            await card.click(timeout=UI_MS)
-            await page.wait_for_timeout(1000)
-    except Exception:
-        pass
-
-    for _ in range(3):
+    clic_tarjeta_intentado = False
+    deadline = time.monotonic() + NAV_MS / 1000
+    while time.monotonic() < deadline:
+        if not clic_tarjeta_intentado:
+            try:
+                card = page.locator(f'span[id="{CARD}"]').first
+                if await card.count():
+                    await card.click(timeout=UI_MS)
+            except Exception:
+                pass
+            clic_tarjeta_intentado = True
         loc = await find_in_frames(page, f'input[id="{INPUT}"]')
         if loc:
             return loc
         await page.wait_for_timeout(700)
-    raise RuntimeError("No se localiza el formulario de Licitaciones")
+    raise RuntimeError(f"No se localiza el formulario de Licitaciones (esperado hasta {NAV_MS / 1000:.0f}s)")
 
 
 async def click_search(page: Page) -> None:
-    btn = await find_in_frames(page, f'input[id="{BUTTON}"]')
+    """Corregido junto con `ensure_form` (misma sesión): antes fallaba al
+    primer intento sin ningún margen si el botón aún no había terminado de
+    renderizarse -- mismo riesgo de confundir "todavía no está" con "no
+    está", ahora con el mismo presupuesto (`NAV_MS`) que el resto de esperas
+    críticas del módulo."""
+    deadline = time.monotonic() + NAV_MS / 1000
+    btn = None
+    while time.monotonic() < deadline:
+        btn = await find_in_frames(page, f'input[id="{BUTTON}"]')
+        if btn:
+            break
+        await page.wait_for_timeout(700)
     if not btn:
-        raise RuntimeError("No se localiza el botón Buscar")
+        raise RuntimeError(f"No se localiza el botón Buscar (esperado hasta {NAV_MS / 1000:.0f}s)")
     await btn.click()
 
 

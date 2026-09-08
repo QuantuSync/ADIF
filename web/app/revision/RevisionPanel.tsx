@@ -173,9 +173,24 @@ function ReasonCard({ categoria, texto, tecnico }: { categoria: "contradiccion" 
 }
 
 const INTERVALO_SONDEO_MS = 3000;
+// Sesión de paginación de la cola de revisión (2026-09-08): antes
+// `GET /revision` devolvía todos los `pendiente_revision` de una vez --
+// con el corpus de 45-52 expedientes no se notaba, pero con 303 casos
+// reales eran 400 KB por respuesta, sondeados cada 3 segundos. Mismo
+// tamaño de página que CatalogoPanel.
+const TAMANO_PAGINA = 25;
+
+type RespuestaColaRevision = {
+  total: number;
+  pagina: number;
+  tamano_pagina: number;
+  expedientes: ExpedienteResumen[];
+};
 
 export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
   const [lista, setLista] = useState<ExpedienteResumen[]>([]);
+  const [totalLista, setTotalLista] = useState(0);
+  const [paginaLista, setPaginaLista] = useState(1);
   const [seleccionId, setSeleccionId] = useState<number | null>(null);
   const [detalle, setDetalle] = useState<DetalleRevision | null>(null);
   const [documentoActivo, setDocumentoActivo] = useState<number | null>(null);
@@ -195,9 +210,12 @@ export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
 
   async function cargarLista() {
     try {
-      const res = await fetch(`${apiUrl}/revision`, { cache: "no-store" });
+      const params = new URLSearchParams({ pagina: String(paginaLista), tamano_pagina: String(TAMANO_PAGINA) });
+      const res = await fetch(`${apiUrl}/revision?${params.toString()}`, { cache: "no-store" });
       if (!res.ok) throw new Error(`la API respondió ${res.status}`);
-      setLista(await res.json());
+      const datos: RespuestaColaRevision = await res.json();
+      setLista(datos.expedientes);
+      setTotalLista(datos.total);
       registrarExito();
     } catch (e) {
       registrarFallo(e instanceof Error ? e.message : String(e));
@@ -228,11 +246,14 @@ export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
     // solo se cargaba una vez al montar -- un fallo puntual la dejaba vacía
     // para siempre, sin reintentar. Sondeo periódico, igual que
     // ExpedientesPanel: se recupera sola en cuanto la API vuelve.
+    // Depende de `paginaLista` (sesión de paginación, 2026-09-08): sin
+    // esto, el intervalo se creaba una sola vez con la página 1 cerrada en
+    // su cierre y nunca se enteraba de un cambio de página.
     cargarLista();
     const id = setInterval(cargarLista, INTERVALO_SONDEO_MS);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [paginaLista]);
 
   // El punto principal del rediseño (CONTEXTO.md, encargo de la sesión de
   // pulido de 1280px): el documento y el formulario al lado de la lista,
@@ -457,6 +478,29 @@ export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
             );
           })}
         </div>
+        {totalLista > TAMANO_PAGINA && (
+          <div style={{ display: "flex", gap: "0.75rem", alignItems: "center", marginTop: "1rem" }}>
+            <button
+              onClick={() => setPaginaLista((p) => Math.max(1, p - 1))}
+              disabled={paginaLista <= 1}
+              className="btn btn-secondary btn-sm"
+            >
+              ← Anterior
+            </button>
+            <span className="muted">
+              Página {paginaLista} de {Math.max(1, Math.ceil(totalLista / TAMANO_PAGINA))} ({totalLista} en total)
+            </span>
+            <button
+              onClick={() =>
+                setPaginaLista((p) => Math.min(Math.max(1, Math.ceil(totalLista / TAMANO_PAGINA)), p + 1))
+              }
+              disabled={paginaLista >= Math.ceil(totalLista / TAMANO_PAGINA)}
+              className="btn btn-secondary btn-sm"
+            >
+              Siguiente →
+            </button>
+          </div>
+        )}
       </div>
 
       {detalle && (

@@ -179,6 +179,20 @@ class CatalogoRespuesta(BaseModel):
     lineas: list[LineaCatalogoOut]
 
 
+class ColaRevisionRespuesta(BaseModel):
+    """Paginación de `GET /revision` (sesión de paginación de la cola de
+    revisión, 2026-09-08): antes devolvía siempre TODOS los
+    `pendiente_revision` de golpe -- con el corpus de 45-52 expedientes no
+    se notaba, pero con 303 casos reales eran 400 KB por respuesta,
+    sondeados cada 3 segundos por la web. Misma forma que `CatalogoRespuesta`,
+    para que el cliente pagine igual en las dos pantallas."""
+
+    total: int
+    pagina: int
+    tamano_pagina: int
+    expedientes: list[ExpedienteOut]
+
+
 class LineaCatalogoCorreccion(BaseModel):
     matricula: Optional[str] = None
     descripcion: Optional[str] = None

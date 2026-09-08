@@ -1,7 +1,7 @@
 from decimal import Decimal
 
-from fastapi import APIRouter, Body, Depends, HTTPException
-from sqlalchemy import select
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.auth import Usuario, get_current_user
@@ -11,6 +11,7 @@ from app.db import get_db
 from app.extraccion.cruce_codigos import AutoreferenciaMatrizError, asignar_matriz
 from app.models import Documento, EstadoExpediente, EstadoRevisionLinea, Expediente, LineaCatalogo, Lote
 from app.schemas import (
+    ColaRevisionRespuesta,
     ExpedienteCorreccion,
     ExpedienteOut,
     ExpedienteRevisionOut,
@@ -23,6 +24,8 @@ from app.schemas import (
 
 router = APIRouter()
 
+_TAMANO_PAGINA_MAX = 200
+
 
 def _acumular_comentario(comentarios: str | None, nuevo: str) -> str:
     """Añade una nota nueva sin perder las que ya hubiera (CONTEXTO.md sección
@@ -33,20 +36,34 @@ def _acumular_comentario(comentarios: str | None, nuevo: str) -> str:
     return f"{comentarios}\n{nuevo}" if comentarios else nuevo
 
 
-@router.get("/revision", response_model=list[ExpedienteOut])
+@router.get("/revision", response_model=ColaRevisionRespuesta)
 def listar_cola_revision(
+    pagina: int = Query(default=1, ge=1),
+    tamano_pagina: int = Query(default=50, ge=1, le=_TAMANO_PAGINA_MAX),
     db: Session = Depends(get_db),
     usuario: Usuario = Depends(get_current_user),
 ):
     """CONTEXTO.md, encargo de esta sesión, punto 3: casos marcados como
     `pendiente_revision`, con el motivo real (`expediente.error`) — el
     documento al lado y la confirmación/corrección se piden por expediente
-    en `/expedientes/{id}/revision`."""
-    return db.execute(
-        select(Expediente)
-        .where(Expediente.estado == EstadoExpediente.pendiente_revision)
-        .order_by(Expediente.updated_at.desc())
+    en `/expedientes/{id}/revision`.
+
+    Paginado desde la sesión de paginación de la cola de revisión
+    (2026-09-08, mismo criterio que `GET /catalogo`): antes devolvía los
+    `pendiente_revision` completos de una vez -- con 303 casos reales eran
+    400 KB por respuesta, sondeados cada 3 segundos por la web
+    (`RevisionPanel.tsx`)."""
+    base = select(Expediente).where(Expediente.estado == EstadoExpediente.pendiente_revision)
+    total = db.execute(select(func.count()).select_from(base.subquery())).scalar_one()
+    filas = db.execute(
+        base.order_by(Expediente.updated_at.desc())
+        .offset((pagina - 1) * tamano_pagina)
+        .limit(tamano_pagina)
     ).scalars().all()
+    return ColaRevisionRespuesta(
+        total=total, pagina=pagina, tamano_pagina=tamano_pagina,
+        expedientes=[ExpedienteOut.model_validate(e) for e in filas],
+    )
 
 
 def _linea_out_con_posible_duplicado(db: Session, linea: LineaCatalogo, fila: tuple) -> LineaCatalogoOut:
