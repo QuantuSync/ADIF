@@ -164,3 +164,112 @@ completo, `Nº Expediente` y `MATRIZ` indexados):
   expedientes son y si el problema es que no figuran... o que el cruce
   falla"): un reintento de cruce cuando `codigo_matriz` cambia después del
   primer intento fallido.
+
+---
+
+## Bloque 3 — Reintento de cruce, corrección del extractor multi-lote PCSP y estado `INVALIDADO`
+
+Continuación del mismo día: implementación de lo diagnosticado en el bloque
+2 (reintento de cruce), corrección de la causa raíz de los 28 expedientes
+del bloque 1, y un hallazgo de diseño nuevo encontrado verificando esa
+corrección contra el corpus real.
+
+### Reintento de cruce con el Excel de códigos
+
+`asegurar_cruce_codigos` solo se intentaba una vez por expediente. Migración
+0023 (`expedientes.codigo_matriz_en_cruce`) guarda qué `codigo_matriz`
+estaba en efecto en el último intento; se reintenta solo cuando cambia (o
+aparece por primera vez) — nunca en bucle. Aplicado en vivo a los 3
+expedientes conocidos (`6.26/28510.0032`, `0071`, `0014`): los tres cruzan
+ya. 708 → 616 líneas sin código interno/de proyecto.
+
+### Extractor multi-lote del Anuncio PCSP ("Nº Lote: NNN")
+
+Nuevo módulo `app.extraccion.lotes_pcsp`: un Anuncio de adjudicación puede
+agrupar varios lotes en un solo PDF bajo "Nº Lote: NNN" (tercera variante,
+distinta de la narrativa "LOTE N" ya cubierta por `app.extraccion.lotes`).
+Cada expediente toma el importe de licitación, el de adjudicación y el
+adjudicatario de **su propio bloque**, emparejado contra
+`Expediente.nombre_proyecto` (fuente independiente, normalmente del Excel
+de ejecución SAP) — nunca a ciegas.
+
+Dos defectos más, encontrados verificando el reproceso real:
+
+1. **Prioridad por orden de documento.** Un mismo expediente puede traer
+   dos Anuncios PCSP (CONTRATO + ADJUDICACION); uno de ellos puede seguir
+   teniendo el presupuesto GLOBAL en su propia cabecera sin repetir "Nº
+   Lote:". "El primer valor no nulo gana" dejaba ese global fijo si se
+   procesaba antes que el documento que sí resuelve el lote. Corregido: un
+   valor resuelto por lote tiene prioridad sobre uno sin resolver, sin
+   importar el orden (`6.20/28510.0041`: 22.000.000 € → 500.000 €, el de
+   su propio lote).
+2. **Sesión larga de SQLAlchemy en el script de reproceso** (no en el
+   motor): reutilizar una sola sesión para 27 expedientes servía datos
+   obsoletos de la matriz a los hermanos procesados después. Corregido
+   usando una sesión nueva por expediente, igual que el worker real.
+
+Escaneo completo de los 772 documentos no tipados `anuncio_pcsp`: 0 casos
+adicionales del marcador. El alcance queda cerrado en 27 expedientes.
+
+### El estado `INVALIDADO`
+
+Verificando el arreglo contra la base real: 12 de los 14 expedientes de
+"balasto" seguían mostrando el adjudicatario de un lote hermano (`UTE
+BALASTO MADRID NORTE 2`) después de corregir la extracción. Causa: `None`
+("no encontrado") y "encontrado pero no atribuible con confianza" se
+trataban igual, y la regla "un valor vacío nunca pisa uno ya guardado" —
+correcta para el primer caso — conservaba en el segundo un dato tan
+equivocado como el que se acababa de corregir.
+
+`app.extraccion.invalidado.INVALIDADO`: un tercer estado explícito, distinto
+de `None`, que SÍ puede borrar un valor ya guardado. Aplicado en tres
+sitios:
+
+- `lote.adjudicatario`, cuando el Anuncio PCSP multi-lote no identifica el
+  bloque propio (los 12 de balasto quedan en blanco, no con el nombre de un
+  hermano).
+- `objeto_contrato`, en el mismo caso — para no sembrar
+  `Expediente.nombre_proyecto` (el propio ancla del emparejamiento) con el
+  objeto del primer lote en un expediente todavía sin nombre propio.
+- `precio_adjudicado` en `guardar_lineas_catalogo`: es siempre derivado
+  (`precio_unitario × (1 − baja_lote)`), nunca leído del documento, así que
+  un `None` aquí significa "ya no se puede calcular", nunca "esta pasada no
+  trajo el dato" — se sobrescribe siempre, a diferencia del resto de
+  campos. 336 líneas de `6.20/28510.0041` tenían el precio derivado de una
+  baja global ya corregida a "desconocida".
+
+### Baja declarada por lote
+
+Mismo defecto estructural, encontrado en el camino de la baja por texto:
+`elegir_baja_preferida` no distinguía candidatas de expedientes hermanos
+que comparten el mismo `CONTRATO`. Nuevo extractor,
+`app.extraccion.baja.extraer_codigo_propio_documento` — cada contrato real
+declara sin ambigüedad "Contrato nº: X" en su cabecera — filtra las
+candidatas cuyo documento declara explícitamente OTRO código; si todas
+quedan excluidas, `INVALIDADO` en vez de elegir la de mayor prioridad de
+plantilla a ciegas.
+
+**Verificado contra el corpus real, las 38 líneas del hallazgo del bloque
+1:**
+
+| Expediente | Baja antes | Baja después | ¿Era correcta? |
+|---|---|---|---|
+| `6.23/28510.0139` | 5,07 % | *(vacía)* | No — no confirma ninguna de las dos, correctamente invalidada |
+| `6.24/28510.0017` | 5,07 % | 5,07 % | Sí — coincidía por casualidad con su propio contrato |
+| `6.24/28510.0018` | 5,07 % | **0,40 %** | **No** — tenía la baja de su hermano `0017` |
+| `6.19/28510.0195` | 5 % | *(vacía)* | No — el documento compartido pertenece a un tercer expediente (`6.20/28510.0029`) nunca scrapeado, ninguno de los dos contratos es suyo |
+| `6.20/28510.0028` | 37,51 % | 37,51 % | Sí — confirmado contra su propio "Contrato nº" |
+
+18 tests nuevos (506 totales). Commiteado, desplegado, reprocesados los 27
+expedientes con el código final.
+
+### Estado del catálogo al cerrar la sesión
+
+El backlog de reproceso general (heredado de una sesión anterior del mismo
+día, ajeno a este arreglo) terminó de drenar durante esta sesión: 467
+expedientes activos, 16.206 líneas en base de datos, 15.290 entregables,
+916 huérfanas sin lote. Auditoría automática: **0 errores**, 4 avisos
+(huérfanas sin lote, precios atípicos, cantidades con forma de año,
+importe de licitación compartido entre expedientes — ninguno nuevo,
+incluye coincidencias legítimas ya documentadas como la familia de precio
+indexado de carril). Listo para exportar.

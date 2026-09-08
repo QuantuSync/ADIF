@@ -1079,8 +1079,26 @@ suficientes, no ahora.
   sistema); 3 (pedidos derivados de acuerdo marco descubiertos por el
   mecanismo inverso, sesión 2026-09-07) sí tienen un fallo de cruce real:
   su `codigo_matriz` se resuelve DESPUÉS de que `asegurar_cruce_codigos` ya
-  intentó (y falló) el cruce una única vez -- diagnosticado, sin
-  implementar un reintento (fuera del encargo de esta sesión).
+  intentó (y falló) el cruce una única vez. **Cerrado, mismo día (bloque
+  3 del doc de sesión):** `asegurar_cruce_codigos` reintenta cuando
+  `codigo_matriz` cambia desde el último intento (migración 0023,
+  `codigo_matriz_en_cruce`) -- 708 → 616 líneas sin código. El alcance real
+  del defecto de importe de licitación medido con precisión (12 documentos
+  del Anuncio PCSP agrupan varios lotes bajo "Nº Lote: NNN", tercera
+  variante multi-lote, 27 expedientes) y corregido:
+  `app.extraccion.lotes_pcsp` da a cada expediente el importe de
+  licitación/adjudicación/adjudicatario de su propio bloque, emparejado
+  por `nombre_proyecto`. De paso, un nuevo estado explícito,
+  `app.extraccion.invalidado.INVALIDADO` ("encontrado pero no atribuible
+  con confianza", que SÍ puede borrar un valor ya guardado, a diferencia de
+  `None`) -- sin él, 12 de los 14 expedientes de "balasto" seguían
+  mostrando el adjudicatario de un lote hermano después de corregir la
+  extracción. Mismo defecto extendido a la baja declarada por texto
+  (`app.extraccion.baja.extraer_codigo_propio_documento`, "Contrato nº: X"):
+  verificado que `6.24/28510.0018` tenía la baja de su hermano `0017`
+  (5,07 % en vez de 0,40 %) -- ya corregido. Detalle completo, la tabla de
+  las 38 líneas afectadas y los números finales en el bloque 3 de
+  `docs/sesion-2026-09-08-auditoria-automatica.md`.
 
 ---
 
