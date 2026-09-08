@@ -39,6 +39,7 @@ from app.extraccion.campos_lc27 import (
     extraer_objeto_contrato_lc27,
 )
 from app.extraccion.campos_pcsp import CampoAnclado, extraer_campos_anuncio_pcsp, importe_como_decimal
+from app.extraccion.lotes_pcsp import extraer_campos_pcsp_para_expediente, extraer_ventanas_multi_lote_pcsp
 from app.extraccion.clasificador import clasificar, es_pliego_sin_precios
 from app.extraccion.cruce_codigos import (
     AutoreferenciaMatrizError,
@@ -326,7 +327,7 @@ def _detectar_numero_lotes_pcsp(documentos: list[_Documento]) -> Optional[int]:
 
 def _extraer_campos_expediente(
     db: Session, expediente: Expediente, documentos: list[_Documento], registrar_baja_importe: bool = True,
-) -> tuple[Optional[Decimal], Optional[Decimal], Optional[BajaDeclarada], Optional[str]]:
+) -> tuple[Optional[Decimal], Optional[Decimal], Optional[BajaDeclarada], Optional[str], Optional[str], bool]:
     """Etapa 2: nombre del proyecto y matriz (siempre) e importes de
     licitación/adjudicación y baja declarada a nivel de expediente (solo
     cuando `registrar_baja_importe`). Prioridad de importes: Anuncio PCSP
@@ -339,7 +340,17 @@ def _extraer_campos_expediente(
     expediente salen de sus lotes (`_resumir_lotes_en_expediente`), no de
     "la primera baja que aparece en el texto" — devolver y trazar esa baja
     suelta aquí sería confuso (una cifra sin lote junto a las trazas por
-    lote que sí importan) y ya no la usa nadie."""
+    lote que sí importan) y ya no la usa nadie.
+
+    El último valor devuelto, `multi_lote_pcsp_detectado`, es `True` cuando
+    algún Anuncio PCSP de `documentos` agrupa varios lotes bajo "Nº Lote:
+    NNN" (tercera variante multi-lote, `app.extraccion.lotes_pcsp`) --
+    tanto si se identificó el bloque propio de este expediente como si no
+    (ver `motivo_multi_lote_pcsp` para eso). El llamador lo usa para no
+    componer el motivo genérico de "cobertura parcial: 0 de N lotes
+    identificados" (pensado para cuando de verdad no hay ningún documento
+    que desglose por lote) sobre un caso que esta vía ya trató -- bien o
+    mal, pero explícitamente."""
     # (valor Decimal, documento_id, pagina, fragmento) por fuente; None si esa
     # fuente no trajo el campo. pcsp gana sobre lc27 al elegir al final.
     licitacion_pcsp = adjudicacion_pcsp = None
@@ -359,20 +370,45 @@ def _extraer_campos_expediente(
     adjudicatario_pcsp = None
     candidatos_baja: list[BajaDeclarada] = []
     baja_doc: dict[int, int] = {}  # id(BajaDeclarada) -> documento.id
+    # Tercera variante multi-lote, sesión de medición del alcance
+    # (2026-09-08): un Anuncio PCSP que agrupa varios lotes bajo "Nº Lote:
+    # NNN" en un único documento -- ver docstring de
+    # `app.extraccion.lotes_pcsp` para el hallazgo real completo.
+    motivo_multi_lote_pcsp: Optional[str] = None
+    multi_lote_pcsp_detectado = False
+    # Hallazgo real, verificando el reproceso de `6.20/28510.0041`: un mismo
+    # expediente puede traer DOS Anuncios PCSP (CONTRATO + ADJUDICACION) --
+    # uno de ellos, de un único lote en su propia sección de adjudicación,
+    # PUEDE seguir teniendo el presupuesto GLOBAL en su propia cabecera sin
+    # repetir "Nº Lote: NNN" (así que `extraer_ventanas_multi_lote_pcsp` no
+    # lo detecta ni lo corrige). "El primer valor no nulo gana" dejaba que
+    # ese documento, si se procesaba antes que el que sí resuelve el bloque
+    # propio del lote, fijara la licitación global sin que el segundo,
+    # correcto, pudiera corregirla después. Un valor que salió de un bloque
+    # de lote identificado con confianza (`resuelto_por_lote`) tiene
+    # prioridad sobre uno que no, sin importar el orden de los documentos.
+    licitacion_pcsp_resuelta = adjudicacion_pcsp_resuelta = adjudicatario_pcsp_resuelto = False
 
     for item in documentos:
         if item.tipo == TipoDocumento.anuncio_pcsp:
-            campos = extraer_campos_anuncio_pcsp(item.paginas)
-            if campos.importe_licitacion and licitacion_pcsp is None:
+            campos, motivo_lote = extraer_campos_pcsp_para_expediente(item.paginas, expediente.nombre_proyecto)
+            ventanas_item = extraer_ventanas_multi_lote_pcsp(item.paginas)
+            resuelto_por_lote = bool(ventanas_item) and motivo_lote is None
+            if ventanas_item:
+                multi_lote_pcsp_detectado = True
+            motivo_multi_lote_pcsp = _acumular_motivo(motivo_multi_lote_pcsp, motivo_lote)
+            if campos.importe_licitacion and (licitacion_pcsp is None or (resuelto_por_lote and not licitacion_pcsp_resuelta)):
                 licitacion_pcsp = (
                     importe_como_decimal(campos.importe_licitacion), item.documento.id,
                     campos.importe_licitacion.pagina, campos.importe_licitacion.fragmento,
                 )
-            if campos.importe_adjudicacion and adjudicacion_pcsp is None:
+                licitacion_pcsp_resuelta = resuelto_por_lote
+            if campos.importe_adjudicacion and (adjudicacion_pcsp is None or (resuelto_por_lote and not adjudicacion_pcsp_resuelta)):
                 adjudicacion_pcsp = (
                     importe_como_decimal(campos.importe_adjudicacion), item.documento.id,
                     campos.importe_adjudicacion.pagina, campos.importe_adjudicacion.fragmento,
                 )
+                adjudicacion_pcsp_resuelta = resuelto_por_lote
             if campos.codigo_matriz:
                 try:
                     escrito = asignar_matriz(expediente, campos.codigo_matriz.valor)
@@ -393,7 +429,8 @@ def _extraer_campos_expediente(
                     campos.objeto_contrato.valor, item.documento.id,
                     campos.objeto_contrato.pagina, campos.objeto_contrato.fragmento,
                 )
-            if campos.adjudicatario and adjudicatario_pcsp is None:
+            if campos.adjudicatario and (adjudicatario_pcsp is None or (resuelto_por_lote and not adjudicatario_pcsp_resuelto)):
+                adjudicatario_pcsp_resuelto = resuelto_por_lote
                 adjudicatario_pcsp = (
                     campos.adjudicatario.valor, item.documento.id,
                     campos.adjudicatario.pagina, campos.adjudicatario.fragmento,
@@ -430,7 +467,7 @@ def _extraer_campos_expediente(
         _traza(db, expediente.id, "nombre_proyecto", *fuente_objeto[1:], fuente_objeto[0])
 
     if not registrar_baja_importe:
-        return None, None, None, None
+        return None, None, None, None, motivo_multi_lote_pcsp, multi_lote_pcsp_detectado
 
     fuente_licitacion = licitacion_pcsp or licitacion_lc27
     fuente_adjudicacion = adjudicacion_pcsp or adjudicacion_lc27
@@ -458,7 +495,10 @@ def _extraer_campos_expediente(
     importe_licitacion = fuente_licitacion[0] if fuente_licitacion else None
     importe_adjudicacion = fuente_adjudicacion[0] if fuente_adjudicacion else None
     adjudicatario = fuente_adjudicatario[0] if fuente_adjudicatario else None
-    return importe_licitacion, importe_adjudicacion, baja_preferida, adjudicatario
+    return (
+        importe_licitacion, importe_adjudicacion, baja_preferida, adjudicatario,
+        motivo_multi_lote_pcsp, multi_lote_pcsp_detectado,
+    )
 
 
 def _procesar_lotes_declarados(
@@ -713,9 +753,11 @@ def ejecutar_extraccion_expediente(
                 # una matriz, la herencia de más abajo puede resolverla
                 # todavía — el motivo genérico de "no se pudo determinar la
                 # baja" solo se compone al final, después de intentarlo.
-                importe_licitacion, importe_adjudicacion, baja_preferida, adjudicatario = _extraer_campos_expediente(
-                    db, expediente, items
-                )
+                (
+                    importe_licitacion, importe_adjudicacion, baja_preferida, adjudicatario,
+                    motivo_multi_lote_pcsp, multi_lote_pcsp_detectado,
+                ) = _extraer_campos_expediente(db, expediente, items)
+                motivo_revision = _acumular_motivo(motivo_revision, motivo_multi_lote_pcsp)
 
                 # Segunda familia de baja (migración 0016, sesión de trabajo
                 # pendiente real 2026-09-05): antes de intentar la baja
@@ -785,7 +827,7 @@ def ejecutar_extraccion_expediente(
                 lotes = [lote]
 
                 expediente.lotes_totales_declarados = lotes_totales_pcsp
-                if lotes_totales_pcsp is not None and lotes_totales_pcsp > 1:
+                if lotes_totales_pcsp is not None and lotes_totales_pcsp > 1 and not multi_lote_pcsp_detectado:
                     # Caso real más peligroso de la sesión de identidad de
                     # lote: `6.23/28510.0139` declara "2 lotes" (el propio
                     # Anuncio PCSP lo confirma, "Nº de Lotes: 2") pero no
@@ -799,6 +841,15 @@ def ejecutar_extraccion_expediente(
                     # mismo riesgo que ya diagnosticó CONTEXTO.md sección 26
                     # para 6.24/28510.0088, aquí sin ni siquiera un
                     # documento que lo desglose.
+                    #
+                    # `not multi_lote_pcsp_detectado` (sesión de medición del
+                    # alcance, 2026-09-08): si el propio Anuncio PCSP SÍ trae
+                    # el desglose "Nº Lote: NNN" (tercera variante,
+                    # `app.extraccion.lotes_pcsp`), este motivo genérico
+                    # sería falso ("no trae ninguna... que declare la
+                    # adjudicación lote a lote") -- ese caso ya lo explica
+                    # `motivo_multi_lote_pcsp` (ambiguo) o no necesita
+                    # ningún motivo (resuelto).
                     motivo_revision = _acumular_motivo(
                         motivo_revision,
                         f"cobertura parcial: 0 de {lotes_totales_pcsp} lotes identificados por número "
