@@ -47,6 +47,7 @@ from app.extraccion.campos_pcsp import (
     _IMPORTE_LICITACION_RE,
     extraer_campos_anuncio_pcsp,
 )
+from app.extraccion.invalidado import INVALIDADO
 from app.extraccion.texto import PaginaTexto
 
 # Marcador de esta variante: "Nº Lote: NNN" con dos puntos -- deliberadamente
@@ -205,8 +206,12 @@ def extraer_campos_pcsp_para_expediente(
     Devuelve `(campos, motivo_revision)`. `motivo_revision` no es `None`
     solo cuando el documento SÍ es multi-lote pero no se pudo identificar
     con confianza el bloque de este expediente -- en ese caso `campos` trae
-    esos tres campos siempre en `None` (nunca el valor global o del primer
-    lote): mejor sin dato que con el equivocado."""
+    esos tres campos como `INVALIDADO` (`app.extraccion.invalidado`), nunca
+    `None`: el documento SÍ trae un valor para esas etiquetas, solo que no
+    se sabe atribuir, así que a diferencia de "no encontrado" (`None`, que
+    nunca pisa un dato ya guardado) esto sí debe poder borrar un valor
+    previo que viniera de esta misma fuente ambigua en una pasada anterior
+    -- ver docstring de `INVALIDADO`."""
     campos = extraer_campos_anuncio_pcsp(paginas)
     ventanas = extraer_ventanas_multi_lote_pcsp(paginas)
     if not ventanas:
@@ -221,7 +226,18 @@ def extraer_campos_pcsp_para_expediente(
             "coincidencia clara con ningún bloque) -- importe de licitación, importe de adjudicación y "
             "adjudicatario de este documento no se usan, para no atribuir el bloque equivocado"
         )
-        return replace(campos, importe_licitacion=None, importe_adjudicacion=None, adjudicatario=None), motivo
+        # `objeto_contrato` también se invalida (no solo los tres importes):
+        # sin él, un expediente todavía sin `nombre_proyecto` propio (recién
+        # descubierto, sin Excel SAP que lo rellene primero) podría sembrarlo
+        # con el objeto del PRIMER lote del documento -- envenenando para
+        # siempre el propio ancla con la que este emparejamiento decide
+        # (`if not expediente.nombre_proyecto` en el llamador nunca lo
+        # vuelve a pisar una vez puesto).
+        return replace(
+            campos,
+            importe_licitacion=INVALIDADO, importe_adjudicacion=INVALIDADO, adjudicatario=INVALIDADO,
+            objeto_contrato=INVALIDADO,
+        ), motivo
 
     return (
         replace(

@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Optional
 
+from app.extraccion.campos_pcsp import CODIGO_EXPEDIENTE_RE
 from app.extraccion.normalizacion import parsear_porcentaje_es
 from app.extraccion.texto import PaginaTexto
 from app.models import TipoDocumento
@@ -107,6 +108,44 @@ class BajaDeclarada:
 class BajaEnTexto:
     baja: Decimal
     fragmento: str
+
+
+# Sesión de medición del alcance "Nº Lote: NNN" (2026-09-08, parte 2 del
+# encargo, docs/sesion-2026-09-08-auditoria-automatica.md): un CONTRATO
+# (u otro documento de `_TIPOS_CON_BAJA_DECLARADA`) puede estar vinculado a
+# varios expedientes hermanos que comparten la misma licitación agrupadora
+# (`DocumentoExpediente`, migración 0021) -- el mismo defecto estructural
+# que ya se corrigió para el Anuncio PCSP multi-lote, aquí en la baja
+# declarada por texto. Verificado contra el corpus real (`6.23/28510.0139`
+# y sus dos pedidos, `6.24/28510.0017`/`0018`): dos CONTRATOs distintos,
+# cada uno vinculado a los TRES expedientes, con bajas declaradas distintas
+# (5,07 % y 0,40 %) -- sin este ancla, `elegir_baja_preferida` no tenía
+# forma de saber cuál de las dos es la de cada expediente.
+#
+# A diferencia del Anuncio PCSP (que agrupa varios lotes en un ÚNICO
+# documento bajo "Nº Lote: NNN"), aquí cada lote tiene su propio documento
+# COMPLETO, y cada uno declara sin ambigüedad a qué expediente pertenece:
+# "Contrato nº: 6.24/28510.0017" -- no hace falta ventanear el texto ni
+# emparejar por `nombre_proyecto`, el propio documento ya lo dice.
+_CODIGO_PROPIO_RE = re.compile(
+    r"Contrato\s*n[ºo]:?\s*(" + CODIGO_EXPEDIENTE_RE.pattern + r")", re.IGNORECASE
+)
+
+
+def extraer_codigo_propio_documento(paginas: list[PaginaTexto]) -> Optional[str]:
+    """`None` si el documento no declara "Contrato nº: X" -- la inmensa
+    mayoría del corpus, donde este mecanismo no cambia nada (un CONTRATO
+    vinculado a un único expediente no necesita desambiguarse). Solo se
+    busca en las tres primeras páginas (la cabecera administrativa del
+    contrato, verificado contra el corpus real): el patrón de código de
+    expediente es demasiado genérico para buscarlo en el cuerpo entero sin
+    arriesgarse a coger una referencia a OTRO expediente mencionada de
+    pasada más adelante."""
+    for pagina in paginas[:3]:
+        m = _CODIGO_PROPIO_RE.search(pagina.texto)
+        if m:
+            return m.group(1)
+    return None
 
 
 def buscar_baja_en_texto(texto: str) -> Optional[BajaEnTexto]:

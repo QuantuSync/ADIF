@@ -31,7 +31,12 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.catalogo import guardar_lineas_catalogo
-from app.extraccion.baja import BajaDeclarada, elegir_baja_preferida, extraer_baja_declarada
+from app.extraccion.baja import (
+    BajaDeclarada,
+    elegir_baja_preferida,
+    extraer_baja_declarada,
+    extraer_codigo_propio_documento,
+)
 from app.extraccion.campos_lc27 import (
     extraer_adjudicatario_lc27,
     extraer_importe_adjudicacion_lc27,
@@ -54,6 +59,7 @@ from app.extraccion.herencia_matriz import (
     resolver_o_encolar_matriz,
 )
 from app.extraccion.identidad_expediente import corregir_identidad_expediente
+from app.extraccion.invalidado import INVALIDADO
 from app.extraccion.lotes import LoteDeclarado, ResultadoLotes, extraer_lotes_declarados
 from app.extraccion.modelo_precio_indexado import detectar_modelo_precio_indexado
 from app.extraccion.normalizacion import parsear_importe_es
@@ -167,6 +173,40 @@ def _acumular_motivo(motivo: Optional[str], nuevo: Optional[str]) -> Optional[st
     if not nuevo:
         return motivo
     return f"{motivo}; {nuevo}" if motivo else nuevo
+
+
+def _combinar_fuente(principal, respaldo):
+    """`principal or respaldo` de siempre, adaptado a que `principal` pueda
+    ser `INVALIDADO` (`app.extraccion.invalidado`): un respaldo real (LC.27)
+    sigue ganando sobre un PCSP invalidado, pero si tampoco hay respaldo se
+    devuelve `INVALIDADO` tal cual -- nunca `None`, para que el llamador
+    sepa que hay que BORRAR un valor ya guardado, no dejarlo como estaba."""
+    if principal is not None and principal is not INVALIDADO:
+        return principal
+    if respaldo is not None:
+        return respaldo
+    return principal
+
+
+def _valor_final(fuente):
+    """Primer elemento de la tupla `(valor, documento_id, pagina,
+    fragmento)`, o el propio `fuente` tal cual si es `None`/`INVALIDADO`
+    (no subindexable)."""
+    if fuente is None or fuente is INVALIDADO:
+        return fuente
+    return fuente[0]
+
+
+def _nivel_campo(valor, resuelto_por_lote: bool) -> int:
+    """Prioridad al combinar el mismo campo (importe de licitación,
+    adjudicación o adjudicatario) leído de varios documentos Anuncio PCSP
+    del mismo expediente -- ver el comentario sobre los cuatro niveles en
+    `_extraer_campos_expediente`."""
+    if valor is None:
+        return 0
+    if valor is INVALIDADO:
+        return 2
+    return 3 if resuelto_por_lote else 1
 
 
 def _obtener_o_crear_lote(db: Session, expediente_id: int, identificador: str) -> Lote:
@@ -370,6 +410,12 @@ def _extraer_campos_expediente(
     adjudicatario_pcsp = None
     candidatos_baja: list[BajaDeclarada] = []
     baja_doc: dict[int, int] = {}  # id(BajaDeclarada) -> documento.id
+    # id(BajaDeclarada) -> "Contrato nº" declarado en su documento de origen
+    # (None si no lo declara) -- sesión de medición del alcance, parte 2:
+    # distingue una baja de UN HERMANO (documento compartido que sí declara
+    # a quién pertenece) de una baja genuinamente de este expediente o de
+    # un documento sin esa etiqueta (la inmensa mayoría del corpus).
+    baja_codigo_propio: dict[int, Optional[str]] = {}
     # Tercera variante multi-lote, sesión de medición del alcance
     # (2026-09-08): un Anuncio PCSP que agrupa varios lotes bajo "Nº Lote:
     # NNN" en un único documento -- ver docstring de
@@ -384,10 +430,16 @@ def _extraer_campos_expediente(
     # lo detecta ni lo corrige). "El primer valor no nulo gana" dejaba que
     # ese documento, si se procesaba antes que el que sí resuelve el bloque
     # propio del lote, fijara la licitación global sin que el segundo,
-    # correcto, pudiera corregirla después. Un valor que salió de un bloque
-    # de lote identificado con confianza (`resuelto_por_lote`) tiene
-    # prioridad sobre uno que no, sin importar el orden de los documentos.
-    licitacion_pcsp_resuelta = adjudicacion_pcsp_resuelta = adjudicatario_pcsp_resuelto = False
+    # correcto, pudiera corregirla después.
+    #
+    # Cuatro niveles de confianza, nunca se baja de nivel dentro del mismo
+    # expediente (`_nivel_campo`): 3 un valor resuelto por lote con
+    # confianza (`resuelto_por_lote`); 2 `INVALIDADO` -- el documento SÍ es
+    # multi-lote pero no se pudo atribuir el bloque, más fiable que un
+    # valor sin resolver porque sabemos explícitamente que no hay que
+    # fiarse de él; 1 un valor sin resolver (documento de un solo lote, o
+    # multi-lote nunca comprobado); 0 nada.
+    licitacion_pcsp_nivel = adjudicacion_pcsp_nivel = adjudicatario_pcsp_nivel = 0
 
     for item in documentos:
         if item.tipo == TipoDocumento.anuncio_pcsp:
@@ -397,18 +449,26 @@ def _extraer_campos_expediente(
             if ventanas_item:
                 multi_lote_pcsp_detectado = True
             motivo_multi_lote_pcsp = _acumular_motivo(motivo_multi_lote_pcsp, motivo_lote)
-            if campos.importe_licitacion and (licitacion_pcsp is None or (resuelto_por_lote and not licitacion_pcsp_resuelta)):
+
+            nivel = _nivel_campo(campos.importe_licitacion, resuelto_por_lote)
+            if nivel > licitacion_pcsp_nivel:
+                licitacion_pcsp_nivel = nivel
                 licitacion_pcsp = (
-                    importe_como_decimal(campos.importe_licitacion), item.documento.id,
-                    campos.importe_licitacion.pagina, campos.importe_licitacion.fragmento,
+                    INVALIDADO if campos.importe_licitacion is INVALIDADO else (
+                        importe_como_decimal(campos.importe_licitacion), item.documento.id,
+                        campos.importe_licitacion.pagina, campos.importe_licitacion.fragmento,
+                    )
                 )
-                licitacion_pcsp_resuelta = resuelto_por_lote
-            if campos.importe_adjudicacion and (adjudicacion_pcsp is None or (resuelto_por_lote and not adjudicacion_pcsp_resuelta)):
+
+            nivel = _nivel_campo(campos.importe_adjudicacion, resuelto_por_lote)
+            if nivel > adjudicacion_pcsp_nivel:
+                adjudicacion_pcsp_nivel = nivel
                 adjudicacion_pcsp = (
-                    importe_como_decimal(campos.importe_adjudicacion), item.documento.id,
-                    campos.importe_adjudicacion.pagina, campos.importe_adjudicacion.fragmento,
+                    INVALIDADO if campos.importe_adjudicacion is INVALIDADO else (
+                        importe_como_decimal(campos.importe_adjudicacion), item.documento.id,
+                        campos.importe_adjudicacion.pagina, campos.importe_adjudicacion.fragmento,
+                    )
                 )
-                adjudicacion_pcsp_resuelta = resuelto_por_lote
             if campos.codigo_matriz:
                 try:
                     escrito = asignar_matriz(expediente, campos.codigo_matriz.valor)
@@ -429,11 +489,14 @@ def _extraer_campos_expediente(
                     campos.objeto_contrato.valor, item.documento.id,
                     campos.objeto_contrato.pagina, campos.objeto_contrato.fragmento,
                 )
-            if campos.adjudicatario and (adjudicatario_pcsp is None or (resuelto_por_lote and not adjudicatario_pcsp_resuelto)):
-                adjudicatario_pcsp_resuelto = resuelto_por_lote
+            nivel = _nivel_campo(campos.adjudicatario, resuelto_por_lote)
+            if nivel > adjudicatario_pcsp_nivel:
+                adjudicatario_pcsp_nivel = nivel
                 adjudicatario_pcsp = (
-                    campos.adjudicatario.valor, item.documento.id,
-                    campos.adjudicatario.pagina, campos.adjudicatario.fragmento,
+                    INVALIDADO if campos.adjudicatario is INVALIDADO else (
+                        campos.adjudicatario.valor, item.documento.id,
+                        campos.adjudicatario.pagina, campos.adjudicatario.fragmento,
+                    )
                 )
         elif item.tipo in (TipoDocumento.propuesta_lc27, TipoDocumento.resolucion_adjudicacion):
             # Misma familia de etiquetas fijas en ambas plantillas (CONTEXTO.md
@@ -460,6 +523,7 @@ def _extraer_campos_expediente(
             if baja is not None:
                 candidatos_baja.append(baja)
                 baja_doc[id(baja)] = item.documento.id
+                baja_codigo_propio[id(baja)] = extraer_codigo_propio_documento(item.paginas)
 
     fuente_objeto = objeto_pcsp or objeto_lc27
     if fuente_objeto and not expediente.nombre_proyecto:
@@ -469,15 +533,39 @@ def _extraer_campos_expediente(
     if not registrar_baja_importe:
         return None, None, None, None, motivo_multi_lote_pcsp, multi_lote_pcsp_detectado
 
-    fuente_licitacion = licitacion_pcsp or licitacion_lc27
-    fuente_adjudicacion = adjudicacion_pcsp or adjudicacion_lc27
-    if fuente_licitacion:
+    fuente_licitacion = _combinar_fuente(licitacion_pcsp, licitacion_lc27)
+    fuente_adjudicacion = _combinar_fuente(adjudicacion_pcsp, adjudicacion_lc27)
+    if fuente_licitacion and fuente_licitacion is not INVALIDADO:
         _traza(db, expediente.id, "importe_licitacion", *fuente_licitacion[1:], fuente_licitacion[0])
-    if fuente_adjudicacion:
+    if fuente_adjudicacion and fuente_adjudicacion is not INVALIDADO:
         _traza(db, expediente.id, "importe_adjudicacion", *fuente_adjudicacion[1:], fuente_adjudicacion[0])
 
-    baja_preferida = elegir_baja_preferida(candidatos_baja)
-    if baja_preferida is not None:
+    # Sesión de medición del alcance, parte 2: excluir las candidatas cuyo
+    # documento declara explícitamente OTRO "Contrato nº" -- son de un
+    # expediente hermano, no de este, aunque compartan el mismo
+    # `DocumentoExpediente` (caso real: 6.23/28510.0139 y sus dos pedidos,
+    # dos CONTRATOs con bajas distintas, 5,07 % y 0,40 %, ambos vinculados a
+    # los tres). Si TODAS las candidatas quedan excluidas así (había baja
+    # declarada, pero ninguna es confirmadamente de este expediente),
+    # `INVALIDADO` en vez de `None` -- ver `app.extraccion.invalidado`.
+    codigo_actual = normalizar_codigo_expediente(expediente.codigo_expediente)
+    ids_codigo_ajeno = {
+        id(c) for c in candidatos_baja
+        if baja_codigo_propio.get(id(c)) is not None
+        and normalizar_codigo_expediente(baja_codigo_propio[id(c)]) != codigo_actual
+    }
+    candidatos_baja_propios = [c for c in candidatos_baja if id(c) not in ids_codigo_ajeno]
+    if ids_codigo_ajeno and not candidatos_baja_propios:
+        motivo_multi_lote_pcsp = _acumular_motivo(
+            motivo_multi_lote_pcsp,
+            f"{len(ids_codigo_ajeno)} baja(s) declarada(s) en documento(s) compartido(s) con expediente(s) "
+            "hermano(s) (cada documento declara explícitamente su propio 'Contrato nº', ninguno coincide "
+            "con el de este expediente) -- ninguna se usa, para no atribuir la baja de otro lote",
+        )
+        baja_preferida = INVALIDADO
+    else:
+        baja_preferida = elegir_baja_preferida(candidatos_baja_propios)
+    if baja_preferida is not None and baja_preferida is not INVALIDADO:
         _traza(
             db, expediente.id, "baja_declarada", baja_doc.get(id(baja_preferida)),
             baja_preferida.pagina, baja_preferida.fragmento, baja_preferida.baja,
@@ -488,13 +576,13 @@ def _extraer_campos_expediente(
     # reserva para expedientes sin Anuncio PCSP, verificado con las 3
     # matrices de carril (ninguna trae Anuncio PCSP, docs/descubrimiento-
     # inverso-matriz-pedidos.md sección 7).
-    fuente_adjudicatario = adjudicatario_pcsp or adjudicatario_lc27
-    if fuente_adjudicatario:
+    fuente_adjudicatario = _combinar_fuente(adjudicatario_pcsp, adjudicatario_lc27)
+    if fuente_adjudicatario and fuente_adjudicatario is not INVALIDADO:
         _traza(db, expediente.id, "adjudicatario", *fuente_adjudicatario[1:], fuente_adjudicatario[0])
 
-    importe_licitacion = fuente_licitacion[0] if fuente_licitacion else None
-    importe_adjudicacion = fuente_adjudicacion[0] if fuente_adjudicacion else None
-    adjudicatario = fuente_adjudicatario[0] if fuente_adjudicatario else None
+    importe_licitacion = _valor_final(fuente_licitacion)
+    importe_adjudicacion = _valor_final(fuente_adjudicacion)
+    adjudicatario = _valor_final(fuente_adjudicatario)
     return (
         importe_licitacion, importe_adjudicacion, baja_preferida, adjudicatario,
         motivo_multi_lote_pcsp, multi_lote_pcsp_detectado,
@@ -759,6 +847,29 @@ def ejecutar_extraccion_expediente(
                 ) = _extraer_campos_expediente(db, expediente, items)
                 motivo_revision = _acumular_motivo(motivo_revision, motivo_multi_lote_pcsp)
 
+                # `INVALIDADO` (app.extraccion.invalidado) solo importa para
+                # decidir, más abajo, si hay que BORRAR un valor ya guardado
+                # -- para el cálculo de baja de aquí en medio se trata igual
+                # que "no hay dato" (nunca como un importe real con el que
+                # operar). `adjudicatario_invalidado` se guarda aparte
+                # porque la asignación a `lote.adjudicatario`, más abajo,
+                # necesita distinguir "no tengo nada nuevo, no lo toco" de
+                # "sé que lo que hay no vale, bórralo".
+                adjudicatario_invalidado = adjudicatario is INVALIDADO
+                if importe_licitacion is INVALIDADO:
+                    importe_licitacion = None
+                if importe_adjudicacion is INVALIDADO:
+                    importe_adjudicacion = None
+                if adjudicatario_invalidado:
+                    adjudicatario = None
+                if baja_preferida is INVALIDADO:
+                    # `lote.baja_lote = baja_efectiva`, más abajo, ya
+                    # sobrescribe sin condición (igual que los importes) --
+                    # basta con que `baja_preferida` deje de ser
+                    # `INVALIDADO` para que el cálculo de más abajo la
+                    # trate como "no declarada" y borre lo que hubiera.
+                    baja_preferida = None
+
                 # Segunda familia de baja (migración 0016, sesión de trabajo
                 # pendiente real 2026-09-05): antes de intentar la baja
                 # única de lote, comprobar si el propio expediente declara
@@ -805,7 +916,17 @@ def ejecutar_extraccion_expediente(
                 lote.baja_lote = baja_efectiva
                 lote.importe_licitacion = importe_licitacion
                 lote.importe_adjudicacion = importe_adjudicacion
-                if adjudicatario is not None:
+                if adjudicatario_invalidado:
+                    # Encontrado pero no atribuible con confianza (documento
+                    # multi-lote ambiguo): a diferencia de "no hay nada
+                    # nuevo" (`adjudicatario is None` sin más, que deja el
+                    # valor ya guardado tal cual), aquí SÍ se borra -- ese
+                    # valor guardado pudo venir de la misma fuente ambigua
+                    # en una pasada anterior (caso real: 12 de los 14
+                    # expedientes de "balasto" seguían mostrando el
+                    # adjudicatario de un lote hermano).
+                    lote.adjudicatario = None
+                elif adjudicatario is not None:
                     lote.adjudicatario = adjudicatario
                 if modelo_indexado is not None:
                     lote.modelo_precio = ModeloPrecio.indexado_por_pedido

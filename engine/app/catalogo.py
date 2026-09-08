@@ -1479,7 +1479,22 @@ def guardar_lineas_catalogo(
             # otro campo, la downgradearía de vuelta a la clave de matrícula
             # si esta llamada es la que no trae `codigo_precio`.
             for campo, valor in datos.items():
-                if campo != "clave_linea" and valor is not None:
+                if campo == "clave_linea":
+                    continue
+                if campo == "precio_adjudicado":
+                    # Derivado, nunca leído del documento (CONTEXTO.md
+                    # sección 4: `precio_unitario * (1 - baja_lote)`, o
+                    # `None` si falta cualquiera de los dos) -- cada pasada
+                    # lo recalcula desde cero, así que un `None` aquí SÍ
+                    # significa "ya no se puede derivar", nunca "esta
+                    # pasada no trajo el dato" (que es lo que justifica no
+                    # pisar el resto de campos). Hallazgo real, sesión de
+                    # medición del alcance 2026-09-08: 336 líneas de
+                    # `6.20/28510.0041` seguían con el precio adjudicado de
+                    # una baja ya corregida a "desconocida" porque este
+                    # bucle nunca llegaba a borrarlo.
+                    setattr(existente, campo, valor)
+                elif valor is not None:
                     setattr(existente, campo, valor)
             for duplicado in duplicados_por_firma:
                 # Filas heredadas de antes de este arreglo para la misma
