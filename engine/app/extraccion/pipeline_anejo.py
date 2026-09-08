@@ -77,6 +77,18 @@ def procesar_anejo(
 
     multi_lote = len(lotes) > 1
     identificador_unico = next(iter(lotes)) if len(lotes) == 1 else None
+    # Herencia de lote entre páginas de continuación (sesión de verificación
+    # del Excel, 2026-09-08, aprobado por el cliente tras verificar contra
+    # el documento real completo de `6.22/28510.0156`): el último lote
+    # resuelto sin ambigüedad -- directamente o ya heredado--, en el orden
+    # en que se procesan las tablas del documento. Solo se usa cuando
+    # `asociar_lote_tabla` marca la tabla actual como `elegible_para_herencia`
+    # (franja sin NINGÚN rastro de "LOTE", nunca sobre una ambigua) — esa es
+    # la única condición, la misma tanto si la franja está vacía como si
+    # trae boilerplate sin la palabra "LOTE". Se reinicia a `None` en cada
+    # documento (esta función procesa uno solo): heredar de un documento a
+    # otro no tendría ninguna base textual.
+    ultimo_lote_resuelto: Optional[str] = None
 
     with pdfplumber.open(ruta_pdf) as pdf:
         paginas_texto = [
@@ -89,16 +101,54 @@ def procesar_anejo(
             tablas_pagina = sorted(extraer_tablas_pagina(pagina), key=lambda t: t.bbox[1])
             banda_top = 0.0
             for tabla in tablas_pagina:
+                heredado_de_pagina_anterior = False
                 if multi_lote:
                     resultado_asociacion = asociar_lote_tabla(
                         pagina, banda_top, tabla.bbox, identificadores_validos=set(lotes)
                     )
                     identificador_lote = resultado_asociacion.identificador_lote
                     motivo_ambiguo = resultado_asociacion.motivo_ambiguo
+                    if (
+                        identificador_lote is None
+                        and resultado_asociacion.elegible_para_herencia
+                        and ultimo_lote_resuelto is not None
+                    ):
+                        # Ausencia total de rastro de "LOTE" en la franja Y
+                        # ya hay un lote resuelto antes en el documento del
+                        # que heredar -- nunca se adivina sobre un rastro
+                        # dudoso (`elegible_para_herencia` ya lo garantiza) ni
+                        # se inventa un lote de la nada (sin ancla previa, se
+                        # queda huérfana como siempre).
+                        identificador_lote = ultimo_lote_resuelto
+                        motivo_ambiguo = None
+                        heredado_de_pagina_anterior = True
                     if motivo_ambiguo is not None:
                         tablas_sin_lote.append(
                             f"página {tabla.pagina}: {motivo_ambiguo}"
                         )
+                    if identificador_lote is not None:
+                        # Se actualiza también cuando `identificador_lote`
+                        # viene de heredar (no solo de una cabecera fresca):
+                        # así la herencia encadena a través de varias páginas
+                        # de continuación seguidas, no solo una.
+                        ultimo_lote_resuelto = identificador_lote
+                    elif not resultado_asociacion.elegible_para_herencia:
+                        # Hallazgo real verificando esta misma sesión contra
+                        # `6.25/28510.0027` (balasto, 6 lotes en el
+                        # documento, solo 1 y 3 declarados): una mención de
+                        # "LOTE" que no se pudo resolver -- rechazada por no
+                        # estar declarada, o ambigua de verdad -- SIGUE
+                        # siendo la prueba de que aquí empieza una sección
+                        # nueva, aunque no se sepa a qué lote. Sin este
+                        # reinicio, una página de continuación sin ningún
+                        # rastro justo después de esa mención rechazada
+                        # heredaría a ciegas el último lote VÁLIDO visto
+                        # mucho antes -- p.ej. atribuir a Lote 1 la
+                        # continuación de la tabla de Lote 2, solo porque
+                        # Lote 2 no está entre los declarados. Se corta la
+                        # cadena aquí: la próxima página sin rastro alguno
+                        # se queda huérfana, no hereda de antes del corte.
+                        ultimo_lote_resuelto = None
                 else:
                     identificador_lote = identificador_unico
                     motivo_ambiguo = None
@@ -117,6 +167,16 @@ def procesar_anejo(
                 )
                 for linea in lineas_tabla:
                     linea["identificador_lote"] = identificador_lote
+                    # Trazabilidad de la herencia (encargo explícito del
+                    # cliente, sesión 2026-09-08): una línea cuyo lote viene
+                    # de heredarse de la tabla anterior, no de leerse en una
+                    # cabecera propia, tiene que poder distinguirse siempre
+                    # -- si algún día una herencia resulta ser incorrecta,
+                    # hace falta poder encontrar TODAS las líneas afectadas
+                    # por ese mecanismo, no solo esta. `True` o `None`, nunca
+                    # `False` explícito (mismo convenio que
+                    # `heredado_de_matriz`).
+                    linea["lote_heredado_de_pagina_anterior"] = True if heredado_de_pagina_anterior else None
                     # `construir_linea_catalogo` (CONTEXTO.md, sesión de rodaje
                     # 2026-09-03) ya puede haber puesto su propio
                     # `motivo_revision` (un valor de cantidad/precio/matrícula
@@ -128,6 +188,26 @@ def procesar_anejo(
                         lineas_con_aviso += 1
                     if motivo_ambiguo is not None:
                         linea["motivo_revision"] = motivo_ambiguo
+                    # Clave que esta línea usaría SI fuese huérfana (mismo
+                    # sufijo de página + franja vertical que more abajo) --
+                    # se calcula siempre, resuelva o no a un lote real, y
+                    # viaja aparte en `clave_huerfana_hipotetica` (nunca en
+                    # `clave_linea`, que sigue siendo la clave real de esta
+                    # línea). `guardar_lineas_catalogo` la usa para encontrar
+                    # y limpiar, con una comparación EXACTA de clave, la fila
+                    # huérfana de una pasada anterior que esta línea acaba de
+                    # superar (herencia de lote, sesión 2026-09-08) -- nunca
+                    # por contenido (descripción/precio): un precio de
+                    # referencia puede repetirse igual entre tablas de lotes
+                    # DISTINTOS de la misma página (hallazgo real,
+                    # `6.25/28510.0027`, "P-1 Balasto..." a 10,85 € en varios
+                    # lotes) y comparar por contenido confundiría esa
+                    # coincidencia con la misma fila reextraída -- justo el
+                    # riesgo de mezclar lotes que esta sesión verificó antes
+                    # de aprobar la propuesta. La franja vertical de la
+                    # tabla de origen es la única señal que distingue dos
+                    # tablas de la misma página sin ambigüedad.
+                    linea["clave_huerfana_hipotetica"] = f"{linea['clave_linea']}@p{tabla.pagina}y{int(tabla.bbox[1])}"
                     if identificador_lote is None:
                         # Hallazgo real (expediente 6.25/28510.0027): varias
                         # tablas ambiguas del mismo documento pueden compartir
@@ -141,7 +221,7 @@ def procesar_anejo(
                         # dos veces. Se desambigua por la posición de la
                         # tabla de origen (página + franja vertical), no por
                         # lote.
-                        linea["clave_linea"] = f"{linea['clave_linea']}@p{tabla.pagina}y{int(tabla.bbox[1])}"
+                        linea["clave_linea"] = linea["clave_huerfana_hipotetica"]
                 lineas.extend(lineas_tabla)
 
     # `Código del material`, vía de modelo (CONTEXTO.md sección 6, bloque 5 de

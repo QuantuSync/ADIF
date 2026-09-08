@@ -405,29 +405,61 @@ def test_expediente_0027_multi_lote_produce_baja_correcta_por_lote(db_session):
     assert len(huerfanas) > 0
     assert all(l.motivo_revision for l in huerfanas)
     assert all(l.expediente_id == expediente.id for l in huerfanas)
-    # 28, no 6: LOTE 2, 4, 5 y 6 tienen todos su propio "P-1".."P-6" — sin
+    # 24, no 6: LOTE 2, 4, 5 y 6 tienen todos su propio "P-1".."P-6" — sin
     # lote que las separe, fundirlas por `codigo_precio` a secas mezclaría
     # datos reales de lotes distintos entre sí (bug real encontrado al
     # verificar contra el stack real: antes de desambiguar por página y
     # posición de tabla en `app.extraccion.pipeline_anejo`, esto colapsaba a
     # solo 6 filas).
-    assert len(huerfanas) == 28
-    # LOTE 1 sí llega a asociarse a su lote (sesión de expedientes sin
-    # publicar, bajada del umbral de densidad de `app.extraccion.localizador`
-    # de 0,04 a 0,025): su tabla se reparte entre dos páginas, y la página con
-    # "P-1"/"P-2" tenía una densidad numérica (0,032) que quedaba por debajo
-    # del umbral antiguo — invisible para la cascada entera, ni siquiera
-    # llegaba a intentar leer la cabecera "LOTE 1" que sí la precede. Con el
-    # umbral nuevo la página se localiza, `app.extraccion.lote_tabla` encuentra
-    # la cabecera y las dos primeras líneas de LOTE 1 dejan de perderse.
+    #
+    # 24, no 28 (sesión de herencia de lote entre páginas de continuación,
+    # 2026-09-08): las 4 líneas de menos son "P-3".."P-6" de LOTE 1, que
+    # SÍ pertenecen a un lote declarado -- ver `lineas_lote1` más abajo. No
+    # están entre las huérfanas de LOTE 2/4/5/6 (esas siguen siendo 24 en
+    # total: 6+6+6+6), que siguen sin resolverse porque cada una tiene su
+    # propia cabecera "LOTE N" real, solo que no declarada -- una mención
+    # real de "LOTE", aunque rechazada, corta la cadena de herencia
+    # (`app.extraccion.pipeline_anejo`, `ultimo_lote_resuelto = None`): la
+    # continuación de LOTE 6 en la página siguiente (P-6 suelto) se queda
+    # huérfana en vez de heredar a ciegas el último lote VÁLIDO visto mucho
+    # antes (LOTE 1) -- justo el riesgo de mezclar lotes que motivó pedir
+    # esta verificación antes de aprobar la propuesta.
+    assert len(huerfanas) == 24
+    # LOTE 1 ya llega completo a las 6 líneas reales (antes de esta sesión,
+    # sesión de expedientes sin publicar: solo "P-1"/"P-2", bajada del
+    # umbral de densidad de `app.extraccion.localizador` de 0,04 a 0,025 --
+    # su tabla se reparte entre dos páginas, y la página con "P-1"/"P-2"
+    # tenía una densidad numérica, 0,032, que quedaba por debajo del umbral
+    # antiguo). "P-3".."P-6" de LOTE 1 están en la página SIGUIENTE, sin
+    # ninguna cabecera "LOTE" propia (confirmado contra el PDF real: la
+    # banda que los precede está vacía de la palabra "LOTE", la cabecera
+    # "LOTE 2" real aparece más abajo, ya después de estas cuatro filas,
+    # introduciendo la tabla siguiente) -- se perdían como huérfanas hasta
+    # esta sesión (herencia de lote entre páginas de continuación, aprobada
+    # por el cliente tras verificar que aquí no hay ningún candidato de
+    # LOTE distinto al que pudieran pertenecer en su lugar).
     lineas_lote1 = (
         db_session.query(LineaCatalogo)
         .filter_by(lote_id=lote1.id)
         .order_by(LineaCatalogo.codigo_precio)
         .all()
     )
-    assert [l.codigo_precio for l in lineas_lote1] == ["P-1", "P-2"]
+    assert [l.codigo_precio for l in lineas_lote1] == ["P-1", "P-2", "P-3", "P-4", "P-5", "P-6"]
     assert lineas_lote1[0].precio_unitario == Decimal("10.8500")
+    # Trazabilidad: P-1/P-2 vinieron de la cabecera propia de LOTE 1
+    # (`lote_heredado_de_pagina_anterior` en None); P-3..P-6 vinieron de
+    # heredar, y tienen que poder distinguirse como tales (encargo explícito
+    # del cliente al aprobar la propuesta).
+    heredadas = {l.codigo_precio: l.lote_heredado_de_pagina_anterior for l in lineas_lote1}
+    assert heredadas["P-1"] is None
+    assert heredadas["P-2"] is None
+    for codigo in ("P-3", "P-4", "P-5", "P-6"):
+        assert heredadas[codigo] is True
+    # Ninguna otra línea del expediente (LOTE 3, ni ninguna huérfana) se
+    # marca como heredada: la herencia es un mecanismo acotado a este caso
+    # concreto, no un efecto secundario que toque el resto del expediente.
+    assert all(l.lote_heredado_de_pagina_anterior is None for l in lineas_lote3)
+    assert all(l.lote_heredado_de_pagina_anterior is None for l in huerfanas)
 
     # Con líneas huérfanas, el expediente va a revisión — no se presenta
     # como completado un catálogo con líneas sin lote determinado.

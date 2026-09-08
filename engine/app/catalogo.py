@@ -1279,6 +1279,27 @@ def _combinar_por_clave(lineas: list[dict], permitir_fusion_material: bool = Tru
     return list(combinadas.values())
 
 
+def _limpiar_huerfana_superada(db: Session, expediente_id: int, clave_huerfana_hipotetica: Optional[str]) -> None:
+    """Ver docstring de `guardar_lineas_catalogo`. Solo se llama cuando la
+    línea se acaba de guardar bajo un `lote_id` real (nunca para huérfanas:
+    no tendría de qué "superarse"). Comparación exacta de `clave_linea`
+    -- `app.extraccion.pipeline_anejo` calcula `clave_huerfana_hipotetica`
+    con el mismo sufijo de página+franja vertical que la línea llevaría si
+    fuese huérfana, así que dos tablas distintas de la misma página con
+    contenido coincidente (mismo precio de referencia en dos lotes, caso
+    real del balasto) nunca comparten esta clave, aunque compartan
+    descripción y precio."""
+    if clave_huerfana_hipotetica is None:
+        return
+    huerfana = (
+        db.query(LineaCatalogo)
+        .filter_by(expediente_id=expediente_id, lote_id=None, clave_linea=clave_huerfana_hipotetica)
+        .one_or_none()
+    )
+    if huerfana is not None:
+        db.delete(huerfana)
+
+
 def guardar_lineas_catalogo(
     db: Session, lote_id: Optional[int], lineas: list[dict]
 ) -> ResultadoGuardadoCatalogo:
@@ -1353,11 +1374,41 @@ def guardar_lineas_catalogo(
     de precio de referencia entre lotes", este descarte automático es
     inseguro en todo su dominio de aplicación — no se implementa. Ver el
     informe de la sesión para el detalle completo y la propuesta pendiente de
-    aprobación del cliente."""
+    aprobación del cliente.
+
+    **Huérfana superada por herencia de lote: se limpia aquí (sesión de
+    herencia de lote entre páginas de continuación, 2026-09-08).**
+    `app.extraccion.pipeline_anejo` añade un sufijo de página/franja vertical
+    a `clave_linea` únicamente cuando la línea es huérfana (`identificador_lote
+    is None`, docstring de ese módulo) — necesario para no confundir dos
+    tablas ambiguas de la misma página que repiten el mismo código. Cuando
+    una línea que antes era huérfana pasa a resolverse a un lote real (una
+    cabecera que antes no se leía bien, o -desde esta sesión- una herencia
+    de la tabla anterior), su clave cambia de "P-001@p15y657" a "P-001" sin
+    más — la búsqueda por clave exacta de este bucle nunca encuentra la fila
+    huérfana vieja para actualizarla, así que queda duplicada para siempre
+    (hallazgo real al reprocesar: 2.152 filas así en los primeros
+    expedientes verificados). `_limpiar_huerfana_superada` la busca por
+    `clave_huerfana_hipotetica` (que `pipeline_anejo` calcula para TODA línea,
+    resuelva o no, con el mismo sufijo de página+franja vertical que tendría
+    si fuera huérfana) y la borra si existe — comparación EXACTA de clave,
+    nunca por contenido (descripción/precio): un precio de referencia puede
+    repetirse igual entre tablas de lotes DISTINTOS de la misma página
+    (hallazgo real, `6.25/28510.0027`, "P-1 Balasto..." a 10,85 € en varios
+    lotes) y comparar por contenido confundiría esa coincidencia con la
+    misma fila reextraída — exactamente el riesgo de mezclar lotes que esta
+    sesión verificó antes de aprobar la propuesta. La franja vertical de la
+    tabla de origen, codificada en la propia clave, es la única señal que
+    distingue sin ambigüedad dos tablas de la misma página."""
     creadas = 0
     actualizadas = 0
     fusion_material = lote_id is not None
     for datos in _combinar_por_clave(lineas, permitir_fusion_material=fusion_material):
+        # Transitorio, nunca una columna de `LineaCatalogo` -- se retira
+        # antes de que `datos` se use para crear/actualizar la fila real,
+        # y se guarda aparte para la limpieza de huérfana superada de más
+        # abajo (ver docstring de esta función).
+        clave_huerfana_hipotetica = datos.pop("clave_huerfana_hipotetica", None)
         existente = (
             db.query(LineaCatalogo)
             .filter_by(lote_id=lote_id, expediente_id=datos["expediente_id"], clave_linea=datos["clave_linea"])
@@ -1464,4 +1515,6 @@ def guardar_lineas_catalogo(
                     existente.motivo_revision, _MOTIVO_FUSION_SIN_MATRICULA
                 )
             actualizadas += 1
+        if lote_id is not None:
+            _limpiar_huerfana_superada(db, datos["expediente_id"], clave_huerfana_hipotetica)
     return ResultadoGuardadoCatalogo(creadas=creadas, actualizadas=actualizadas)

@@ -151,6 +151,106 @@ def test_documento_0088_traviesas_colapsa_a_14_lineas_unicas_en_catalogo(db_sess
     assert guardado.actualizadas == 0
 
 
+def test_documento_0156_hereda_lote_entre_paginas_de_continuacion(db_session):
+    # Sesión de verificación del Excel (2026-09-08), aprobado por el
+    # cliente tras verificar contra el documento real completo: fixture de
+    # 5 páginas reales de `6.22/28510.0156` (p.15, 16, 25, 26, 27 del
+    # original) -- p.15 y p.26 traen la cláusula de "urgencia mutua" (Parte
+    # A: se resuelven por posición gramatical), p.16/25/27 no traen ningún
+    # rastro de "LOTE" (Parte B: heredan el lote de la tabla anterior).
+    expediente = Expediente(codigo_expediente="6.22/28510.0156")
+    db_session.add(expediente)
+    db_session.commit()
+    lote1 = Lote(expediente_id=expediente.id, identificador_lote="1")
+    lote2 = Lote(expediente_id=expediente.id, identificador_lote="2")
+    db_session.add_all([lote1, lote2])
+    db_session.commit()
+    documento = Documento(
+        tipo_documento=TipoDocumento.anejo,
+        hash="hash-0156-herencia-lote",
+        ruta_almacenamiento=str(fx.ANEJO_HERENCIA_LOTE_0156),
+    )
+    db_session.add(documento)
+    db_session.commit()
+    db_session.add(DocumentoExpediente(
+        documento_id=documento.id, expediente_id=expediente.id,
+        nombre_archivo=fx.ANEJO_HERENCIA_LOTE_0156.name,
+    ))
+    db_session.commit()
+
+    resultado = procesar_anejo(
+        fx.ANEJO_HERENCIA_LOTE_0156,
+        documento_origen_id=documento.id,
+        expediente_id=expediente.id,
+        lotes={"1": Decimal("0.10"), "2": Decimal("0.20")},
+        db=db_session,
+        model_provider=None,
+    )
+
+    # Las 5 páginas del fixture (5 tablas, una por página) resuelven todas
+    # -- ninguna se queda ambigua.
+    assert resultado.tablas_sin_lote == []
+
+    por_pagina: dict[int, list[dict]] = {}
+    for linea in resultado.lineas:
+        por_pagina.setdefault(linea["pagina"], []).append(linea)
+    assert set(por_pagina) == {1, 2, 3, 4, 5}
+
+    # Página 1 (p.15 real): cabecera propia, resuelta por la Parte A -- no
+    # heredada.
+    for linea in por_pagina[1]:
+        assert linea["identificador_lote"] == "1"
+        assert linea["lote_heredado_de_pagina_anterior"] is None
+
+    # Páginas 2 y 3 (p.16 y p.25 reales): continuación de Lote 1, heredada.
+    for pagina in (2, 3):
+        for linea in por_pagina[pagina]:
+            assert linea["identificador_lote"] == "1"
+            assert linea["lote_heredado_de_pagina_anterior"] is True
+
+    # Página 4 (p.26 real): nueva cabecera propia, Parte A resuelve a Lote
+    # 2 -- la herencia de Lote 1 se corta aquí, no heredada.
+    for linea in por_pagina[4]:
+        assert linea["identificador_lote"] == "2"
+        assert linea["lote_heredado_de_pagina_anterior"] is None
+
+    # Página 5 (p.27 real): continuación de Lote 2, heredada -- nunca de
+    # Lote 1, aunque sea el "último lote" que apareció antes de la página 4.
+    for linea in por_pagina[5]:
+        assert linea["identificador_lote"] == "2"
+        assert linea["lote_heredado_de_pagina_anterior"] is True
+
+    # La baja de cada lote se aplica según el lote resuelto (heredado o no),
+    # nunca un valor mezclado entre los dos.
+    assert all(l["baja_lote"] == Decimal("0.10") for l in por_pagina[1] + por_pagina[2] + por_pagina[3])
+    assert all(l["baja_lote"] == Decimal("0.20") for l in por_pagina[4] + por_pagina[5])
+
+    grupos: dict[str, list[dict]] = {"1": [], "2": []}
+    for linea in resultado.lineas:
+        grupos[linea.pop("identificador_lote")].append(
+            {k: v for k, v in linea.items()}
+        )
+    guardado1 = guardar_lineas_catalogo(db_session, lote1.id, grupos["1"])
+    guardado2 = guardar_lineas_catalogo(db_session, lote2.id, grupos["2"])
+    db_session.commit()
+
+    from app.models import LineaCatalogo
+
+    heredadas_lote1 = (
+        db_session.query(LineaCatalogo)
+        .filter_by(lote_id=lote1.id, lote_heredado_de_pagina_anterior=True)
+        .count()
+    )
+    heredadas_lote2 = (
+        db_session.query(LineaCatalogo)
+        .filter_by(lote_id=lote2.id, lote_heredado_de_pagina_anterior=True)
+        .count()
+    )
+    assert heredadas_lote1 == len(por_pagina[2]) + len(por_pagina[3])
+    assert heredadas_lote2 == len(por_pagina[5])
+    assert guardado1.creadas + guardado2.creadas == len(resultado.lineas)
+
+
 def test_reprocesar_el_mismo_documento_no_duplica_lineas_ni_repite_llamadas(db_session):
     expediente, lote, documento = _crear_lote(db_session, "6.24/28510.0088", fx.ANEJO_PRECIOS_TRAVIESAS)
 

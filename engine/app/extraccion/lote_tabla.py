@@ -20,16 +20,44 @@ lote por defecto ni por cercanía: sus líneas quedan huérfanas (CONTEXTO.md,
 `app.models.LineaCatalogo.lote_id` admite NULL para esto) y van a la cola de
 revisión.
 
-**Herencia de lote entre páginas: deliberadamente sin implementar todavía**
-(ajuste 2 del usuario a este plan). Cuando la franja está vacía de texto
-—posible continuación de una tabla partida entre dos páginas, sin ninguna
-otra cosa a la que pudiera pertenecer— sería técnicamente inequívoco heredar
-el lote de la tabla anterior, pero es la única regla de este módulo que
-infiere en vez de leer directamente el documento, y una regla así puede
-fallar de formas silenciosas. Se deja como huérfana, con un motivo distinto
-("banda vacía") para poder medir cuántas líneas caen en este caso concreto
-sobre el corpus real antes de decidir si vale la pena implementarla.
-"""
+**Ambigüedad de "urgencia mutua entre lotes": resuelta (sesión de
+verificación del Excel, 2026-09-08, aprobado por el cliente).** Verificado
+contra `6.22/28510.0156`/`0122` (repuestos de vía, 2 lotes): la cláusula
+administrativa que abre cada lote es "Lote N: <alcance> y, en caso de
+urgencia que no pueda ser atendida por el adjudicatario del lote M,
+<alcance del otro>" — SIEMPRE menciona los dos números de lote en la misma
+frase, así que la franja de cualquiera de los dos lotes trae dos
+identificadores y caía en "varias cabeceras" sin serlo de verdad. El número
+que abre la sección real es el que precede a los dos puntos ("Lote N:");
+el que sigue a "del lote"/"por el lote" es solo la referencia de repuesto
+de urgencia, nunca una cabecera de tabla. `_resolver_ambiguedad_urgencia_mutua`
+distingue los dos por su posición gramatical en el texto — nunca por el
+contenido de las filas de datos (precio, descripción): eso es justo lo que
+CONTEXTO.md sección 12 y el caso del balasto (`6.25/28510.0027`) ya
+descartaron como riesgo de mezclar lotes distintos por coincidencia.
+
+**Herencia de lote entre páginas de continuación: implementada (misma
+sesión).** Cuando la franja no trae NINGÚN rastro de la palabra "LOTE" —ni
+siquiera ambiguo— es estructuralmente inequívoco que la tabla sigue siendo
+la misma que la anterior: siempre y cuando NO se haya descartado esa
+inferencia frente a una franja que sí trae algún indicio, aunque sea
+dudoso. `ResultadoAsociacionLote.elegible_para_herencia` señala
+exactamente y solo este caso (`app.extraccion.pipeline_anejo` es quien
+hereda de verdad, porque es el único que conoce la secuencia de tablas del
+documento). Verificado contra el documento real completo de
+`6.22/28510.0156` antes de implementar (sesión de verificación del Excel,
+2026-09-08): el "Lote 2" de ese documento es una copia íntegra del cuadro
+de precios de "Lote 1" (mismos códigos, mismas descripciones, mismos
+precios, desplazados 11 páginas) — la transición semicambios→cruzamientos
+que parecía un cambio de lote a mitad de tabla es el orden interno del
+propio catálogo, idéntico dentro de los dos bloques, y el único punto real
+de cambio de lote (p.26) trae su propia cabecera fuerte ("Lote 2:"), nunca
+una franja sin ningún rastro. No hay caso real en el corpus, verificado
+antes de implementar, donde un lote cambie sin dejar ningún rastro
+textual — pero si apareciera, sigue siendo el mismo riesgo que ya asumía
+esta sesión de diseño original (docstring previo: "una regla así puede
+fallar de formas silenciosas"), nunca el riesgo del balasto (aquí no se
+compara nunca el contenido de una fila con otra)."""
 from __future__ import annotations
 
 import re
@@ -37,6 +65,37 @@ from dataclasses import dataclass
 from typing import Optional
 
 _LOTE_CABECERA_RE = re.compile(r"\bLOTE\s*[Nº°]?\.?\s*(\d{1,2})\b", re.IGNORECASE)
+
+# Las dos mitades de la cláusula de "urgencia mutua" (ver docstring del
+# módulo): "Lote N:" abre la sección real que sigue; "del lote M"/"por el
+# lote M" es la referencia de repuesto de urgencia al OTRO lote, nunca una
+# cabecera. Verificado contra las dos variantes reales del corpus ("...que
+# no pueda ser atendida por el adjudicatario del lote 2..." y su espejo
+# "...del lote 1...").
+_LOTE_CABECERA_FUERTE_RE = re.compile(r"\bLOTE\s*[Nº°]?\.?\s*(\d{1,2})\s*:", re.IGNORECASE)
+_LOTE_REFERENCIA_URGENCIA_RE = re.compile(
+    r"\b(?:del|por el)\s+lote\s*[Nº°]?\.?\s*(\d{1,2})\b", re.IGNORECASE
+)
+
+
+def _resolver_ambiguedad_urgencia_mutua(texto_banda: str, identificadores: list[str]) -> Optional[str]:
+    """Solo se llama con exactamente dos identificadores en la franja (ver
+    `asociar_lote_tabla`). Devuelve el que abre la sección real ("Lote N:")
+    cuando el OTRO aparece únicamente como referencia de urgencia ("del
+    lote M") y nunca también como cabecera fuerte por su cuenta — con
+    cualquier otra combinación (los dos con cabecera fuerte de verdad, como
+    dos tablas reales compartiendo página; ninguno con cabecera fuerte;
+    más de dos identificadores) no se adivina, se devuelve `None` y la
+    tabla se queda ambigua como hasta ahora."""
+    if len(identificadores) != 2:
+        return None
+    fuertes = set(_LOTE_CABECERA_FUERTE_RE.findall(texto_banda))
+    referencias_urgencia = set(_LOTE_REFERENCIA_URGENCIA_RE.findall(texto_banda))
+    candidatos_cabecera = [i for i in identificadores if i in fuertes and i not in referencias_urgencia]
+    candidatos_solo_referencia = [i for i in identificadores if i in referencias_urgencia and i not in fuertes]
+    if len(candidatos_cabecera) == 1 and len(candidatos_solo_referencia) == 1:
+        return candidatos_cabecera[0]
+    return None
 
 
 @dataclass(frozen=True)
@@ -47,6 +106,15 @@ class ResultadoAsociacionLote:
     # con texto pero sin cabecera reconocible" y de "varias cabeceras en la
     # banda" — necesario para poder contar cada caso por separado.
     motivo_ambiguo: Optional[str]
+    # True solo en los dos casos de CERO identificadores en la franja
+    # (banda vacía, o banda con texto pero sin ninguna mención de "LOTE") —
+    # la única condición bajo la que `app.extraccion.pipeline_anejo` puede
+    # heredar el lote de la tabla anterior (ver docstring del módulo).
+    # Cualquier mención de "LOTE", por dudosa o no declarada que sea, deja
+    # esto en False: la herencia es para la ausencia total de rastro, nunca
+    # para un rastro dudoso (encargo explícito del cliente, sesión
+    # 2026-09-08).
+    elegible_para_herencia: bool = False
 
 
 def asociar_lote_tabla(
@@ -71,13 +139,15 @@ def asociar_lote_tabla(
         if identificadores_validos is not None and identificador not in identificadores_validos:
             # Red de seguridad: la tabla apunta a un lote que ningún
             # documento de etiqueta fija declaró. No se adivina cuál de los
-            # lotes conocidos "debía" ser — huérfana también.
+            # lotes conocidos "debía" ser — huérfana también, y NO elegible
+            # para herencia: hay un rastro real de "LOTE", solo que inválido.
             return ResultadoAsociacionLote(
                 identificador_lote=None,
                 motivo_ambiguo=(
                     f"la tabla se asocia al LOTE {identificador}, que no está entre los lotes "
                     "declarados del expediente"
                 ),
+                elegible_para_herencia=False,
             )
         return ResultadoAsociacionLote(identificador_lote=identificador, motivo_ambiguo=None)
 
@@ -86,13 +156,29 @@ def asociar_lote_tabla(
             return ResultadoAsociacionLote(
                 identificador_lote=None,
                 motivo_ambiguo="banda vacía: posible continuación de tabla partida entre páginas, sin inferir",
+                elegible_para_herencia=True,
             )
         return ResultadoAsociacionLote(
             identificador_lote=None,
             motivo_ambiguo="ninguna cabecera LOTE N encontrada en la franja que precede a esta tabla",
+            elegible_para_herencia=True,
         )
+
+    resuelto = _resolver_ambiguedad_urgencia_mutua(texto_banda, identificadores)
+    if resuelto is not None:
+        if identificadores_validos is not None and resuelto not in identificadores_validos:
+            return ResultadoAsociacionLote(
+                identificador_lote=None,
+                motivo_ambiguo=(
+                    f"la tabla se asocia al LOTE {resuelto}, que no está entre los lotes "
+                    "declarados del expediente"
+                ),
+                elegible_para_herencia=False,
+            )
+        return ResultadoAsociacionLote(identificador_lote=resuelto, motivo_ambiguo=None)
 
     return ResultadoAsociacionLote(
         identificador_lote=None,
         motivo_ambiguo=f"varias cabeceras de lote en la franja que precede a esta tabla: {identificadores}",
+        elegible_para_herencia=False,
     )

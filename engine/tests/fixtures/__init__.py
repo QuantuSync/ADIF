@@ -195,3 +195,18 @@ ANUNCIO_PCSP_DOS_LOTES_SIN_DESGLOSE = FIXTURES_DIR / "6.23_28510.0139_ADJUDICACI
 # es una imagen a página completa, sin ningún carácter de texto ni con
 # `pdfplumber` ni con `pypdf`.
 DOCUMENTO_ESCANEADO_SIN_TEXTO = FIXTURES_DIR / "6.20_28510.0136_ANEJO_2_p1.pdf"
+
+# Herencia de lote entre páginas de continuación (sesión de verificación del
+# Excel, 2026-09-08, aprobado por el cliente): 5 páginas reales de
+# `6.22/28510.0156_ANEJO_1.pdf` (repuestos genéricos de vía, 2 lotes) — p.15,
+# 16, 25, 26 y 27 del documento original, en ese orden. p.15 y p.26 traen la
+# cláusula de "urgencia mutua" que menciona los dos lotes en la misma frase
+# (Parte A: se resuelve por posición gramatical, "Lote N:" vs "del lote M");
+# p.16, 25 y 27 no traen ningún rastro de "LOTE" (Parte B: elegibles para
+# heredar el lote de la tabla anterior). Verificado contra el documento real
+# completo antes de implementar nada: el bloque de Lote 2 (p.26-36 del
+# original) es una copia íntegra del cuadro de precios de Lote 1 (p.15-25),
+# mismos códigos/descripciones/precios desplazados 11 páginas — la
+# transición interna semicambios→cruzamientos es el orden del propio
+# catálogo, no un cambio de lote sin marcar.
+ANEJO_HERENCIA_LOTE_0156 = FIXTURES_DIR / "6.22_28510.0156_ANEJO_herencia_lote_p15-16_25-27.pdf"

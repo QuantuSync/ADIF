@@ -379,6 +379,17 @@ class LineaCatalogo(Base):
     # documento real de origen (el de la matriz): la trazabilidad no se
     # pierde por heredar, solo se marca para que se distinga a simple vista.
     heredado_de_matriz = Column(Boolean, nullable=True)
+    # True cuando `lote_id` no se leyó de una cabecera "LOTE N" propia de
+    # esta tabla, sino que se heredó de la tabla inmediatamente anterior del
+    # mismo documento porque la franja que la precede no traía NINGÚN rastro
+    # de la palabra "LOTE" (`app.extraccion.lote_tabla`, migración 0022,
+    # encargo explícito del cliente, sesión de verificación del Excel
+    # 2026-09-08: "que se distinga en la trazabilidad de una línea cuyo lote
+    # viene de una cabecera explícita" -- si algún día una herencia resulta
+    # incorrecta, tiene que poder encontrarse TODAS las líneas afectadas por
+    # el mecanismo, no solo una). Nunca se pone a partir de una franja
+    # ambigua (varias cabeceras, o una no declarada): solo ausencia total.
+    lote_heredado_de_pagina_anterior = Column(Boolean, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),
