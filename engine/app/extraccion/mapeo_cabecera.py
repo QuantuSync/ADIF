@@ -152,6 +152,32 @@ def guardar_mapeo_cacheado(
     return entrada
 
 
+def _cabecera_sin_senal(cabecera: list[Optional[str]]) -> bool:
+    """Verdadero cuando `cabecera` no trae ningún texto real (todas las
+    celdas `None` o en blanco) -- caso real de esta sesión (verificación del
+    Excel exportado, 2026-09-08): `app.extraccion.tabla.extraer_tablas_pagina`
+    puede no encontrar ninguna fila de cabecera antes de la primera fila de
+    datos (cuando esa primera fila ya trae un valor con forma de matrícula,
+    típico de una tabla que continúa de la página anterior sin repetir su
+    cabecera), y devuelve `[]`.
+
+    Una cabecera así NUNCA es un signo estable de "esta misma tabla, vista
+    otra vez": `calcular_firma_cabecera` hashea la cadena vacía igual para
+    CUALQUIER tabla sin cabecera detectada, sin importar qué columnas traiga
+    de verdad. Cachear y reutilizar el mapeo del modelo bajo esa firma
+    aplicaba a ciegas el mapeo aprendido de la PRIMERA tabla sin cabecera del
+    corpus a todas las demás -- verificado contra datos reales: la firma de
+    cadena vacía (`e3b0c44...`) tenía un único mapeo cacheado
+    (`matricula`/`descripcion`/`codigo_precio` de la tabla de
+    `6.24/28510.0184`), reaplicado sin más a `6.24/28510.0209` con columnas
+    en un orden distinto -- produjo líneas de catálogo sin descripción, sin
+    matrícula y sin código de expediente cruzado, exactamente "una línea sin
+    expediente" que no debería poder guardarse. Nunca se cachea ni se
+    reutiliza esta firma degenerada: cada tabla sin cabecera detectada pide
+    su propio mapeo al modelo, usando solo sus filas de ejemplo."""
+    return not any(c and c.strip() for c in cabecera)
+
+
 def mapear_cabecera(
     cabecera: list[Optional[str]],
     filas_ejemplo: list[list[Optional[str]]],
@@ -159,17 +185,21 @@ def mapear_cabecera(
     model_provider: Optional[ModelProvider],
 ) -> ResultadoMapeoCabecera:
     firma = calcular_firma_cabecera(cabecera)
+    cabecera_fiable = not _cabecera_sin_senal(cabecera)
 
-    cacheado = obtener_mapeo_cacheado(db, firma)
-    if cacheado is not None:
-        return ResultadoMapeoCabecera(mapeo=dict(cacheado.mapeo), firma=firma, origen="cache", llamada_modelo=False)
+    if cabecera_fiable:
+        cacheado = obtener_mapeo_cacheado(db, firma)
+        if cacheado is not None:
+            return ResultadoMapeoCabecera(
+                mapeo=dict(cacheado.mapeo), firma=firma, origen="cache", llamada_modelo=False
+            )
 
-    mapeo_determinista = intentar_mapeo_determinista(cabecera)
-    if mapeo_determinista is not None:
-        guardar_mapeo_cacheado(db, firma, cabecera, mapeo_determinista, origen="determinista")
-        return ResultadoMapeoCabecera(
-            mapeo=mapeo_determinista, firma=firma, origen="determinista", llamada_modelo=False
-        )
+        mapeo_determinista = intentar_mapeo_determinista(cabecera)
+        if mapeo_determinista is not None:
+            guardar_mapeo_cacheado(db, firma, cabecera, mapeo_determinista, origen="determinista")
+            return ResultadoMapeoCabecera(
+                mapeo=mapeo_determinista, firma=firma, origen="determinista", llamada_modelo=False
+            )
 
     if model_provider is None:
         raise RuntimeError(
@@ -177,5 +207,6 @@ def mapear_cabecera(
             "y no se proporcionó un ModelProvider para resolverla"
         )
     mapeo_modelo = _mapear_con_modelo(cabecera, filas_ejemplo, model_provider)
-    guardar_mapeo_cacheado(db, firma, cabecera, mapeo_modelo, origen="modelo")
+    if cabecera_fiable:
+        guardar_mapeo_cacheado(db, firma, cabecera, mapeo_modelo, origen="modelo")
     return ResultadoMapeoCabecera(mapeo=mapeo_modelo, firma=firma, origen="modelo", llamada_modelo=True)

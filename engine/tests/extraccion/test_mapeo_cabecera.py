@@ -123,3 +123,41 @@ def test_mapear_cabecera_sin_model_provider_y_sin_determinismo_falla(db_session)
 
     with pytest.raises(RuntimeError):
         mapear_cabecera(["Ref.", "Detalle", "Coste"], [], db_session, None)
+
+
+def test_mapear_cabecera_vacia_nunca_se_cachea_ni_se_reutiliza(db_session):
+    # Verificación del Excel exportado (2026-09-08): dos tablas reales
+    # distintas sin ninguna cabecera detectada (`extraer_tablas_pagina`
+    # devuelve `[]`) comparten la misma firma degenerada (hash de la cadena
+    # vacía) -- reutilizar el mapeo de la primera para la segunda mezcló sus
+    # columnas (matrícula/descripción intercambiadas), produciendo líneas de
+    # catálogo sin descripción, sin matrícula y sin código de expediente
+    # cruzado (`6.24/28510.0184` y `6.24/28510.0209` reales). Cada tabla sin
+    # cabecera debe pedir su propio mapeo, siempre.
+    cabecera_vacia = [None, None, None]
+    filas_1 = [["664410231", "", "LUNA2 Power Supply Unit", "418,00 €"]]
+    filas_2 = [["Fuente de alimentación FA-602", "618050302", "325,50 €"]]
+
+    modelo_1 = ProveedorModeloFalso({
+        "codigo_precio": None, "matricula": 0, "descripcion": 2,
+        "unidad_medida": None, "cantidad": None, "precio_unitario": 3,
+    })
+    resultado1 = mapear_cabecera(cabecera_vacia, filas_1, db_session, modelo_1)
+    assert resultado1.origen == "modelo"
+    assert modelo_1.llamadas == 1
+
+    firma = calcular_firma_cabecera(cabecera_vacia)
+    assert obtener_mapeo_cacheado(db_session, firma) is None
+
+    # Segunda tabla, misma firma degenerada, columnas realmente distintas:
+    # debe volver a llamar al modelo, nunca reutilizar el mapeo de la primera.
+    modelo_2 = ProveedorModeloFalso({
+        "codigo_precio": None, "matricula": 1, "descripcion": 0,
+        "unidad_medida": None, "cantidad": None, "precio_unitario": 2,
+    })
+    resultado2 = mapear_cabecera(cabecera_vacia, filas_2, db_session, modelo_2)
+    assert resultado2.origen == "modelo"
+    assert resultado2.llamada_modelo is True
+    assert modelo_2.llamadas == 1
+    assert resultado2.mapeo != resultado1.mapeo
+    assert obtener_mapeo_cacheado(db_session, firma) is None
