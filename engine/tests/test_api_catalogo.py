@@ -344,9 +344,41 @@ def test_revision_lista_solo_pendientes(cliente, db_session):
 
     assert resp.status_code == 200
     datos = resp.json()
-    assert len(datos) == 1
-    assert datos[0]["estado"] == "pendiente_revision"
-    assert datos[0]["error"] == "no se pudo determinar la baja del lote"
+    # Paginado (sesión 2026-09-08, mismo criterio que /catalogo): la forma
+    # de la respuesta ahora es {total, pagina, tamano_pagina, expedientes}.
+    assert datos["total"] == 1
+    assert datos["pagina"] == 1
+    assert len(datos["expedientes"]) == 1
+    assert datos["expedientes"][0]["estado"] == "pendiente_revision"
+    assert datos["expedientes"][0]["error"] == "no se pudo determinar la baja del lote"
+
+
+def test_revision_lista_pagina(cliente, db_session):
+    # Sesión de paginación de la cola de revisión (2026-09-08): mismo
+    # criterio que /catalogo -- `tamano_pagina` acota cuántos vienen por
+    # página, `total` sigue reflejando el recuento real completo.
+    for i in range(3):
+        db_session.add(
+            Expediente(
+                codigo_expediente=f"6.24/28510.100{i}",
+                estado=EstadoExpediente.pendiente_revision,
+                error="motivo de prueba",
+            )
+        )
+    db_session.commit()
+
+    resp = cliente.get("/revision", params={"pagina": 1, "tamano_pagina": 2})
+    assert resp.status_code == 200
+    datos = resp.json()
+    assert datos["total"] == 3
+    assert datos["pagina"] == 1
+    assert datos["tamano_pagina"] == 2
+    assert len(datos["expedientes"]) == 2
+
+    resp2 = cliente.get("/revision", params={"pagina": 2, "tamano_pagina": 2})
+    datos2 = resp2.json()
+    assert datos2["total"] == 3
+    assert len(datos2["expedientes"]) == 1
 
 
 def test_detalle_revision_incluye_documentos_y_lineas(cliente, db_session):
