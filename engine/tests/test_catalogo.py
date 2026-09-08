@@ -704,6 +704,42 @@ def test_guardar_lineas_catalogo_no_borra_campo_con_valor_nulo_entrante(db_sessi
     assert linea.pagina == 23  # la traza sí se actualiza a la pasada más reciente
 
 
+def test_guardar_lineas_catalogo_borra_precio_adjudicado_cuando_la_baja_deja_de_conocerse(db_session):
+    # Hallazgo real, sesión de medición del alcance "Nº Lote: NNN"
+    # (2026-09-08): a diferencia del resto de campos (`cantidad`,
+    # `unidad_medida`...), `precio_adjudicado` es SIEMPRE derivado --
+    # `precio_unitario * (1 - baja_lote)`, nunca leído del documento. Si una
+    # pasada posterior determina que la baja ya no se puede derivar (p.ej.
+    # se corrige de una baja global equivocada a "desconocida"), su
+    # `precio_adjudicado` sale `None` en `datos`, y ese `None` SÍ debe
+    # borrar el valor ya guardado -- no es "esta pasada no trajo el dato",
+    # es "ya no se puede calcular". 336 líneas de `6.20/28510.0041` se
+    # quedaron con el precio derivado de una baja ya inexistente porque
+    # `guardar_lineas_catalogo` trataba este campo igual que cualquier otro.
+    lote = _lote(db_session)
+    mapeo = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": None, "cantidad": None, "precio_unitario": 2}
+
+    con_baja = construir_linea_catalogo(
+        ["P-001", "Material X", "1000"], mapeo, 1, None, lote.expediente_id, Decimal("0.10"), 0
+    )
+    guardar_lineas_catalogo(db_session, lote.id, [con_baja])
+    linea = db_session.query(LineaCatalogo).filter_by(lote_id=lote.id, clave_linea="P-001").one()
+    assert linea.precio_adjudicado == Decimal("900.0000")
+
+    sin_baja = construir_linea_catalogo(
+        ["P-001", "Material X", "1000"], mapeo, 1, None, lote.expediente_id, None, 0
+    )
+    guardar_lineas_catalogo(db_session, lote.id, [sin_baja])
+
+    # `existente` dentro de `guardar_lineas_catalogo` es el mismo objeto que
+    # `linea` (identity map de SQLAlchemy) -- se comprueba directo, sin
+    # `refresh()`: sin un `commit()` de por medio, `refresh()` descartaría
+    # el cambio todavía pendiente y volvería a leer el valor viejo de la
+    # base de datos real.
+    assert linea.precio_adjudicado is None
+    assert linea.precio_unitario == Decimal("1000")  # el resto de campos sigue intacto
+
+
 def test_combinar_por_clave_funde_repeticiones_dentro_del_mismo_lote_de_lineas():
     # Bug real (sesión de validación del mapeo de cabecera contra la API):
     # SessionLocal (app/db.py) usa autoflush=False, así que un mismo

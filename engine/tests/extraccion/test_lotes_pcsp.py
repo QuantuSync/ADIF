@@ -6,6 +6,7 @@ real de `6.23/28510.0139`, dos lotes reales (La Gineta / Almussafes)."""
 from decimal import Decimal
 
 from app.extraccion.campos_pcsp import importe_como_decimal
+from app.extraccion.invalidado import INVALIDADO
 from app.extraccion.lotes_pcsp import (
     emparejar_ventana_por_nombre_proyecto,
     extraer_campos_pcsp_para_expediente,
@@ -121,15 +122,23 @@ def test_extraer_campos_pcsp_para_expediente_usa_el_bloque_propio():
 
 
 def test_extraer_campos_pcsp_para_expediente_sin_nombre_proyecto_no_usa_ningun_bloque():
+    # `INVALIDADO` (app.extraccion.invalidado), no `None`: el documento SÍ
+    # trae los tres campos, solo que no se puede atribuir con confianza --
+    # a diferencia de "no encontrado", esto sí debe poder borrar un valor
+    # guardado en una pasada anterior (ver docstring de `INVALIDADO`).
     paginas = extraer_texto(fx.ANUNCIO_PCSP_DOS_LOTES_SIN_DESGLOSE)
 
     campos, motivo = extraer_campos_pcsp_para_expediente(paginas, None)
 
     assert motivo is not None
     assert "Nº Lote: 001/002" in motivo
-    assert campos.importe_licitacion is None
-    assert campos.importe_adjudicacion is None
-    assert campos.adjudicatario is None
+    assert campos.importe_licitacion is INVALIDADO
+    assert campos.importe_adjudicacion is INVALIDADO
+    assert campos.adjudicatario is INVALIDADO
+    # También el objeto: un expediente recién descubierto, sin
+    # nombre_proyecto propio todavía, no debe sembrarlo con el del primer
+    # lote del documento -- envenenaría el propio ancla de emparejamiento.
+    assert campos.objeto_contrato is INVALIDADO
 
 
 def test_extraer_campos_pcsp_para_expediente_documento_de_un_solo_lote_no_cambia():

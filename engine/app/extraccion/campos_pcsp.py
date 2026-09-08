@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Optional
 
+from app.extraccion.invalidado import INVALIDADO
 from app.extraccion.normalizacion import parsear_importe_es
 from app.extraccion.texto import PaginaTexto
 
@@ -84,6 +85,14 @@ class CampoAnclado:
 class CamposAnuncioPcsp:
     numero_expediente: Optional[CampoAnclado] = None
     codigo_matriz: Optional[CampoAnclado] = None
+    # `importe_licitacion`/`importe_adjudicacion`/`adjudicatario` pueden
+    # llevar además `app.extraccion.invalidado.INVALIDADO` (nunca lo pone
+    # esta función -- solo `app.extraccion.lotes_pcsp.
+    # extraer_campos_pcsp_para_expediente`, cuando el documento es
+    # multi-lote y no se pudo atribuir el bloque propio de este
+    # expediente): "encontrado pero no fiable", distinto de `None` ("no
+    # encontrado"). El resto de campos de este documento son genuinamente
+    # del documento entero, sin ambigüedad de lote que resolver.
     importe_licitacion: Optional[CampoAnclado] = None
     importe_adjudicacion: Optional[CampoAnclado] = None
     adjudicatario: Optional[CampoAnclado] = None
@@ -124,9 +133,15 @@ def extraer_campos_anuncio_pcsp(paginas: list[PaginaTexto]) -> CamposAnuncioPcsp
     )
 
 
-def importe_como_decimal(campo: Optional[CampoAnclado]) -> Optional[Decimal]:
+def importe_como_decimal(campo):
     """El modelo (aquí, el regex) devuelve el literal; esta es la única
-    frontera donde se normaliza a Decimal (CONTEXTO.md sección 8)."""
-    if campo is None:
-        return None
+    frontera donde se normaliza a Decimal (CONTEXTO.md sección 8).
+
+    `campo` puede ser `None` (no encontrado), `INVALIDADO`
+    (`app.extraccion.invalidado` -- encontrado pero no atribuible, ver
+    docstring de `CamposAnuncioPcsp`) o un `CampoAnclado` real; los dos
+    primeros pasan tal cual, sin normalizar nada, para que el llamador siga
+    distinguiéndolos."""
+    if campo is None or campo is INVALIDADO:
+        return campo
     return parsear_importe_es(campo.valor)

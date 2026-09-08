@@ -20,6 +20,7 @@ from app.extraccion.orquestador import (
     _extraer_campos_expediente,
     ejecutar_extraccion_expediente,
 )
+from app.extraccion.invalidado import INVALIDADO
 from app.extraccion.texto import PaginaTexto
 from app.interfaces.document_storage import DocumentStorage
 from app.models import (
@@ -610,6 +611,30 @@ def test_expediente_0139_con_nombre_proyecto_toma_los_datos_de_su_propio_lote(db
     assert "cobertura parcial" not in (expediente.error or "")
 
 
+def test_expediente_0139_sin_nombre_proyecto_borra_un_adjudicatario_rancio(db_session):
+    """`INVALIDADO` (app.extraccion.invalidado): el caso real que motivó
+    este símbolo. Un `lote.adjudicatario` ya guardado de una pasada anterior
+    (la extracción vieja, antes de esta sesión, que copiaba a ciegas el
+    primer bloque del documento) no debe sobrevivir cuando esta pasada
+    determina explícitamente que no se puede atribuir con confianza -- a
+    diferencia de "no encontré nada" (`None`), que sí lo habría dejado tal
+    cual."""
+    expediente = _crear_expediente_con_documentos(
+        db_session, "6.23/28510.0139", [("ADJUDICACION", fx.ANUNCIO_PCSP_DOS_LOTES_SIN_DESGLOSE)],
+    )
+    lote_previo = Lote(
+        expediente_id=expediente.id, identificador_lote=LOTE_UNICO, adjudicatario="UTE SUMINISTRO LA GINETA",
+    )
+    db_session.add(lote_previo)
+    db_session.commit()
+    trabajo = SimpleNamespace(expediente_id=expediente.id)
+
+    ejecutar_extraccion_expediente(db_session, _StorageDirecta(), trabajo, model_provider=None)
+
+    lote = db_session.query(Lote).filter_by(expediente_id=expediente.id).one()
+    assert lote.adjudicatario is None
+
+
 def test_reprocesar_expediente_con_sentinela_previo_lo_sustituye(db_session):
     """Idempotencia (CONTEXTO.md sección 9.9) al migrar al arreglo de
     identidad de lote: un expediente que ya tenía el lote implícito único
@@ -771,6 +796,85 @@ def test_importe_resuelto_por_lote_gana_al_global_sin_importar_el_orden(db_sessi
         assert importe_licitacion == Decimal("500000"), f"orden {orden}"
         assert importe_adjudicacion == Decimal("500000"), f"orden {orden}"
         assert adjudicatario == "LOTE DOS SA", f"orden {orden}"
+
+
+def _doc_contrato_con_baja(doc_id: int, codigo_propio: str, baja_pct: str, adjudicatario: str) -> _Documento:
+    """Caso real, sesión de medición del alcance parte 2: dos CONTRATOs
+    distintos (uno por lote real), cada uno vinculado a VARIOS expedientes
+    hermanos (6.23/28510.0139 y sus dos pedidos), cada uno declarando sin
+    ambigüedad su propio "Contrato nº" y una baja distinta."""
+    paginas = [
+        PaginaTexto(
+            numero=1,
+            texto=(
+                f"OBJETO DEL CONTRATO\nContrato nº: {codigo_propio}\n"
+                f"ADJUDICATARIO: {adjudicatario}\n"
+                f"La baja económica ofertada del {baja_pct}% será aplicable a todos los precios unitarios.\n"
+            ),
+        )
+    ]
+    doc = SimpleNamespace(id=doc_id, nombre_archivo="contrato.pdf")
+    return _Documento(documento=doc, tipo=TipoDocumento.contrato, paginas=paginas)
+
+
+def test_baja_declarada_en_documento_compartido_se_atribuye_por_contrato_no(db_session):
+    # Caso real: 6.24/28510.0017 (Contrato nº propio, baja 5,07 %) y
+    # 6.24/28510.0018 (Contrato nº propio, baja 0,40 %) -- los DOS
+    # documentos están vinculados a los dos expedientes (comparten
+    # DocumentoExpediente), pero cada uno solo debe tomar SU propia baja.
+    docs = [
+        _doc_contrato_con_baja(1, "6.24/28510.0017", "5,07", "UTE SUMINISTRO LA GINETA"),
+        _doc_contrato_con_baja(2, "6.24/28510.0018", "0,40", "PORFIDOS DEL MEDITERRANEO S A"),
+    ]
+
+    expediente_17 = Expediente(codigo_expediente="6.24/28510.0017")
+    db_session.add(expediente_17)
+    db_session.commit()
+    _, _, baja_17, _, motivo_17, _ = _extraer_campos_expediente(db_session, expediente_17, docs)
+    assert baja_17.baja == Decimal("0.0507")
+    assert motivo_17 is None
+
+    expediente_18 = Expediente(codigo_expediente="6.24/28510.0018")
+    db_session.add(expediente_18)
+    db_session.commit()
+    _, _, baja_18, _, motivo_18, _ = _extraer_campos_expediente(db_session, expediente_18, docs)
+    assert baja_18.baja == Decimal("0.0040")
+    assert motivo_18 is None
+
+
+def test_baja_declarada_en_documento_compartido_sin_confirmacion_propia_se_invalida(db_session):
+    # El expediente "padre" (6.23/28510.0139) también está vinculado a los
+    # dos CONTRATOs, pero ninguno declara SU código -- ninguna de las dos
+    # bajas es confirmadamente suya, así que ninguna se usa (`INVALIDADO`,
+    # no una elegida a ciegas por prioridad de documento).
+    docs = [
+        _doc_contrato_con_baja(1, "6.24/28510.0017", "5,07", "UTE SUMINISTRO LA GINETA"),
+        _doc_contrato_con_baja(2, "6.24/28510.0018", "0,40", "PORFIDOS DEL MEDITERRANEO S A"),
+    ]
+    expediente = Expediente(codigo_expediente="6.23/28510.0139")
+    db_session.add(expediente)
+    db_session.commit()
+
+    _, _, baja, _, motivo, _ = _extraer_campos_expediente(db_session, expediente, docs)
+
+    assert baja is INVALIDADO
+    assert motivo is not None
+    assert "documento(s) compartido(s) con expediente(s) hermano(s)" in motivo
+
+
+def test_baja_declarada_sin_ningun_codigo_propio_sigue_como_siempre(db_session):
+    # La inmensa mayoría del corpus: un CONTRATO propio de un único
+    # expediente, sin "Contrato nº" en absoluto (o el mismo código que el
+    # expediente) -- el mecanismo nuevo no debe cambiar nada aquí.
+    docs = [_doc_contrato_con_baja(1, "6.24/28510.9999", "54,00", "PROVEEDOR SA")]
+    expediente = Expediente(codigo_expediente="6.24/28510.9999")
+    db_session.add(expediente)
+    db_session.commit()
+
+    _, _, baja, _, motivo, _ = _extraer_campos_expediente(db_session, expediente, docs)
+
+    assert baja.baja == Decimal("0.5400")
+    assert motivo is None
 
 
 def test_detectar_contrato_obra_ignora_documentos_que_no_son_anuncio_pcsp():

@@ -1,6 +1,11 @@
 from decimal import Decimal
 
-from app.extraccion.baja import BajaDeclarada, elegir_baja_preferida, extraer_baja_declarada
+from app.extraccion.baja import (
+    BajaDeclarada,
+    elegir_baja_preferida,
+    extraer_baja_declarada,
+    extraer_codigo_propio_documento,
+)
 from app.extraccion.texto import PaginaTexto, extraer_texto
 from app.models import TipoDocumento
 from tests import fixtures as fx
@@ -67,6 +72,34 @@ def test_elegir_baja_preferida_prioriza_resolucion_sobre_propuesta():
 
 def test_elegir_baja_preferida_sin_candidatas():
     assert elegir_baja_preferida([]) is None
+
+
+# --- `extraer_codigo_propio_documento`: sesión de medición del alcance,
+# parte 2 (2026-09-08) -- "Contrato nº: X", verificado en un CONTRATO real
+# compartido entre expedientes hermanos (6.23/28510.0139 y sus dos pedidos,
+# 6.24/28510.0017 con baja 5,07 %, 6.24/28510.0018 con baja 0,40 %). ---
+
+
+def test_extraer_codigo_propio_documento_encuentra_contrato_no():
+    pagina = PaginaTexto(
+        numero=1,
+        texto="OBJETO DEL CONTRATO\nContrato nº: 6.24/28510.0017\nSUMINISTRO DE BALASTO...",
+    )
+    assert extraer_codigo_propio_documento([pagina]) == "6.24/28510.0017"
+
+
+def test_extraer_codigo_propio_documento_ausente_no_inventa_nada():
+    pagina = PaginaTexto(numero=1, texto="Presupuesto base de licitación\nImporte (sin impuestos) 100.000 EUR")
+    assert extraer_codigo_propio_documento([pagina]) is None
+
+
+def test_extraer_codigo_propio_documento_solo_mira_las_tres_primeras_paginas():
+    # Ancla deliberadamente acotada a la cabecera administrativa -- una
+    # mención tardía del mismo patrón (p.ej. citando OTRO expediente de
+    # pasada) no debe confundirse con la identidad propia del documento.
+    paginas = [PaginaTexto(numero=i, texto="texto de relleno") for i in range(1, 4)]
+    paginas.append(PaginaTexto(numero=4, texto="Contrato nº: 6.24/28510.0099"))
+    assert extraer_codigo_propio_documento(paginas) is None
 
 
 # Sesión de expedientes sin publicar (CONTEXTO.md sección 22): variantes de
