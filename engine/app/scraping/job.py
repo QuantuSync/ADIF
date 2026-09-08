@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.extraccion.herencia_matriz import reencolar_pedidos_esperando_matriz
 from app.interfaces.document_storage import DocumentStorage
-from app.models import Documento, EstadoExpediente, Expediente, TipoDocumento, TrabajoCola
+from app.models import Documento, DocumentoExpediente, EstadoExpediente, Expediente, TipoDocumento, TrabajoCola
 from app.queue import encolar_trabajo
 from app.scraping.limitador import esperar_turno
 from app.scraping.pcsp import ExpedienteNoPublicadoError, safe, scrape_expediente
@@ -46,7 +46,9 @@ def ejecutar_scraping_expediente(db: Session, storage: DocumentStorage, trabajo:
     # válido en el momento de decidir qué hacer con el fallo.
     estado_anterior = expediente.estado
     ya_tenia_documentos = (
-        db.execute(select(Documento.id).where(Documento.expediente_id == expediente.id).limit(1)).first()
+        db.execute(
+            select(DocumentoExpediente.id).where(DocumentoExpediente.expediente_id == expediente.id).limit(1)
+        ).first()
         is not None
     )
 
@@ -103,27 +105,48 @@ def ejecutar_scraping_expediente(db: Session, storage: DocumentStorage, trabajo:
     carpeta = safe(expediente.codigo_expediente.replace("/", "_"))
     contadores = {"CONTRATO": 0, "PLIEGO": 0, "ADJUDICACION": 0, "ANEJO": 0}
     nuevos = 0
+    enlaces_nuevos = 0
     for doc in resultado.documentos:
         contadores[doc.categoria] += 1
-        # Idempotencia: mismo contenido (mismo hash) ya registrado, aunque sea
-        # de una ejecución anterior de este mismo expediente -> no se duplica.
-        existente = db.execute(select(Documento).where(Documento.hash == doc.hash)).scalar_one_or_none()
-        if existente is not None:
-            continue
-        nuevos += 1
-        # La ruta de almacenamiento va con el hash, no con el índice: si una
-        # regrabación trae contenido distinto en el mismo hueco (p.ej. una
-        # resolución de adjudicación más reciente), no se pisa el fichero de
-        # una fila de documentos que aún la referencia por su hash antiguo.
         nombre_display = f"{doc.categoria}_{contadores[doc.categoria]}.pdf"
-        ruta = storage.guardar(f"{carpeta}/{doc.categoria}_{doc.hash}.pdf", doc.contenido)
-        db.add(Documento(
-            expediente_id=expediente.id,
-            tipo_documento=CATEGORIA_A_TIPO[doc.categoria],
-            hash=doc.hash,
-            nombre_archivo=nombre_display,
-            ruta_almacenamiento=ruta,
-        ))
+
+        # Idempotencia por CONTENIDO (mismo hash): el fichero físico no se
+        # vuelve a guardar ni a descargar si ya existe una fila `Documento`
+        # con este hash, sea de este expediente o de cualquier otro.
+        existente = db.execute(select(Documento).where(Documento.hash == doc.hash)).scalar_one_or_none()
+        if existente is None:
+            nuevos += 1
+            ruta = storage.guardar(f"{carpeta}/{doc.categoria}_{doc.hash}.pdf", doc.contenido)
+            existente = Documento(
+                tipo_documento=CATEGORIA_A_TIPO[doc.categoria],
+                hash=doc.hash,
+                ruta_almacenamiento=ruta,
+            )
+            db.add(existente)
+            db.flush()  # necesita existente.id para el enlace de abajo
+
+        # Sesión de colisión de hash entre expedientes hermanos (2026-09-08,
+        # migración 0021): el documento puede ya existir (mismo contenido
+        # descargado antes bajo OTRO expediente -- expedientes hermanos de
+        # una licitación multi-lote que comparten el mismo PDF real,
+        # verificado con `4.25/28510.0124`/`0132`), pero este expediente
+        # concreto puede no tener todavía su propio enlace. Antes, este caso
+        # se descartaba en silencio (`continue`) y el expediente se quedaba
+        # sin ver un documento que sí existía en el sistema -- ahora se
+        # enlaza siempre que falte, nunca se duplica el fichero.
+        enlace_existente = db.execute(
+            select(DocumentoExpediente.id).where(
+                DocumentoExpediente.documento_id == existente.id,
+                DocumentoExpediente.expediente_id == expediente.id,
+            )
+        ).first()
+        if enlace_existente is None:
+            enlaces_nuevos += 1
+            db.add(DocumentoExpediente(
+                documento_id=existente.id,
+                expediente_id=expediente.id,
+                nombre_archivo=nombre_display,
+            ))
 
     expediente.estado = EstadoExpediente.descargado
     expediente.error = None
@@ -138,4 +161,9 @@ def ejecutar_scraping_expediente(db: Session, storage: DocumentStorage, trabajo:
         "encontrado_como": resultado.codigo_encontrado,
         "documentos": contadores,
         "documentos_nuevos": nuevos,
+        # Sesión de colisión de hash entre expedientes hermanos (2026-09-08):
+        # distinto de `documentos_nuevos` -- un documento ya existente
+        # (mismo hash de otro expediente) que este expediente enlaza por
+        # primera vez cuenta aquí, no arriba.
+        "enlaces_nuevos": enlaces_nuevos,
     }

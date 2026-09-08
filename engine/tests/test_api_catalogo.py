@@ -18,6 +18,7 @@ from app.interfaces.document_storage import LocalDiskStorage
 from app.main import app
 from app.models import (
     Documento,
+    DocumentoExpediente,
     EstadoExpediente,
     EstadoRevisionLinea,
     Expediente,
@@ -30,6 +31,7 @@ _TABLAS = [
     models.Expediente.__table__,
     models.Lote.__table__,
     models.Documento.__table__,
+    models.DocumentoExpediente.__table__,
     models.LineaCatalogo.__table__,
     models.TrazaOrigen.__table__,
     models.MapeoCabeceraCache.__table__,
@@ -85,13 +87,17 @@ def _sembrar_catalogo(db_session, *, estado=EstadoExpediente.completado):
     db_session.commit()
 
     documento = Documento(
-        expediente_id=expediente.id,
         tipo_documento=TipoDocumento.anejo,
         hash="hash-1",
-        nombre_archivo="6.24_28510.0008_ANEJO_1.pdf",
         ruta_almacenamiento="6.24_28510.0008_ANEJO_1.pdf",
     )
     db_session.add(documento)
+    db_session.commit()
+    db_session.add(DocumentoExpediente(
+        documento_id=documento.id,
+        expediente_id=expediente.id,
+        nombre_archivo="6.24_28510.0008_ANEJO_1.pdf",
+    ))
     db_session.commit()
 
     linea = LineaCatalogo(
@@ -390,7 +396,7 @@ def test_detalle_revision_incluye_documentos_y_lineas(cliente, db_session):
     datos = resp.json()
     assert datos["expediente"]["id"] == expediente.id
     assert len(datos["documentos"]) == 1
-    assert datos["documentos"][0]["nombre_archivo"] == documento.nombre_archivo
+    assert datos["documentos"][0]["nombre_archivo"] == "6.24_28510.0008_ANEJO_1.pdf"
     assert len(datos["lineas"]) == 1
 
 

@@ -19,7 +19,7 @@ from app.models import Documento, EstadoExpediente, Expediente, Lote, LineaCatal
 
 def _documento(hash_: str) -> Documento:
     return Documento(
-        tipo_documento="anejo", hash=hash_, nombre_archivo=f"{hash_}.pdf", ruta_almacenamiento=f"x/{hash_}.pdf",
+        tipo_documento="anejo", hash=hash_, ruta_almacenamiento=f"x/{hash_}.pdf",
     )
 
 

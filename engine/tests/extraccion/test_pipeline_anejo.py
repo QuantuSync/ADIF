@@ -8,7 +8,7 @@ from decimal import Decimal
 
 from app.catalogo import guardar_lineas_catalogo
 from app.extraccion.pipeline_anejo import procesar_anejo
-from app.models import Documento, Expediente, Lote, TipoDocumento
+from app.models import Documento, DocumentoExpediente, Expediente, Lote, TipoDocumento
 from tests import fixtures as fx
 from tests.extraccion.dobles import ProveedorModeloFalso
 
@@ -31,13 +31,15 @@ def _crear_lote(db_session, codigo_expediente, ruta_pdf):
     db_session.add(lote)
     db_session.commit()
     documento = Documento(
-        expediente_id=expediente.id,
         tipo_documento=TipoDocumento.anejo,
         hash=f"hash-{codigo_expediente}",
-        nombre_archivo=ruta_pdf.name,
         ruta_almacenamiento=str(ruta_pdf),
     )
     db_session.add(documento)
+    db_session.commit()
+    db_session.add(DocumentoExpediente(
+        documento_id=documento.id, expediente_id=expediente.id, nombre_archivo=ruta_pdf.name,
+    ))
     db_session.commit()
     return expediente, lote, documento
 

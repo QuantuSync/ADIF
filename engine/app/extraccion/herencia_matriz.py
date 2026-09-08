@@ -37,7 +37,7 @@ from sqlalchemy.orm import Session
 from app.catalogo import guardar_lineas_catalogo
 from app.extraccion.cruce_codigos import normalizar_codigo_expediente
 from app.models import (
-    Documento,
+    DocumentoExpediente,
     EstadoExpediente,
     EstadoTrabajo,
     Expediente,
@@ -182,7 +182,7 @@ def resolver_o_encolar_matriz(db: Session, pedido: Expediente) -> ResolucionMatr
         return ResolucionMatriz(EstadoResolucionMatriz.lista, matriz=matriz)
 
     documento_existente = db.execute(
-        select(Documento.id).where(Documento.expediente_id == matriz.id).limit(1)
+        select(DocumentoExpediente.id).where(DocumentoExpediente.expediente_id == matriz.id).limit(1)
     ).scalar_one_or_none()
 
     if documento_existente is None:

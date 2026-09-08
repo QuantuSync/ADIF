@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from app.mantenimiento.ciclo import ejecutar_ciclo_mantenimiento
 from app.mantenimiento.frescura import VERSION_LOGICA_EXTRACCION, huella_documentos
-from app.models import Documento, EstadoExpediente, EstadoTrabajo, Expediente, TrabajoCola
+from app.models import Documento, DocumentoExpediente, EstadoExpediente, EstadoTrabajo, Expediente, TrabajoCola
 from app.queue import encolar_trabajo
 
 
@@ -20,11 +20,10 @@ def _crear_expediente(db, **kwargs) -> Expediente:
 
 
 def _crear_documento(db, expediente_id: int, hash_: str) -> Documento:
-    doc = Documento(
-        expediente_id=expediente_id, tipo_documento="anejo", hash=hash_,
-        nombre_archivo=f"{hash_}.pdf", ruta_almacenamiento=f"x/{hash_}.pdf",
-    )
+    doc = Documento(tipo_documento="anejo", hash=hash_, ruta_almacenamiento=f"x/{hash_}.pdf")
     db.add(doc)
+    db.commit()
+    db.add(DocumentoExpediente(documento_id=doc.id, expediente_id=expediente_id, nombre_archivo=f"{hash_}.pdf"))
     db.commit()
     return doc
 
@@ -74,7 +73,12 @@ def test_expediente_sin_documentos_encola_y_drena_descarga_y_extraccion_encadena
 def test_expediente_al_dia_no_lanza_nada(db_session):
     exp = _crear_expediente(db_session)
     _crear_documento(db_session, exp.id, "h1")
-    docs = db_session.query(Documento).filter(Documento.expediente_id == exp.id).all()
+    docs = (
+        db_session.query(Documento)
+        .join(DocumentoExpediente, DocumentoExpediente.documento_id == Documento.id)
+        .filter(DocumentoExpediente.expediente_id == exp.id)
+        .all()
+    )
     exp.extraido_en = datetime.now(timezone.utc)
     exp.version_logica_extraccion = VERSION_LOGICA_EXTRACCION
     exp.huella_documentos = huella_documentos(docs)
@@ -95,7 +99,12 @@ def test_expediente_al_dia_no_lanza_nada(db_session):
 def test_forzar_global_reprocesa_aunque_este_al_dia(db_session):
     exp = _crear_expediente(db_session)
     _crear_documento(db_session, exp.id, "h1")
-    docs = db_session.query(Documento).filter(Documento.expediente_id == exp.id).all()
+    docs = (
+        db_session.query(Documento)
+        .join(DocumentoExpediente, DocumentoExpediente.documento_id == Documento.id)
+        .filter(DocumentoExpediente.expediente_id == exp.id)
+        .all()
+    )
     exp.extraido_en = datetime.now(timezone.utc)
     exp.version_logica_extraccion = VERSION_LOGICA_EXTRACCION
     exp.huella_documentos = huella_documentos(docs)

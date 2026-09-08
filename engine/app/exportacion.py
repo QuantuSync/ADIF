@@ -244,7 +244,7 @@ def generar_excel_catalogo(db: Session, incluir_pendientes_sin_lote: bool = Fals
         # sale en el Excel que se entrega al cliente, aunque siga en base de
         # datos con su motivo.
         resultado = consultar_catalogo(db, pagina=pagina, tamano_pagina=_TAMANO_LOTE, excluir_descartadas=True)
-        for linea, lote, expediente, _documento in resultado.filas:
+        for linea, lote, expediente, _documento, _nombre_archivo in resultado.filas:
             if lote is None and not incluir_pendientes_sin_lote:
                 excluidas_por_categoria[_categoria_motivo(linea.motivo_revision)] += 1
                 continue

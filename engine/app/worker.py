@@ -29,7 +29,7 @@ from app.mantenimiento.programacion import (
     verificar_y_lanzar_copia_programada,
     verificar_y_lanzar_descubrimiento_pedidos_programado,
 )
-from app.models import Documento, EstadoExpediente, Expediente
+from app.models import Documento, DocumentoExpediente, EstadoExpediente, Expediente
 from app.sindicacion.descubrimiento import TIPO_TRABAJO as TIPO_SINDICACION_BACKFILL
 from app.sindicacion.descubrimiento import descubrir_backfill, periodos_recientes
 from app.queue import ejecutar_trabajo as ejecutar_trabajo_generico
@@ -104,8 +104,16 @@ def procesar_extraer_expediente(db, trabajo) -> dict:
     verificar_integridad = False
     conteo_antes = 0
     if expediente_antes is not None:
+        # Colisión de hash entre expedientes hermanos (2026-09-08, migración
+        # 0021): la huella cuenta TODOS los documentos enlazados, propios o
+        # compartidos con un expediente hermano (decisión explícita del
+        # cliente) -- si un hermano trae una versión nueva del PDF
+        # compartido, este expediente también tiene que reextraerse, porque
+        # su catálogo sale del mismo fichero.
         documentos_antes = db.execute(
-            select(Documento).where(Documento.expediente_id == expediente_antes.id)
+            select(Documento)
+            .join(DocumentoExpediente, DocumentoExpediente.documento_id == Documento.id)
+            .where(DocumentoExpediente.expediente_id == expediente_antes.id)
         ).scalars().all()
         verificar_integridad = documentos_sin_cambios(expediente_antes, documentos_antes)
         if verificar_integridad:
@@ -116,7 +124,9 @@ def procesar_extraer_expediente(db, trabajo) -> dict:
         expediente = db.get(Expediente, trabajo.expediente_id) if trabajo.expediente_id else None
         if expediente is not None and debe_estampar_extraccion(expediente):
             documentos = db.execute(
-                select(Documento).where(Documento.expediente_id == expediente.id)
+                select(Documento)
+                .join(DocumentoExpediente, DocumentoExpediente.documento_id == Documento.id)
+                .where(DocumentoExpediente.expediente_id == expediente.id)
             ).scalars().all()
             if verificar_integridad:
                 aviso = detectar_crecimiento_sin_cambios(conteo_antes, contar_lineas_catalogo(db, expediente.id))

@@ -5,7 +5,8 @@ from app.auth import Usuario, get_current_user
 from app.config import settings
 from app.db import get_db
 from app.interfaces.document_storage import LocalDiskStorage
-from app.models import Documento
+from app.models import Documento, DocumentoExpediente
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 router = APIRouter()
@@ -30,8 +31,18 @@ def descargar_documento(
     if documento is None:
         raise HTTPException(status_code=404, detail="documento no encontrado")
     contenido = _storage.recuperar(documento.ruta_almacenamiento)
+    # Colisión de hash entre expedientes hermanos (2026-09-08, migración
+    # 0021): `nombre_archivo` ya no vive en `Documento` -- esta ruta no tiene
+    # contexto de expediente en la URL, así que se toma cualquier enlace
+    # existente (da igual cuál: es solo el nombre del fichero para la
+    # descarga, no cambia el contenido).
+    nombre_archivo = db.execute(
+        select(DocumentoExpediente.nombre_archivo)
+        .where(DocumentoExpediente.documento_id == documento_id)
+        .limit(1)
+    ).scalar_one_or_none()
     return Response(
         content=contenido,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="{documento.nombre_archivo}"'},
+        headers={"Content-Disposition": f'inline; filename="{nombre_archivo or documento_id}"'},
     )
