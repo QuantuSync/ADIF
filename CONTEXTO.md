@@ -1051,6 +1051,36 @@ suficientes, no ahora.
   `True` o ausente. 10 tests nuevos (465 total), incluido un guard de
   seguridad para el mismo riesgo del balasto llegado por una tercera vía
   (limpieza de huérfanas superadas por clave exacta, nunca por contenido).
+- **Auditoría automática del catálogo: montada (sesión 2026-09-08,
+  `docs/sesion-2026-09-08-auditoria-automatica.md`).**
+  `app.mantenimiento.auditoria` (trabajo de cola `auditoria_catalogo`,
+  mismo patrón que `copia_seguridad`): se encola y ejecuta sola al terminar
+  cada ciclo de mantenimiento, **solo detecta y avisa, nunca corrige**.
+  Ocho comprobaciones de solo lectura (duplicadas exactas, campos
+  esenciales vacíos, precios a cero/negativos/desproporcionados, cantidades
+  con forma de año, bajas fuera de rango, firma de cabecera cacheada
+  vacía/corrupta, líneas que cambian sin cambiar documentos, y campos
+  vacíos por columna crecientes entre ejecuciones), visible en
+  `/mantenimiento` junto al botón manual
+  (`POST /mantenimiento/auditoria/ejecutar`). Primer informe real sobre
+  10.408 líneas / 467 expedientes: 0 errores, 4 avisos (huérfanas sin lote,
+  precios atípicos, cantidades con forma de año, bajas >90% — todos
+  categorías ya conocidas del corpus, ninguna nueva).
+  **De paso, dos hallazgos del mismo encargo:** (1) el duplicado exacto de
+  `6.23/28510.0051` (`P-0058`/`P-0059`) tenía causa real y distinta de lo ya
+  cerrado en la sesión 2026-09-06/07 -- `_dividir_fila_multiple` separaba
+  bien el código y el precio de una fila fusionada por `pdfplumber`, pero
+  nunca la descripción, ni siquiera cuando (como aquí) se divide limpiamente
+  1:1 con el número de códigos; corregido, con red de seguridad para el
+  caso ambiguo donde el número de líneas no coincide (ver el doc de sesión
+  para el caso real que sí motivaba esa cautela). (2) De las 708 líneas del
+  catálogo sin código interno ni de proyecto (22 expedientes), 19 no
+  figuran en el Excel de códigos de ADIF en absoluto (no es un fallo del
+  sistema); 3 (pedidos derivados de acuerdo marco descubiertos por el
+  mecanismo inverso, sesión 2026-09-07) sí tienen un fallo de cruce real:
+  su `codigo_matriz` se resuelve DESPUÉS de que `asegurar_cruce_codigos` ya
+  intentó (y falló) el cruce una única vez -- diagnosticado, sin
+  implementar un reintento (fuera del encargo de esta sesión).
 
 ---
 
@@ -1068,4 +1098,5 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `sesion-2026-09-08-cobertura-sap-367.md`,
 `sesion-2026-09-08-verificacion-excel-6599.md`,
 `sesion-2026-09-08-herencia-lote-continuacion.md`,
+`sesion-2026-09-08-auditoria-automatica.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.

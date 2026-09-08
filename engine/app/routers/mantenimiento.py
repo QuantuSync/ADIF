@@ -10,11 +10,13 @@ from app.config import settings
 from app.db import get_db
 from app.extraccion.descubrimiento_matriz import TIPO_TRABAJO as TIPO_TRABAJO_DESCUBRIMIENTO_PEDIDOS
 from app.extraccion.estado_sap import cargar_estado_sap
+from app.mantenimiento.auditoria import TIPO_TRABAJO as TIPO_TRABAJO_AUDITORIA
 from app.mantenimiento.ciclo import TIPO_TRABAJO
 from app.mantenimiento.copia_seguridad import TIPO_TRABAJO as TIPO_TRABAJO_COPIA
 from app.mantenimiento.programacion import (
     DISPARADO_POR_MANUAL,
     obtener_estado,
+    obtener_estado_auditoria,
     obtener_estado_copia,
     obtener_estado_descubrimiento_pedidos,
 )
@@ -215,6 +217,48 @@ def historial_descubrimiento_pedidos(
     return db.execute(
         select(TrabajoCola)
         .where(TrabajoCola.tipo == TIPO_TRABAJO_DESCUBRIMIENTO_PEDIDOS)
+        .order_by(TrabajoCola.created_at.desc())
+        .limit(limite)
+    ).scalars().all()
+
+
+@router.post("/mantenimiento/auditoria/ejecutar", response_model=TrabajoOut)
+def lanzar_auditoria_catalogo(
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    """BLOQUE 1, sesión de auditoría automática (2026-09-08): botón manual
+    para lanzar la auditoría sin esperar al final del próximo ciclo de
+    mantenimiento -- mismo trabajo (`auditoria_catalogo`) que se encola solo
+    al terminar `app.mantenimiento.ciclo.ejecutar_ciclo_mantenimiento`.
+    Solo detecta y avisa (`app.mantenimiento.auditoria`): nunca corrige nada
+    por su cuenta."""
+    trabajo = encolar_trabajo(db, tipo=TIPO_TRABAJO_AUDITORIA, payload={"disparado_por": DISPARADO_POR_MANUAL})
+    return trabajo
+
+
+@router.get("/mantenimiento/auditoria/estado", response_model=EstadoMantenimientoOut)
+def estado_auditoria_catalogo(
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    """Igual que `GET /mantenimiento/estado`, para la auditoría automática:
+    cuándo fue la última ejecución y qué encontró
+    (`ultima_ejecucion.resultado`, la lista completa de hallazgos)."""
+    return obtener_estado_auditoria(db)
+
+
+@router.get("/mantenimiento/auditoria/historial", response_model=list[TrabajoOut])
+def historial_auditoria_catalogo(
+    limite: int = Query(default=20, ge=1, le=200),
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    """Igual que `GET /mantenimiento/historial`, filtrado por
+    `auditoria_catalogo` -- misma `trabajos_cola`, sin tabla nueva."""
+    return db.execute(
+        select(TrabajoCola)
+        .where(TrabajoCola.tipo == TIPO_TRABAJO_AUDITORIA)
         .order_by(TrabajoCola.created_at.desc())
         .limit(limite)
     ).scalars().all()

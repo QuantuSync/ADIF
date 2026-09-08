@@ -366,6 +366,14 @@ def test_construir_lineas_desde_tabla_separa_fila_fusionada_con_precios_iguales(
     # por casualidad (no un valor duplicado dentro de la celda de un único
     # código -- eso ya lo cubre `_resolver_valor_duplicado`). Debe separarse
     # en dos líneas de catálogo con su propio código, no fundirse en una.
+    #
+    # Auditoría 2026-09-08, duplicado exacto reportado por el cliente en
+    # 6.23/28510.0051: la descripción también se divide 1:1 (dos líneas de
+    # texto para dos códigos, verificado contra el PDF real) -- cada línea
+    # se queda con SU propia descripción ("...-TC-D" / "...-TC-I", dos
+    # piezas D/I completas, mismo patrón que P-0056/P-0057 dos filas más
+    # arriba en la misma tabla, sin fusionar), no con el bloque entero
+    # repetido. Sin ambigüedad que confirmar, no lleva motivo_revision.
     mapeo = {"codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": 3, "cantidad": None, "precio_unitario": 5}
     tabla = TablaExtraida(
         cabecera=["CÓDIGO", "MATRÍCULA", "DESCRIPCIÓN", "UNIDAD", "IMPACTO", "PRECIO"],
@@ -382,28 +390,39 @@ def test_construir_lineas_desde_tabla_separa_fila_fusionada_con_precios_iguales(
     lineas = construir_lineas_desde_tabla(tabla, mapeo, None, expediente_id=1, baja_lote=None, orden_inicial=0)
 
     assert len(lineas) == 2
-    assert {linea["codigo_precio"] for linea in lineas} == {"P-0058", "P-0059"}
+    por_codigo = {linea["codigo_precio"]: linea for linea in lineas}
+    assert set(por_codigo) == {"P-0058", "P-0059"}
+    assert por_codigo["P-0058"]["descripcion"] == "CAM1H-60-1500-TC-D"
+    assert por_codigo["P-0059"]["descripcion"] == "CAM1H-60-1500-TC-I"
     assert all(linea["precio_unitario"] == Decimal("306351.49") for linea in lineas)
+    assert all(not linea["motivo_revision"] for linea in lineas)
 
 
 def test_combinar_por_clave_no_funde_dos_lineas_de_la_misma_fila_fusionada():
     # Defecto encontrado verificando el arreglo de la fila fusionada contra
-    # la base de datos real (expediente 18, lote 179): separar la fila en
-    # P-0058 y P-0059 no bastaba. Las dos líneas salen con la MISMA
-    # descripción (el bloque entero de la fila, que nunca se reparte a
-    # ciegas), sin matrícula, y con el mismo precio -- firma de material
-    # idéntica, así que `_combinar_por_clave` volvía a fundirlas en una
-    # sola: en la base de datos quedaba UNA fila, con `clave_linea="P-0058"`
-    # y `codigo_precio="P-0059"`, y el material P-0058 desaparecía del
+    # la base de datos real (expediente 18, lote 179): separar una fila
+    # fusionada en dos códigos no bastaba si la descripción quedaba
+    # AMBIGUA (número de líneas de descripción distinto de N, así que no se
+    # reparte 1:1 -- auditoría 2026-09-08, ver
+    # `test_construir_lineas_desde_tabla_separa_fila_fusionada_con_dos_precios`
+    # para el caso real, P-0090/P-0091, donde la descripción trae 4 líneas
+    # para solo 2 códigos). Las dos líneas salen entonces con la MISMA
+    # descripción (el bloque entero de la fila), sin matrícula, y con
+    # precios que pueden coincidir -- firma de material idéntica, así que
+    # `_combinar_por_clave` volvía a fundirlas en una sola: en la base de
+    # datos quedaba UNA fila, con `clave_linea` de un código y
+    # `codigo_precio` del otro, y uno de los dos materiales desaparecía del
     # catálogo entero. El mismo fallo que el arreglo venía a corregir, un
     # paso más allá y con peor pinta (la línea superviviente parece
-    # correcta). `_firma_material` no da firma a estas líneas.
+    # correcta). `_firma_material` no da firma a estas líneas mientras la
+    # descripción siga sin poder repartirse con garantía.
     mapeo = {"codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": 3, "cantidad": None, "precio_unitario": 5}
     tabla = TablaExtraida(
         cabecera=["CÓDIGO", "MATRÍCULA", "DESCRIPCIÓN", "UNIDAD", "IMPACTO", "PRECIO"],
         filas=[
             [
-                "P-0058\nP-0059", None, "CAM1H-60-1500-TC-D\nCAM1H-60-1500-TC-I",
+                "P-0090\nP-0091", None,
+                "DMRDH-G-60-250-0,11-CR-\nD-TC con 2 motores\nSemicambio dcha (doble)",
                 "UD.\nUD.", "ALTO\nALTO", "306.351,49 €\n306.351,49 €",
             ],
         ],
@@ -415,16 +434,18 @@ def test_combinar_por_clave_no_funde_dos_lineas_de_la_misma_fila_fusionada():
     combinadas = _combinar_por_clave(lineas)
 
     assert len(combinadas) == 2
-    assert {linea["codigo_precio"] for linea in combinadas} == {"P-0058", "P-0059"}
-    assert {linea["clave_linea"] for linea in combinadas} == {"P-0058", "P-0059"}
+    assert {linea["codigo_precio"] for linea in combinadas} == {"P-0090", "P-0091"}
+    assert {linea["clave_linea"] for linea in combinadas} == {"P-0090", "P-0091"}
 
 
 def test_guardar_lineas_catalogo_no_pierde_un_codigo_de_una_fila_fusionada(db_session):
     # El mismo defecto, comprobado donde de verdad dolía: contra la base de
     # datos. Antes del arreglo esto guardaba una sola fila; ahora guarda los
-    # dos materiales reales, cada uno con su código como clave y los dos
-    # marcados para revisión (su descripción es el bloque compartido de la
-    # fila del documento, hay que confirmarla contra el original).
+    # dos materiales reales, cada uno con su código como clave. Auditoría
+    # 2026-09-08: la descripción también se reparte 1:1 en este caso (dos
+    # líneas para dos códigos), así que ninguna de las dos queda marcada
+    # para revisión -- ver el caso ambiguo (descripción con más líneas que
+    # códigos) en `test_combinar_por_clave_no_funde_dos_lineas_de_la_misma_fila_fusionada`.
     lote = _lote(db_session)
     mapeo = {"codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": 3, "cantidad": None, "precio_unitario": 5}
     tabla = TablaExtraida(
@@ -449,8 +470,9 @@ def test_guardar_lineas_catalogo_no_pierde_un_codigo_de_una_fila_fusionada(db_se
     guardadas = db_session.query(LineaCatalogo).filter_by(lote_id=lote.id).all()
     assert {linea.codigo_precio for linea in guardadas} == {"P-0058", "P-0059"}
     assert {linea.clave_linea for linea in guardadas} == {"P-0058", "P-0059"}
+    assert {linea.descripcion for linea in guardadas} == {"CAM1H-60-1500-TC-D", "CAM1H-60-1500-TC-I"}
     assert all(linea.precio_unitario == Decimal("306351.49") for linea in guardadas)
-    assert all("fusionaba" in (linea.motivo_revision or "") for linea in guardadas)
+    assert all(not linea.motivo_revision for linea in guardadas)
 
 
 def test_guardar_lineas_catalogo_fila_fusionada_reprocesada_no_duplica(db_session):

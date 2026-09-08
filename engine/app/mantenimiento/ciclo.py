@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 
 from app.interfaces.document_storage import DocumentStorage
 from app.interfaces.model_provider import ModelProvider
+from app.mantenimiento.auditoria import TIPO_TRABAJO as TIPO_TRABAJO_AUDITORIA
 from app.mantenimiento.frescura import debe_descargar, debe_extraer
 from app.models import Documento, DocumentoExpediente, EstadoExpediente, Expediente, TrabajoCola
 from app.queue import ejecutar_trabajo, encolar_trabajo, tomar_siguiente_trabajo
@@ -57,6 +58,12 @@ class ResumenCiclo:
     # (o {"error": ...} si el descubrimiento falló) — None si estaba
     # desactivado para esta ejecución (payload "sindicacion_desactivada").
     descubrimiento: Optional[dict] = field(default=None)
+    # BLOQUE 1, sesión de auditoría automática 2026-09-08: resultado completo
+    # de `app.mantenimiento.auditoria.ejecutar_auditoria` sobre el estado del
+    # catálogo YA con lo que este mismo ciclo acaba de descargar/extraer —
+    # None solo si encolarla o ejecutarla fallara (nunca debe impedir que el
+    # resto del ciclo se dé por bueno: ver el manejo de errores más abajo).
+    auditoria: Optional[dict] = field(default=None)
 
     def to_dict(self) -> dict:
         return {
@@ -69,6 +76,7 @@ class ResumenCiclo:
             "trabajos_drenados": self.trabajos_drenados,
             "duracion_segundos": round(self.duracion_segundos, 3),
             "descubrimiento": self.descubrimiento,
+            "auditoria": self.auditoria,
         }
 
 
@@ -176,6 +184,30 @@ def ejecutar_ciclo_mantenimiento(
             break
         ejecutar_trabajo(db, siguiente, manejadores)
         resumen.trabajos_drenados += 1
+
+    # BLOQUE 1, sesión de auditoría automática (2026-09-08): "que corra sola
+    # al terminar cada ciclo de mantenimiento" -- se encola DESPUÉS de que el
+    # drenaje de arriba haya vaciado la cola con todo lo que este ciclo
+    # lanzó, para que audite el catálogo ya con las descargas/extracciones
+    # de esta misma pasada aplicadas, no el estado de antes de empezar. Se
+    # ejecuta aquí mismo (no se deja pendiente para la siguiente vuelta del
+    # worker) por el mismo motivo que el drenaje síncrono de arriba: que esta
+    # ejecución del ciclo refleje el trabajo real hecho. Un fallo aquí (bug
+    # en una comprobación, tabla bloqueada) no debe tirar el ciclo entero —
+    # ya hizo su trabajo real (descubrir/descargar/extraer) antes de llegar
+    # a esto.
+    try:
+        trabajo_auditoria = encolar_trabajo(db, tipo=TIPO_TRABAJO_AUDITORIA)
+        siguiente = tomar_siguiente_trabajo(db, excluir_tipos=_TIPOS_EXCLUIDOS_DEL_DRENAJE)
+        if siguiente is not None:
+            ejecutar_trabajo(db, siguiente, manejadores)
+            resumen.trabajos_drenados += 1
+            db.refresh(trabajo_auditoria)
+            resumen.auditoria = trabajo_auditoria.resultado
+    except Exception as exc:  # noqa: BLE001
+        db.rollback()
+        logger.warning("auditoría automática de fin de ciclo falló, se continúa sin ella: %s", exc)
+        resumen.auditoria = {"error": str(exc)}
 
     resumen.duracion_segundos = time.monotonic() - inicio
     logger.info("ciclo de mantenimiento terminado: %s", resumen.to_dict())

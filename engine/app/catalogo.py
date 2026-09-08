@@ -935,7 +935,7 @@ _MOTIVO_FILA_FUSIONADA = (
 
 def _dividir_fila_multiple(
     fila: list[Optional[str]], mapeo: dict[str, Optional[int]]
-) -> Optional[list[list[Optional[str]]]]:
+) -> Optional[tuple[list[list[Optional[str]]], bool]]:
     """Arreglo de 6.23/28510.0051 (sesión 2026-09-06): en tablas donde el
     desfase de una línea entre la columna de descripción y el resto (ver
     la fila fantasma que descarta `construir_linea_catalogo`) hace que dos
@@ -954,17 +954,27 @@ def _dividir_fila_multiple(
     unidad de medida, si la cabecera la declara, debe dividirse también en
     N o venir vacía en las dos.
 
-    La descripción NUNCA se reparte entre las N filas resultantes -- el
-    desfase de una línea hace que sus fragmentos no se correspondan 1:1 con
-    el resto de columnas (CONTEXTO.md sección 8: nunca inventar un reparto
-    que no se pueda verificar). Cada fila resultante se queda con el mismo
-    bloque de descripción completo tal cual; `construir_lineas_desde_tabla`
-    marca cada una con `_MOTIVO_FILA_FUSIONADA` para que un humano la
-    confirme, aunque el precio (y por tanto el precio adjudicado derivado)
-    ya sea correcto.
+    La descripción solo se reparte 1:1 cuando TAMBIÉN se divide en
+    exactamente N líneas no vacías (verificado con el duplicado real de
+    6.23/28510.0051, sesión de auditoría 2026-09-08: P-0058/P-0059,
+    "CAM1H-60-1500-TC-D\\nCAM1H-60-1500-TC-I", dos piezas D/I completas al
+    mismo precio -- el mismo patrón que P-0056/P-0057 dos filas más arriba,
+    sin fusionar, con precio igualmente idéntico -- confirmado contra el PDF
+    real, `pdfplumber` funde dos filas SIMPLES consecutivas, no una
+    descripción envuelta). Cuando el número de líneas de descripción no
+    coincide con N (el caso que motivó no repartir nunca, en la sesión
+    original: una de las N filas fusionadas traía a su vez una descripción
+    envuelta en más de una línea, así que el recuento por sí solo no basta
+    para emparejarlas 1:1 con garantía), se mantiene el comportamiento
+    anterior -- cada fila resultante se queda con el mismo bloque de
+    descripción completo tal cual, y `construir_lineas_desde_tabla` marca
+    cada una con `_MOTIVO_FILA_FUSIONADA` para que un humano la confirme.
 
-    Devuelve `None` cuando no aplica: la fila sigue su camino normal, de
-    una sola línea por campo."""
+    Devuelve `None` cuando no aplica (la fila sigue su camino normal, de una
+    sola línea por campo), o una tupla `(filas_divididas, descripcion_dividida)`
+    -- el segundo valor le dice a la persona que llama si hace falta marcar
+    la línea para revisión (`False`) o si el reparto de descripción ya quedó
+    verificado sin ambigüedad (`True`)."""
     indice_codigo = mapeo.get("codigo_precio")
     indice_precio = mapeo.get("precio_unitario")
     if indice_codigo is None or indice_precio is None:
@@ -991,6 +1001,10 @@ def _dividir_fila_multiple(
     if unidades and len(unidades) != n:
         return None
 
+    indice_descripcion = mapeo.get("descripcion")
+    descripciones = _lineas_no_vacias(indice_descripcion) if indice_descripcion is not None else []
+    descripcion_dividida = len(descripciones) == n
+
     filas_divididas = []
     for i in range(n):
         nueva_fila = list(fila)
@@ -998,8 +1012,10 @@ def _dividir_fila_multiple(
         nueva_fila[indice_precio] = precios[i]
         if unidades:
             nueva_fila[indice_unidad] = unidades[i]
+        if descripcion_dividida:
+            nueva_fila[indice_descripcion] = descripciones[i]
         filas_divididas.append(nueva_fila)
-    return filas_divididas
+    return filas_divididas, descripcion_dividida
 
 
 def construir_lineas_desde_tabla(
@@ -1029,8 +1045,9 @@ def construir_lineas_desde_tabla(
         # puede traer texto de la línea vecina, nunca se reparte. Una fila
         # fusionada no participa en la absorción de fragmentos de más abajo
         # (esa lógica es para una fila normal, de una sola línea real).
-        sub_filas = _dividir_fila_multiple(fila, mapeo)
-        if sub_filas is not None:
+        resultado_division = _dividir_fila_multiple(fila, mapeo)
+        if resultado_division is not None:
+            sub_filas, descripcion_dividida = resultado_division
             for sub_fila in sub_filas:
                 linea = construir_linea_catalogo(
                     sub_fila, mapeo, tabla.pagina, documento_origen_id, expediente_id, baja_lote,
@@ -1038,7 +1055,8 @@ def construir_lineas_desde_tabla(
                 )
                 if linea is None:
                     continue
-                linea["motivo_revision"] = _acumular_motivo(linea["motivo_revision"], _MOTIVO_FILA_FUSIONADA)
+                if not descripcion_dividida:
+                    linea["motivo_revision"] = _acumular_motivo(linea["motivo_revision"], _MOTIVO_FILA_FUSIONADA)
                 resultado.append(linea)
             continue
 
@@ -1135,8 +1153,9 @@ def _firma_material(datos: dict) -> Optional[tuple]:
     `motivo_revision` cuando la fusión ocurre sin matrícula (señal más
     débil que con ella), para que quede confirmable.
 
-    Una línea recuperada de una fila fusionada (`_MOTIVO_FILA_FUSIONADA`,
-    `_dividir_fila_multiple`) no tiene firma: su descripción es el bloque
+    Una línea recuperada de una fila fusionada CUYA DESCRIPCIÓN QUEDÓ
+    AMBIGUA (`_MOTIVO_FILA_FUSIONADA`, `_dividir_fila_multiple` con
+    `descripcion_dividida=False`) no tiene firma: su descripción es el bloque
     entero de la fila del documento, el MISMO para las N líneas que salen de
     ella porque ahí nunca se reparte a ciegas. Sin este descarte, dos
     materiales reales y distintos de una misma fila fusionada que además
