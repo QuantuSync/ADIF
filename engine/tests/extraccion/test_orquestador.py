@@ -17,6 +17,7 @@ from app.extraccion.orquestador import (
     _Documento,
     _detectar_contrato_obra,
     _detectar_numero_lotes_pcsp,
+    _extraer_campos_expediente,
     ejecutar_extraccion_expediente,
 )
 from app.extraccion.texto import PaginaTexto
@@ -552,12 +553,16 @@ def test_expediente_0028_con_hueco_en_la_numeracion_marca_cobertura_parcial(db_s
     assert "cobertura parcial: 6 de 7" in expediente.error
 
 
-def test_expediente_0139_sin_ningun_desglose_por_lote_marca_cobertura_cero(db_session):
+def test_expediente_0139_sin_nombre_proyecto_no_puede_identificar_su_lote(db_session):
     """El caso más peligroso de la sesión (encargo explícito del cliente):
-    6.23/28510.0139 confirma "Nº de Lotes: 2" en su Anuncio PCSP pero no
-    trae ninguna Propuesta LC.27 ni Resolución que desglose por lote --
-    antes de esta sesión figuraba `completado` sin haber identificado ni un
-    solo lote de los 2 que el propio documento confirma que existen."""
+    6.23/28510.0139 confirma "Nº de Lotes: 2" en su Anuncio PCSP y, desde la
+    sesión de medición del alcance (2026-09-08), el propio documento SÍ trae
+    el desglose por lote bajo "Nº Lote: NNN" (tercera variante multi-lote,
+    `app.extraccion.lotes_pcsp`) -- pero sin `Expediente.nombre_proyecto`
+    (la fuente independiente con la que se empareja el bloque propio de
+    cada expediente, ver docstring del módulo) no hay con qué distinguir
+    cuál de los dos bloques es el suyo, así que ninguno de los dos se usa:
+    a revisión, nunca se adivina."""
     expediente = _crear_expediente_con_documentos(
         db_session, "6.23/28510.0139", [("ADJUDICACION", fx.ANUNCIO_PCSP_DOS_LOTES_SIN_DESGLOSE)],
     )
@@ -568,7 +573,41 @@ def test_expediente_0139_sin_ningun_desglose_por_lote_marca_cobertura_cero(db_se
     db_session.refresh(expediente)
     assert expediente.lotes_totales_declarados == 2
     assert expediente.estado == EstadoExpediente.pendiente_revision
-    assert "cobertura parcial: 0 de 2" in expediente.error
+    assert "no se pudo identificar con confianza" in expediente.error
+    assert "Nº Lote: 001/002" in expediente.error
+    # El motivo genérico de "cobertura parcial: 0 de 2" (pensado para cuando
+    # no hay NINGÚN documento que desglose por lote) no debe aparecer
+    # también -- sería falso aquí, el documento sí desglosa.
+    assert "cobertura parcial" not in expediente.error
+
+
+def test_expediente_0139_con_nombre_proyecto_toma_los_datos_de_su_propio_lote(db_session):
+    """Contrapartida: con `nombre_proyecto` ya puesto (como lo deja el Excel
+    de ejecución SAP antes de que corra esta extracción, caso real), el
+    expediente toma el importe de licitación, el de adjudicación y el
+    adjudicatario de SU bloque -- no la cabecera global del documento ni el
+    primer bloque. Objeto real del Lote 1 (La Gineta) del propio PDF."""
+    expediente = _crear_expediente_con_documentos(
+        db_session, "6.23/28510.0139", [("ADJUDICACION", fx.ANUNCIO_PCSP_DOS_LOTES_SIN_DESGLOSE)],
+    )
+    expediente.nombre_proyecto = (
+        "Suministro de balasto para las necesidades de obras y mantenimiento en la red ferroviaria de interés "
+        "general (línea este). 2 lotes. Lote 1: Base de mantenimiento de La Gineta"
+    )
+    db_session.commit()
+    trabajo = SimpleNamespace(expediente_id=expediente.id)
+
+    ejecutar_extraccion_expediente(db_session, _StorageDirecta(), trabajo, model_provider=None)
+
+    db_session.refresh(expediente)
+    lote = db_session.query(Lote).filter_by(expediente_id=expediente.id).one()
+    # Ni el total global del documento (590.256 + 1.291.698) ni el bloque
+    # del OTRO lote (Almussafes, 1.291.698) -- el propio, La Gineta.
+    assert lote.importe_licitacion == Decimal("590256")
+    assert lote.importe_adjudicacion == Decimal("590256")
+    assert lote.adjudicatario == "UTE SUMINISTRO LA GINETA"
+    assert expediente.lotes_totales_declarados == 2
+    assert "cobertura parcial" not in (expediente.error or "")
 
 
 def test_reprocesar_expediente_con_sentinela_previo_lo_sustituye(db_session):
@@ -645,6 +684,93 @@ def test_detectar_contrato_obra_ignora_suministros():
     doc = SimpleNamespace(id=1, nombre_archivo="anuncio.pdf")
     item = _Documento(documento=doc, tipo=TipoDocumento.anuncio_pcsp, paginas=paginas)
     assert _detectar_contrato_obra([item]) is None
+
+
+def _doc_pcsp_global_sin_desglose(doc_id: int) -> _Documento:
+    """Caso real que verificó el reproceso de `6.20/28510.0041`: el CONTRATO
+    de un lote concreto puede seguir declarando el presupuesto GLOBAL de
+    toda la licitación en su propia cabecera, sin repetir "Nº Lote: NNN" en
+    ningún sitio -- `extraer_ventanas_multi_lote_pcsp` no lo detecta como
+    multi-lote (no hay nada que detectar), así que sigue el camino de
+    siempre: el importe de licitación que trae es el global, no el de este
+    lote. La adjudicación, sin embargo, sí es la real de este lote (coincide
+    con la de la ventana resuelta abajo) -- exactamente la mezcla real
+    encontrada."""
+    paginas = [
+        PaginaTexto(
+            numero=1,
+            texto=(
+                "Número de Expediente 6.20/28510.0041\n"
+                "Presupuesto base de licitación\n"
+                "Importe 26.620.000 EUR.\n"
+                "Importe (sin impuestos) 22.000.000 EUR.\n"
+                "Adjudicatario\n"
+                "GLOBAL SA\n"
+                "Importes de Adjudicación\n"
+                "Importe total ofertado (sin impuestos) 500.000 EUR.\n"
+            ),
+        )
+    ]
+    doc = SimpleNamespace(id=doc_id, nombre_archivo="contrato.pdf")
+    return _Documento(documento=doc, tipo=TipoDocumento.anuncio_pcsp, paginas=paginas)
+
+
+def _doc_pcsp_multi_lote_resuelto(doc_id: int) -> _Documento:
+    """El Anuncio de adjudicación real, con "Nº Lote: NNN" repetido -- el
+    bloque del lote 2 (el que coincidirá con `nombre_proyecto`) trae el
+    importe de licitación REAL de ese lote (500.000, no el global)."""
+    paginas = [
+        PaginaTexto(
+            numero=1,
+            texto=(
+                "Nº Lote: 001\n"
+                "Objeto del Contrato: Suministro de repuestos. Lote 1: Otro sitio\n"
+                "Presupuesto base de licitación\n"
+                "Importe 121.000 EUR.\n"
+                "Importe (sin impuestos) 100.000 EUR.\n"
+                "Adjudicatario\n"
+                "OTRO SA\n"
+                "Importes de Adjudicación\n"
+                "Importe total ofertado (sin impuestos) 100.000 EUR.\n"
+                "Nº Lote: 002\n"
+                "Objeto del Contrato: Suministro de repuestos. Lote 2: Mi sitio\n"
+                "Presupuesto base de licitación\n"
+                "Importe 605.000 EUR.\n"
+                "Importe (sin impuestos) 500.000 EUR.\n"
+                "Adjudicatario\n"
+                "LOTE DOS SA\n"
+                "Importes de Adjudicación\n"
+                "Importe total ofertado (sin impuestos) 500.000 EUR.\n"
+            ),
+        )
+    ]
+    doc = SimpleNamespace(id=doc_id, nombre_archivo="adjudicacion.pdf")
+    return _Documento(documento=doc, tipo=TipoDocumento.anuncio_pcsp, paginas=paginas)
+
+
+def test_importe_resuelto_por_lote_gana_al_global_sin_importar_el_orden(db_session):
+    # Hallazgo real verificando el reproceso de `6.20/28510.0041`: "el
+    # primer valor no nulo gana" dejaba fijo el importe de licitación
+    # GLOBAL si ese documento se procesaba antes que el que sí resuelve el
+    # bloque de este lote -- probado en los dos órdenes posibles.
+    for orden, docs in enumerate([
+        [_doc_pcsp_global_sin_desglose(1), _doc_pcsp_multi_lote_resuelto(2)],
+        [_doc_pcsp_multi_lote_resuelto(1), _doc_pcsp_global_sin_desglose(2)],
+    ]):
+        expediente = Expediente(
+            codigo_expediente=f"6.20/28510.004{orden}",
+            nombre_proyecto="Suministro de repuestos. Lote 2: Mi sitio",
+        )
+        db_session.add(expediente)
+        db_session.commit()
+
+        importe_licitacion, importe_adjudicacion, _baja, adjudicatario, _motivo, _detectado = (
+            _extraer_campos_expediente(db_session, expediente, docs)
+        )
+
+        assert importe_licitacion == Decimal("500000"), f"orden {orden}"
+        assert importe_adjudicacion == Decimal("500000"), f"orden {orden}"
+        assert adjudicatario == "LOTE DOS SA", f"orden {orden}"
 
 
 def test_detectar_contrato_obra_ignora_documentos_que_no_son_anuncio_pcsp():
