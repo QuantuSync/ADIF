@@ -25,6 +25,18 @@ type EstadoMantenimiento = {
   programado_activo: boolean;
 };
 
+// BLOQUE 1, sesión de auditoría automática (2026-09-08): forma de cada
+// entrada de `resultado.hallazgos` de un trabajo `auditoria_catalogo`
+// (`app.mantenimiento.auditoria.Hallazgo.to_dict`).
+type HallazgoAuditoria = {
+  categoria: string;
+  gravedad: "error" | "aviso";
+  mensaje: string;
+  expedientes: string[];
+  total_afectados: number | null;
+  detalle: Record<string, unknown> | null;
+};
+
 const INTERVALO_SONDEO_MS = 4000;
 
 function formatearFecha(iso: string): string {
@@ -79,9 +91,91 @@ function ResumenCiclo({ resultado }: { resultado: Record<string, unknown> | null
   );
 }
 
+// BLOQUE 1, sesión de auditoría automática (2026-09-08): un hallazgo por
+// fila, con su gravedad y los expedientes afectados (recortada por el
+// backend a `_LIMITE_EXPEDIENTES`; `total_afectados` es siempre la cifra
+// real aunque la lista venga más corta). "No corrige nada por su cuenta,
+// solo detecta y avisa" -- esta pantalla es exactamente ese aviso.
+function FilaHallazgo({ hallazgo }: { hallazgo: HallazgoAuditoria }) {
+  const masExpedientes = (hallazgo.total_afectados ?? hallazgo.expedientes.length) - hallazgo.expedientes.length;
+  return (
+    <li style={{ marginBottom: "0.6rem" }}>
+      <span className={`status ${hallazgo.gravedad === "error" ? "status-attn" : ""}`}>
+        {hallazgo.gravedad === "error" ? "Error" : "Aviso"}
+      </span>{" "}
+      <strong>{hallazgo.categoria}</strong>
+      <div style={{ margin: "0.2rem 0 0" }}>{hallazgo.mensaje}</div>
+      {hallazgo.expedientes.length > 0 && (
+        <div className="muted" style={{ marginTop: "0.2rem" }}>
+          Expedientes: {hallazgo.expedientes.join(", ")}
+          {masExpedientes > 0 ? ` (+${masExpedientes} más)` : ""}
+        </div>
+      )}
+    </li>
+  );
+}
+
+function PanelAuditoria({ estado }: { estado: EstadoMantenimiento | null }) {
+  if (!estado) return null;
+  const trabajo = estado.ultima_ejecucion;
+  if (!trabajo) {
+    return (
+      <div className="card" style={{ marginBottom: "1.5rem" }}>
+        <p className="section-label">Auditoría automática del catálogo</p>
+        <p className="muted">
+          Todavía no ha corrido ninguna — se lanza sola al terminar cada ciclo de mantenimiento.
+        </p>
+      </div>
+    );
+  }
+  if (trabajo.estado !== "completado") {
+    return (
+      <div className="card" style={{ marginBottom: "1.5rem" }}>
+        <p className="section-label">Auditoría automática del catálogo</p>
+        <p>
+          <span className="status status-attn">La última ejecución no terminó bien</span>
+        </p>
+        {trabajo.error && <p style={{ margin: "0.35rem 0 0" }}>{trabajo.error}</p>}
+      </div>
+    );
+  }
+  const resultado = trabajo.resultado ?? {};
+  const hallazgos = (resultado.hallazgos as HallazgoAuditoria[] | undefined) ?? [];
+  const totalErrores = Number(resultado.total_errores ?? 0);
+  const totalAvisos = Number(resultado.total_avisos ?? 0);
+  return (
+    <div className="card" style={{ marginBottom: "1.5rem" }}>
+      <p className="section-label">Auditoría automática del catálogo</p>
+      <div className="muted" style={{ marginBottom: "0.6rem" }}>
+        Última ejecución: {formatearFecha(trabajo.created_at)} · {String(resultado.total_lineas ?? 0)} línea(s) de{" "}
+        {String(resultado.total_expedientes ?? 0)} expediente(s) revisadas -- solo detecta y avisa, nunca corrige nada
+        por su cuenta.
+      </div>
+      {hallazgos.length === 0 ? (
+        <p>
+          <span className="status status-ok">Sin hallazgos</span>
+        </p>
+      ) : (
+        <>
+          <p style={{ marginBottom: "0.5rem" }}>
+            <span className={`status ${totalErrores > 0 ? "status-attn" : ""}`}>{totalErrores} error(es)</span>{" "}
+            <span className="status">{totalAvisos} aviso(s)</span>
+          </p>
+          <ul style={{ paddingLeft: "1.1rem", margin: 0 }}>
+            {hallazgos.map((h, i) => (
+              <FilaHallazgo key={`${h.categoria}-${i}`} hallazgo={h} />
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function MantenimientoPanel({ apiUrl }: { apiUrl: string }) {
   const [estado, setEstado] = useState<EstadoMantenimiento | null>(null);
   const [historial, setHistorial] = useState<Trabajo[]>([]);
+  const [estadoAuditoria, setEstadoAuditoria] = useState<EstadoMantenimiento | null>(null);
   // Conexión (sondeo pasivo): gateado, igual que en el resto de paneles.
   // `errorAccion` es de "lanzar ahora" -- una acción directa, avisa ya.
   const { error: errorConexion, confirmado, cargando, registrarExito, registrarFallo } = useReintentoConexion();
@@ -90,14 +184,17 @@ export default function MantenimientoPanel({ apiUrl }: { apiUrl: string }) {
 
   async function recargar() {
     try {
-      const [resEstado, resHistorial] = await Promise.all([
+      const [resEstado, resHistorial, resAuditoria] = await Promise.all([
         fetch(`${apiUrl}/mantenimiento/estado`, { cache: "no-store" }),
         fetch(`${apiUrl}/mantenimiento/historial`, { cache: "no-store" }),
+        fetch(`${apiUrl}/mantenimiento/auditoria/estado`, { cache: "no-store" }),
       ]);
       if (!resEstado.ok) throw new Error(`la API respondió ${resEstado.status}`);
       if (!resHistorial.ok) throw new Error(`la API respondió ${resHistorial.status}`);
+      if (!resAuditoria.ok) throw new Error(`la API respondió ${resAuditoria.status}`);
       setEstado(await resEstado.json());
       setHistorial(await resHistorial.json());
+      setEstadoAuditoria(await resAuditoria.json());
       registrarExito();
     } catch (e) {
       registrarFallo(e instanceof Error ? e.message : String(e));
@@ -218,6 +315,8 @@ export default function MantenimientoPanel({ apiUrl }: { apiUrl: string }) {
               </>
             )}
           </div>
+
+          <PanelAuditoria estado={estadoAuditoria} />
 
           <p className="section-label">Histórico</p>
           <div className="table-scroll">

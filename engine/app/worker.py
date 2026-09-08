@@ -12,6 +12,8 @@ from app.extraccion.descubrimiento_matriz import descubrir_pedidos_de_matrices_c
 from app.extraccion.orquestador import ejecutar_extraccion_expediente
 from app.interfaces.document_storage import LocalDiskStorage
 from app.interfaces.model_provider import APIModelProvider, CachedModelProvider
+from app.mantenimiento.auditoria import TIPO_TRABAJO as TIPO_AUDITORIA_CATALOGO
+from app.mantenimiento.auditoria import ejecutar_auditoria
 from app.mantenimiento.ciclo import TIPO_TRABAJO as TIPO_MANTENIMIENTO_CICLO
 from app.mantenimiento.ciclo import ejecutar_ciclo_mantenimiento
 from app.mantenimiento.copia_seguridad import TIPO_TRABAJO as TIPO_COPIA_SEGURIDAD
@@ -199,6 +201,7 @@ MANEJADORES = {
     TIPO_COPIA_SEGURIDAD: ejecutar_copia_seguridad,
     TIPO_SINDICACION_BACKFILL: procesar_sindicacion_backfill,
     TIPO_DESCUBRIMIENTO_PEDIDOS: procesar_descubrimiento_pedidos,
+    TIPO_AUDITORIA_CATALOGO: ejecutar_auditoria,
 }
 
 

@@ -3,10 +3,21 @@ y drena — con manejadores falsos, sin scraping real ni modelo real, igual
 que el resto de tests de esta cascada."""
 from datetime import datetime, timezone
 
+from app.mantenimiento.auditoria import TIPO_TRABAJO as TIPO_TRABAJO_AUDITORIA
+from app.mantenimiento.auditoria import ejecutar_auditoria
 from app.mantenimiento.ciclo import ejecutar_ciclo_mantenimiento
 from app.mantenimiento.frescura import VERSION_LOGICA_EXTRACCION, huella_documentos
 from app.models import Documento, DocumentoExpediente, EstadoExpediente, EstadoTrabajo, Expediente, TrabajoCola
 from app.queue import encolar_trabajo
+
+# BLOQUE 1, sesión de auditoría automática (2026-09-08): la auditoría se
+# encola sola al final de CADA ciclo (`app.mantenimiento.ciclo`), así que
+# todo manejador de estos tests la incluye -- con la función real (de solo
+# lectura, sin red ni modelo, igual de barata que el resto de estos tests)
+# para que el conteo de `trabajos_drenados` y el propio `resumen["auditoria"]`
+# reflejen el comportamiento real, no un manejador desconocido fallando en
+# silencio.
+_AUDITORIA = {TIPO_TRABAJO_AUDITORIA: ejecutar_auditoria}
 
 
 def _crear_expediente(db, **kwargs) -> Expediente:
@@ -56,7 +67,7 @@ def test_expediente_sin_documentos_encola_y_drena_descarga_y_extraccion_encadena
         e.estado = EstadoExpediente.completado
         return {"ok": True}
 
-    manejadores = {"descargar_expediente": fake_descargar, "extraer_expediente": fake_extraer}
+    manejadores = {"descargar_expediente": fake_descargar, "extraer_expediente": fake_extraer, **_AUDITORIA}
     trabajo = _trabajo_ciclo(db_session)
 
     resumen = ejecutar_ciclo_mantenimiento(db_session, storage=None, model_provider=None, manejadores=manejadores, trabajo=trabajo)
@@ -67,7 +78,10 @@ def test_expediente_sin_documentos_encola_y_drena_descarga_y_extraccion_encadena
     # no desde el bucle de decisión (el expediente no tenía documentos
     # cuando se evaluó) -- pero el drenaje la recoge y ejecuta igual.
     assert llamadas_extraer == [exp.id]
-    assert resumen["trabajos_drenados"] == 2
+    # descarga + extracción + auditoría automática de fin de ciclo.
+    assert resumen["trabajos_drenados"] == 3
+    assert resumen["auditoria"] is not None
+    assert resumen["auditoria"]["total_expedientes"] == 1
 
 
 def test_expediente_al_dia_no_lanza_nada(db_session):
@@ -84,7 +98,7 @@ def test_expediente_al_dia_no_lanza_nada(db_session):
     exp.huella_documentos = huella_documentos(docs)
     db_session.commit()
 
-    manejadores = {"descargar_expediente": lambda db, t: {}, "extraer_expediente": lambda db, t: {}}
+    manejadores = {"descargar_expediente": lambda db, t: {}, "extraer_expediente": lambda db, t: {}, **_AUDITORIA}
     trabajo = _trabajo_ciclo(db_session)
 
     resumen = ejecutar_ciclo_mantenimiento(db_session, storage=None, model_provider=None, manejadores=manejadores, trabajo=trabajo)
@@ -93,7 +107,9 @@ def test_expediente_al_dia_no_lanza_nada(db_session):
     assert resumen["saltados_extraccion"] == 1
     assert resumen["descargas_lanzadas"] == 0
     assert resumen["extracciones_lanzadas"] == 0
-    assert resumen["trabajos_drenados"] == 0
+    # Nada que descargar/extraer, pero la auditoría automática de fin de
+    # ciclo sí corre siempre.
+    assert resumen["trabajos_drenados"] == 1
 
 
 def test_forzar_global_reprocesa_aunque_este_al_dia(db_session):
@@ -111,7 +127,7 @@ def test_forzar_global_reprocesa_aunque_este_al_dia(db_session):
     db_session.commit()
 
     ejecutados = []
-    manejadores = {"extraer_expediente": lambda db, t: ejecutados.append(t.expediente_id) or {}}
+    manejadores = {"extraer_expediente": lambda db, t: ejecutados.append(t.expediente_id) or {}, **_AUDITORIA}
     trabajo = _trabajo_ciclo(db_session, payload={"forzar": True})
 
     resumen = ejecutar_ciclo_mantenimiento(db_session, storage=None, model_provider=None, manejadores=manejadores, trabajo=trabajo)
@@ -136,8 +152,10 @@ def test_drenaje_no_recoge_otro_ciclo_pendiente(db_session):
     trabajo = _trabajo_ciclo(db_session)
     otro_ciclo = _trabajo_ciclo(db_session)
 
-    resumen = ejecutar_ciclo_mantenimiento(db_session, storage=None, model_provider=None, manejadores={}, trabajo=trabajo)
+    resumen = ejecutar_ciclo_mantenimiento(db_session, storage=None, model_provider=None, manejadores=_AUDITORIA, trabajo=trabajo)
 
-    assert resumen["trabajos_drenados"] == 0
+    # El segundo `mantenimiento_ciclo` pendiente nunca se recoge (excluido
+    # del drenaje por tipo); la auditoría automática de fin de ciclo sí.
+    assert resumen["trabajos_drenados"] == 1
     db_session.refresh(otro_ciclo)
     assert otro_ciclo.estado == EstadoTrabajo.pendiente

@@ -32,6 +32,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.extraccion.descubrimiento_matriz import TIPO_TRABAJO as TIPO_TRABAJO_DESCUBRIMIENTO_PEDIDOS
+from app.mantenimiento.auditoria import TIPO_TRABAJO as TIPO_TRABAJO_AUDITORIA
 from app.mantenimiento.ciclo import TIPO_TRABAJO
 from app.mantenimiento.copia_seguridad import TIPO_TRABAJO as TIPO_TRABAJO_COPIA
 from app.models import EstadoTrabajo, TrabajoCola
@@ -172,6 +173,19 @@ def obtener_estado_descubrimiento_pedidos(db: Session) -> EstadoMantenimiento:
     return _obtener_estado(
         db, TIPO_TRABAJO_DESCUBRIMIENTO_PEDIDOS,
         settings.descubrimiento_pedidos_intervalo_segundos, settings.descubrimiento_pedidos_activo,
+    )
+
+
+def obtener_estado_auditoria(db: Session) -> EstadoMantenimiento:
+    """BLOQUE 1, sesión de auditoría automática (2026-09-08): la auditoría no
+    tiene programación propia -- se encola sola al final de cada ciclo de
+    mantenimiento (`app.mantenimiento.ciclo`), nunca de forma independiente
+    -- así que reutiliza el mismo intervalo/actividad que el ciclo para
+    calcular "próxima ejecución" en la pantalla de mantenimiento (misma
+    cadencia real: si el ciclo no está activo, la auditoría tampoco corre
+    sola)."""
+    return _obtener_estado(
+        db, TIPO_TRABAJO_AUDITORIA, settings.mantenimiento_intervalo_segundos, settings.mantenimiento_programado_activo
     )
 
 
