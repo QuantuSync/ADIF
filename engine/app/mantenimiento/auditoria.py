@@ -30,6 +30,7 @@ from sqlalchemy.orm import Session
 
 from app.extraccion.firma_cabecera import calcular_firma_cabecera
 from app.models import (
+    DocumentoExpediente,
     EstadoRevisionLinea,
     Expediente,
     EstadoTrabajo,
@@ -405,6 +406,118 @@ def _check_bajas(db: Session) -> list[Hallazgo]:
     return hallazgos
 
 
+def _check_importe_licitacion_sospechoso(db: Session) -> list[Hallazgo]:
+    """Encargo explícito del cliente, sesión de medición del alcance
+    "Nº Lote: NNN" (2026-09-08, docs/sesion-2026-09-08-auditoria-automatica.md):
+    "si el importe de licitación de un lote coincide con el de otro lote del
+    mismo expediente, o con el presupuesto global, es sospechoso". Hallazgo
+    real que motiva esto: un "Anuncio de adjudicación" que agrupa varios
+    lotes en un solo PDF (marcador "Nº Lote: NNN", distinto del "LOTE N"
+    narrativo que ya cubre `app.extraccion.lotes`) puede compartirse entre
+    varios expedientes hermanos -- la extracción de etiqueta fija de un solo
+    lote (`app.extraccion.campos_pcsp`) coge la primera coincidencia de
+    "Presupuesto base de licitación" del documento entero, que es la
+    cabecera GLOBAL de toda la licitación, no la del lote de ESE expediente.
+    Medido contra el corpus real: 22 expedientes confirmados, 374 líneas de
+    catálogo con `precio_adjudicado` derivado de la baja resultante.
+
+    Dos señales, ambas de solo lectura sobre `lotes`/`documento_expedientes`,
+    sin volver a abrir ningún PDF (por eso puede correr en cada auditoría sin
+    coste de red ni de E/S de disco):
+
+    1. **Mismo documento de origen, mismo `importe_licitacion`, expedientes
+       DISTINTOS** -- la señal real que sí se verificó contra el corpus.
+       Dos lotes de licitaciones distintas raramente comparten presupuesto
+       exacto por casualidad; si además comparten el documento del que salió
+       ese importe, es la firma exacta de este defecto.
+    2. **Dos lotes del MISMO expediente con idéntico `importe_licitacion`**
+       -- la forma literal del encargo ("otro lote del mismo expediente"):
+       no verificada contra ningún caso real todavía (el corpus actual no
+       tiene expedientes con 2+ filas de `lotes`), pero barata de comprobar
+       y cubre el caso si aparece.
+
+    Aviso, no error: existe el caso legítimo de dos lotes con presupuestos
+    iguales por coincidencia real (verificado en otro contexto,
+    `docs/descubrimiento-inverso-matriz-pedidos.md`: un precio de referencia
+    puede repetirse legítimamente) -- aquí igual, nunca se descarta ni se
+    corrige solo, se señala para que un humano lo confirme contra el
+    documento."""
+    hallazgos: list[Hallazgo] = []
+
+    filas = db.execute(
+        select(DocumentoExpediente.documento_id, Expediente.id, Expediente.codigo_expediente, Lote.importe_licitacion)
+        .join(Expediente, Expediente.id == DocumentoExpediente.expediente_id)
+        .join(Lote, Lote.expediente_id == Expediente.id)
+        .where(Lote.importe_licitacion.isnot(None))
+    ).all()
+
+    grupos: dict[tuple, dict[int, str]] = {}
+    for documento_id, expediente_id, codigo, importe in filas:
+        grupos.setdefault((documento_id, importe), {})[expediente_id] = codigo
+
+    codigos_cruzados: set[str] = set()
+    grupos_sospechosos = 0
+    for miembros in grupos.values():
+        if len(miembros) > 1:
+            grupos_sospechosos += 1
+            codigos_cruzados.update(miembros.values())
+
+    if codigos_cruzados:
+        expedientes, total = _limitar_expedientes(codigos_cruzados)
+        hallazgos.append(
+            Hallazgo(
+                categoria="importe_licitacion_compartido_entre_expedientes",
+                gravedad="aviso",
+                mensaje=(
+                    f"{grupos_sospechosos} grupo(s) de expedientes distintos que comparten el mismo "
+                    "documento de origen Y el mismo importe de licitación -- señal de que ese importe es "
+                    "el presupuesto global de la licitación, no el del lote de cada expediente (defecto "
+                    "verificado en la sesión 2026-09-08, ver docs/sesion-2026-09-08-auditoria-automatica.md)."
+                ),
+                expedientes=expedientes,
+                total_afectados=total,
+                detalle={"grupos": grupos_sospechosos},
+            )
+        )
+
+    # Independiente de la consulta de arriba: un expediente con 2+ lotes
+    # propios de importe idéntico no depende de tener ningún documento
+    # vinculado vía `documento_expedientes` -- se comprueba directo sobre
+    # `lotes`/`expedientes`.
+    filas_lotes = db.execute(
+        select(Lote.expediente_id, Expediente.codigo_expediente, Lote.importe_licitacion)
+        .join(Expediente, Expediente.id == Lote.expediente_id)
+        .where(Lote.importe_licitacion.isnot(None))
+    ).all()
+    por_expediente: dict[int, list] = {}
+    codigo_por_expediente: dict[int, str] = {}
+    for expediente_id, codigo, importe in filas_lotes:
+        por_expediente.setdefault(expediente_id, []).append(importe)
+        codigo_por_expediente[expediente_id] = codigo
+
+    duplicado_interno = [
+        codigo_por_expediente[expediente_id]
+        for expediente_id, importes in por_expediente.items()
+        if len(importes) > 1 and len(set(importes)) < len(importes)
+    ]
+    if duplicado_interno:
+        expedientes, total = _limitar_expedientes(duplicado_interno)
+        hallazgos.append(
+            Hallazgo(
+                categoria="importe_licitacion_repetido_en_el_mismo_expediente",
+                gravedad="aviso",
+                mensaje=(
+                    f"{total} expediente(s) con dos o más lotes propios que comparten idéntico importe "
+                    "de licitación -- confirmar que no es el presupuesto global repetido en cada lote."
+                ),
+                expedientes=expedientes,
+                total_afectados=total,
+            )
+        )
+
+    return hallazgos
+
+
 def _check_firma_cabecera(db: Session) -> list[Hallazgo]:
     """"Firmas de cabecera compartidas por tablas de estructura distinta".
     Dos comprobaciones sobre `cache_mapeo_cabecera` (CONTEXTO.md sección 6):
@@ -610,6 +723,7 @@ def ejecutar_auditoria(db: Session, trabajo: TrabajoCola) -> dict:
     hallazgos += _check_precios(lineas)
     hallazgos += _check_cantidades(lineas)
     hallazgos += _check_bajas(db)
+    hallazgos += _check_importe_licitacion_sospechoso(db)
     hallazgos += _check_firma_cabecera(db)
     hallazgos += _check_crecimiento_sin_cambios(db, snapshot_anterior)
     vacios_por_columna, hallazgos_vacios = _check_vacios_por_columna(lineas, resultado_anterior)
