@@ -958,6 +958,32 @@ suficientes, no ahora.
   término (`cache_codigo_material`, migración 0018, mismo mecanismo que
   `cache_mapeo_cabecera`) para lo que la regla no casa. Relleno antes: 8,1 %
   (253/3.121 líneas); número final tras el reproceso completo, pendiente.
+  **Actualizado tras el análisis del corpus a 467 expedientes
+  (`docs/analisis-corpus-467-expedientes.md`): 66,7 % (5.486/8.225
+  líneas)** — muy por encima de lo esperado solo con vocabulario, gracias a
+  la vía de modelo funcionando a escala real (verificado en los logs del
+  worker durante el reproceso completo).
+- **Análisis del corpus a 467 expedientes: hecho, dos hallazgos nuevos sin
+  arreglar** (`docs/analisis-corpus-467-expedientes.md`). (1)
+  `app.scraping.pcsp.ensure_form` tiene un presupuesto de espera fijo y
+  corto (~3 s) que no aguanta la Plataforma cuando responde más lenta de lo
+  habitual (medido en vivo: el formulario apareció a los ~7,5 s) — mismo
+  tipo de fallo que motivó el arreglo de límite de tasa de esta sesión
+  (confundir un fallo transitorio con algo determinista), pero en una etapa
+  anterior y no cubierta por ese arreglo. Bloqueó la verificación a mano de
+  los 62 expedientes del SAP dados por "no encontrados" (encargo del
+  cliente, sin completar). (2) Documentos compartidos entre expedientes
+  hermanos (mismo hash de PDF bajo dos códigos de expediente distintos, la
+  constraint `UNIQUE(documentos.hash)` deja al segundo sin ninguna fila
+  propia) confirmado en al menos 26 de los 303 expedientes en revisión —
+  no es un bug nuevo, es el límite ya documentado más arriba ("Separar de
+  verdad [...] en expedientes de lote reales [...] fuera de alcance de un
+  arreglo urgente"), que con 45-52 expedientes nunca llegó a manifestarse y
+  ahora, con 467, sí. (3) `GET /revision` no está paginado (a diferencia de
+  `/catalogo`): 255 ms / 400 KB por respuesta con 303 casos, sondeado cada 3
+  segundos por la web — sigue siendo rápido en términos absolutos, pero es
+  la única de las cuatro pantallas sin paginación de servidor y el primer
+  sitio donde se notará si la cola de revisión sigue creciendo.
 
 ---
 
@@ -971,4 +997,5 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `copias-de-seguridad.md`, `descubrimiento-inverso-matriz-pedidos.md`,
 `sesion-2026-09-07-adjudicatario-revision-vocabulario.md`,
 `sesion-2026-09-07-sap-ejecucion-cobertura.md`,
+`analisis-corpus-467-expedientes.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.
