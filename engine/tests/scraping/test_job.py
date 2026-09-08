@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.models import Documento, EstadoExpediente, Expediente, TipoDocumento, TrabajoCola
+from app.models import Documento, DocumentoExpediente, EstadoExpediente, Expediente, TipoDocumento, TrabajoCola
 from app.scraping.job import ejecutar_scraping_expediente
 from app.scraping.pcsp import ExpedienteNoPublicadoError
 
@@ -83,15 +83,18 @@ def test_error_generico_marca_fallido_sin_agotar_intentos(db_session, monkeypatc
 
 
 def _con_un_documento(db_session, expediente: Expediente) -> None:
-    db_session.add(
-        Documento(
-            expediente_id=expediente.id,
-            tipo_documento=TipoDocumento.anuncio_pcsp,
-            hash=f"hash-{expediente.id}",
-            nombre_archivo="ADJUDICACION_1.pdf",
-            ruta_almacenamiento=f"{expediente.codigo_expediente}/ADJUDICACION_1.pdf",
-        )
+    documento = Documento(
+        tipo_documento=TipoDocumento.anuncio_pcsp,
+        hash=f"hash-{expediente.id}",
+        ruta_almacenamiento=f"{expediente.codigo_expediente}/ADJUDICACION_1.pdf",
     )
+    db_session.add(documento)
+    db_session.commit()
+    db_session.add(DocumentoExpediente(
+        documento_id=documento.id,
+        expediente_id=expediente.id,
+        nombre_archivo="ADJUDICACION_1.pdf",
+    ))
     db_session.commit()
 
 

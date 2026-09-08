@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session
 from app.interfaces.document_storage import DocumentStorage
 from app.interfaces.model_provider import ModelProvider
 from app.mantenimiento.frescura import debe_descargar, debe_extraer
-from app.models import Documento, EstadoExpediente, Expediente, TrabajoCola
+from app.models import Documento, DocumentoExpediente, EstadoExpediente, Expediente, TrabajoCola
 from app.queue import ejecutar_trabajo, encolar_trabajo, tomar_siguiente_trabajo
 from app.sindicacion.descubrimiento import descubrir_novedades
 
@@ -73,13 +73,22 @@ class ResumenCiclo:
 
 
 def _documentos_por_expediente(db: Session, expedientes: list[Expediente]) -> dict[int, list[Documento]]:
+    """Sesión de colisión de hash entre expedientes hermanos (2026-09-08,
+    migración 0021): un documento puede pertenecer a varios expedientes, así
+    que se agrupa por `DocumentoExpediente.expediente_id` (la relación),
+    nunca por un `Documento.expediente_id` que ya no existe -- el mismo
+    `Documento` puede aparecer en la lista de más de un expediente."""
     if not expedientes:
         return {}
     ids = [e.id for e in expedientes]
-    filas = db.execute(select(Documento).where(Documento.expediente_id.in_(ids))).scalars().all()
+    filas = db.execute(
+        select(DocumentoExpediente.expediente_id, Documento)
+        .join(Documento, Documento.id == DocumentoExpediente.documento_id)
+        .where(DocumentoExpediente.expediente_id.in_(ids))
+    ).all()
     resultado: dict[int, list[Documento]] = {e.id: [] for e in expedientes}
-    for doc in filas:
-        resultado.setdefault(doc.expediente_id, []).append(doc)
+    for expediente_id, doc in filas:
+        resultado.setdefault(expediente_id, []).append(doc)
     return resultado
 
 

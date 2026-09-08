@@ -45,7 +45,7 @@ def explorar_catalogo(
     )
     # Backfill perezoso del cruce con el Excel de códigos (docstring de
     # `asegurar_cruce_codigos`), solo sobre los expedientes de esta página.
-    expedientes_pagina = {expediente for _l, _lo, expediente, _d in resultado.filas}
+    expedientes_pagina = {expediente for _l, _lo, expediente, _d, _n in resultado.filas}
     cambios = False
     for exp in expedientes_pagina:
         antes = exp.codigos_cruzados

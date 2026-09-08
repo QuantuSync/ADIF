@@ -22,6 +22,7 @@ from app.extraccion.orquestador import LOTE_UNICO, ejecutar_extraccion_expedient
 from app.interfaces.document_storage import DocumentStorage
 from app.models import (
     Documento,
+    DocumentoExpediente,
     EstadoExpediente,
     EstadoTrabajo,
     Expediente,
@@ -62,6 +63,18 @@ def _crear_lote(db, expediente_id, identificador_lote=LOTE_UNICO, **campos) -> L
     return lote
 
 
+def _crear_documento(db, expediente_id, *, hash_, nombre_archivo, ruta_almacenamiento, tipo_documento) -> Documento:
+    """Colisión de hash entre expedientes hermanos (2026-09-08, migración
+    0021): `Documento` ya no tiene `expediente_id`/`nombre_archivo` propios --
+    el enlace vive en `DocumentoExpediente`."""
+    documento = Documento(tipo_documento=tipo_documento, hash=hash_, ruta_almacenamiento=ruta_almacenamiento)
+    db.add(documento)
+    db.commit()
+    db.add(DocumentoExpediente(documento_id=documento.id, expediente_id=expediente_id, nombre_archivo=nombre_archivo))
+    db.commit()
+    return documento
+
+
 # --- resolver_o_encolar_matriz -----------------------------------------
 
 
@@ -90,11 +103,10 @@ def test_matriz_nueva_se_crea_y_encola_su_descarga(db_session):
 
 def test_matriz_existente_con_documentos_sin_procesar_encola_extraccion(db_session):
     matriz = _crear_expediente(db_session, "2.18/04703.0019")
-    db_session.add(Documento(
-        expediente_id=matriz.id, tipo_documento=TipoDocumento.otro,
-        hash="h1", nombre_archivo="a.pdf", ruta_almacenamiento="/x/a.pdf",
-    ))
-    db_session.commit()
+    _crear_documento(
+        db_session, matriz.id, hash_="h1", nombre_archivo="a.pdf",
+        ruta_almacenamiento="/x/a.pdf", tipo_documento=TipoDocumento.otro,
+    )
     pedido = _crear_expediente(db_session, "6.24/28510.0103", codigo_matriz="2.18/04703.0019")
 
     resultado = resolver_o_encolar_matriz(db_session, pedido)
@@ -185,12 +197,10 @@ def test_ciclo_de_cadena_larga_se_corta(db_session):
 def test_hereda_lineas_y_baja_con_trazabilidad_al_documento_de_la_matriz(db_session):
     matriz = _crear_expediente(db_session, "2.18/04703.0019", estado=EstadoExpediente.completado)
     lote_matriz = _crear_lote(db_session, matriz.id, baja_lote=Decimal("0.10"))
-    doc_matriz = Documento(
-        expediente_id=matriz.id, tipo_documento=TipoDocumento.anejo,
-        hash="hm", nombre_archivo="anejo_matriz.pdf", ruta_almacenamiento="/x/m.pdf",
+    doc_matriz = _crear_documento(
+        db_session, matriz.id, hash_="hm", nombre_archivo="anejo_matriz.pdf",
+        ruta_almacenamiento="/x/m.pdf", tipo_documento=TipoDocumento.anejo,
     )
-    db_session.add(doc_matriz)
-    db_session.commit()
     db_session.add(TrazaOrigen(
         entidad_tipo="lote", entidad_id=lote_matriz.id, campo="baja_declarada",
         documento_id=doc_matriz.id, pagina=3, fragmento="baja del 10%", valor_extraido="0.10",
@@ -432,12 +442,10 @@ def test_pedido_real_sin_matriz_creada_pasa_a_esperando_matriz(db_session):
     pedido = Expediente(codigo_expediente="6.24/28510.0103")
     db_session.add(pedido)
     db_session.commit()
-    db_session.add(Documento(
-        expediente_id=pedido.id, tipo_documento=TipoDocumento.otro,
-        hash="h-pedido", nombre_archivo="ADJUDICACION_1.pdf",
-        ruta_almacenamiento=str(fx.ANUNCIO_PCSP_CON_MATRIZ),
-    ))
-    db_session.commit()
+    _crear_documento(
+        db_session, pedido.id, hash_="h-pedido", nombre_archivo="ADJUDICACION_1.pdf",
+        ruta_almacenamiento=str(fx.ANUNCIO_PCSP_CON_MATRIZ), tipo_documento=TipoDocumento.otro,
+    )
     trabajo = SimpleNamespace(expediente_id=pedido.id)
 
     resultado = ejecutar_extraccion_expediente(db_session, _StorageDirecta(), trabajo, model_provider=None)
@@ -461,12 +469,10 @@ def test_pedido_real_hereda_al_reprocesar_una_vez_la_matriz_esta_completa(db_ses
     pedido = Expediente(codigo_expediente="6.24/28510.0103")
     db_session.add(pedido)
     db_session.commit()
-    db_session.add(Documento(
-        expediente_id=pedido.id, tipo_documento=TipoDocumento.otro,
-        hash="h-pedido", nombre_archivo="ADJUDICACION_1.pdf",
-        ruta_almacenamiento=str(fx.ANUNCIO_PCSP_CON_MATRIZ),
-    ))
-    db_session.commit()
+    _crear_documento(
+        db_session, pedido.id, hash_="h-pedido", nombre_archivo="ADJUDICACION_1.pdf",
+        ruta_almacenamiento=str(fx.ANUNCIO_PCSP_CON_MATRIZ), tipo_documento=TipoDocumento.otro,
+    )
     trabajo = SimpleNamespace(expediente_id=pedido.id)
     ejecutar_extraccion_expediente(db_session, _StorageDirecta(), trabajo, model_provider=None)
     db_session.refresh(pedido)

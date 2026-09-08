@@ -12,7 +12,7 @@ from typing import Optional
 from sqlalchemy import Select, case, func, or_, select
 from sqlalchemy.orm import Session
 
-from app.models import Documento, EstadoRevisionLinea, Expediente, LineaCatalogo, Lote
+from app.models import Documento, DocumentoExpediente, EstadoRevisionLinea, Expediente, LineaCatalogo, Lote
 
 # Órdenes disponibles para `/catalogo` (encargo de esta sesión, 2026-09-07):
 # el cliente ve esta pantalla sin filtrar, y "alfabetico" (el único orden
@@ -91,7 +91,7 @@ def _aplicar_filtros(
 @dataclass(frozen=True)
 class PaginaCatalogo:
     total: int
-    filas: list[tuple[LineaCatalogo, Optional[Lote], Expediente, Optional[Documento]]]
+    filas: list[tuple[LineaCatalogo, Optional[Lote], Expediente, Optional[Documento], Optional[str]]]
 
 
 def consultar_catalogo(
@@ -111,11 +111,21 @@ def consultar_catalogo(
     # el catálogo/cola de revisión. El join a `Expediente` ya no depende de
     # `Lote` (antes `lineas_catalogo -> lotes -> expedientes` era el único
     # camino; ahora `LineaCatalogo.expediente_id` es directo).
+    # Sesión de colisión de hash entre expedientes hermanos (2026-09-08,
+    # migración 0021): `Documento` ya no tiene `nombre_archivo` propio -- se
+    # trae aparte desde `DocumentoExpediente`, acotado al mismo expediente
+    # de la línea (así se ve el nombre que ESE expediente le dio, aunque el
+    # fichero físico esté compartido con otro).
     base = (
-        select(LineaCatalogo, Lote, Expediente, Documento)
+        select(LineaCatalogo, Lote, Expediente, Documento, DocumentoExpediente.nombre_archivo)
         .join(Expediente, LineaCatalogo.expediente_id == Expediente.id)
         .outerjoin(Lote, LineaCatalogo.lote_id == Lote.id)
         .outerjoin(Documento, LineaCatalogo.documento_origen_id == Documento.id)
+        .outerjoin(
+            DocumentoExpediente,
+            (DocumentoExpediente.documento_id == Documento.id)
+            & (DocumentoExpediente.expediente_id == LineaCatalogo.expediente_id),
+        )
     )
     base = _aplicar_filtros(base, expediente, lote, matricula, q, excluir_descartadas)
 
@@ -143,7 +153,11 @@ def consultar_catalogo(
 
 
 def fila_a_dict(
-    linea: LineaCatalogo, lote: Optional[Lote], expediente: Expediente, documento: Optional[Documento]
+    linea: LineaCatalogo,
+    lote: Optional[Lote],
+    expediente: Expediente,
+    documento: Optional[Documento],
+    nombre_archivo: Optional[str] = None,
 ) -> dict:
     return {
         "id": linea.id,
@@ -169,7 +183,7 @@ def fila_a_dict(
         "heredado_de_matriz": linea.heredado_de_matriz,
         "estado_revision": linea.estado_revision.value,
         "documento_origen_id": linea.documento_origen_id,
-        "documento_origen_nombre": documento.nombre_archivo if documento else None,
+        "documento_origen_nombre": nombre_archivo,
         "pagina": linea.pagina,
         "fragmento": linea.fragmento,
     }

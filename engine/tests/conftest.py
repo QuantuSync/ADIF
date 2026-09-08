@@ -9,6 +9,7 @@ _TABLAS = [
     models.Expediente.__table__,
     models.Lote.__table__,
     models.Documento.__table__,
+    models.DocumentoExpediente.__table__,
     models.LineaCatalogo.__table__,
     models.TrazaOrigen.__table__,
     models.MapeoCabeceraCache.__table__,

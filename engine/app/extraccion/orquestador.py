@@ -63,6 +63,7 @@ from app.interfaces.document_storage import DocumentStorage
 from app.interfaces.model_provider import ModelProvider
 from app.models import (
     Documento,
+    DocumentoExpediente,
     EstadoExpediente,
     Expediente,
     LineaCatalogo,
@@ -557,9 +558,22 @@ def ejecutar_extraccion_expediente(
     db.commit()
 
     try:
-        documentos = db.execute(
-            select(Documento).where(Documento.expediente_id == expediente.id)
-        ).scalars().all()
+        # Sesión de colisión de hash entre expedientes hermanos (2026-09-08,
+        # migración 0021): `Documento` ya no tiene `expediente_id` ni
+        # `nombre_archivo` propios (un documento puede pertenecer a varios
+        # expedientes) -- se listan por `DocumentoExpediente` y se adjunta
+        # `nombre_archivo` como atributo de instancia (no una columna
+        # mapeada, nunca se persiste) para que el resto de esta función siga
+        # leyendo `item.documento.nombre_archivo` sin cambios.
+        filas_documentos = db.execute(
+            select(Documento, DocumentoExpediente.nombre_archivo)
+            .join(DocumentoExpediente, DocumentoExpediente.documento_id == Documento.id)
+            .where(DocumentoExpediente.expediente_id == expediente.id)
+        ).all()
+        documentos = []
+        for doc, nombre_archivo in filas_documentos:
+            doc.nombre_archivo = nombre_archivo
+            documentos.append(doc)
 
         motivo_revision: Optional[str] = None
         estado_especial: Optional[EstadoExpediente] = None

@@ -9,7 +9,15 @@ from app.catalogo import buscar_posible_duplicado_huerfana
 from app.catalogo_consulta import fila_a_dict
 from app.db import get_db
 from app.extraccion.cruce_codigos import AutoreferenciaMatrizError, asignar_matriz
-from app.models import Documento, EstadoExpediente, EstadoRevisionLinea, Expediente, LineaCatalogo, Lote
+from app.models import (
+    Documento,
+    DocumentoExpediente,
+    EstadoExpediente,
+    EstadoRevisionLinea,
+    Expediente,
+    LineaCatalogo,
+    Lote,
+)
 from app.schemas import (
     ColaRevisionRespuesta,
     ExpedienteCorreccion,
@@ -99,15 +107,36 @@ def detalle_revision_expediente(
     usuario: Usuario = Depends(get_current_user),
 ):
     expediente = _cargar_expediente_o_404(db, expediente_id)
-    documentos = db.execute(
-        select(Documento).where(Documento.expediente_id == expediente_id).order_by(Documento.id)
-    ).scalars().all()
+    # Colisión de hash entre expedientes hermanos (2026-09-08, migración
+    # 0021): los documentos de un expediente ya no cuelgan de
+    # `Documento.expediente_id` (no existe) -- se listan por la relación,
+    # que puede enlazar el mismo `Documento` físico con más de un expediente.
+    # `DocumentoOut.nombre_archivo` se rellena desde `DocumentoExpediente`
+    # como atributo transitorio (mismo patrón que
+    # `app.extraccion.orquestador._items_documentos`): no es una columna de
+    # `Documento`, así que Pydantic (`from_attributes=True`) no la vería si
+    # no se asigna aquí antes de construir la respuesta.
+    filas_documentos = db.execute(
+        select(Documento, DocumentoExpediente.nombre_archivo)
+        .join(DocumentoExpediente, DocumentoExpediente.documento_id == Documento.id)
+        .where(DocumentoExpediente.expediente_id == expediente_id)
+        .order_by(Documento.id)
+    ).all()
+    documentos = []
+    for doc, nombre_archivo in filas_documentos:
+        doc.nombre_archivo = nombre_archivo
+        documentos.append(doc)
 
     filas = db.execute(
-        select(LineaCatalogo, Lote, Expediente, Documento)
+        select(LineaCatalogo, Lote, Expediente, Documento, DocumentoExpediente.nombre_archivo)
         .join(Expediente, LineaCatalogo.expediente_id == Expediente.id)
         .outerjoin(Lote, LineaCatalogo.lote_id == Lote.id)
         .outerjoin(Documento, LineaCatalogo.documento_origen_id == Documento.id)
+        .outerjoin(
+            DocumentoExpediente,
+            (DocumentoExpediente.documento_id == Documento.id)
+            & (DocumentoExpediente.expediente_id == LineaCatalogo.expediente_id),
+        )
         .where(LineaCatalogo.expediente_id == expediente_id)
         .order_by(Lote.identificador_lote, LineaCatalogo.orden_aparicion)
     ).all()
@@ -215,10 +244,15 @@ def _linea_o_404(db: Session, linea_id: int) -> LineaCatalogo:
 
 def _fila_linea(db: Session, linea_id: int) -> LineaCatalogoOut:
     fila = db.execute(
-        select(LineaCatalogo, Lote, Expediente, Documento)
+        select(LineaCatalogo, Lote, Expediente, Documento, DocumentoExpediente.nombre_archivo)
         .join(Expediente, LineaCatalogo.expediente_id == Expediente.id)
         .outerjoin(Lote, LineaCatalogo.lote_id == Lote.id)
         .outerjoin(Documento, LineaCatalogo.documento_origen_id == Documento.id)
+        .outerjoin(
+            DocumentoExpediente,
+            (DocumentoExpediente.documento_id == Documento.id)
+            & (DocumentoExpediente.expediente_id == LineaCatalogo.expediente_id),
+        )
         .where(LineaCatalogo.id == linea_id)
     ).one()
     return _linea_out_con_posible_duplicado(db, fila[0], fila)

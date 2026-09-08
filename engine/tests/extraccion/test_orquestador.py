@@ -21,7 +21,16 @@ from app.extraccion.orquestador import (
 )
 from app.extraccion.texto import PaginaTexto
 from app.interfaces.document_storage import DocumentStorage
-from app.models import Documento, EstadoExpediente, Expediente, Lote, LineaCatalogo, TipoDocumento, TrazaOrigen
+from app.models import (
+    Documento,
+    DocumentoExpediente,
+    EstadoExpediente,
+    Expediente,
+    Lote,
+    LineaCatalogo,
+    TipoDocumento,
+    TrazaOrigen,
+)
 from tests import fixtures as fx
 from tests.extraccion.dobles import ProveedorModeloCabeceraPorContenido, ProveedorModeloFalso
 
@@ -45,12 +54,15 @@ def _crear_expediente_con_documentos(db_session, codigo_expediente, rutas: list[
     db_session.add(expediente)
     db_session.commit()
     for categoria, ruta in rutas:
-        db_session.add(Documento(
-            expediente_id=expediente.id,
+        documento = Documento(
             tipo_documento=TipoDocumento.otro,  # placeholder del scraper; el orquestador lo corrige
             hash=f"hash-{codigo_expediente}-{categoria}",
-            nombre_archivo=ruta.name,
             ruta_almacenamiento=str(ruta),
+        )
+        db_session.add(documento)
+        db_session.commit()
+        db_session.add(DocumentoExpediente(
+            documento_id=documento.id, expediente_id=expediente.id, nombre_archivo=ruta.name,
         ))
     db_session.commit()
     return expediente
@@ -97,7 +109,12 @@ def test_expediente_0008_completo_produce_catalogo_y_pasa_a_completado(db_sessio
     # El documento que trae el cuadro de precios (en realidad un pliego
     # completo, CONTEXTO.md sección 3) se reclasifica por contenido, no por la
     # categoría que le puso el scraper.
-    doc_anejo = db_session.query(Documento).filter_by(nombre_archivo=fx.ANEJO_PRECIOS_GUANTES.name).one()
+    doc_anejo = (
+        db_session.query(Documento)
+        .join(DocumentoExpediente, DocumentoExpediente.documento_id == Documento.id)
+        .filter(DocumentoExpediente.nombre_archivo == fx.ANEJO_PRECIOS_GUANTES.name)
+        .one()
+    )
     assert doc_anejo.tipo_documento in (TipoDocumento.pliego, TipoDocumento.anejo)
     assert doc_anejo.procesado_en is not None
 
@@ -188,7 +205,12 @@ def test_expediente_con_documento_escaneado_va_a_revision_con_motivo_distinto(db
     assert "escaneado" in resultado["motivo_revision"]
     assert "no se extrajo ninguna línea" not in resultado["motivo_revision"]
 
-    doc = db_session.query(Documento).filter_by(expediente_id=expediente.id).one()
+    doc = (
+        db_session.query(Documento)
+        .join(DocumentoExpediente, DocumentoExpediente.documento_id == Documento.id)
+        .filter(DocumentoExpediente.expediente_id == expediente.id)
+        .one()
+    )
     assert doc.procesado_en is None  # nunca se intentó procesar su tabla
 
 
@@ -225,7 +247,11 @@ def test_documento_escaneado_no_bloquea_si_el_resto_ya_resolvio_el_expediente(db
 
     doc_escaneado = (
         db_session.query(Documento)
-        .filter_by(expediente_id=expediente.id, nombre_archivo=fx.DOCUMENTO_ESCANEADO_SIN_TEXTO.name)
+        .join(DocumentoExpediente, DocumentoExpediente.documento_id == Documento.id)
+        .filter(
+            DocumentoExpediente.expediente_id == expediente.id,
+            DocumentoExpediente.nombre_archivo == fx.DOCUMENTO_ESCANEADO_SIN_TEXTO.name,
+        )
         .one()
     )
     assert doc_escaneado.procesado_en is None  # nunca se intentó procesar su tabla

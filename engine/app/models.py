@@ -210,7 +210,12 @@ class Expediente(Base):
     )
 
     lotes = relationship("Lote", back_populates="expediente")
-    documentos = relationship("Documento", back_populates="expediente")
+    # Sesión de colisión de hash entre expedientes hermanos (2026-09-08):
+    # un documento puede pertenecer a varios expedientes (mismo PDF real
+    # compartido entre lotes/expedientes hermanos), así que ya no hay una
+    # relación directa `Expediente -> Documento` -- pasa siempre por
+    # `DocumentoExpediente`. Ver su docstring y migración 0021.
+    documento_links = relationship("DocumentoExpediente", back_populates="expediente")
     # Autorreferencial: la matriz de este expediente, si ya se resolvió
     # (app.extraccion.herencia_matriz.resolver_o_encolar_matriz).
     matriz = relationship(
@@ -276,19 +281,48 @@ class Lote(Base):
 
 
 class Documento(Base):
+    """El fichero físico (sesión de colisión de hash entre expedientes
+    hermanos, 2026-09-08, migración 0021): solo lo que decide el CONTENIDO
+    del PDF -- hash, clasificación de plantilla, ruta de almacenamiento,
+    páginas. Ya no tiene `expediente_id` ni `nombre_archivo` propios: qué
+    expedientes lo referencian y cómo lo llama cada uno vive en
+    `DocumentoExpediente`, porque el mismo fichero real puede pertenecer a
+    más de un expediente (expedientes hermanos de una licitación
+    multi-lote, verificado con `4.25/28510.0124`/`0132`, bytes idénticos) y
+    cada uno puede haberlo numerado distinto en su propia descarga."""
+
     __tablename__ = "documentos"
 
     id = Column(Integer, primary_key=True)
-    expediente_id = Column(Integer, ForeignKey("expedientes.id"), nullable=False)
     tipo_documento = Column(Enum(TipoDocumento, name="tipo_documento"), nullable=False)
     hash = Column(String(64), nullable=False, unique=True)
-    nombre_archivo = Column(String(255), nullable=False)
     ruta_almacenamiento = Column(String(512), nullable=False)
     paginas = Column(Integer, nullable=True)
     procesado_en = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
-    expediente = relationship("Expediente", back_populates="documentos")
+    expediente_links = relationship("DocumentoExpediente", back_populates="documento")
+
+
+class DocumentoExpediente(Base):
+    """Relación muchos-a-muchos entre `Documento` (el fichero físico) y
+    `Expediente` (quién lo referencia) -- migración 0021, ver docstring de
+    `Documento` para el porqué. `nombre_archivo` vive aquí, no en
+    `Documento`: es "cómo numeró ESA descarga concreta este documento
+    dentro de su categoría" (`ANEJO_2.pdf`...), y puede variar entre dos
+    expedientes que comparten el mismo fichero real."""
+
+    __tablename__ = "documento_expedientes"
+    __table_args__ = (UniqueConstraint("documento_id", "expediente_id", name="uq_documento_expediente"),)
+
+    id = Column(Integer, primary_key=True)
+    documento_id = Column(Integer, ForeignKey("documentos.id"), nullable=False)
+    expediente_id = Column(Integer, ForeignKey("expedientes.id"), nullable=False)
+    nombre_archivo = Column(String(255), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    documento = relationship("Documento", back_populates="expediente_links")
+    expediente = relationship("Expediente", back_populates="documento_links")
 
 
 class LineaCatalogo(Base):

@@ -15,7 +15,7 @@ from app.extraccion.identidad_expediente import corregir_identidad_expediente
 from app.extraccion.orquestador import ejecutar_extraccion_expediente
 from app.extraccion.texto import extraer_texto
 from app.interfaces.document_storage import DocumentStorage
-from app.models import Documento, EstadoExpediente, Expediente, TipoDocumento, TrazaOrigen
+from app.models import Documento, DocumentoExpediente, EstadoExpediente, Expediente, TipoDocumento, TrazaOrigen
 from tests import fixtures as fx
 
 
@@ -34,10 +34,12 @@ def _item_anuncio_pcsp(db_session, expediente_id, ruta: Path, nombre: str):
     """Un `_Documento` de orquestador es duck-typed aquí (`.tipo`, `.paginas`,
     `.documento.id`) para no depender de la dataclass privada del módulo."""
     documento = Documento(
-        expediente_id=expediente_id, tipo_documento=TipoDocumento.anuncio_pcsp,
-        hash=f"hash-{nombre}", nombre_archivo=nombre, ruta_almacenamiento=str(ruta),
+        tipo_documento=TipoDocumento.anuncio_pcsp,
+        hash=f"hash-{nombre}", ruta_almacenamiento=str(ruta),
     )
     db_session.add(documento)
+    db_session.commit()
+    db_session.add(DocumentoExpediente(documento_id=documento.id, expediente_id=expediente_id, nombre_archivo=nombre))
     db_session.commit()
     paginas = extraer_texto(ruta)
     assert clasificar(paginas).tipo == TipoDocumento.anuncio_pcsp
@@ -154,10 +156,15 @@ def test_pedido_mal_etiquetado_se_renombra_y_deja_de_formar_ciclo(db_session):
     pedido = Expediente(codigo_expediente="2.18/04703.0019")
     db_session.add(pedido)
     db_session.commit()
-    db_session.add(Documento(
-        expediente_id=pedido.id, tipo_documento=TipoDocumento.otro,
-        hash="h-pedido", nombre_archivo="ADJUDICACION_1.pdf",
+    documento = Documento(
+        tipo_documento=TipoDocumento.otro,
+        hash="h-pedido",
         ruta_almacenamiento=str(fx.ANUNCIO_PCSP_CON_MATRIZ),
+    )
+    db_session.add(documento)
+    db_session.commit()
+    db_session.add(DocumentoExpediente(
+        documento_id=documento.id, expediente_id=pedido.id, nombre_archivo="ADJUDICACION_1.pdf",
     ))
     db_session.commit()
     trabajo = SimpleNamespace(expediente_id=pedido.id)
