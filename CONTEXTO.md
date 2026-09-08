@@ -1030,9 +1030,27 @@ suficientes, no ahora.
   fenómeno, más grande, no contemplada en esa medición: una página de
   continuación cuya franja trae texto (pie de página, nota) pero nunca la
   palabra "LOTE", que cae en el cubo "ninguna cabecera" en vez de en
-  "banda vacía" y por eso nunca se sumó al mismo problema. Propuesta de
-  herencia de lote entre páginas de continuación, con el tamaño real
-  medido, pendiente de aprobación del cliente — no implementada.
+  "banda vacía" y por eso nunca se sumó al mismo problema. **Aprobado e
+  implementado, misma sesión** (`docs/sesion-2026-09-08-herencia-lote-
+  continuacion.md`): la propuesta cambió dos veces bajo verificación antes
+  de aprobarse. (1) El documento ancla resultó tener SU PROPIA ambigüedad
+  (la cabecera de cada lote cita al otro como repuesto de urgencia, "en
+  caso de urgencia que no pueda ser atendida por el adjudicatario del lote
+  M") — sin resolver eso primero (Parte A,
+  `app.extraccion.lote_tabla._resolver_ambiguedad_urgencia_mutua`, por
+  posición gramatical, nunca por contenido) no había ancla de la que
+  heredar. (2) Verificando los demás expedientes afectados (no solo el
+  ancla), `6.25/28510.0027` (balasto, 6 lotes) expuso que el estado de
+  "último lote resuelto" no se reiniciaba al pasar por una mención de LOTE
+  rechazada (no declarada) — sin el reinicio, una continuación real
+  heredaría el último lote VÁLIDO visto páginas antes, el mismo riesgo de
+  mezclar lotes que motivó no implementar esto en su día. Corregido antes
+  de reprocesar en serio. Resultado: 3.102 → 494 pendientes,
+  `lineas_catalogo.lote_heredado_de_pagina_anterior` (migración 0022) deja
+  trazabilidad explícita de cada línea heredada, nunca `False` -- solo
+  `True` o ausente. 10 tests nuevos (465 total), incluido un guard de
+  seguridad para el mismo riesgo del balasto llegado por una tercera vía
+  (limpieza de huérfanas superadas por clave exacta, nunca por contenido).
 
 ---
 
@@ -1049,4 +1067,5 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `analisis-corpus-467-expedientes.md`,
 `sesion-2026-09-08-cobertura-sap-367.md`,
 `sesion-2026-09-08-verificacion-excel-6599.md`,
+`sesion-2026-09-08-herencia-lote-continuacion.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.

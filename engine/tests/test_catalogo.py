@@ -930,6 +930,64 @@ def test_guardar_lineas_catalogo_huerfana_con_clave_sufijada_no_se_duplica_al_re
     assert huerfanas[0].clave_linea == "P-094@p24y198"
 
 
+def test_guardar_lineas_catalogo_limpia_huerfana_superada_por_herencia_de_lote(db_session):
+    # Sesión de herencia de lote entre páginas de continuación (2026-09-08):
+    # una línea que se guardó como huérfana en un reproceso anterior
+    # ("P-094@p24y198") y ahora resuelve a un lote real ("P-094" a secas)
+    # tiene que sustituir a la huérfana vieja, no duplicarla -- el hallazgo
+    # real que motivó este arreglo (2.152 filas así en los primeros
+    # expedientes verificados). `clave_huerfana_hipotetica` es la clave
+    # exacta que la línea resuelta habría tenido de haberse quedado
+    # huérfana (la calcula `app.extraccion.pipeline_anejo` para toda línea,
+    # resuelva o no) -- comparación exacta, nunca por contenido.
+    lote = _lote(db_session)
+    mapeo = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": None, "cantidad": None, "precio_unitario": 2}
+    fila = ["P-094", "Traviesa", "10,00"]
+
+    huerfana = construir_linea_catalogo(fila, mapeo, 24, None, lote.expediente_id, None, 0)
+    huerfana["clave_linea"] = "P-094@p24y198"
+    guardar_lineas_catalogo(db_session, None, [huerfana])
+    assert db_session.query(LineaCatalogo).filter_by(lote_id=None, expediente_id=lote.expediente_id).count() == 1
+
+    resuelta = construir_linea_catalogo(fila, mapeo, 24, None, lote.expediente_id, Decimal("0.10"), 0)
+    resuelta["clave_huerfana_hipotetica"] = "P-094@p24y198"
+    guardado = guardar_lineas_catalogo(db_session, lote.id, [resuelta])
+
+    assert guardado.creadas == 1
+    todas = db_session.query(LineaCatalogo).filter_by(expediente_id=lote.expediente_id).all()
+    assert len(todas) == 1
+    assert todas[0].lote_id == lote.id
+    assert todas[0].clave_linea == "P-094"
+
+
+def test_guardar_lineas_catalogo_no_borra_huerfana_con_precio_coincidente_de_otra_tabla(db_session):
+    # Guard de seguridad (caso real del balasto, `6.25/28510.0027`): un
+    # precio de referencia puede repetirse igual entre tablas de LOTES
+    # DISTINTOS de la misma página ("P-1 Balasto..." a 10,85 € en varios
+    # lotes) -- la huérfana de un lote no declarado no se borra solo
+    # porque otro lote, ya resuelto, tenga una línea con el mismo código,
+    # descripción y precio. Solo se borra con una clave EXACTAMENTE igual
+    # a `clave_huerfana_hipotetica` (misma franja vertical de la misma
+    # tabla) -- aquí la huérfana viene de una tabla distinta ("y198" frente
+    # a "y50" de la resuelta), así que sobrevive.
+    lote = _lote(db_session)
+    mapeo = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": None, "cantidad": None, "precio_unitario": 2}
+    fila = ["P-1", "Balasto sobre camión en cantera", "10,85"]
+
+    huerfana = construir_linea_catalogo(fila, mapeo, 24, None, lote.expediente_id, None, 0)
+    huerfana["clave_linea"] = "P-1@p24y198"
+    guardar_lineas_catalogo(db_session, None, [huerfana])
+
+    resuelta = construir_linea_catalogo(fila, mapeo, 24, None, lote.expediente_id, Decimal("0.10"), 0)
+    resuelta["clave_huerfana_hipotetica"] = "P-1@p24y50"  # otra tabla, otra franja
+    guardar_lineas_catalogo(db_session, lote.id, [resuelta])
+
+    huerfanas = db_session.query(LineaCatalogo).filter_by(lote_id=None, expediente_id=lote.expediente_id).all()
+    assert len(huerfanas) == 1
+    assert huerfanas[0].clave_linea == "P-1@p24y198"
+    assert db_session.query(LineaCatalogo).filter_by(lote_id=lote.id).count() == 1
+
+
 def test_construir_lineas_desde_tabla_usa_orden_inicial():
     tabla = TablaExtraida(
         cabecera=["Código", "Descripción", "Precio"],
