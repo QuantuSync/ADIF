@@ -116,6 +116,21 @@ class Expediente(Base):
     # `codigo_interno` se deja vacío), `True` si cruzó.
     codigo_interno = Column(String(64), nullable=True)
     codigos_cruzados = Column(Boolean, nullable=True)
+    # Migración 0023 (sesión de auditoría automática, 2026-09-08, hallazgo
+    # bloque 2 punto 2): qué valor de `codigo_matriz` (ya normalizado) tenía
+    # el expediente la última vez que se intentó el cruce -- necesario para
+    # distinguir "el cruce falló y sigue sin haber nada nuevo que probar" de
+    # "el cruce falló, pero desde entonces se resolvió una matriz distinta
+    # (o una matriz por primera vez) que merece un segundo intento". Un
+    # pedido derivado de acuerdo marco descubierto por el mecanismo inverso
+    # (`app.extraccion.descubrimiento_matriz`) resuelve su `codigo_matriz`
+    # DESPUÉS de que `asegurar_cruce_codigos` ya se ejecutó una vez sobre él
+    # -- sin este rastro, `codigos_cruzados=False` queda fijo para siempre
+    # aunque la matriz recién conocida sí cruce (verificado con
+    # `6.26/28510.0032`, `0071`, `0014`: cruzan al reintentar con su
+    # `codigo_matriz` actual). `None` si nunca se intentó el cruce, o si se
+    # intentó cuando el expediente todavía no tenía ninguna matriz.
+    codigo_matriz_en_cruce = Column(String(64), nullable=True)
     importe_licitacion = Column(Numeric(14, 4), nullable=True)
     importe_adjudicacion = Column(Numeric(14, 4), nullable=True)
     baja_global = Column(Numeric(12, 6), nullable=True)
