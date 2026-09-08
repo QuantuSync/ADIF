@@ -231,14 +231,27 @@ def cruzar_codigo_proyecto(
 
 
 def asegurar_cruce_codigos(db: Session, expediente) -> Optional[str]:
-    """Intenta el cruce una sola vez por expediente (`codigos_cruzados` pasa
-    de `None` a `True`/`False`, nunca se repite) y deja la sesión con el
-    cambio aplicado pero sin `commit` — lo hace la persona que llama, igual
-    que el resto de mutaciones sobre `expediente` en esta cascada
+    """Intenta el cruce, y lo reintenta si hace falta, y deja la sesión con
+    el cambio aplicado pero sin `commit` — lo hace la persona que llama,
+    igual que el resto de mutaciones sobre `expediente` en esta cascada
     (CONTEXTO.md sección 7: cruce por clave exacta, "el sistema nunca inventa
     una matriz"). Se usa tanto al terminar la extracción de un expediente
     como, de forma perezosa, sobre expedientes ya procesados antes de que
     existiera esta columna (routers de catálogo y de expedientes).
+
+    Un cruce que ya tuvo éxito (`codigos_cruzados=True`) nunca se repite: ya
+    tiene su `codigo_interno`, no hay nada que ganar. Uno que falló
+    (`codigos_cruzados=False`) tampoco se repite MIENTRAS `codigo_matriz`
+    siga siendo el mismo que en el último intento (`codigo_matriz_en_cruce`,
+    migración 0023) -- pero sí se reintenta en cuanto cambia (o aparece por
+    primera vez). Hallazgo real, sesión de auditoría automática 2026-09-08
+    (docs/sesion-2026-09-08-auditoria-automatica.md, bloque 2 punto 2): un
+    pedido derivado de acuerdo marco descubierto por el mecanismo inverso
+    (`app.extraccion.descubrimiento_matriz`) resuelve su `codigo_matriz`
+    DESPUÉS de que este cruce ya se ejecutó una vez sobre él -- sin este
+    reintento, `codigos_cruzados=False` quedaba fijo para siempre aunque la
+    matriz recién conocida sí cruzara (verificado con `6.26/28510.0032`,
+    `0071`, `0014`: cruzan al reintentar con su `codigo_matriz` actual).
 
     Devuelve un motivo de revisión, o `None` si no hay nada que avisar (la
     mayoría de las llamadas ignoran el valor de vuelta, que solo le importa
@@ -248,8 +261,10 @@ def asegurar_cruce_codigos(db: Session, expediente) -> Optional[str]:
     la columna MATRIZ del Excel son dos fuentes independientes del mismo
     dato — si las dos existen y no coinciden, no se elige una en silencio,
     se marca `matriz_conflicto` y se explica por qué."""
+    matriz_actual = normalizar_codigo_expediente(expediente.codigo_matriz)
     if expediente.codigos_cruzados is not None:
-        return None
+        if expediente.codigos_cruzados or matriz_actual == expediente.codigo_matriz_en_cruce:
+            return None
     if not settings.codigos_proyecto_path:
         return None
     try:
@@ -259,6 +274,7 @@ def asegurar_cruce_codigos(db: Session, expediente) -> Optional[str]:
     except FileNotFoundError:
         return None
     expediente.codigos_cruzados = resultado.cruzado
+    expediente.codigo_matriz_en_cruce = matriz_actual
     if not resultado.cruzado:
         return None
 

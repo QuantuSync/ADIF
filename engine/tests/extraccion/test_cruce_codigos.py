@@ -85,7 +85,7 @@ def test_no_cruza_no_inventa_nada(excel_codigos):
 
 def _expediente(**kwargs):
     base = dict(codigo_expediente=None, codigo_matriz=None, codigos_cruzados=None,
-                codigo_interno=None, matriz_conflicto=None)
+                codigo_interno=None, matriz_conflicto=None, codigo_matriz_en_cruce=None)
     base.update(kwargs)
     return SimpleNamespace(**base)
 
@@ -151,6 +151,66 @@ def test_asegurar_cruce_codigos_matriz_autorreferenciada_en_excel_no_se_escribe(
     assert expediente.codigo_matriz is None
     assert expediente.codigo_interno == "23026"
     assert expediente.codigos_cruzados is True
+
+
+# --- Reintento del cruce cuando cambia `codigo_matriz` (sesión de
+# auditoría automática 2026-09-08, docs/sesion-2026-09-08-auditoria-
+# automatica.md bloque 2 punto 2): un pedido derivado de acuerdo marco
+# descubierto por el mecanismo inverso resuelve su `codigo_matriz` DESPUÉS
+# de que el cruce ya se intentó una vez y falló -- caso real
+# `6.26/28510.0032`/`0071`/`0014`. ---
+
+
+def test_reintenta_el_cruce_cuando_aparece_una_matriz_nueva(excel_codigos, monkeypatch):
+    monkeypatch.setattr(settings, "codigos_proyecto_path", excel_codigos)
+    # Primer intento: sin matriz todavía, y un código propio que no cruza
+    # por sí solo -- falla, como el primer intento real de un pedido recién
+    # descubierto antes de que se le resuelva la matriz.
+    expediente = _expediente(codigo_expediente="6.26/28510.9999", codigo_matriz=None)
+    assert asegurar_cruce_codigos(None, expediente) is None
+    assert expediente.codigos_cruzados is False
+    assert expediente.codigo_interno is None
+    assert expediente.codigo_matriz_en_cruce is None
+
+    # El descubrimiento inverso matriz -> pedidos resuelve la matriz más
+    # tarde, en un momento distinto -- el siguiente intento debe reintentar
+    # el cruce (ahora sí encuentra la fila por MATRIZ) en vez de quedarse
+    # con el `False` fijado la primera vez.
+    expediente.codigo_matriz = "6.25/28510.0028"
+    assert asegurar_cruce_codigos(None, expediente) is None
+    assert expediente.codigos_cruzados is True
+    assert expediente.codigo_interno == "24038"
+    assert expediente.codigo_matriz_en_cruce == "6.25/28510.0028"
+
+
+def test_no_reintenta_el_cruce_si_la_matriz_no_cambio(excel_codigos, monkeypatch):
+    monkeypatch.setattr(settings, "codigos_proyecto_path", excel_codigos)
+    expediente = _expediente(
+        codigo_expediente="6.26/28510.9999", codigo_matriz="6.99/00000.0000",
+        codigos_cruzados=False, codigo_matriz_en_cruce="6.99/00000.0000",
+    )
+
+    # Sin cambiar `codigo_matriz`, un segundo cruce real (que devolvería
+    # otra cosa si se ejecutara) NUNCA debe intentarse: se apaga
+    # `codigos_proyecto_path` para comprobar que la función no vuelve a
+    # entrar en `cruzar_codigo_proyecto` -- si lo hiciera, fallaría por
+    # ruta no configurada.
+    monkeypatch.setattr(settings, "codigos_proyecto_path", None)
+    assert asegurar_cruce_codigos(None, expediente) is None
+    assert expediente.codigos_cruzados is False
+    assert expediente.codigo_interno is None
+
+
+def test_cruce_exitoso_nunca_se_reintenta_aunque_cambie_la_matriz(excel_codigos, monkeypatch):
+    monkeypatch.setattr(settings, "codigos_proyecto_path", excel_codigos)
+    expediente = _expediente(
+        codigo_expediente="6.24/28510.0128", codigo_matriz=None,
+        codigos_cruzados=True, codigo_interno="24001", codigo_matriz_en_cruce=None,
+    )
+
+    expediente.codigo_matriz = "cualquier-cosa-nueva"
+    assert asegurar_cruce_codigos(None, expediente) is None
+    assert expediente.codigo_interno == "24001"
 
 
 # --- `validar_ruta_codigos_proyecto` (encargo de esta sesión: fallar de
