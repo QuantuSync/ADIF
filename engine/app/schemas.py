@@ -266,6 +266,31 @@ class SapDesglosecargaOut(BaseModel):
     lineas_sin_cambios: int = 0
 
 
+class MaestroMaterialesCargaOut(BaseModel):
+    """Resumen de `POST /mantenimiento/maestro-materiales/cargar` (bloque 4,
+    sesión 2026-09-09): mismo criterio que `SapDesglosecargaOut` --
+    `configurado=False` significa que `MAESTRO_MATERIALES_PATH` no tiene
+    ninguna ruta montada (el cliente todavía no lo ha facilitado)."""
+
+    configurado: bool
+    filas_leidas: int = 0
+    filas_sin_matricula: int = 0
+    materiales_nuevos: int = 0
+    materiales_actualizados: int = 0
+    materiales_sin_cambios: int = 0
+
+
+class MaestroMaterialesCompletarOut(BaseModel):
+    """Resumen de `POST /mantenimiento/maestro-materiales/completar-unidades`
+    (bloque 4, sesión 2026-09-09): solo actúa sobre líneas que ya tienen
+    matrícula y no tienen unidad de medida -- nunca pisa un valor ya
+    extraído de un documento real."""
+
+    lineas_evaluadas: int = 0
+    lineas_completadas: int = 0
+    sin_matricula_en_maestro: int = 0
+
+
 class TrabajoOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

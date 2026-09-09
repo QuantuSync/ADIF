@@ -10,6 +10,7 @@ from app.config import settings
 from app.db import get_db
 from app.extraccion.descubrimiento_matriz import TIPO_TRABAJO as TIPO_TRABAJO_DESCUBRIMIENTO_PEDIDOS
 from app.extraccion.estado_sap import cargar_estado_sap
+from app.extraccion.maestro_materiales import cargar_maestro_materiales, completar_unidades_desde_maestro
 from app.extraccion.sap_desglose import cargar_sap_desglose
 from app.mantenimiento.auditoria import TIPO_TRABAJO as TIPO_TRABAJO_AUDITORIA
 from app.mantenimiento.ciclo import TIPO_TRABAJO
@@ -23,7 +24,14 @@ from app.mantenimiento.programacion import (
 )
 from app.models import TrabajoCola
 from app.queue import encolar_trabajo
-from app.schemas import EstadoMantenimientoOut, EstadoSapCargaOut, SapDesglosecargaOut, TrabajoOut
+from app.schemas import (
+    EstadoMantenimientoOut,
+    EstadoSapCargaOut,
+    MaestroMaterialesCargaOut,
+    MaestroMaterialesCompletarOut,
+    SapDesglosecargaOut,
+    TrabajoOut,
+)
 from app.sindicacion.descubrimiento import TIPO_TRABAJO as TIPO_TRABAJO_SINDICACION_BACKFILL
 
 router = APIRouter()
@@ -293,3 +301,31 @@ def cargar_desglose_sap(
     `POST /mantenimiento/estado-sap/cargar`: repetible sin duplicar (upsert
     por documento de compras + posición), síncrono, sin pasar por la cola."""
     return cargar_sap_desglose(db, settings.sap_desglose_path)
+
+
+@router.post("/mantenimiento/maestro-materiales/cargar", response_model=MaestroMaterialesCargaOut)
+def cargar_maestro_de_materiales(
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    """Bloque 4, sesión 2026-09-09: recarga `maestro_materiales` desde
+    `MAESTRO_MATERIALES_PATH` (`app.extraccion.maestro_materiales`). Mismo
+    criterio que las demás fuentes de entrada: repetible sin duplicar (upsert
+    por matrícula), síncrono, sin pasar por la cola. Solo carga la tabla de
+    referencia -- no toca `lineas_catalogo` (ver el endpoint de abajo)."""
+    return cargar_maestro_materiales(db, settings.maestro_materiales_path)
+
+
+@router.post("/mantenimiento/maestro-materiales/completar-unidades", response_model=MaestroMaterialesCompletarOut)
+def completar_unidades_de_medida(
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    """Bloque 4, sesión 2026-09-09: aplica `maestro_materiales` (ya cargado
+    por el endpoint de arriba) para rellenar `unidad_medida` de líneas del
+    catálogo que tienen matrícula pero no unidad -- nunca pisa un valor ya
+    extraído de un documento real (`app.extraccion.maestro_materiales.
+    completar_unidades_desde_maestro`). Paso separado de la carga a
+    propósito: cargar el maestro no debe escribir en el catálogo sin que
+    alguien lo pida explícitamente."""
+    return completar_unidades_desde_maestro(db)

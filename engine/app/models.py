@@ -405,6 +405,14 @@ class LineaCatalogo(Base):
     # el mecanismo, no solo una). Nunca se pone a partir de una franja
     # ambigua (varias cabeceras, o una no declarada): solo ausencia total.
     lote_heredado_de_pagina_anterior = Column(Boolean, nullable=True)
+    # Bloque 4, sesión 2026-09-09 (migración 0025): `True` únicamente cuando
+    # `unidad_medida` se rellenó desde `maestro_materiales` (app.extraccion.
+    # maestro_materiales.completar_unidades_desde_maestro) porque el
+    # documento propio del expediente no la traía -- mismo patrón que
+    # `heredado_de_matriz`/`lote_heredado_de_pagina_anterior`: sin esta marca,
+    # `documento_origen_id`/`pagina`/`fragmento` seguirían apuntando al PDF
+    # real pero ese valor concreto ya no vendría de ahí.
+    unidad_medida_completada_desde_maestro = Column(Boolean, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),
@@ -622,4 +630,33 @@ class SapDesgloseLinea(Base):
 
     __table_args__ = (
         UniqueConstraint("documento_compras", "posicion", name="uq_sap_desglose_documento_posicion"),
+    )
+
+
+class MaestroMaterial(Base):
+    """Maestro de materiales de SAP (bloque 4, sesión 2026-09-09, migración
+    0025) -- documento de referencia de ADIF, no derivado de pliegos ni
+    contratos: matrícula y unidad de medida de cada material que existe en
+    SAP, independientemente de en qué expediente se haya comprado. Distinto
+    de `SapDesgloseLinea` (una fila por línea de pedido de compras real,
+    ligada a un expediente): esta tabla es un catálogo de referencia, una
+    fila por matrícula, sin relación con ningún expediente concreto -- por
+    eso la clave natural es `matricula` sola, no un compuesto.
+    `app.extraccion.maestro_materiales.cargar_maestro_materiales` hace
+    upsert por esa clave; `completar_unidades_desde_maestro` la usa para
+    rellenar `LineaCatalogo.unidad_medida` únicamente donde falta, nunca para
+    pisar un valor ya extraído de un documento real."""
+
+    __tablename__ = "maestro_materiales"
+
+    id = Column(Integer, primary_key=True)
+    matricula = Column(String(9), nullable=False, unique=True)
+    descripcion = Column(String(255), nullable=True)
+    unidad_medida = Column(String(32), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
     )

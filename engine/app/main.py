@@ -8,6 +8,7 @@ from sqlalchemy.exc import OperationalError
 from app.config import settings
 from app.extraccion.cruce_codigos import validar_ruta_codigos_proyecto
 from app.extraccion.estado_sap import validar_ruta_estado_sap
+from app.extraccion.maestro_materiales import validar_ruta_maestro_materiales
 from app.extraccion.sap_desglose import validar_ruta_sap_desglose
 from app.routers import catalogo, documentos, expedientes, health, mantenimiento, revision, trabajos
 
@@ -25,6 +26,10 @@ validar_ruta_estado_sap(settings.estado_sap_path)
 # cambios del cliente tras revisar el catálogo): solo la API lo lee
 # (POST /mantenimiento/sap-desglose/cargar), el worker no necesita esta ruta.
 validar_ruta_sap_desglose(settings.sap_desglose_path)
+# Mismo motivo, para el maestro de materiales de SAP (bloque 4, sesión
+# 2026-09-09): solo la API lo lee (POST /mantenimiento/maestro-materiales/
+# cargar), el worker no necesita esta ruta.
+validar_ruta_maestro_materiales(settings.maestro_materiales_path)
 
 app = FastAPI(title="ADIF - Catalogo de materiales")
 
