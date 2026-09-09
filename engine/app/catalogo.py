@@ -1413,8 +1413,35 @@ def _combinar_por_clave(lineas: list[dict], permitir_fusion_material: bool = Tru
     (`6.24/28510.0116`: la tabla sin código está en la página 18, la que sí
     lo trae en la 22 — si se quedara con "la primera vista" a secas, la
     fila fundida heredaría la clave de matrícula pese a conocerse ya el
-    código)."""
+    código).
+
+    **Dos códigos propios y distintos de la MISMA página nunca se funden
+    entre sí por firma, aunque coincidan en ella** (hallazgo real,
+    `6.22/28510.0125`/`0126`/`0094` -- las tres comparten el mismo CONTRATO,
+    que reproduce el cuadro de precios completo dos veces, una por lote
+    NORTE/SUR). `P-133` y `P-137` son dos materiales reales y distintos del
+    mismo cuadro (matrículas `611050081`/`611050121`) que además comparten
+    descripción y precio en el documento real -- una coincidencia legítima
+    del catálogo, no un error. En la copia de la página 126 la extracción
+    pierde la matrícula de las dos filas (queda `None`), así que su firma
+    para esa página se vuelve indistinguible entre ambas: sin este guard,
+    `clave_por_firma` fundía la segunda bajo la clave de la primera y el
+    bucle de abajo, que copia campo a campo, dejaba su propio
+    `codigo_precio` pisando el de la fila ganadora -- `clave_linea="P-133"`
+    con `codigo_precio="P-137"`, un choque directo con la restricción única
+    `uq_linea_lote_clave` en cuanto la fila se guarda de verdad. La firma sin
+    matrícula existe para fundir un eco SIN código propio en su tabla
+    original CON código (docstring de arriba); nunca para que dos filas que
+    YA traen cada una su propio código se roben la identidad la una a la
+    otra. La fusión por `clave_linea` exacta entre páginas (más abajo, fuera
+    de este guard) sigue intacta: cada fila conserva su propio código y se
+    completa igual con los campos que traiga la copia de la otra página."""
     clave_por_firma: dict[tuple, tuple[str, bool]] = {}
+    # Por firma, qué claves con código propio aporta cada página -- para
+    # detectar el choque de arriba: una página que aporta más de una clave
+    # distinta a la misma firma nunca puede resolverse fundiendo, porque
+    # ninguna tabla real repite el mismo material dos veces con dos códigos.
+    claves_por_pagina: dict[tuple, dict[object, set[str]]] = {}
     if permitir_fusion_material:
         for datos in lineas:
             firma = _firma_material(datos)
@@ -1424,11 +1451,28 @@ def _combinar_por_clave(lineas: list[dict], permitir_fusion_material: bool = Tru
             actual = clave_por_firma.get(firma)
             if actual is None or (tiene_codigo and not actual[1]):
                 clave_por_firma[firma] = (datos["clave_linea"], tiene_codigo)
+            if tiene_codigo:
+                claves_por_pagina.setdefault(firma, {}).setdefault(datos.get("pagina"), set()).add(
+                    datos["clave_linea"]
+                )
+    paginas_en_conflicto = {
+        firma: {pagina for pagina, claves in por_pagina.items() if len(claves) > 1}
+        for firma, por_pagina in claves_por_pagina.items()
+    }
 
     combinadas: dict[str, dict] = {}
     for datos in lineas:
         firma = _firma_material(datos) if permitir_fusion_material else None
-        clave = clave_por_firma[firma][0] if firma is not None else datos["clave_linea"]
+        tiene_codigo = bool(datos.get("codigo_precio"))
+        # El guard de página en conflicto solo protege a una fila que YA
+        # trae su propio código: una fila sin código (el eco de una tabla
+        # secundaria, docstring de arriba) no tiene identidad propia que
+        # perder, así que sigue pudiendo redirigirse a la clave con código
+        # de esa misma firma sin más.
+        redirige_por_firma = firma is not None and not (
+            tiene_codigo and datos.get("pagina") in paginas_en_conflicto.get(firma, ())
+        )
+        clave = clave_por_firma[firma][0] if redirige_por_firma else datos["clave_linea"]
         existente = combinadas.get(clave)
         if existente is None:
             nuevo = dict(datos)
