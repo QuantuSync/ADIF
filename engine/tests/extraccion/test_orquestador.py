@@ -16,6 +16,7 @@ from app.extraccion.orquestador import (
     LOTE_UNICO,
     _Documento,
     _detectar_contrato_obra,
+    _detectar_documento_adjudicacion_no_relacionado,
     _detectar_numero_lotes_pcsp,
     _extraer_campos_expediente,
     ejecutar_extraccion_expediente,
@@ -875,6 +876,64 @@ def test_baja_declarada_sin_ningun_codigo_propio_sigue_como_siempre(db_session):
 
     assert baja.baja == Decimal("0.5400")
     assert motivo is None
+
+
+def test_detectar_documento_adjudicacion_no_relacionado_avisa_cuando_no_menciona_el_expediente():
+    # Caso real, Bloque 4 (sesión de auditoría 2026-09-09): `6.24/28510.0216`
+    # tiene un documento nombrado ADJUDICACION_...pdf, clasificado `otro`
+    # (una plantilla no reconocida), cuyo texto menciona otros expedientes
+    # reales pero nunca el propio -- quedaba `completado` sin ningún aviso.
+    paginas = [PaginaTexto(
+        numero=1,
+        texto="ACUERDO DEL CONSEJO DE ADMINISTRACIÓN\nExpediente 3.22/27510.0135\nExpediente 3.22/27510.0133\n",
+    )]
+    doc = SimpleNamespace(id=1, ruta_almacenamiento="6.24_28510.0216/ADJUDICACION_2765fcc0730e7a73.pdf")
+    item = _Documento(documento=doc, tipo=TipoDocumento.otro, paginas=paginas)
+    aviso = _detectar_documento_adjudicacion_no_relacionado([item], "6.24/28510.0216", None)
+    assert aviso is not None
+    assert "ADJUDICACION_2765fcc0730e7a73.pdf" in aviso
+
+
+def test_detectar_documento_adjudicacion_no_relacionado_no_avisa_si_menciona_el_propio_expediente():
+    # Caso real, `6.22/28510.0126`: el mismo tipo de plantilla (boletín de
+    # Consejo de Administración, varios contratos aprobados a la vez) SÍ
+    # menciona el expediente propio -- documento genuinamente relevante,
+    # solo de una plantilla que el clasificador todavía no reconoce. No debe
+    # avisar.
+    paginas = [PaginaTexto(
+        numero=17,
+        texto="LOTE 2 – SUR (EXPEDIENTE Nº 6.22/28510.0126)\n% BAJA 23,90%\n",
+    )]
+    doc = SimpleNamespace(id=1, ruta_almacenamiento="6.22_28510.0126/ADJUDICACION_5c030c40c37b1ba9.pdf")
+    item = _Documento(documento=doc, tipo=TipoDocumento.otro, paginas=paginas)
+    assert _detectar_documento_adjudicacion_no_relacionado([item], "6.22/28510.0126", None) is None
+
+
+def test_detectar_documento_adjudicacion_no_relacionado_no_avisa_si_menciona_la_matriz():
+    paginas = [PaginaTexto(numero=1, texto="Expediente matriz 6.20/28510.0001\n")]
+    doc = SimpleNamespace(id=1, ruta_almacenamiento="ADJUDICACION_abc.pdf")
+    item = _Documento(documento=doc, tipo=TipoDocumento.otro, paginas=paginas)
+    assert _detectar_documento_adjudicacion_no_relacionado([item], "6.20/28510.0099", "6.20/28510.0001") is None
+
+
+def test_detectar_documento_adjudicacion_no_relacionado_no_avisa_sin_ningun_codigo_legible():
+    # Un documento sin ningún código de expediente reconocible (escaneado, o
+    # una plantilla sin ese dato) no es evidencia de nada -- sería
+    # indistinguible de un falso positivo de extracción.
+    paginas = [PaginaTexto(numero=1, texto="Documento sin ningún código de expediente reconocible.\n")]
+    doc = SimpleNamespace(id=1, ruta_almacenamiento="ADJUDICACION_abc.pdf")
+    item = _Documento(documento=doc, tipo=TipoDocumento.otro, paginas=paginas)
+    assert _detectar_documento_adjudicacion_no_relacionado([item], "6.20/28510.0099", None) is None
+
+
+def test_detectar_documento_adjudicacion_no_relacionado_ignora_documentos_no_adjudicacion():
+    # Un PLIEGO o ANEJO que por casualidad no mencione el propio expediente
+    # no es sospechoso -- solo se comprueba el que el scraper etiquetó como
+    # ADJUDICACION en el nombre de fichero.
+    paginas = [PaginaTexto(numero=1, texto="Expediente 6.20/28510.0001\n")]
+    doc = SimpleNamespace(id=1, ruta_almacenamiento="ANEJO_abc.pdf")
+    item = _Documento(documento=doc, tipo=TipoDocumento.anejo, paginas=paginas)
+    assert _detectar_documento_adjudicacion_no_relacionado([item], "6.20/28510.0099", None) is None
 
 
 def test_detectar_contrato_obra_ignora_documentos_que_no_son_anuncio_pcsp():
