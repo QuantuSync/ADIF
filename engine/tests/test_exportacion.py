@@ -1,6 +1,8 @@
 """CONTEXTO.md, encargo de esta sesión (Excel al cliente), punto 1: ninguna
 convención de marcador de texto de la web viaja al Excel -- celda vacía en
 su lugar, para no convertir una columna numérica en texto mixto."""
+from decimal import Decimal
+
 from app.exportacion import (
     _CATEGORIAS_MOTIVO,
     _EXPLICACIONES_MOTIVO,
@@ -9,6 +11,7 @@ from app.exportacion import (
     _celda_numero,
     _celda_texto,
     _escribir_resumen,
+    _formato_cantidad,
 )
 from app.models import LineaCatalogo
 from collections import Counter
@@ -50,9 +53,33 @@ def test_celda_numero_vacio_es_none():
 
 
 def test_celda_numero_devuelve_float():
-    from decimal import Decimal
     assert _celda_numero(Decimal("0")) == 0.0
     assert _celda_numero(Decimal("12.5")) == 12.5
+
+
+# Bloque 2, revisión del cliente: la columna Cantidad mostraba "20.000." (un
+# punto colgando tras un valor entero) con la máscara "#,##0.###" anterior.
+def test_formato_cantidad_entero_sin_punto():
+    assert _formato_cantidad(Decimal("20000")) == "#,##0"
+    assert _formato_cantidad(Decimal("20000.000")) == "#,##0"
+    assert _formato_cantidad(Decimal("0")) == "#,##0"
+
+
+def test_formato_cantidad_ausente_sin_punto():
+    assert _formato_cantidad(None) == "#,##0"
+
+
+def test_formato_cantidad_con_decimales_significativos():
+    assert _formato_cantidad(Decimal("12.5")) == "#,##0.0"
+    assert _formato_cantidad(Decimal("0.142")) == "#,##0.000"
+    assert _formato_cantidad(Decimal("3.50")) == "#,##0.0"
+
+
+def test_formato_cantidad_capa_en_tres_decimales():
+    # `lineas_catalogo.cantidad` es NUMERIC(14,3): nunca debería llegar un
+    # cuarto decimal significativo, pero el formato no debe reventar si lo
+    # hiciera -- capa en 3, la precisión real de la columna.
+    assert _formato_cantidad(Decimal("1.2345")) == "#,##0.000"
 
 
 # Encargo de esta sesión: agrupar el motivo de las huérfanas excluidas del

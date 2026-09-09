@@ -38,6 +38,8 @@ from __future__ import annotations
 
 import io
 from collections import Counter
+from decimal import Decimal
+from typing import Optional
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment
@@ -93,12 +95,32 @@ COLUMNAS = [
 # "General" y Excel puede mostrarlas alineadas a la izquierda como si fueran
 # texto pese a llevar ya un valor numérico real (punto 1 de esta sesión:
 # "Asegúrate además de que los importes se exportan como número").
-_FORMATO_CANTIDAD = "#,##0.###"
+_FORMATO_CANTIDAD_ENTERO = "#,##0"
 _FORMATO_IMPORTE = "#,##0.00"
 _FORMATO_PORCENTAJE = "0.00%"
 _COLUMNA_CANTIDAD = COLUMNAS.index("Cantidad") + 1
 _COLUMNAS_IMPORTE = (COLUMNAS.index("Precio unitario") + 1, COLUMNAS.index("Precio adjudicado") + 1)
 _COLUMNA_PORCENTAJE = COLUMNAS.index("Baja del lote") + 1
+
+
+def _formato_cantidad(valor: Optional[Decimal]) -> str:
+    """Máscara de celda sin decimales ni punto de sobra (bloque 2, revisión
+    del cliente: la columna Cantidad mostraba `20.000.`, un punto colgando
+    tras un valor entero). Una máscara con `#` opcionales tras el punto
+    (`#,##0.###`) depende de que el lector de Excel colapse el separador
+    decimal entero cuando no hay ninguna cifra que mostrar -- no todos lo
+    hacen igual. Más seguro: contar los decimales significativos reales de
+    `valor` (hasta 3, la precisión de `lineas_catalogo.cantidad`) y construir
+    una máscara con exactamente esos ceros fijos; si no hay ninguno, la
+    máscara no lleva punto decimal en absoluto, así que no hay nada que
+    colapsar mal en ningún lector."""
+    if valor is None:
+        return _FORMATO_CANTIDAD_ENTERO
+    exponente = valor.normalize().as_tuple().exponent
+    decimales = max(0, min(-exponente, 3)) if isinstance(exponente, int) else 0
+    if decimales == 0:
+        return _FORMATO_CANTIDAD_ENTERO
+    return f"#,##0.{'0' * decimales}"
 
 # Tamaño de página de la consulta al generar: bastante grande para pocas
 # vueltas a la base de datos, pequeño para no cargar el catálogo entero en
@@ -272,7 +294,7 @@ def generar_excel_catalogo(db: Session, incluir_pendientes_sin_lote: bool = Fals
                 _celda_texto(linea.unidad_medida),
                 _celda_texto(expediente.estado_contrato_sap),
             ])
-            hoja.cell(row=fila, column=_COLUMNA_CANTIDAD).number_format = _FORMATO_CANTIDAD
+            hoja.cell(row=fila, column=_COLUMNA_CANTIDAD).number_format = _formato_cantidad(linea.cantidad)
             for columna in _COLUMNAS_IMPORTE:
                 hoja.cell(row=fila, column=columna).number_format = _FORMATO_IMPORTE
             hoja.cell(row=fila, column=_COLUMNA_PORCENTAJE).number_format = _FORMATO_PORCENTAJE
