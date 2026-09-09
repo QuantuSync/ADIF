@@ -619,6 +619,37 @@ def test_catalogo_no_oculta_expediente_de_otro_departamento(cliente, db_session,
     assert resp.json()["total"] == 1
 
 
+# Bloque 3, sesión 2026-09-09: mecanismo de exclusión por código interno.
+def test_catalogo_oculta_codigo_interno_de_la_lista_de_exclusion(cliente, db_session, tmp_path, monkeypatch):
+    fichero = tmp_path / "exclusion.txt"
+    fichero.write_text("INTERNO:24038\n")
+    monkeypatch.setattr(settings, "exclusion_expedientes_path", str(fichero))
+    expediente, *_ = _sembrar_catalogo(db_session)
+    expediente.codigo_interno = "24038"
+    db_session.commit()
+
+    resp = cliente.get("/catalogo")
+
+    assert resp.json()["total"] == 0
+
+
+def test_catalogo_no_oculta_expediente_sin_codigo_interno_por_lista_de_codigo_interno(
+    cliente, db_session, tmp_path, monkeypatch
+):
+    # El expediente sembrado no tiene codigo_interno (58,9% del corpus real
+    # no cruza con el Excel de códigos) -- sin el `or_(... is_(None) ...)` de
+    # `_excluir_expedientes_de_la_lista`, "NULL NOT IN (...)" habría ocultado
+    # también a este, no solo a los de la lista.
+    fichero = tmp_path / "exclusion.txt"
+    fichero.write_text("INTERNO:24038\n")
+    monkeypatch.setattr(settings, "exclusion_expedientes_path", str(fichero))
+    _sembrar_catalogo(db_session)
+
+    resp = cliente.get("/catalogo")
+
+    assert resp.json()["total"] == 1
+
+
 def test_exportar_catalogo_excluye_expediente_de_la_lista_pero_no_lo_borra(
     cliente, db_session, tmp_path, monkeypatch
 ):
