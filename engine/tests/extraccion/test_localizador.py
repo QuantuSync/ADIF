@@ -71,3 +71,60 @@ def test_parrafo_que_solo_menciona_precio_no_es_candidato():
     texto = "El precio ofertado deberá respetar el precio máximo de licitación en todo momento." * 5
     resultado = localizar_paginas_candidatas([PaginaTexto(numero=1, texto=texto)])
     assert resultado.candidatas == []
+
+
+# Bloque 5, cambios del cliente tras revisar el catálogo (sesión 2026-09-09):
+# páginas de continuación de un cuadro de precios de varias páginas, que no
+# repiten ninguna palabra de cabecera -- verificado contra
+# `6.20/28510.0047_ANEJO_abd69efbdd39b552.pdf`, 42 páginas reales así.
+from app.extraccion.texto import PaginaTexto  # noqa: E402
+
+_PAGINA_CON_TABLA = (
+    "MATRICULA DESIGNACION PLANO PRECIO CANTIDAD 610840051 BULON ARTICULACION 5,82 1 " * 4
+)  # cabecera real + datos: marcadores y densidad numérica altos a propósito
+_PAGINA_SOLO_DATOS = "610840051 BULON ARTICULACION 213-27-67 5,82 1 " * 8  # solo dígitos y texto, sin marcador
+_PAGINA_PROSA = (
+    "El presente pliego regula las condiciones generales del contrato administrativo "
+    "y las obligaciones de las partes intervinientes en el procedimiento."
+) * 3
+
+
+def test_pagina_sin_marcadores_hereda_candidatura_de_la_anterior():
+    paginas = [
+        PaginaTexto(numero=1, texto=_PAGINA_CON_TABLA),
+        PaginaTexto(numero=2, texto=_PAGINA_SOLO_DATOS),
+    ]
+    resultado = localizar_paginas_candidatas(paginas)
+
+    numeros = [c.numero for c in resultado.candidatas]
+    assert numeros == [1, 2]
+    candidata_2 = next(c for c in resultado.candidatas if c.numero == 2)
+    assert candidata_2.continuacion is True
+    assert candidata_2.grupos_marcadores == frozenset()
+    candidata_1 = next(c for c in resultado.candidatas if c.numero == 1)
+    assert candidata_1.continuacion is False
+
+
+def test_cadena_de_continuacion_se_corta_al_llegar_a_densidad_baja():
+    paginas = [
+        PaginaTexto(numero=1, texto=_PAGINA_CON_TABLA),
+        PaginaTexto(numero=2, texto=_PAGINA_SOLO_DATOS),
+        PaginaTexto(numero=3, texto=_PAGINA_PROSA),  # densidad baja: corta la cadena
+        PaginaTexto(numero=4, texto=_PAGINA_SOLO_DATOS),  # ya no hereda de nadie
+    ]
+    resultado = localizar_paginas_candidatas(paginas)
+
+    assert [c.numero for c in resultado.candidatas] == [1, 2]
+
+
+def test_pagina_sin_marcadores_no_candidata_si_la_anterior_tampoco_lo_era():
+    # Contraste: sin ninguna página candidata antes, la densidad sola no
+    # basta -- evita que un documento sin ningún cuadro de precios real
+    # empiece a aceptar páginas de pura casualidad numérica.
+    paginas = [
+        PaginaTexto(numero=1, texto=_PAGINA_PROSA),
+        PaginaTexto(numero=2, texto=_PAGINA_SOLO_DATOS),
+    ]
+    resultado = localizar_paginas_candidatas(paginas)
+
+    assert resultado.candidatas == []

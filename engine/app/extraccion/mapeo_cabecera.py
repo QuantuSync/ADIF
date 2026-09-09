@@ -178,6 +178,51 @@ def _cabecera_sin_senal(cabecera: list[Optional[str]]) -> bool:
     return not any(c and c.strip() for c in cabecera)
 
 
+def heredar_mapeo_de_pagina_anterior(
+    cabecera: list[Optional[str]],
+    ultimo_mapeo_resuelto: Optional[dict[str, Optional[int]]],
+    ultima_longitud_fila: Optional[int],
+) -> Optional[ResultadoMapeoCabecera]:
+    """Bloque 5, cambios del cliente tras revisar el catálogo (sesión
+    2026-09-09): una tabla sin ninguna celda de cabecera con texto real
+    (`_cabecera_sin_senal`) nunca puede pedir al modelo un mapeo NUEVO de
+    forma fiable -- no hay ninguna palabra que traducir, solo filas de
+    datos. Verificado contra el PDF real
+    (`6.20/28510.0047_ANEJO_abd69efbdd39b552.pdf`, cuadro de precios de 61
+    páginas con cabecera solo en la primera): sin esto, cada página de
+    continuación revienta con `RuntimeError` en cuanto no hay
+    `model_provider`, y con uno sí configurado el modelo tendría que
+    adivinar a ciegas sobre las mismas filas de ejemplo una y otra vez, sin
+    garantía de acertar la MISMA asignación de columnas cada vez.
+
+    Devuelve el mapeo de la tabla anterior tal cual, sin tocar `cache_
+    mapeo_cabecera` (nunca bajo la firma degenerada de cabecera vacía,
+    docstring de `_cabecera_sin_senal`: cachear eso confundiría tablas de
+    documentos distintos que comparten esa misma firma), cuando esta tabla
+    no trae ninguna señal propia Y la anterior de este mismo documento sí
+    tuvo un mapeo resuelto (por cabecera propia, caché, determinista o
+    modelo -- da igual el origen) con el MISMO número de columnas -- una
+    comprobación barata de que de verdad es la misma forma de tabla, no
+    una completamente distinta que por casualidad también carece de
+    cabecera. `None` en cualquier otro caso: el llamador decide entonces
+    llamar a `mapear_cabecera` como de costumbre. Reiniciar `ultimo_mapeo_
+    resuelto` a `None` en cada documento nuevo es responsabilidad del
+    llamador (`app.extraccion.pipeline_anejo`), igual que `ultimo_lote_
+    resuelto`: heredar de un documento a otro no tendría ninguna base."""
+    if (
+        _cabecera_sin_senal(cabecera)
+        and ultimo_mapeo_resuelto is not None
+        and len(cabecera) == ultima_longitud_fila
+    ):
+        return ResultadoMapeoCabecera(
+            mapeo=ultimo_mapeo_resuelto,
+            firma=calcular_firma_cabecera(cabecera),
+            origen="heredado_pagina_anterior",
+            llamada_modelo=False,
+        )
+    return None
+
+
 def mapear_cabecera(
     cabecera: list[Optional[str]],
     filas_ejemplo: list[list[Optional[str]]],
