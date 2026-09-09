@@ -24,7 +24,7 @@ from app.catalogo import construir_lineas_desde_tabla
 from app.extraccion.codigo_material import derivar_codigo_material_con_modelo
 from app.extraccion.localizador import ResultadoLocalizacion, localizar_paginas_candidatas
 from app.extraccion.lote_tabla import asociar_lote_tabla
-from app.extraccion.mapeo_cabecera import heredar_mapeo_de_pagina_anterior, mapear_cabecera
+from app.extraccion.mapeo_cabecera import mapear_cabecera
 from app.extraccion.tabla import extraer_tablas_pagina
 from app.extraccion.texto import PaginaTexto
 from app.interfaces.model_provider import ModelProvider
@@ -89,12 +89,6 @@ def procesar_anejo(
     # documento (esta función procesa uno solo): heredar de un documento a
     # otro no tendría ninguna base textual.
     ultimo_lote_resuelto: Optional[str] = None
-    # Herencia de mapeo de cabecera entre páginas de continuación (bloque 5,
-    # cambios del cliente tras revisar el catálogo, sesión 2026-09-09) --
-    # ver docstring de `heredar_mapeo_de_pagina_anterior`. Mismo criterio de
-    # reinicio que `ultimo_lote_resuelto`: a `None` en cada documento nuevo.
-    ultimo_mapeo_resuelto: Optional[dict] = None
-    ultima_longitud_fila_mapeo: Optional[int] = None
 
     with pdfplumber.open(ruta_pdf) as pdf:
         paginas_texto = [
@@ -162,11 +156,7 @@ def procesar_anejo(
 
                 baja_lote = lotes.get(identificador_lote) if identificador_lote is not None else None
 
-                resultado_mapeo = heredar_mapeo_de_pagina_anterior(
-                    tabla.cabecera, ultimo_mapeo_resuelto, ultima_longitud_fila_mapeo
-                ) or mapear_cabecera(tabla.cabecera, tabla.filas[:3], db, model_provider)
-                ultimo_mapeo_resuelto = resultado_mapeo.mapeo
-                ultima_longitud_fila_mapeo = len(tabla.cabecera)
+                resultado_mapeo = mapear_cabecera(tabla.cabecera, tabla.filas[:3], db, model_provider)
                 firmas_cabecera.add(resultado_mapeo.firma)
                 if resultado_mapeo.llamada_modelo:
                     llamadas_modelo += 1
