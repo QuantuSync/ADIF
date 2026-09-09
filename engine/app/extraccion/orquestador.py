@@ -43,7 +43,7 @@ from app.extraccion.campos_lc27 import (
     extraer_importe_licitacion_lc27,
     extraer_objeto_contrato_lc27,
 )
-from app.extraccion.campos_pcsp import CampoAnclado, extraer_campos_anuncio_pcsp, importe_como_decimal
+from app.extraccion.campos_pcsp import CampoAnclado, CODIGO_EXPEDIENTE_RE, extraer_campos_anuncio_pcsp, importe_como_decimal
 from app.extraccion.lotes_pcsp import extraer_campos_pcsp_para_expediente, extraer_ventanas_multi_lote_pcsp
 from app.extraccion.clasificador import clasificar, es_pliego_sin_precios
 from app.extraccion.cruce_codigos import (
@@ -324,6 +324,55 @@ def _detectar_contrato_obra(documentos: list[_Documento]) -> Optional[CampoAncla
         if campo is not None and campo.valor.strip().lower() in _TIPOS_CONTRATO_OBRA:
             return campo
     return None
+
+
+def _detectar_documento_adjudicacion_no_relacionado(
+    items: list[_Documento], codigo_expediente: str, codigo_matriz: Optional[str]
+) -> Optional[str]:
+    """Bloque 4 (sesión de auditoría 2026-09-09): el nombre de fichero que
+    asigna el scraper (`ADJUDICACION_<hash>.pdf`, `app.scraping.pcsp.
+    seleccionar_documentos`) es la única pista de qué fila de la Plataforma
+    lo trajo -- el clasificador de contenido (CONTEXTO.md sección 3) manda
+    para decidir `tipo_documento`, nunca ese nombre, pero aquí se usa
+    justo al revés: para encontrar el documento que el scraper SÍ pensaba
+    que era la adjudicación, y comprobar si su propio texto respalda esa
+    idea.
+
+    Verificado contra 16 documentos reales así clasificados `otro` en el
+    corpus: 5 mencionan su propio expediente (o su matriz) en el texto --
+    normalmente un boletín de Consejo de Administración que aprueba varios
+    contratos a la vez, plantilla que el clasificador todavía no reconoce,
+    pero genuinamente relevante, no un error de selección. Al menos 3
+    (`6.24/28510.0109`, `6.24/28510.0216`, `4.25/28510.0208`) NUNCA
+    mencionan su propio expediente pese a mencionar otros -- el documento
+    pertenece a un expediente distinto, descargado por error. Sin este
+    aviso, dos de esos tres (`0109`, `0216`) quedaban `completado` con un
+    documento de adjudicación ajeno adjunto, invisible para el cliente.
+
+    Solo dispara cuando el documento SÍ trae al menos un código de
+    expediente reconocible en su texto (`CODIGO_EXPEDIENTE_RE`) pero NINGUNO
+    de ellos es el propio -- un documento sin ningún código legible (p.ej.
+    escaneado, o una plantilla sin ese dato) no basta para sospechar, sería
+    indistinguible de un falso positivo de extracción."""
+    codigos_propios = {codigo_expediente}
+    if codigo_matriz:
+        codigos_propios.add(codigo_matriz)
+
+    avisos: list[str] = []
+    for item in items:
+        nombre = item.documento.ruta_almacenamiento or ""
+        if "/ADJUDICACION_" not in nombre and not nombre.startswith("ADJUDICACION_"):
+            continue
+        texto = "\n".join(pagina.texto for pagina in item.paginas)
+        codigos_en_texto = set(CODIGO_EXPEDIENTE_RE.findall(texto))
+        if not codigos_en_texto or codigos_en_texto & codigos_propios:
+            continue
+        avisos.append(
+            f"el documento descargado como adjudicación ({nombre.rsplit('/', 1)[-1]}) no menciona este "
+            f"expediente ni su matriz en su texto, pero sí menciona otros ({', '.join(sorted(codigos_en_texto))[:200]}) "
+            "-- posible documento equivocado del scraper, confirmar contra la Plataforma"
+        )
+    return "; ".join(avisos) if avisos else None
 
 
 def _es_documento_de_pliegos_pcsp(item: _Documento) -> bool:
@@ -763,6 +812,17 @@ def ejecutar_extraccion_expediente(
             # todo lo demás trabaje ya con la identidad correcta.
             motivo_revision = _acumular_motivo(motivo_revision, corregir_identidad_expediente(db, expediente, items))
             db.commit()
+
+            # Bloque 4 (auditoría de documentos de adjudicación, sesión
+            # 2026-09-09): después de que la identidad del expediente ya esté
+            # corregida arriba, comprueba si el documento que el scraper
+            # descargó como adjudicación menciona de verdad este expediente.
+            motivo_revision = _acumular_motivo(
+                motivo_revision,
+                _detectar_documento_adjudicacion_no_relacionado(
+                    items, expediente.codigo_expediente, expediente.codigo_matriz
+                ),
+            )
 
             # Nº de lotes declarado por el Anuncio PCSP (campo estructurado,
             # sección 27): única fuente para un expediente sin ninguna
