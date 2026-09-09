@@ -716,6 +716,14 @@ def test_guardar_lineas_catalogo_borra_precio_adjudicado_cuando_la_baja_deja_de_
     # es "ya no se puede calcular". 336 líneas de `6.20/28510.0041` se
     # quedaron con el precio derivado de una baja ya inexistente porque
     # `guardar_lineas_catalogo` trataba este campo igual que cualquier otro.
+    #
+    # Mismo hueco encontrado de nuevo en `baja_lote` (bloque 3, cambios del
+    # cliente tras revisar el catálogo): se copia de `lote.baja_lote`, que
+    # `app.extraccion.orquestador` ya sobrescribe sin condición en cada
+    # extracción -- reprocesar `6.20/28510.0041` con el extractor multi-lote
+    # PCSP ya corregido dejaba `lotes.baja_lote` en blanco, pero el 97,73 %
+    # de la baja contaminada del hermano seguía en cada línea del catálogo,
+    # porque este mismo bucle tampoco borraba `baja_lote`.
     lote = _lote(db_session)
     mapeo = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": None, "cantidad": None, "precio_unitario": 2}
 
@@ -737,6 +745,7 @@ def test_guardar_lineas_catalogo_borra_precio_adjudicado_cuando_la_baja_deja_de_
     # el cambio todavía pendiente y volvería a leer el valor viejo de la
     # base de datos real.
     assert linea.precio_adjudicado is None
+    assert linea.baja_lote is None
     assert linea.precio_unitario == Decimal("1000")  # el resto de campos sigue intacto
 
 
