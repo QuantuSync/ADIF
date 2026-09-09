@@ -250,7 +250,7 @@ def test_exportar_catalogo_genera_xlsx_con_columnas_del_formato_esperado(cliente
     # CONTEXTO.md, encargo de esta sesión, punto 4: mismas columnas y mismo
     # orden que Ejemplo/Output/.
     assert cabecera == [
-        "Código interno", "Código de proyecto", "Código matriz", "Nombre del proyecto",
+        "Código interno", "Código de expediente", "Código matriz", "Título expediente",
         "Matrícula del material", "Descripción del material", "Código del material",
         "Cantidad", "Precio unitario", "Lote", "Comentarios",
         "Precio adjudicado", "Baja del lote", "Unidad de medida",

@@ -538,7 +538,7 @@ export default function ExpedientesPanel({
               className="input"
               value={busqueda}
               onChange={(e) => setBusqueda(e.target.value)}
-              placeholder="Buscar por código o nombre de proyecto…"
+              placeholder="Buscar por código o título de expediente…"
               aria-label="Buscar expedientes"
             />
             <div className="filtro-estado-grupo" role="group" aria-label="Filtrar por estado">

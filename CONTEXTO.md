@@ -241,9 +241,9 @@ precio por tonelada-kilómetro).
 | Columna | Origen | Modelo |
 |---|---|---|
 | Código interno | `Nº Interno` del Excel de códigos | No, cruce |
-| Código de proyecto | `Nº Expediente` del Excel | No, cruce |
+| Código de expediente | `Nº Expediente` del Excel | No, cruce |
 | Código matriz | `MATRIZ` del Excel | No, cruce |
-| Nombre del proyecto | *Objeto del Contrato* del anuncio | No, etiqueta fija |
+| Título expediente | *Objeto del Contrato* del anuncio | No, etiqueta fija |
 | Matrícula del material | Cuadro de precios | No |
 | Descripción del material | Cuadro de precios | No |
 | Código del material | Derivado de la descripción | Solo si no casa |

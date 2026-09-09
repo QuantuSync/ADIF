@@ -61,9 +61,9 @@ def _celda_numero(valor) -> object:
 
 COLUMNAS = [
     "Código interno",
-    "Código de proyecto",
+    "Código de expediente",
     "Código matriz",
-    "Nombre del proyecto",
+    "Título expediente",
     "Matrícula del material",
     "Descripción del material",
     "Código del material",

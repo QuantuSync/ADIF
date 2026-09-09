@@ -486,7 +486,7 @@ export default function CatalogoPanel({ apiUrl }: { apiUrl: string }) {
               </dl>
               {seleccion.nombre_proyecto && (
                 <dl className="trace-field" style={{ flex: "1 1 100%" }}>
-                  <dt>Proyecto</dt>
+                  <dt>Título expediente</dt>
                   <dd>{seleccion.nombre_proyecto}</dd>
                 </dl>
               )}
