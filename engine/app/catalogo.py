@@ -58,6 +58,47 @@ _MATRICULA_VALIDA_RE = re.compile(r"^\d+$")
 # cuántas variantes de cabecera existan sin descubrir todavía.
 _UNIDAD_MEDIDA_IMPLAUSIBLE_RE = re.compile(r"^[\d.]+$")
 
+# Bloque 3, segunda tanda de cambios del cliente tras revisar el catálogo
+# (sesión 2026-09-09): verificado contra el corpus real que el 7,3% que
+# resultó ser un defecto de extracción (bloque 4) no agota el 100% de las
+# líneas sin unidad -- `6.20/28510.0136_ANEJO_3.pdf` ("hilo de contacto" y
+# familia, matrículas 642910100 y similares) no declara ninguna columna de
+# unidad en absoluto, pero la propia celda de cantidad trae el número y la
+# unidad pegados ("120000 Kg", "1200 m") y la de precio unitario trae la
+# unidad tras el símbolo de división ("9,61 €/Kg", "4,05 €/m") -- ninguna
+# de las dos rompe `parsear_numero_es`/`parsear_importe_es` (que ya
+# descartan cualquier carácter que no sea dígito o separador), así que
+# cantidad y precio ya salían bien: solo la unidad se perdía por no tener
+# columna propia que leer. Verificado con un barrido real de los 64
+# documentos detrás de las líneas sin unidad de todo el corpus (bloque 4
+# del diagnóstico anterior): "Kg" y "m" son los dos únicos tokens que
+# aparecen así, pegados a un número de cantidad o tras "€/" en el precio --
+# no se amplía esta lista sin verificar un caso real nuevo primero (mismo
+# criterio que las redacciones de baja, CONTEXTO.md sección 4).
+_UNIDAD_EMBEBIDA_EN_CANTIDAD_RE = re.compile(r"^[\d.,]+\s*(Kg|m)\.?$", re.IGNORECASE)
+_UNIDAD_EMBEBIDA_EN_PRECIO_RE = re.compile(r"€\s*/\s*(Kg|m)\b", re.IGNORECASE)
+
+
+def _extraer_unidad_embebida(cantidad_bruta: Optional[str], precio_bruto: Optional[str]) -> Optional[str]:
+    """Solo se llama cuando la cabecera no declaró ninguna columna de
+    unidad de medida (o su valor salió descartado por implausible, ver
+    `_UNIDAD_MEDIDA_IMPLAUSIBLE_RE`) -- nunca pisa una unidad ya resuelta
+    en su propia columna. Mira primero la celda de cantidad (el caso más
+    común en el corpus verificado) y, si no encuentra nada ahí, la de
+    precio -- una fila puede traer cantidad vacía del todo y la unidad
+    solo en el precio (verificado: `740560006`/`740570001`, cantidad
+    vacía, precio "14,70 €/Kg")."""
+    if cantidad_bruta:
+        coincidencia = _UNIDAD_EMBEBIDA_EN_CANTIDAD_RE.match(cantidad_bruta.strip())
+        if coincidencia:
+            return coincidencia.group(1)
+    if precio_bruto:
+        coincidencia = _UNIDAD_EMBEBIDA_EN_PRECIO_RE.search(precio_bruto)
+        if coincidencia:
+            return coincidencia.group(1)
+    return None
+
+
 # Mismo aviso del cliente: en la misma tabla, la columna "CANTIDAD DE
 # REFERENCIA" del documento original trae valores en un rango que parece un
 # año (1872, 1996-2005, la mayoría exactamente "2000") en vez de una
@@ -675,6 +716,15 @@ def _construir_campos(
                 motivo_revision,
                 "precio unitario recuperado de una columna fantasma sin etiquetar junto a \"precio "
                 "unitario\" en la cabecera de esta tabla, confirmar antes de dar por buena",
+            )
+
+    if unidad_medida is None:
+        unidad_medida = _extraer_unidad_embebida(cantidad_bruta, precio_bruto)
+        if unidad_medida is not None:
+            motivo_revision = _acumular_motivo(
+                motivo_revision,
+                f"unidad de medida ({unidad_medida!r}) recuperada de la propia celda de cantidad o "
+                "precio, sin columna propia en la cabecera de esta tabla: confirmar antes de dar por buena",
             )
 
     # Hallazgo real (sesión de limpieza del Excel al cliente, 2026-09-06,

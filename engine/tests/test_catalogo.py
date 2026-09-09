@@ -1718,6 +1718,85 @@ def test_construir_linea_catalogo_no_descarta_unidad_medida_real():
     assert linea["unidad_medida"] == "M"
 
 
+# Bloque 3, segunda tanda de cambios del cliente tras revisar el catálogo
+# (sesión 2026-09-09): `6.20/28510.0136_ANEJO_3.pdf` ("hilo de contacto")
+# no declara ninguna columna de unidad, pero la trae pegada al número de
+# cantidad o tras "€/" en el precio -- verificado contra el PDF real,
+# matrícula 642910100.
+def test_construir_linea_catalogo_recupera_unidad_embebida_en_cantidad():
+    mapeo = {"codigo_precio": None, "matricula": 0, "descripcion": 1, "unidad_medida": None, "cantidad": 2, "precio_unitario": 3}
+    fila = ["642910100", "HILO DE CONTACTO DE SECCIÓN CIRCULAR DE 107MM2", "120000 Kg", "9,61 €/Kg"]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=3, documento_origen_id=20, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea is not None
+    assert linea["unidad_medida"] == "Kg"
+    # La cantidad y el precio ya salían bien sin este arreglo
+    # (parsear_numero_es/parsear_importe_es descartan cualquier carácter
+    # que no sea dígito o separador) -- este bloque es solo sobre la unidad.
+    assert linea["cantidad"] == Decimal("120000")
+    assert linea["precio_unitario"] == Decimal("9.61")
+    assert "recuperada de la propia celda" in linea["motivo_revision"]
+
+
+def test_construir_linea_catalogo_recupera_unidad_embebida_en_precio_cuando_cantidad_vacia():
+    # Verificado contra el PDF real: matrículas 740560006/740570001, cantidad
+    # vacía del todo, la unidad solo aparece en el precio ("14,70 €/Kg").
+    mapeo = {"codigo_precio": None, "matricula": 0, "descripcion": 1, "unidad_medida": None, "cantidad": 2, "precio_unitario": 3}
+    fila = ["740560006", "CABLE FLEXIBLE DE 16 MM2 DE BRONCE BZ II", None, "14,70 €/Kg"]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=5, documento_origen_id=20, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea is not None
+    assert linea["unidad_medida"] == "Kg"
+    assert linea["precio_unitario"] == Decimal("14.70")
+
+
+def test_construir_linea_catalogo_recupera_unidad_embebida_metros():
+    mapeo = {"codigo_precio": None, "matricula": 0, "descripcion": 1, "unidad_medida": None, "cantidad": 2, "precio_unitario": 3}
+    fila = ["665100001", "EAPSP de 1x4x0,9 mm", "1200 m", "4,05 €/m"]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=7, documento_origen_id=20, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea is not None
+    assert linea["unidad_medida"] == "m"
+
+
+def test_construir_linea_catalogo_no_extrae_unidad_de_un_codigo_que_solo_parece_tenerla():
+    # Contraste: un valor de cantidad que no es "número + unidad" tal cual
+    # (p.ej. un código con una letra suelta en medio) no debe disparar la
+    # extracción -- el patrón exige que la celda ENTERA sea número + Kg/m.
+    mapeo = {"codigo_precio": None, "matricula": 0, "descripcion": 1, "unidad_medida": None, "cantidad": 2, "precio_unitario": 3}
+    fila = ["715500320", "ACC.DE AGUJA L-826H PABN", "1", "9.028,66 €"]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=90, documento_origen_id=487, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea is not None
+    assert linea["unidad_medida"] is None
+
+
+def test_construir_linea_catalogo_no_pisa_unidad_ya_resuelta_en_su_columna():
+    # La unidad ya viene de su propia columna: la recuperación de celda
+    # embebida ni se intenta.
+    mapeo = {"codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": 3, "cantidad": 4, "precio_unitario": 5}
+    fila = ["P-009", "", "CABLE ARMADO DE Cu", "UD.", "2000 Kg", "4,79 €/Kg"]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=115, documento_origen_id=95, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea is not None
+    assert linea["unidad_medida"] == "UD."
+
+
 def test_construir_linea_catalogo_marca_cantidad_con_forma_de_anio():
     mapeo = {"codigo_precio": None, "matricula": 0, "descripcion": 1, "unidad_medida": None, "cantidad": 2, "precio_unitario": 3}
     fila = ["607010254", "TRAVIESA PR-VE 54E1", "2004", "76,19 €"]
