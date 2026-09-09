@@ -1130,6 +1130,46 @@ suficientes, no ahora.
   todavía ni la derivación del coeficiente ni la completitud automática de
   matrícula (encargo explícito: "no lo implementes todavía"). Detalle
   completo y números en `docs/sesion-2026-09-09-cambios-cliente-catalogo.md`.
+- **Auditoría del reproceso de 16.647→22.097 líneas, mapeo de cabeceras sin
+  cabecera y documentos de adjudicación (sesión 2026-09-09, continuación,
+  `docs/sesion-2026-09-09-auditoria-mapeo-documentos.md`).** No se restaura
+  la copia de seguridad: la mayoría del crecimiento bruto era basura
+  localizada en `6.20/28510.0042/0046/0047` (mapeo del modelo desplazado
+  una columna sobre tablas sin cabecera, 3.183 líneas con ~2% de cantidad
+  real pero con lote al 100% -- contaminaban el Excel), no un fallo general
+  del reproceso; el resto del crecimiento (≈2.400 líneas de otros
+  expedientes) es aportación real de calidad igual o mejor que la media.
+  **Arreglado:** `evaluar_coherencia_mapeo` (`app.extraccion.
+  mapeo_cabecera`) valida el mapeo de una tabla sin cabecera contra TODAS
+  sus filas antes de aceptarlo (no solo las 2-3 que ve el modelo) y excluye
+  del Excel, sin tocar `lote_id`/`clave_linea` (por idempotencia -- una
+  primera versión que sí lo hacía duplicaba filas en cada reproceso), la
+  línea de una tabla cuyo mapeo resulta incoherente. **Caché de tablas sin
+  cabecera implementada:** `app.extraccion.firma_estructural` clasifica
+  cada columna por su contenido (no por número de columnas a secas, que ya
+  falló una vez, sesión 2026-09-08) para reutilizar un mapeo ya validado
+  entre tablas sin cabecera del MISMO documento, nunca entre documentos --
+  verificado que el caso real que tumbó el intento anterior
+  (`6.22/28510.0126`) queda correctamente descartado. **Hallazgo que
+  revisó el planteamiento del cliente:** el "documento de adjudicación
+  equivocado" de `6.22/28510.0126/0125/0094` no lo es -- el boletín de
+  Consejo de Administración adjunto sí menciona los tres expedientes con su
+  baja real, solo que es una plantilla que el clasificador todavía no
+  reconoce (cae en `otro`). De 16 documentos reales del corpus con el mismo
+  patrón, 10 mencionan su propio expediente o su matriz (mismo caso, no un
+  error); los 6 restantes no traen ningún código legible por texto vacío o
+  codificación de fuente rota, no por pertenecer a otro expediente -- cero
+  casos confirmados de "documento de otro expediente" en esta muestra. Se
+  implementó igual un detector genérico
+  (`_detectar_documento_adjudicacion_no_relacionado`) como red de
+  seguridad de solo lectura, que de paso reveló que `6.24/28510.0109` y
+  `6.24/28510.0216` tenían este mismo boletín adjunto sin ningún aviso.
+  **Pendiente:** reprocesar el corpus completo (467 expedientes, ~4-5 h
+  estimadas) para que estos arreglos, verificados contra una muestra real
+  representativa, alcancen también al resto del corpus; extracción de baja
+  para la plantilla de boletín de Consejo de Administración (nueva
+  plantilla en la cascada, sesión propia); 6 documentos `ADJUDICACION_*.pdf`
+  sin código legible, candidatos a revisión manual contra la Plataforma.
 
 ---
 
@@ -1149,4 +1189,5 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `sesion-2026-09-08-herencia-lote-continuacion.md`,
 `sesion-2026-09-08-auditoria-automatica.md`,
 `sesion-2026-09-09-cambios-cliente-catalogo.md`,
+`sesion-2026-09-09-auditoria-mapeo-documentos.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.
