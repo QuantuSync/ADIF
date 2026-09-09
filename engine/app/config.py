@@ -53,6 +53,15 @@ class Settings(BaseSettings):
     # lee la API (POST /mantenimiento/sap-desglose/cargar).
     sap_desglose_path: Optional[str] = None
 
+    # Bloque 4, sesión 2026-09-09: maestro de materiales de SAP (app.
+    # extraccion.maestro_materiales) -- documento de referencia de ADIF, NO
+    # derivado de pliegos ni contratos, con matrícula y unidad de medida de
+    # cada material. Mismo mecanismo que las rutas de arriba. Todavía no
+    # facilitado por el cliente: sin esta variable, `POST /mantenimiento/
+    # maestro-materiales/cargar` no tiene nada que leer y `completar-unidades`
+    # no completa nada -- ninguno de los dos rompe el resto del sistema.
+    maestro_materiales_path: Optional[str] = None
+
     # Recuperación de trabajos huérfanos (CONTEXTO.md sección 17, pendiente):
     # un trabajo `en_proceso` cuyo `bloqueado_en` supera este umbral se
     # reclama como si el worker que lo tenía hubiera desaparecido (contenedor
