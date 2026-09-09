@@ -252,6 +252,20 @@ class EstadoSapCargaOut(BaseModel):
     expedientes_sin_cambios: int = 0
 
 
+class SapDesglosecargaOut(BaseModel):
+    """Resumen de `POST /mantenimiento/sap-desglose/cargar` (bloque 6,
+    cambios del cliente tras revisar el catálogo): mismo criterio que
+    `EstadoSapCargaOut` -- `configurado=False` significa que
+    `SAP_DESGLOSE_PATH` no tiene ninguna ruta montada."""
+
+    configurado: bool
+    filas_leidas: int = 0
+    filas_sin_clave: int = 0
+    lineas_nuevas: int = 0
+    lineas_actualizadas: int = 0
+    lineas_sin_cambios: int = 0
+
+
 class TrabajoOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

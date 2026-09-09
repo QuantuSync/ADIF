@@ -40,6 +40,11 @@ services:
       # contrato SAP (app.extraccion.estado_sap). Solo lo lee la API
       # (POST /mantenimiento/estado-sap/cargar), el worker no la necesita.
       ESTADO_SAP_PATH: ${ESTADO_SAP_PATH:-}
+      # Bloque 6, cambios del cliente tras revisar el catálogo: desglose de
+      # SAP con las matrículas concretas de cada contrato
+      # (app.extraccion.sap_desglose) -- mismo mecanismo que las dos rutas
+      # de arriba. Solo lo lee la API (POST /mantenimiento/sap-desglose/cargar).
+      SAP_DESGLOSE_PATH: ${SAP_DESGLOSE_PATH:-}
       # Bloque 5, cambios del cliente tras revisar el catálogo: lista de
       # exclusión de expedientes (app/exclusion.py), un fichero de texto
       # plano -- una entrada por línea, código exacto ("6.24/28510.0088")

@@ -17,6 +17,7 @@ _TABLAS = [
     models.TrabajoCola.__table__,
     models.SindicacionExpediente.__table__,
     models.CandidatoAcuerdoMarco.__table__,
+    models.SapDesgloseLinea.__table__,
 ]
 
 
