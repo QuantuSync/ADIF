@@ -577,6 +577,61 @@ def test_catalogo_sigue_mostrando_lineas_descartadas(cliente, db_session):
     assert resp.json()["total"] == 1
 
 
+# Bloque 5, cambios del cliente tras revisar el catálogo: lista de exclusión
+# de expedientes (app/exclusion.py) -- "6.24/28510.0008" es el código que
+# siembra _sembrar_catalogo.
+def test_catalogo_oculta_expediente_de_la_lista_de_exclusion(cliente, db_session, tmp_path, monkeypatch):
+    fichero = tmp_path / "exclusion.txt"
+    fichero.write_text("# comentario\n6.24/28510.0008\n")
+    monkeypatch.setattr(settings, "exclusion_expedientes_path", str(fichero))
+    _sembrar_catalogo(db_session)
+
+    resp = cliente.get("/catalogo")
+
+    assert resp.json()["total"] == 0
+
+
+def test_catalogo_oculta_departamento_completo_de_la_lista_de_exclusion(cliente, db_session, tmp_path, monkeypatch):
+    fichero = tmp_path / "exclusion.txt"
+    fichero.write_text("28510\n")
+    monkeypatch.setattr(settings, "exclusion_expedientes_path", str(fichero))
+    _sembrar_catalogo(db_session)
+
+    resp = cliente.get("/catalogo")
+
+    assert resp.json()["total"] == 0
+
+
+def test_catalogo_no_oculta_expediente_de_otro_departamento(cliente, db_session, tmp_path, monkeypatch):
+    fichero = tmp_path / "exclusion.txt"
+    fichero.write_text("28520\n")
+    monkeypatch.setattr(settings, "exclusion_expedientes_path", str(fichero))
+    _sembrar_catalogo(db_session)  # "6.24/28510.0008", departamento 28510
+
+    resp = cliente.get("/catalogo")
+
+    assert resp.json()["total"] == 1
+
+
+def test_exportar_catalogo_excluye_expediente_de_la_lista_pero_no_lo_borra(
+    cliente, db_session, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(settings, "codigos_proyecto_path", None)
+    fichero = tmp_path / "exclusion.txt"
+    fichero.write_text("6.24/28510.0008\n")
+    monkeypatch.setattr(settings, "exclusion_expedientes_path", str(fichero))
+    _sembrar_catalogo(db_session)
+
+    resp = cliente.get("/catalogo/exportar.xlsx")
+
+    libro = openpyxl.load_workbook(io.BytesIO(resp.content))
+    hoja = libro.active
+    assert hoja.max_row == 1  # solo la cabecera: el único expediente está excluido
+    # Se conserva en base de datos (CONTEXTO.md, encargo del bloque 5: "se
+    # conservan en la base de datos") -- la exclusión es solo de la vista.
+    assert db_session.query(Expediente).filter_by(codigo_expediente="6.24/28510.0008").count() == 1
+
+
 def test_descargar_documento_sirve_los_bytes_reales(cliente, db_session, tmp_path, monkeypatch):
     from app.routers import documentos as documentos_router
 
