@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from app.catalogo import MOTIVO_MAPEO_INCOHERENTE, _acumular_motivo, construir_lineas_desde_tabla
 from app.extraccion.codigo_material import derivar_codigo_material_con_modelo
+from app.extraccion.firma_estructural import calcular_firma_estructural
 from app.extraccion.localizador import ResultadoLocalizacion, localizar_paginas_candidatas
 from app.extraccion.lote_tabla import asociar_lote_tabla
 from app.extraccion.mapeo_cabecera import cabecera_sin_senal, evaluar_coherencia_mapeo, mapear_cabecera
@@ -89,6 +90,17 @@ def procesar_anejo(
     # documento (esta función procesa uno solo): heredar de un documento a
     # otro no tendría ninguna base textual.
     ultimo_lote_resuelto: Optional[str] = None
+    # Bloque 3 (caché de tablas sin cabecera, sesión de auditoría
+    # 2026-09-09): mapeo ya validado de una tabla sin cabecera anterior de
+    # ESTE MISMO documento, indexado por `calcular_firma_estructural` (nunca
+    # por número de columnas a secas, ver su docstring). Vive solo mientras
+    # dura esta llamada -- nunca se persiste ni se comparte entre documentos,
+    # a diferencia de `cache_mapeo_cabecera` (CONTEXTO.md sección 6: el
+    # mapeo de una firma de CABECERA real sí vale entre documentos porque el
+    # texto de la cabecera es una señal fuerte; el contenido de una tabla sin
+    # cabecera no lo es lo bastante como para arriesgarse fuera del
+    # documento que la vio).
+    cache_estructural: dict[tuple, dict[str, Optional[int]]] = {}
 
     with pdfplumber.open(ruta_pdf) as pdf:
         paginas_texto = [
@@ -156,28 +168,48 @@ def procesar_anejo(
 
                 baja_lote = lotes.get(identificador_lote) if identificador_lote is not None else None
 
-                resultado_mapeo = mapear_cabecera(tabla.cabecera, tabla.filas[:3], db, model_provider)
-                firmas_cabecera.add(resultado_mapeo.firma)
-                if resultado_mapeo.llamada_modelo:
-                    llamadas_modelo += 1
+                sin_cabecera_propia = cabecera_sin_senal(tabla.cabecera)
+                firma_estructural = calcular_firma_estructural(tabla.filas) if sin_cabecera_propia else None
+                mapeo_heredado = cache_estructural.get(firma_estructural) if firma_estructural is not None else None
+
+                # Bloque 3 (caché de tablas sin cabecera): un mapeo heredado
+                # de otra tabla sin cabecera de ESTE documento con la misma
+                # firma estructural nunca se acepta a ciegas -- se valida
+                # contra las filas de ESTA tabla (misma comprobación del
+                # Bloque 2) antes de usarlo. `calcular_firma_estructural` ya
+                # distingue formas realmente distintas con el mismo número de
+                # columnas (docstring del módulo, caso real
+                # `6.22/28510.0126`), pero esta segunda comprobación es la
+                # red de seguridad si dos formas distintas coincidieran en
+                # firma por algún caso no visto todavía.
+                if mapeo_heredado is not None and evaluar_coherencia_mapeo(mapeo_heredado, tabla.filas) is None:
+                    mapeo = mapeo_heredado
+                    motivo_mapeo_incoherente = None
+                else:
+                    resultado_mapeo = mapear_cabecera(tabla.cabecera, tabla.filas[:3], db, model_provider)
+                    firmas_cabecera.add(resultado_mapeo.firma)
+                    if resultado_mapeo.llamada_modelo:
+                        llamadas_modelo += 1
+                    mapeo = resultado_mapeo.mapeo
+                    # Bloque 2 (auditoría 6.20/28510.0042/0046/0047): una tabla
+                    # sin cabecera propia siempre resuelve su mapeo con el
+                    # modelo, a ciegas de 2-3 filas de ejemplo
+                    # (`cabecera_sin_senal` implica `resultado_mapeo.origen ==
+                    # "modelo"`, nunca caché ni determinista). Se valida contra
+                    # TODAS sus filas antes de aceptarlo -- un mapeo
+                    # incoherente no cambia el lote de la línea (ver el
+                    # docstring de `MOTIVO_MAPEO_INCOHERENTE`, motivo de
+                    # idempotencia), solo se marca para que `app.exportacion`
+                    # la excluya del Excel entregable en vez de contaminarlo
+                    # con datos mal columnados.
+                    motivo_mapeo_incoherente = (
+                        evaluar_coherencia_mapeo(mapeo, tabla.filas) if sin_cabecera_propia else None
+                    )
+                    if sin_cabecera_propia and firma_estructural is not None and motivo_mapeo_incoherente is None:
+                        cache_estructural[firma_estructural] = mapeo
                 tablas_procesadas += 1
-                # Bloque 2 (auditoría 6.20/28510.0042/0046/0047): una tabla sin
-                # cabecera propia siempre resuelve su mapeo con el modelo, a
-                # ciegas de 2-3 filas de ejemplo (`cabecera_sin_senal` implica
-                # `resultado_mapeo.origen == "modelo"`, nunca caché ni
-                # determinista). Se valida contra TODAS sus filas antes de
-                # aceptarlo -- un mapeo incoherente no cambia el lote de la
-                # línea (ver el docstring de `MOTIVO_MAPEO_INCOHERENTE`, motivo
-                # de idempotencia), solo se marca para que `app.exportacion`
-                # la excluya del Excel entregable en vez de contaminarlo con
-                # datos mal columnados.
-                motivo_mapeo_incoherente = (
-                    evaluar_coherencia_mapeo(resultado_mapeo.mapeo, tabla.filas)
-                    if cabecera_sin_senal(tabla.cabecera)
-                    else None
-                )
                 lineas_tabla = construir_lineas_desde_tabla(
-                    tabla, resultado_mapeo.mapeo, documento_origen_id, expediente_id, baja_lote,
+                    tabla, mapeo, documento_origen_id, expediente_id, baja_lote,
                     orden_inicial=len(lineas),
                 )
                 for linea in lineas_tabla:
