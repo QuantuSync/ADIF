@@ -40,6 +40,15 @@ services:
       # contrato SAP (app.extraccion.estado_sap). Solo lo lee la API
       # (POST /mantenimiento/estado-sap/cargar), el worker no la necesita.
       ESTADO_SAP_PATH: ${ESTADO_SAP_PATH:-}
+      # Bloque 5, cambios del cliente tras revisar el catálogo: lista de
+      # exclusión de expedientes (app/exclusion.py), un fichero de texto
+      # plano -- una entrada por línea, código exacto ("6.24/28510.0088")
+      # o departamento completo ("28520"), "#" para comentarios -- que
+      # ADIF puede editar sin tocar código ni pedir un despliegue. Solo la
+      # API la lee (GET /catalogo y el Excel, los dos únicos sitios de los
+      # que el cliente pidió que desaparecieran). Vacío por defecto: sin
+      # esta variable, no se excluye ningún expediente.
+      EXCLUSION_EXPEDIENTES_PATH: ${EXCLUSION_EXPEDIENTES_PATH:-}
       # Orígenes permitidos para CORS (app/config.py): el navegador llama a
       # esta API desde fuera de la red de Docker, en el origen donde corre
       # "web". Lista separada por comas si hace falta más de uno.

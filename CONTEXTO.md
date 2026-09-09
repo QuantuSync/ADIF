@@ -288,6 +288,20 @@ y en ese caso va con umbral y cola de revisión.
 `Nº Interno`** (se repite entre filas: agrupa varios pedidos de un mismo
 procedimiento).
 
+### Lista de exclusión de expedientes
+
+Bloque 5, cambios del cliente tras revisar el catálogo: expedientes que no
+son del equipo del cliente se excluyen del Excel entregado y de `/catalogo`
+en la web, pero **se conservan en base de datos** y siguen visibles en las
+pantallas de gestión/revisión — la exclusión es solo de la vista, nunca un
+borrado. Configurable sin tocar código (`EXCLUSION_EXPEDIENTES_PATH`,
+`app/exclusion.py`): un fichero de texto plano, una entrada por línea,
+código exacto (`6.24/28510.0088`) o departamento completo (`28520`, el
+mismo segmento de `codigo_expediente` que ya usa la sindicación), `#` para
+comentarios. Aplicado dentro de `app.catalogo_consulta.consultar_catalogo`
+(la única implementación que usan tanto `/catalogo` como el Excel), nunca
+como parámetro que el llamador pueda desactivar.
+
 ---
 
 ## 8. Normalización — errores que van a aparecer

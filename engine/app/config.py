@@ -149,5 +149,17 @@ class Settings(BaseSettings):
     descubrimiento_pedidos_intervalo_segundos: float = 7 * 24 * 3600.0
     descubrimiento_pedidos_activo: bool = True
 
+    # Bloque 5, cambios del cliente tras revisar el catálogo: lista de
+    # exclusión de expedientes que no son del equipo del cliente -- sin
+    # ella, el cliente los quitaba a mano de cada exportación y volvían a
+    # aparecer en la siguiente. Mismo mecanismo que `codigos_proyecto_path`/
+    # `estado_sap_path` de arriba (ruta a un fichero de entrada, montada por
+    # bind-mount, vacía por defecto): un fichero de texto plano, no una base
+    # de datos ni un endpoint de escritura, para que ADIF pueda mantenerlo
+    # sin tocar código ni pedir un despliegue (`app.exclusion` para el
+    # formato exacto). Vacío por defecto: sin esta variable, no se excluye
+    # ningún expediente.
+    exclusion_expedientes_path: Optional[str] = None
+
 
 settings = Settings()

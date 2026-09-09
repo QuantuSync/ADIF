@@ -9,9 +9,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from sqlalchemy import Select, case, func, or_, select
+from sqlalchemy import Select, and_, case, func, or_, select
 from sqlalchemy.orm import Session
 
+from app.config import settings
+from app.exclusion import cargar_exclusiones
 from app.models import Documento, DocumentoExpediente, EstadoRevisionLinea, Expediente, LineaCatalogo, Lote
 
 # Órdenes disponibles para `/catalogo` (encargo de esta sesión, 2026-09-07):
@@ -85,7 +87,28 @@ def _aplicar_filtros(
                 LineaCatalogo.codigo_precio.ilike(patron),
             )
         )
+    stmt = _excluir_expedientes_de_la_lista(stmt)
     return stmt
+
+
+def _excluir_expedientes_de_la_lista(stmt: Select) -> Select:
+    """Bloque 5, cambios del cliente tras revisar el catálogo
+    (`app.exclusion`): siempre activo, nunca un parámetro que el llamador
+    pueda desactivar -- el catálogo de la web y el Excel (los dos pasan por
+    `consultar_catalogo`, CONTEXTO.md: "una sola implementación") son
+    exactamente los dos sitios de los que el cliente pidió que
+    desaparecieran. Las pantallas de gestión/revisión no llaman a esta
+    función, así que un expediente excluido se sigue viendo y procesando
+    ahí con normalidad -- solo se esconde del entregable."""
+    exclusiones = cargar_exclusiones(settings.exclusion_expedientes_path)
+    if exclusiones.vacia():
+        return stmt
+    condiciones = []
+    if exclusiones.codigos:
+        condiciones.append(Expediente.codigo_expediente.notin_(exclusiones.codigos))
+    for departamento in exclusiones.departamentos:
+        condiciones.append(~Expediente.codigo_expediente.like(f"%/{departamento}.%"))
+    return stmt.where(and_(*condiciones))
 
 
 @dataclass(frozen=True)
