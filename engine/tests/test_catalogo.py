@@ -1229,6 +1229,51 @@ def test_combinar_por_clave_no_funde_por_firma_material_en_huerfanas():
     assert len(combinadas) == 2
 
 
+def test_combinar_por_clave_no_funde_dos_codigos_propios_de_la_misma_pagina_por_firma():
+    # Caso real, 6.22/28510.0125 / 0126 / 0094 (las tres comparten el mismo
+    # CONTRATO, que reproduce el cuadro de precios completo dos veces, una
+    # por lote NORTE/SUR). P-133 (matrícula 611050081) y P-137 (matrícula
+    # 611050121) son dos materiales reales y distintos que además comparten
+    # descripción y precio en el documento -- coincidencia legítima del
+    # catálogo. En la copia de la página 126 la extracción pierde la
+    # matrícula de las dos filas (queda `None`), así que su firma se vuelve
+    # indistinguible entre ellas para esa página. Sin el guard de página en
+    # conflicto, `_combinar_por_clave` fundía la segunda bajo la clave de la
+    # primera y el bucle de fusión, que copia campo a campo, dejaba su
+    # propio `codigo_precio` pisando el de la fila ganadora --
+    # `clave_linea="P-133"` con `codigo_precio="P-137"`, un choque directo
+    # con `uq_linea_lote_clave` en cuanto la fila se guardaba de verdad.
+    p133_pagina120 = {
+        "clave_linea": "P-133", "matricula": "611050081", "descripcion": "",
+        "codigo_precio": "P-133", "precio_unitario": Decimal("241039.59"), "pagina": 120,
+    }
+    p137_pagina120 = {
+        "clave_linea": "P-137", "matricula": "611050121", "descripcion": "",
+        "codigo_precio": "P-137", "precio_unitario": Decimal("241039.59"), "pagina": 120,
+    }
+    p133_pagina126 = {
+        "clave_linea": "P-133", "matricula": None, "descripcion": "ES-B1-54-320-1:8,5-CC-I-3.808",
+        "codigo_precio": "P-133", "precio_unitario": Decimal("241039.59"), "pagina": 126,
+    }
+    p137_pagina126 = {
+        "clave_linea": "P-137", "matricula": None, "descripcion": "ES-B1-54-320-1:8,5-CC-I-3.808",
+        "codigo_precio": "P-137", "precio_unitario": Decimal("241039.59"), "pagina": 126,
+    }
+
+    combinadas = _combinar_por_clave([p133_pagina120, p137_pagina120, p133_pagina126, p137_pagina126])
+
+    por_codigo = {l["codigo_precio"]: l for l in combinadas}
+    assert set(por_codigo) == {"P-133", "P-137"}
+    # Cada fila conserva su propia clave (nunca roba la de la otra) y se
+    # completa igual con el campo que trajo la copia de la otra página.
+    assert por_codigo["P-133"]["clave_linea"] == "P-133"
+    assert por_codigo["P-133"]["matricula"] == "611050081"
+    assert por_codigo["P-133"]["descripcion"] == "ES-B1-54-320-1:8,5-CC-I-3.808"
+    assert por_codigo["P-137"]["clave_linea"] == "P-137"
+    assert por_codigo["P-137"]["matricula"] == "611050121"
+    assert por_codigo["P-137"]["descripcion"] == "ES-B1-54-320-1:8,5-CC-I-3.808"
+
+
 def test_guardar_lineas_catalogo_funde_material_repetido_entre_documentos_distintos(db_session):
     # Caso real, 6.23/28510.0102 y 6.25/28510.0016: la tabla sin código vive
     # en un documento (ANEJO_3) y la que sí trae codigo_precio en otro
