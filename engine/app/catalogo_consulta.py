@@ -108,6 +108,18 @@ def _excluir_expedientes_de_la_lista(stmt: Select) -> Select:
         condiciones.append(Expediente.codigo_expediente.notin_(exclusiones.codigos))
     for departamento in exclusiones.departamentos:
         condiciones.append(~Expediente.codigo_expediente.like(f"%/{departamento}.%"))
+    if exclusiones.codigos_internos:
+        # `codigo_interno` es nullable (solo 58,9% de los expedientes cruzan
+        # con el Excel de códigos, CONTEXTO.md sección 7): "NULL NOT IN (...)"
+        # evalúa a NULL en SQL, no a verdadero, así que sin el `or_` de abajo
+        # este `AND` habría escondido del entregable TODOS los expedientes
+        # sin código interno, no solo los de la lista.
+        condiciones.append(
+            or_(
+                Expediente.codigo_interno.is_(None),
+                Expediente.codigo_interno.notin_(exclusiones.codigos_internos),
+            )
+        )
     return stmt.where(and_(*condiciones))
 
 

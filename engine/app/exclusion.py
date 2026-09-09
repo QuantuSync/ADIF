@@ -14,6 +14,19 @@ Formato del fichero, una entrada por línea:
 - Una línea de solo dígitos es un departamento completo ("28520") -- mismo
   segmento que ya usa `app.sindicacion.atom_parser.EntradaSindicacion.
   departamento" ("6.24/28510.0088" -> "28510").
+- Una línea con el prefijo "INTERNO:" es un código interno completo
+  ("INTERNO:24038") -- bloque 3, sesión 2026-09-09: el cliente propuso
+  agrupar por código interno como criterio adicional (además de expediente y
+  departamento) porque, agrupado así, el catálogo sale coherente por
+  tipología de material (`docs/sesion-2026-09-09-...md`, correlación
+  verificada contra el corpus real: 160/161 grupos con más de un expediente
+  comparten la misma ESPECIALIDAD/DISCIPLINA del Excel de códigos). El
+  prefijo es obligatorio porque un código interno y un departamento son las
+  dos cadenas de solo dígitos que puede traer este fichero (ambos de 5
+  cifras en el corpus real) -- sin distinguirlos, "24038" sería ambiguo
+  entre "excluye el departamento 24038" (no existe, pero el fichero no lo
+  sabe) y "excluye el código interno 24038". Mecanismo únicamente: qué
+  código interno excluir, si alguno, lo decide el cliente, no esta sesión.
 - Líneas vacías y las que empiezan por "#" se ignoran (comentarios).
 
 Se excluye del Excel entregado y del catálogo de la web (`app.catalogo_
@@ -34,21 +47,26 @@ from app.extraccion.cruce_codigos import normalizar_codigo_expediente
 # (CONTEXTO.md sección 20): "N.NN/DDDDD.NNNN" -> "DDDDD".
 _DEPARTAMENTO_RE = re.compile(r"^\d+\.\d+/(\d+)\.")
 
+_PREFIJO_INTERNO = "INTERNO:"
+
 
 @dataclass(frozen=True)
 class ExclusionExpedientes:
     codigos: frozenset[str] = field(default_factory=frozenset)
     departamentos: frozenset[str] = field(default_factory=frozenset)
+    codigos_internos: frozenset[str] = field(default_factory=frozenset)
 
-    def excluye(self, codigo_expediente: str) -> bool:
+    def excluye(self, codigo_expediente: str, codigo_interno: Optional[str] = None) -> bool:
         normalizado = normalizar_codigo_expediente(codigo_expediente)
         if normalizado in self.codigos:
+            return True
+        if codigo_interno is not None and codigo_interno in self.codigos_internos:
             return True
         m = _DEPARTAMENTO_RE.match(normalizado or "")
         return m is not None and m.group(1) in self.departamentos
 
     def vacia(self) -> bool:
-        return not self.codigos and not self.departamentos
+        return not self.codigos and not self.departamentos and not self.codigos_internos
 
 
 _SIN_EXCLUSIONES = ExclusionExpedientes()
@@ -72,14 +90,23 @@ def cargar_exclusiones(ruta: Optional[str]) -> ExclusionExpedientes:
         return _SIN_EXCLUSIONES
     codigos: set[str] = set()
     departamentos: set[str] = set()
+    codigos_internos: set[str] = set()
     for linea in contenido.read_text(encoding="utf-8").splitlines():
         valor = linea.strip()
         if not valor or valor.startswith("#"):
             continue
-        if "/" in valor:
+        if valor.upper().startswith(_PREFIJO_INTERNO):
+            codigo_interno = valor[len(_PREFIJO_INTERNO):].strip()
+            if codigo_interno:
+                codigos_internos.add(codigo_interno)
+        elif "/" in valor:
             normalizado = normalizar_codigo_expediente(valor)
             if normalizado:
                 codigos.add(normalizado)
         else:
             departamentos.add(valor)
-    return ExclusionExpedientes(codigos=frozenset(codigos), departamentos=frozenset(departamentos))
+    return ExclusionExpedientes(
+        codigos=frozenset(codigos),
+        departamentos=frozenset(departamentos),
+        codigos_internos=frozenset(codigos_internos),
+    )

@@ -52,3 +52,30 @@ def test_comentarios_y_lineas_vacias_se_ignoran(tmp_path):
 def test_expediente_sin_formato_de_codigo_no_casa_ningun_departamento():
     exclusiones = ExclusionExpedientes(departamentos=frozenset({"28510"}))
     assert not exclusiones.excluye("no-es-un-codigo")
+
+
+# Bloque 3, sesión 2026-09-09: mecanismo de exclusión por código interno,
+# además de expediente y departamento -- prefijo "INTERNO:" porque un código
+# interno y un departamento son ambos cadenas de solo dígitos (ambigüedad
+# real, ver docstring del módulo).
+def test_codigo_interno(tmp_path):
+    fichero = tmp_path / "exclusion.txt"
+    fichero.write_text("INTERNO:24038\n")
+    exclusiones = cargar_exclusiones(str(fichero))
+    assert exclusiones.codigos_internos == frozenset({"24038"})
+    assert exclusiones.excluye("6.24/28510.9999", codigo_interno="24038")
+    assert not exclusiones.excluye("6.24/28510.9999", codigo_interno="24039")
+
+
+def test_codigo_interno_no_excluye_sin_dato_de_codigo_interno():
+    exclusiones = ExclusionExpedientes(codigos_internos=frozenset({"24038"}))
+    assert not exclusiones.excluye("6.24/28510.9999")
+    assert not exclusiones.excluye("6.24/28510.9999", codigo_interno=None)
+
+
+def test_codigo_interno_no_se_confunde_con_departamento(tmp_path):
+    fichero = tmp_path / "exclusion.txt"
+    fichero.write_text("28510\n")
+    exclusiones = cargar_exclusiones(str(fichero))
+    assert exclusiones.departamentos == frozenset({"28510"})
+    assert exclusiones.codigos_internos == frozenset()
