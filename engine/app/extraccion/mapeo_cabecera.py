@@ -19,6 +19,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from app.catalogo import _MATRICULA_VALIDA_RE
 from app.extraccion.firma_cabecera import calcular_firma_cabecera
 from app.extraccion.texto import normalizar
 from app.interfaces.model_provider import ModelProvider
@@ -152,7 +153,7 @@ def guardar_mapeo_cacheado(
     return entrada
 
 
-def _cabecera_sin_senal(cabecera: list[Optional[str]]) -> bool:
+def cabecera_sin_senal(cabecera: list[Optional[str]]) -> bool:
     """Verdadero cuando `cabecera` no trae ningún texto real (todas las
     celdas `None` o en blanco) -- caso real de esta sesión (verificación del
     Excel exportado, 2026-09-08): `app.extraccion.tabla.extraer_tablas_pagina`
@@ -178,6 +179,85 @@ def _cabecera_sin_senal(cabecera: list[Optional[str]]) -> bool:
     return not any(c and c.strip() for c in cabecera)
 
 
+_UMBRAL_COHERENCIA = 0.5
+
+
+def evaluar_coherencia_mapeo(
+    mapeo: dict[str, Optional[int]], filas: list[list[Optional[str]]]
+) -> Optional[str]:
+    """Bloque 2 (auditoría de `6.20/28510.0042`/`0046`/`0047`, 51 grupos
+    duplicados y 207 líneas sin descripción): solo se aplica a un mapeo de
+    modelo sobre una tabla `cabecera_sin_senal` -- sin nombres de columna
+    que lo anclen, un modelo pequeño guiado solo por 2-3 filas de ejemplo
+    (`_mapear_con_modelo`) puede devolver un índice que no corresponde al
+    campo real. Verificado contra el PDF real de `6.20/28510.0047`
+    (`ANEJO_abd69efbdd39b552.pdf` p.27): la tabla trae 5 columnas reales
+    (matrícula, designación, plano, norma técnica, precio) sin cabecera
+    propia -- el modelo, sin más pista que 3 filas, mapeó `descripcion` a
+    una columna vacía en el 100% de las filas reales de esa tabla y
+    `cantidad` a la columna de la norma técnica ("03.360.101.4" leído como
+    33601014).
+
+    Se valida contra TODAS las filas de la tabla, no solo las 2-3 que vio
+    el modelo -- las de ejemplo pueden ser, por azar, las únicas donde el
+    mapeo sí cuadra. Solo se comprueban los dos campos obligatorios del
+    catálogo (`CAMPOS_OBLIGATORIOS`): si el modelo hubiera acertado, ambos
+    deberían traer valor real en la inmensa mayoría de las filas -- ningún
+    cuadro de precios legítimo del corpus tiene una `descripcion` o un
+    `precio_unitario` mayoritariamente vacíos.
+
+    El umbral de vacío no basta por sí solo -- verificado contra otras tablas
+    reales del mismo documento (p.27, 29, 35, 42 de `ANEJO_abd69efbdd39b552.
+    pdf`): el mismo desplazamiento de una columna (matrícula->codigo_precio,
+    designación->matrícula, PLANO->descripcion) deja `descripcion` apuntando
+    a la columna "Plano" (referencias de plano tipo "P16.0739.04"), que por
+    azar del documento está rellena en más de la mitad de las filas -- pasa
+    el umbral de vacío sin ser una descripción real. Por eso se añade una
+    segunda comprobación, sobre `matricula` si el mapeo la asigna: sus
+    valores no vacíos deben parecer matrículas de verdad (`_MATRICULA_VALIDA_
+    RE`, CONTEXTO.md sección 2, 9 dígitos) en la mayoría de las filas -- una
+    matrícula real puede faltar en muchas filas (no es clave, sección 2),
+    pero cuando trae valor nunca es texto libre como "CUPON MIXTO...". Este
+    desplazamiento concreto pone justo ese texto libre en la columna que el
+    mapeo cree que es `matricula`, y lo detecta aunque `descripcion` haya
+    colado el umbral de arriba. Devuelve el motivo si resulta incoherente, o
+    `None` si el mapeo pasa la comprobación."""
+    if not filas:
+        return None
+    total = len(filas)
+    for campo in CAMPOS_OBLIGATORIOS:
+        indice = mapeo.get(campo)
+        if indice is None:
+            return f"{campo} sin columna asignada por el modelo en una tabla sin cabecera propia"
+        con_valor = sum(
+            1 for fila in filas if indice < len(fila) and fila[indice] and fila[indice].strip()
+        )
+        if con_valor / total < _UMBRAL_COHERENCIA:
+            return (
+                f"{campo} vacío en la mayoría de las filas de la tabla "
+                f"({con_valor}/{total}) tras aplicar el mapeo del modelo sobre cabecera sin señal"
+            )
+
+    indice_matricula = mapeo.get("matricula")
+    if indice_matricula is not None:
+        valores = [
+            fila[indice_matricula].strip()
+            for fila in filas
+            if indice_matricula < len(fila) and fila[indice_matricula] and fila[indice_matricula].strip()
+        ]
+        if valores:
+            con_forma_valida = sum(
+                1 for valor in valores if _MATRICULA_VALIDA_RE.match(valor.replace(" ", ""))
+            )
+            if con_forma_valida / len(valores) < _UMBRAL_COHERENCIA:
+                return (
+                    "matricula con valores que no tienen forma de matrícula "
+                    f"({con_forma_valida}/{len(valores)} con 9 dígitos) tras aplicar el mapeo del "
+                    "modelo sobre cabecera sin señal -- probablemente apunta a otra columna"
+                )
+    return None
+
+
 # Bloque 5, cambios del cliente tras revisar el catálogo (sesión 2026-09-09):
 # se intentó aquí una función `heredar_mapeo_de_pagina_anterior` -- reutilizar
 # el mapeo de la tabla anterior del mismo documento para una tabla sin
@@ -194,7 +274,7 @@ def _cabecera_sin_senal(cabecera: list[Optional[str]]) -> bool:
 # por la propia auditoría automática (`lineas_duplicadas_exactas`) al
 # reprocesar en vivo. El número de columnas por sí solo no basta como
 # garantía de "misma forma de tabla". La vía segura que ya preveía la
-# sesión que cerró `_cabecera_sin_senal` (docstring de esa función) sigue
+# sesión que cerró `cabecera_sin_senal` (docstring de esa función) sigue
 # siendo la correcta: cada tabla sin cabecera pide su propio mapeo al
 # modelo, con sus propias filas de ejemplo -- exige `MODEL_API_KEY`
 # configurada, no disponible en este entorno; sin ella, esas páginas se
@@ -209,7 +289,7 @@ def mapear_cabecera(
     model_provider: Optional[ModelProvider],
 ) -> ResultadoMapeoCabecera:
     firma = calcular_firma_cabecera(cabecera)
-    cabecera_fiable = not _cabecera_sin_senal(cabecera)
+    cabecera_fiable = not cabecera_sin_senal(cabecera)
 
     if cabecera_fiable:
         cacheado = obtener_mapeo_cacheado(db, firma)
