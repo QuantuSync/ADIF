@@ -10,6 +10,7 @@ from app.exportacion import (
     _celda_matricula,
     _celda_numero,
     _celda_texto,
+    _celda_texto_o_espacio,
     _escribir_resumen,
     _formato_cantidad,
 )
@@ -67,6 +68,24 @@ def test_formato_cantidad_entero_sin_punto():
 
 def test_formato_cantidad_ausente_sin_punto():
     assert _formato_cantidad(None) == "#,##0"
+
+
+# Bloque 2, segunda tanda de cambios del cliente tras revisar el catálogo:
+# una celda de texto vacía del todo deja que Excel desborde encima el texto
+# de la celda anterior -- un espacio lo evita. Solo en columnas de texto,
+# nunca en las numéricas (_celda_numero, sin cambios: sigue devolviendo
+# None, nunca un espacio que las convertiría en texto mixto).
+def test_celda_texto_o_espacio_vacio_da_un_espacio():
+    assert _celda_texto_o_espacio(None) == " "
+    assert _celda_texto_o_espacio("") == " "
+
+
+def test_celda_texto_o_espacio_presente_se_deja_igual():
+    assert _celda_texto_o_espacio("L01") == "L01"
+
+
+def test_celda_numero_sigue_devolviendo_none_nunca_espacio():
+    assert _celda_numero(None) is None
 
 
 def test_formato_cantidad_con_decimales_significativos():
