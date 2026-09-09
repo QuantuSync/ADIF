@@ -7,7 +7,10 @@ baja de lote (encargo de una sesión anterior, punto 3) y, al final de todo,
 unidad de medida (aviso del cliente, sesión 2026-09-07: sin ella, una
 Cantidad de 2000 o un Precio unitario de 0,142 no significan nada por sí
 solos). Las tres añadidas siempre después de las once originales, nunca
-alterando su orden ni sus posiciones.
+alterando su orden ni sus posiciones -- **excepto "Comentarios"**, que el
+cliente pidió mover al final de todas (bloque 1, segunda tanda de cambios
+tras revisar el catálogo, sesión 2026-09-09): es la única de las once que
+rellena una persona a mano, no el documento.
 
 El marcador entre paréntesis ("(no consta)", "(no aplica)") es una
 convención de la interfaz web (`app/ui.tsx`, `DatoVacio`) para que una
@@ -72,7 +75,6 @@ COLUMNAS = [
     "Cantidad",
     "Precio unitario",
     "Lote",
-    "Comentarios",
     "Precio adjudicado",
     "Baja del lote",
     # Aviso del cliente (sesión 2026-09-07): sin la unidad, una Cantidad de
@@ -88,6 +90,14 @@ COLUMNAS = [
     # Excel. Al final de todo, cuarta columna añadida -- mismo criterio que
     # las tres anteriores.
     "Estado del contrato (SAP)",
+    # Segunda tanda de cambios del cliente tras revisar el catálogo (bloque
+    # 1, sesión 2026-09-09): la única de las once columnas originales que el
+    # cliente pidió mover -- de la novena posición al final de todas,
+    # después de las cuatro añadidas más tarde. Es la única columna que
+    # rellena una persona a mano (CONTEXTO.md sección 7: "Comentarios |
+    # Humano"), así que al final es donde menos estorba a las columnas que
+    # sí vienen del documento.
+    "Comentarios",
 ]
 
 # Columnas numéricas (1-indexadas, en el orden de COLUMNAS de arriba) a las
@@ -288,11 +298,11 @@ def generar_excel_catalogo(db: Session, incluir_pendientes_sin_lote: bool = Fals
                 _celda_numero(linea.cantidad),
                 _celda_numero(linea.precio_unitario),
                 _celda_texto(lote.identificador_lote if lote else None),
-                linea.comentarios,
                 _celda_numero(linea.precio_adjudicado),
                 _celda_numero(linea.baja_lote),
                 _celda_texto(linea.unidad_medida),
                 _celda_texto(expediente.estado_contrato_sap),
+                linea.comentarios,
             ])
             hoja.cell(row=fila, column=_COLUMNA_CANTIDAD).number_format = _formato_cantidad(linea.cantidad)
             for columna in _COLUMNAS_IMPORTE:

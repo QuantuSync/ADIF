@@ -252,9 +252,9 @@ def test_exportar_catalogo_genera_xlsx_con_columnas_del_formato_esperado(cliente
     assert cabecera == [
         "Código interno", "Código de expediente", "Código matriz", "Título expediente",
         "Matrícula del material", "Descripción del material", "Código del material",
-        "Cantidad", "Precio unitario", "Lote", "Comentarios",
+        "Cantidad", "Precio unitario", "Lote",
         "Precio adjudicado", "Baja del lote", "Unidad de medida",
-        "Estado del contrato (SAP)",
+        "Estado del contrato (SAP)", "Comentarios",
     ]
     fila = [c.value for c in next(hoja.iter_rows(min_row=2, max_row=2))]
     assert fila[3] == "SUMINISTRO DE GUANTES CONTRA RIESGO ELECTRICO."
@@ -268,11 +268,14 @@ def test_exportar_catalogo_genera_xlsx_con_columnas_del_formato_esperado(cliente
     assert fila[1] is None
     # Encargo de una sesión anterior, punto 3: precio adjudicado y baja del
     # lote, sin desplazar las once columnas de siempre.
-    assert fila[11] == 11.04
-    assert fila[12] == 0.54
+    assert fila[10] == 11.04
+    assert fila[11] == 0.54
     # Aviso del cliente (sesión 2026-09-07): unidad de medida, al final de
     # todo, después de las dos columnas ya añadidas.
-    assert fila[13] == "UN"
+    assert fila[12] == "UN"
+    # Segunda tanda de cambios del cliente (bloque 1, sesión 2026-09-09):
+    # "Comentarios" se mueve al final de todas las columnas.
+    assert fila[14] is None
 
 
 def _agregar_linea_huerfana(db_session, expediente, documento, *, motivo):
