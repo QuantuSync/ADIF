@@ -263,9 +263,12 @@ def test_exportar_catalogo_genera_xlsx_con_columnas_del_formato_esperado(cliente
     assert fila[8] == 24.0
     # Sin cruce con el Excel de códigos configurado en este test: código
     # interno y código de proyecto se dejan vacíos, no inventados
-    # (CONTEXTO.md sección 7).
-    assert fila[0] is None
-    assert fila[1] is None
+    # (CONTEXTO.md sección 7) -- un espacio, no una celda en blanco del todo
+    # (bloque 2, segunda tanda de cambios del cliente, sesión 2026-09-09:
+    # solo en columnas de texto, para que Excel no desborde encima el texto
+    # de la celda anterior).
+    assert fila[0] == " "
+    assert fila[1] == " "
     # Encargo de una sesión anterior, punto 3: precio adjudicado y baja del
     # lote, sin desplazar las once columnas de siempre.
     assert fila[10] == 11.04
@@ -275,7 +278,7 @@ def test_exportar_catalogo_genera_xlsx_con_columnas_del_formato_esperado(cliente
     assert fila[12] == "UN"
     # Segunda tanda de cambios del cliente (bloque 1, sesión 2026-09-09):
     # "Comentarios" se mueve al final de todas las columnas.
-    assert fila[14] is None
+    assert fila[14] == " "
 
 
 def _agregar_linea_huerfana(db_session, expediente, documento, *, motivo):

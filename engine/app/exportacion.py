@@ -60,6 +60,19 @@ def _celda_texto(valor: str | None) -> str | None:
     return valor or None
 
 
+def _celda_texto_o_espacio(valor: str | None) -> str:
+    """Bloque 2, segunda tanda de cambios del cliente tras revisar el
+    catálogo (sesión 2026-09-09): una celda de texto vacía del todo deja
+    que Excel desborde encima el texto de la celda anterior de la misma
+    fila -- un único espacio ocupa la celda sin desbordamiento, y se sigue
+    leyendo como "vacío" al mirar la pantalla. **Solo en columnas de
+    texto**: en una columna numérica (`_celda_numero`, justo debajo) un
+    espacio la convertiría en texto mixto y rompería sumar/filtrar/ordenar
+    -- el mismo motivo, en sentido contrario, por el que el marcador
+    "(no consta)" tampoco viaja al Excel (ver docstring del módulo)."""
+    return valor if valor else " "
+
+
 def _celda_numero(valor) -> object:
     return float(valor) if valor is not None else None
 
@@ -288,21 +301,21 @@ def generar_excel_catalogo(db: Session, incluir_pendientes_sin_lote: bool = Fals
             cruzado = bool(expediente.codigos_cruzados)
             fila = hoja.max_row + 1
             hoja.append([
-                expediente.codigo_interno if cruzado else None,
-                expediente.codigo_expediente if cruzado else None,
-                expediente.codigo_matriz,
-                expediente.nombre_proyecto,
-                _celda_matricula(linea),
-                linea.descripcion,
-                _celda_texto(linea.codigo_material),
+                _celda_texto_o_espacio(expediente.codigo_interno if cruzado else None),
+                _celda_texto_o_espacio(expediente.codigo_expediente if cruzado else None),
+                _celda_texto_o_espacio(expediente.codigo_matriz),
+                _celda_texto_o_espacio(expediente.nombre_proyecto),
+                _celda_texto_o_espacio(_celda_matricula(linea)),
+                _celda_texto_o_espacio(linea.descripcion),
+                _celda_texto_o_espacio(_celda_texto(linea.codigo_material)),
                 _celda_numero(linea.cantidad),
                 _celda_numero(linea.precio_unitario),
-                _celda_texto(lote.identificador_lote if lote else None),
+                _celda_texto_o_espacio(lote.identificador_lote if lote else None),
                 _celda_numero(linea.precio_adjudicado),
                 _celda_numero(linea.baja_lote),
-                _celda_texto(linea.unidad_medida),
-                _celda_texto(expediente.estado_contrato_sap),
-                linea.comentarios,
+                _celda_texto_o_espacio(linea.unidad_medida),
+                _celda_texto_o_espacio(expediente.estado_contrato_sap),
+                _celda_texto_o_espacio(linea.comentarios),
             ])
             hoja.cell(row=fila, column=_COLUMNA_CANTIDAD).number_format = _formato_cantidad(linea.cantidad)
             for columna in _COLUMNAS_IMPORTE:
