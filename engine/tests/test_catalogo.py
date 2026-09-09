@@ -1852,3 +1852,87 @@ def test_construir_linea_catalogo_no_marca_cantidad_redonda_fuera_de_rango_de_an
     assert linea is not None
     assert linea["cantidad"] == Decimal("2500")
     assert linea["motivo_revision"] is None
+
+
+# Bloque 4, segunda tanda de cambios del cliente tras revisar el catálogo
+# (sesión 2026-09-09): defecto real de extracción de unidad de medida,
+# verificado contra `6.22_28510.0126_ANEJO_53d9b3928f16babb.pdf` p.3.
+# Cabecera real: [CÓDIGO DEL ELEMENTO(0), Nº MATRÍCULA(1), DESCRIPCIÓN(2),
+# None(3), None(4), UNIDAD DE MEDIDA(5), PLANO DE REFERENCIA(6),
+# IMPACTO...(7), PRECIO UNITARIO(8), None(9), None(10)]. Las filas "D"
+# (P-001, P-003, P-005...) traen la descripción y el precio reales una
+# columna más a la derecha de lo que el mapeo espera -- dos columnas
+# fantasma independientes en la misma fila -- mientras que código de
+# precio, matrícula y unidad de medida SÍ están en su columna de siempre.
+_MAPEO_ANEJO_0126 = {
+    "codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": 5, "cantidad": None, "precio_unitario": 8,
+}
+
+
+def test_construir_linea_catalogo_dos_columnas_fantasma_no_desplaza_codigo_ni_unidad():
+    fila_d = [
+        "P-001", "611150110", "", "DS-B1-54-320/230-0,11-CR-D", "", "UD.",
+        "P16.2627.00", "ALTO", "", "122.624,14 €", "",
+    ]
+
+    linea = construir_linea_catalogo(
+        fila_d, _MAPEO_ANEJO_0126, pagina=3, documento_origen_id=672, expediente_id=1,
+        baja_lote=None, orden_aparicion=0,
+    )
+
+    assert linea is not None
+    # Antes del arreglo, desplazar el mapeo entero "arreglaba" descripción y
+    # precio pero rompía estos dos -- código de precio pasaba a leer la
+    # matrícula, y unidad de medida pasaba a leer "Plano de Referencia".
+    assert linea["codigo_precio"] == "P-001"
+    assert linea["unidad_medida"] == "UD."
+    assert linea["descripcion"] == "DS-B1-54-320/230-0,11-CR-D"
+    assert linea["precio_unitario"] == Decimal("122624.14")
+    assert "propia columna fantasma" in linea["motivo_revision"]
+
+
+def test_construir_linea_catalogo_columna_fantasma_de_referencia_vacia_tambien_se_recupera():
+    # Caso real, matrícula 611150412: la misma fila "D", pero con "Plano de
+    # Referencia" vacío en vez de relleno -- no cambia el resultado, la
+    # recuperación no depende de esa columna.
+    fila_d = [
+        "P-015", "611150412", "", "DSI-B1-54-320/230-0,11-CR-D", "", "UD.",
+        "", "ALTO", "", "107.198,44 €", "",
+    ]
+
+    linea = construir_linea_catalogo(
+        fila_d, _MAPEO_ANEJO_0126, pagina=3, documento_origen_id=672, expediente_id=1,
+        baja_lote=None, orden_aparicion=0,
+    )
+
+    assert linea is not None
+    assert linea["codigo_precio"] == "P-015"
+    assert linea["matricula"] == "611150412"
+    assert linea["unidad_medida"] == "UD."
+    assert linea["precio_unitario"] == Decimal("107198.44")
+
+
+def test_construir_linea_catalogo_fila_i_sin_columnas_fantasma_no_se_toca():
+    # Contraste: la fila "I" hermana no tiene columnas fantasma -- descripción
+    # y precio ya están en su columna de siempre, así que ni la recuperación
+    # nueva ni el desplazamiento completo llegan a intentarse.
+    fila_i = ["P-002", "611150111", "DS-B1-54-320/230-0,11-CR-I", None, None, "UD.", "P16.2627.00\nSIM", "ALTO", "107.198,44 €", None, None]
+
+    linea = construir_linea_catalogo(
+        fila_i, _MAPEO_ANEJO_0126, pagina=3, documento_origen_id=672, expediente_id=1,
+        baja_lote=None, orden_aparicion=0,
+    )
+
+    assert linea is not None
+    assert linea["codigo_precio"] == "P-002"
+    assert linea["unidad_medida"] == "UD."
+    assert linea["motivo_revision"] is None
+
+
+# Nota: la cobertura de que una fila SÍ realmente desalineada (código de
+# precio también vacío en la columna de siempre) sigue cayendo en el
+# desplazamiento completo de siempre la da la suite ya existente de
+# `_intentar_recuperar_desalineacion` más arriba en este fichero -- ahí
+# `codigo_precio` sale `None` con el mapeo sin desplazar, así que la
+# recuperación nueva (que exige codigo_precio o matrícula ya resueltos) ni
+# se intenta, y el comportamiento no cambia.
