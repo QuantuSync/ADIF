@@ -20,11 +20,11 @@ from typing import Optional
 import pdfplumber
 from sqlalchemy.orm import Session
 
-from app.catalogo import construir_lineas_desde_tabla
+from app.catalogo import MOTIVO_MAPEO_INCOHERENTE, _acumular_motivo, construir_lineas_desde_tabla
 from app.extraccion.codigo_material import derivar_codigo_material_con_modelo
 from app.extraccion.localizador import ResultadoLocalizacion, localizar_paginas_candidatas
 from app.extraccion.lote_tabla import asociar_lote_tabla
-from app.extraccion.mapeo_cabecera import mapear_cabecera
+from app.extraccion.mapeo_cabecera import cabecera_sin_senal, evaluar_coherencia_mapeo, mapear_cabecera
 from app.extraccion.tabla import extraer_tablas_pagina
 from app.extraccion.texto import PaginaTexto
 from app.interfaces.model_provider import ModelProvider
@@ -161,11 +161,32 @@ def procesar_anejo(
                 if resultado_mapeo.llamada_modelo:
                     llamadas_modelo += 1
                 tablas_procesadas += 1
+                # Bloque 2 (auditoría 6.20/28510.0042/0046/0047): una tabla sin
+                # cabecera propia siempre resuelve su mapeo con el modelo, a
+                # ciegas de 2-3 filas de ejemplo (`cabecera_sin_senal` implica
+                # `resultado_mapeo.origen == "modelo"`, nunca caché ni
+                # determinista). Se valida contra TODAS sus filas antes de
+                # aceptarlo -- un mapeo incoherente no cambia el lote de la
+                # línea (ver el docstring de `MOTIVO_MAPEO_INCOHERENTE`, motivo
+                # de idempotencia), solo se marca para que `app.exportacion`
+                # la excluya del Excel entregable en vez de contaminarlo con
+                # datos mal columnados.
+                motivo_mapeo_incoherente = (
+                    evaluar_coherencia_mapeo(resultado_mapeo.mapeo, tabla.filas)
+                    if cabecera_sin_senal(tabla.cabecera)
+                    else None
+                )
                 lineas_tabla = construir_lineas_desde_tabla(
                     tabla, resultado_mapeo.mapeo, documento_origen_id, expediente_id, baja_lote,
                     orden_inicial=len(lineas),
                 )
                 for linea in lineas_tabla:
+                    if motivo_mapeo_incoherente is not None:
+                        linea["motivo_revision"] = _acumular_motivo(
+                            linea.get("motivo_revision"),
+                            f"{MOTIVO_MAPEO_INCOHERENTE}, tabla descartada del catálogo entregable: "
+                            f"{motivo_mapeo_incoherente}",
+                        )
                     linea["identificador_lote"] = identificador_lote
                     # Trazabilidad de la herencia (encargo explícito del
                     # cliente, sesión 2026-09-08): una línea cuyo lote viene

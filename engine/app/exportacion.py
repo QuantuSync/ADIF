@@ -48,6 +48,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment
 from sqlalchemy.orm import Session
 
+from app.catalogo import MOTIVO_MAPEO_INCOHERENTE
 from app.catalogo_consulta import consultar_catalogo
 from app.models import LineaCatalogo
 
@@ -193,6 +194,14 @@ _CATEGORIAS_MOTIVO = (
         "ese expediente (puede ser una errata del documento, o un lote real que todavía falta registrar).",
         "Que alguien compare con el documento y corrija el número de lote, o lo dé de alta si falta.",
     ),
+    (
+        MOTIVO_MAPEO_INCOHERENTE,
+        "cuadro de precios sin cabecera, columnas mal identificadas",
+        "Esta tabla no traía cabecera propia (una página de continuación, normalmente) y el sistema no "
+        "pudo identificar con confianza qué columna es cada dato -- para no inventar valores, se ha "
+        "descartado del Excel entero, aunque siga guardada en la base de datos.",
+        "Que alguien abra el documento original en esa página y complete o corrija la fila a mano.",
+    ),
 )
 _EXPLICACION_OTRO_MOTIVO = (
     "El sistema detectó una ambigüedad de un tipo que no encaja en los motivos anteriores."
@@ -290,7 +299,14 @@ def generar_excel_catalogo(db: Session, incluir_pendientes_sin_lote: bool = Fals
         # datos con su motivo.
         resultado = consultar_catalogo(db, pagina=pagina, tamano_pagina=_TAMANO_LOTE, excluir_descartadas=True)
         for linea, lote, expediente, _documento, _nombre_archivo in resultado.filas:
-            if lote is None and not incluir_pendientes_sin_lote:
+            # Bloque 2 (auditoría 6.20/28510.0042/0046/0047): a diferencia de
+            # una huérfana sin lote, aquí SÍ hay lote conocido -- se excluye
+            # siempre, sin que `incluir_pendientes_sin_lote` la reincluya,
+            # porque el problema no es "falta asignar lote" sino "no se
+            # confía en cómo se leyeron las columnas de esta tabla" (ver
+            # `MOTIVO_MAPEO_INCOHERENTE`).
+            mapeo_incoherente = bool(linea.motivo_revision) and MOTIVO_MAPEO_INCOHERENTE in linea.motivo_revision
+            if (lote is None and not incluir_pendientes_sin_lote) or mapeo_incoherente:
                 excluidas_por_categoria[_categoria_motivo(linea.motivo_revision)] += 1
                 continue
             incluidas += 1

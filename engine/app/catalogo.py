@@ -1080,6 +1080,25 @@ _MOTIVO_FILA_FUSIONADA = (
     "de la línea vecina, confirmar contra el documento original"
 )
 
+# Bloque 2 (auditoría 6.20/28510.0042/0046/0047, 51 grupos duplicados y 207
+# líneas sin descripción): marcador público (sin guion bajo, a diferencia de
+# los de arriba) porque tanto `app.extraccion.pipeline_anejo` (lo añade a
+# `motivo_revision`) como `app.exportacion` (lo usa para excluir la línea del
+# Excel entregable, igual que ya hace con las huérfanas sin lote) necesitan
+# reconocer el mismo texto exacto. Se mantiene el `lote_id` real de la línea
+# -- a diferencia de la ambigüedad de lote, aquí SÍ se sabe a qué lote
+# pertenece la tabla, solo no se confía en cómo se leyeron sus columnas --
+# para que reprocesar no cambie su `clave_linea` y así no duplique la fila
+# (CONTEXTO.md sección 9, idempotencia): forzar `lote_id=None` aquí, como
+# hace una tabla de lote ambiguo, le habría dado una clave distinta
+# (`clave_huerfana_hipotetica`) cada vez que la línea pasara de "incoherente"
+# a "coherente" o viceversa entre dos reprocesos, sin ningún mecanismo que
+# limpie la fila vieja (`_limpiar_huerfana_superada` solo cubre la dirección
+# huérfana -> resuelta, no la inversa) -- verificado en vivo: la primera
+# versión de este arreglo, que sí tocaba `lote_id`, duplicó cientos de filas
+# al reprocesar dos veces seguidas los tres expedientes reales.
+MOTIVO_MAPEO_INCOHERENTE = "mapeo de cabecera sin cabecera propia resultó incoherente"
+
 
 def _dividir_fila_multiple(
     fila: list[Optional[str]], mapeo: dict[str, Optional[int]]

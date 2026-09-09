@@ -1,5 +1,6 @@
 from app.extraccion.firma_cabecera import calcular_firma_cabecera
 from app.extraccion.mapeo_cabecera import (
+    evaluar_coherencia_mapeo,
     intentar_mapeo_determinista,
     mapear_cabecera,
     obtener_mapeo_cacheado,
@@ -161,3 +162,71 @@ def test_mapear_cabecera_vacia_nunca_se_cachea_ni_se_reutiliza(db_session):
     assert modelo_2.llamadas == 1
     assert resultado2.mapeo != resultado1.mapeo
     assert obtener_mapeo_cacheado(db_session, firma) is None
+
+
+def test_evaluar_coherencia_mapeo_detecta_mapeo_incoherente_sobre_cabecera_sin_senal():
+    # Caso real, Bloque 2 (auditoría 6.20/28510.0042/0046/0047, 51 grupos
+    # duplicados y 207 líneas sin descripción): tabla sin cabecera propia de
+    # `ANEJO_abd69efbdd39b552.pdf` p.27 -- 5 columnas reales (matrícula,
+    # designación, plano, norma técnica, precio). El modelo, guiado solo por
+    # unas pocas filas de ejemplo, mapeó descripcion a una columna vacía en
+    # todas las filas reales de la tabla.
+    filas = [
+        ["610850108", "AC-9000 / SCI-A-54-DI-190", "311-31", "03.360.101.4", "1.620,46 €"],
+        ["601080026", "CUPON MIXTO 54/42'5 KGS.L:8 M. HILO IZQUIERDO", "", "", "1.665,72 €"],
+        ["601080025", "CUPON MIXTO 54/42'5 KGS. L:8 M.HILO DERECHO", "", "", "1.676,15 €"],
+        ["612860600", "JUEGO DE PLACAS PARA SUJECION BLOQUE CENTRAL", "", "", "1.692,08 €"],
+        ["601080022", "CUPON MIXTO 54/45 12 M.(6+ 6) lADO DERECHO", "", "03.360.101.4", "1.697,76 €"],
+    ]
+    mapeo_incoherente = {
+        "codigo_precio": None, "matricula": 0, "descripcion": None,
+        "unidad_medida": None, "cantidad": 3, "precio_unitario": 4,
+    }
+    motivo = evaluar_coherencia_mapeo(mapeo_incoherente, filas)
+    assert motivo is not None
+    assert "descripcion" in motivo
+
+    # El mapeo correcto (descripcion=1) sobre las mismas filas pasa la
+    # comprobación.
+    mapeo_correcto = {
+        "codigo_precio": None, "matricula": 0, "descripcion": 1,
+        "unidad_medida": None, "cantidad": None, "precio_unitario": 4,
+    }
+    assert evaluar_coherencia_mapeo(mapeo_correcto, filas) is None
+
+
+def test_evaluar_coherencia_mapeo_sin_filas_no_opina():
+    assert evaluar_coherencia_mapeo({"descripcion": 1, "precio_unitario": 2}, []) is None
+
+
+def test_evaluar_coherencia_mapeo_detecta_desplazamiento_aunque_descripcion_pase_el_umbral_de_vacio():
+    # Caso real, misma tabla (`ANEJO_abd69efbdd39b552.pdf` p.27): el mismo
+    # desplazamiento de una columna que el test de arriba (matrícula->
+    # codigo_precio, designación->matrícula, PLANO->descripcion) esta vez con
+    # más filas de la tabla real -- la columna "Plano" está rellena en más de
+    # la mitad de ellas (referencias de plano tipo "P16.0739.04"), así que
+    # `descripcion` SÍ pasa la comprobación de vacío. Solo la segunda
+    # comprobación (forma de `matricula`) detecta que el mapeo sigue mal:
+    # la columna que el mapeo cree que es `matricula` trae designaciones de
+    # texto libre, nunca 9 dígitos.
+    filas = [
+        ["610850108", "AC-9000 / SCI-A-54-DI-190", "311-31", "03.360.101.4", "1.620,46 €"],
+        ["601080026", "CUPON MIXTO 54/42'5 KGS.L:8 M. HILO IZQUIERDO", "", "", "1.665,72 €"],
+        ["612860604", "JUEGO PLACAS NERVADAS PN-60 SUJ. BLOQUE C 042", "Pl6, 2244.00", "", "1.717,34 €"],
+        ["601080620", "CUPON MIXTO 45/60, 10407, 3'20+7'207, HILO D", "ESQUEMAS DE VIA, 2.2.1", "", "1.741,24 €"],
+        ["617560810", "J.A.E. IVG 30(REFORZADA) L= 10,80 CARRIL 60", "P16.4039.00", "", "1.761,45 €"],
+        ["617060451", "CONTRAAGUJA DCH.-14037(+100) ADH-F-60-500", "P16.1702.00 SIMETRICO", "", "1.822,49 €"],
+        ["612250182", "CAC-15465(+200)/ SCI-C-54-II-250", "P16.0739.04", "03.360.101.4", "1.854,06 €"],
+    ]
+    mapeo_desplazado = {
+        "codigo_precio": 0, "matricula": 1, "descripcion": 2,
+        "unidad_medida": None, "cantidad": 3, "precio_unitario": 4,
+    }
+    # La comprobación de vacío por sí sola no bastaría: 5/7 filas traen algo
+    # en la columna "Plano" que el mapeo cree que es descripcion.
+    con_valor_col2 = sum(1 for f in filas if f[2].strip())
+    assert con_valor_col2 / len(filas) >= 0.5
+
+    motivo = evaluar_coherencia_mapeo(mapeo_desplazado, filas)
+    assert motivo is not None
+    assert "matricula" in motivo
