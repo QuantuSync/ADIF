@@ -1,6 +1,5 @@
 from app.extraccion.firma_cabecera import calcular_firma_cabecera
 from app.extraccion.mapeo_cabecera import (
-    heredar_mapeo_de_pagina_anterior,
     intentar_mapeo_determinista,
     mapear_cabecera,
     obtener_mapeo_cacheado,
@@ -162,56 +161,3 @@ def test_mapear_cabecera_vacia_nunca_se_cachea_ni_se_reutiliza(db_session):
     assert modelo_2.llamadas == 1
     assert resultado2.mapeo != resultado1.mapeo
     assert obtener_mapeo_cacheado(db_session, firma) is None
-
-
-# Bloque 5, cambios del cliente tras revisar el catálogo (sesión 2026-09-09):
-# `heredar_mapeo_de_pagina_anterior`, verificado en vivo contra
-# `6.20/28510.0047_ANEJO_abd69efbdd39b552.pdf` (61 páginas, cabecera solo en
-# la primera): sin esto, 37 de 1.302 líneas reales del documento eran las
-# únicas que se extraían.
-_MAPEO_EJEMPLO = {
-    "codigo_precio": None, "matricula": 0, "descripcion": 1,
-    "unidad_medida": None, "cantidad": 6, "precio_unitario": 4,
-}
-
-
-def test_hereda_mapeo_cuando_la_cabecera_no_trae_ninguna_senal():
-    cabecera_vacia = [None, None, None, None, None, None, None]
-
-    resultado = heredar_mapeo_de_pagina_anterior(cabecera_vacia, _MAPEO_EJEMPLO, 7)
-
-    assert resultado is not None
-    assert resultado.mapeo == _MAPEO_EJEMPLO
-    assert resultado.origen == "heredado_pagina_anterior"
-    assert resultado.llamada_modelo is False
-
-
-def test_no_hereda_si_no_hay_mapeo_anterior_todavia():
-    cabecera_vacia = [None, None, None]
-    assert heredar_mapeo_de_pagina_anterior(cabecera_vacia, None, None) is None
-
-
-def test_no_hereda_si_la_cabecera_si_trae_señal_propia():
-    # Una tabla con cabecera propia siempre pide su propio mapeo (cache,
-    # determinista o modelo) -- nunca hereda solo porque haya un mapeo
-    # anterior disponible.
-    cabecera_real = ["Matricula", "Descripción", None, None, "Precio", None, "Cantidad"]
-    assert heredar_mapeo_de_pagina_anterior(cabecera_real, _MAPEO_EJEMPLO, 7) is None
-
-
-def test_no_hereda_si_el_numero_de_columnas_no_coincide():
-    # Señal barata de que es una tabla de forma distinta, no la misma
-    # continuando -- nunca se hereda a ciegas solo por venir sin cabecera.
-    cabecera_vacia_mas_corta = [None, None, None]
-    assert heredar_mapeo_de_pagina_anterior(cabecera_vacia_mas_corta, _MAPEO_EJEMPLO, 7) is None
-
-
-def test_mapeo_heredado_no_se_guarda_en_cache(db_session):
-    # El mapeo heredado nunca pasa por `guardar_mapeo_cacheado` -- verificado
-    # aparte de la firma degenerada ya cubierta arriba (misma firma para
-    # cualquier cabecera vacía, nunca se cachea bajo ella).
-    cabecera_vacia = [None, None, None, None, None, None, None]
-    resultado = heredar_mapeo_de_pagina_anterior(cabecera_vacia, _MAPEO_EJEMPLO, 7)
-    firma = calcular_firma_cabecera(cabecera_vacia)
-    assert obtener_mapeo_cacheado(db_session, firma) is None
-    assert resultado.firma == firma

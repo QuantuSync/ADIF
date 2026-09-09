@@ -178,49 +178,28 @@ def _cabecera_sin_senal(cabecera: list[Optional[str]]) -> bool:
     return not any(c and c.strip() for c in cabecera)
 
 
-def heredar_mapeo_de_pagina_anterior(
-    cabecera: list[Optional[str]],
-    ultimo_mapeo_resuelto: Optional[dict[str, Optional[int]]],
-    ultima_longitud_fila: Optional[int],
-) -> Optional[ResultadoMapeoCabecera]:
-    """Bloque 5, cambios del cliente tras revisar el catálogo (sesión
-    2026-09-09): una tabla sin ninguna celda de cabecera con texto real
-    (`_cabecera_sin_senal`) nunca puede pedir al modelo un mapeo NUEVO de
-    forma fiable -- no hay ninguna palabra que traducir, solo filas de
-    datos. Verificado contra el PDF real
-    (`6.20/28510.0047_ANEJO_abd69efbdd39b552.pdf`, cuadro de precios de 61
-    páginas con cabecera solo en la primera): sin esto, cada página de
-    continuación revienta con `RuntimeError` en cuanto no hay
-    `model_provider`, y con uno sí configurado el modelo tendría que
-    adivinar a ciegas sobre las mismas filas de ejemplo una y otra vez, sin
-    garantía de acertar la MISMA asignación de columnas cada vez.
-
-    Devuelve el mapeo de la tabla anterior tal cual, sin tocar `cache_
-    mapeo_cabecera` (nunca bajo la firma degenerada de cabecera vacía,
-    docstring de `_cabecera_sin_senal`: cachear eso confundiría tablas de
-    documentos distintos que comparten esa misma firma), cuando esta tabla
-    no trae ninguna señal propia Y la anterior de este mismo documento sí
-    tuvo un mapeo resuelto (por cabecera propia, caché, determinista o
-    modelo -- da igual el origen) con el MISMO número de columnas -- una
-    comprobación barata de que de verdad es la misma forma de tabla, no
-    una completamente distinta que por casualidad también carece de
-    cabecera. `None` en cualquier otro caso: el llamador decide entonces
-    llamar a `mapear_cabecera` como de costumbre. Reiniciar `ultimo_mapeo_
-    resuelto` a `None` en cada documento nuevo es responsabilidad del
-    llamador (`app.extraccion.pipeline_anejo`), igual que `ultimo_lote_
-    resuelto`: heredar de un documento a otro no tendría ninguna base."""
-    if (
-        _cabecera_sin_senal(cabecera)
-        and ultimo_mapeo_resuelto is not None
-        and len(cabecera) == ultima_longitud_fila
-    ):
-        return ResultadoMapeoCabecera(
-            mapeo=ultimo_mapeo_resuelto,
-            firma=calcular_firma_cabecera(cabecera),
-            origen="heredado_pagina_anterior",
-            llamada_modelo=False,
-        )
-    return None
+# Bloque 5, cambios del cliente tras revisar el catálogo (sesión 2026-09-09):
+# se intentó aquí una función `heredar_mapeo_de_pagina_anterior` -- reutilizar
+# el mapeo de la tabla anterior del mismo documento para una tabla sin
+# ninguna cabecera propia, cuando coincidiera el número de columnas -- para
+# que las páginas de continuación que `app.extraccion.localizador` ya sabe
+# abrir (mismo bloque, ver su docstring) no revienten sin `model_provider`.
+# Retirada tras verificarla contra el corpus real completo (no solo contra
+# el caso que la motivó): dos tablas de `6.22/28510.0126_ANEJO_
+# 57694f5d5dacb236.pdf` con el MISMO número de columnas (8) tenían formas
+# distintas -- una con la descripción desplazada una columna, la otra sin
+# desplazar -- así que heredar el mapeo de la primera para la segunda
+# desplazaba silenciosamente cantidad/descripción, produciendo líneas
+# corruptas (descripción = "UD.", cantidad idéntica al precio) detectadas
+# por la propia auditoría automática (`lineas_duplicadas_exactas`) al
+# reprocesar en vivo. El número de columnas por sí solo no basta como
+# garantía de "misma forma de tabla". La vía segura que ya preveía la
+# sesión que cerró `_cabecera_sin_senal` (docstring de esa función) sigue
+# siendo la correcta: cada tabla sin cabecera pide su propio mapeo al
+# modelo, con sus propias filas de ejemplo -- exige `MODEL_API_KEY`
+# configurada, no disponible en este entorno; sin ella, esas páginas se
+# abren (localizador) pero su tabla queda pendiente de revisión en vez de
+# perderse o corromperse.
 
 
 def mapear_cabecera(
