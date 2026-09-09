@@ -549,6 +549,57 @@ def _mapeo_desplazado(
     return desplazado
 
 
+def _recuperar_descripcion_y_precio_columna_fantasma(
+    fila: list[Optional[str]], mapeo: dict[str, Optional[int]], campos: dict
+) -> Optional[dict]:
+    """Bloque 4, segunda tanda de cambios del cliente tras revisar el
+    catálogo (defecto real de extracción de unidad de medida, sesión
+    2026-09-09): cuando descripción Y precio unitario caen vacíos a la vez,
+    ninguna de las dos recuperaciones de una sola columna (`_recuperar_
+    descripcion_columna_fantasma`/`_recuperar_precio_columna_fantasma`, en
+    `_construir_campos`) dispara por sí sola -- cada una exige que la OTRA
+    ya esté resuelta, precisamente para no confundir esto con una fila
+    realmente desalineada de cabo a rabo (`_intentar_recuperar_
+    desalineacion`, justo debajo).
+
+    Verificado contra el PDF real (`6.22_28510.0126_ANEJO_...pdf` p.3,
+    matrículas `611150412`/`611150490`): cada fila "D" de esa tabla trae DOS
+    columnas fantasma independientes -- una antes de la descripción, otra
+    antes del precio -- mientras que código de precio, matrícula y unidad
+    de medida siguen en su columna de siempre. Desplazar el mapeo ENTERO
+    "arreglaba" descripción y precio pero de paso destruía código de precio
+    (pasaba a leer la matrícula) y unidad de medida (pasaba a leer "Plano
+    de Referencia" en vez de "UD.") -- el defecto medido en el bloque 3 del
+    diagnóstico anterior (7,3 % de las líneas sin unidad, pese a que la
+    columna existe y trae el valor correcto en el PDF).
+
+    Solo se llama cuando `codigo_precio` o `matricula` YA salieron con
+    pinta real de la fila sin tocar nada (la señal de que esta fila NO está
+    desplazada de cabo a rabo) y solo se acepta si las dos recuperaciones
+    -- cada una mirando nada más que su propio vecino, nunca robando una
+    columna que otro campo ya reclama -- tienen éxito por separado. Si solo
+    una de las dos recupera algo, se deja que `_intentar_recuperar_
+    desalineacion` decida: una sola columna fantasma sí puede ser sólo el
+    síntoma de una desalineación real de toda la fila."""
+    if mapeo.get("descripcion") is None or mapeo.get("precio_unitario") is None:
+        return None
+    descripcion_recuperada = _recuperar_columna_fantasma(fila, mapeo, "descripcion", _parece_descripcion_recuperable)
+    if descripcion_recuperada is None:
+        return None
+    precio_recuperado = _recuperar_columna_fantasma(fila, mapeo, "precio_unitario", _parece_precio_recuperable)
+    if precio_recuperado is None:
+        return None
+    nuevos = dict(campos)
+    nuevos["descripcion"] = descripcion_recuperada
+    nuevos["precio_unitario"] = parsear_importe_es(precio_recuperado)
+    nuevos["motivo_revision"] = _acumular_motivo(
+        nuevos["motivo_revision"],
+        "descripción y precio unitario recuperados cada uno de su propia columna fantasma, sin "
+        "desplazar el resto del mapeo -- confirmar antes de dar por buena",
+    )
+    return nuevos
+
+
 def _intentar_recuperar_desalineacion(
     fila: list[Optional[str]], mapeo: dict[str, Optional[int]]
 ) -> Optional[dict]:
@@ -667,6 +718,51 @@ def _construir_campos(
             )
             matricula = None
 
+    # Precio unitario, calculado antes que cantidad (bloque 4/5, hallazgo
+    # verificado por el cliente contra `6.22/28510.0126_CONTRATO_...pdf`
+    # p.123, matrícula 611150110, sesión 2026-09-09): solo el intento
+    # directo contra la columna de siempre -- la recuperación de columna
+    # fantasma de precio, si hace falta, va más abajo, después de intentar
+    # recuperar también la descripción, por el mismo motivo que se explica
+    # justo debajo.
+    precio_bruto = _valor("precio_unitario")
+    precio_unitario = None
+    if precio_bruto and not _es_celda_vacia(precio_bruto):
+        try:
+            precio_unitario = parsear_importe_es(precio_bruto)
+        except ValueError as exc:
+            motivo_revision = _acumular_motivo(motivo_revision, f"precio unitario no interpretable: {exc}")
+
+    # Columna fantasma de descripción, recuperada AQUÍ -- antes de cantidad
+    # y antes de la recuperación de precio de más abajo -- y no al final de
+    # la función como antes de este arreglo (hallazgo real, cambios del
+    # cliente tras revisar el catálogo, sesión 2026-09-09, verificado
+    # contra `6.22/28510.0126_CONTRATO_93ddea98081d8169.pdf` p.123,
+    # matrícula 611150110: cabecera limpia, "CÓDIGO DEL ELEMENTO | Nº
+    # MATRÍCULA | DESCRIPCIÓN | [fantasma] | UNIDAD DE MEDIDA | CANTIDADES
+    # ESTIMADAS DE REFERENCIA | [fantasma] | PRECIO UNITARIO DE
+    # REFERENCIA", con la descripción Y la cantidad reales una columna
+    # desplazadas cada una, y el precio ya resuelto en su columna de
+    # siempre). La recuperación de cantidad, más abajo, exige `descripcion`
+    # YA resuelta como condición (para no confundirse con una fila
+    # realmente desalineada de cabo a rabo) -- calculada al final como
+    # antes de este arreglo, esa condición siempre fallaba aunque la
+    # descripción SÍ fuera recuperable un instante después, y la cantidad
+    # se perdía por puro orden de ejecución, no porque la tabla no la
+    # trajera. Sigue exigiendo `precio_unitario` ya resuelto en su columna
+    # de siempre (docstring de `_recuperar_descripcion_columna_fantasma`):
+    # sin esto, una fila de relleno real se recuperaría como si fuera una
+    # fila de datos legítima solo por tener texto en la columna siguiente.
+    if not descripcion and precio_unitario is not None:
+        recuperada = _recuperar_descripcion_columna_fantasma(fila, mapeo)
+        if recuperada:
+            descripcion = recuperada
+            # Texto reutilizado tal cual por `construir_lineas_desde_tabla`
+            # (marcador estable, no una columna de `LineaCatalogo`) para
+            # saber que esta línea puede seguir envuelta en las filas
+            # siguientes -- ver `_MOTIVO_DESCRIPCION_COLUMNA_FANTASMA`.
+            motivo_revision = _acumular_motivo(motivo_revision, _MOTIVO_DESCRIPCION_COLUMNA_FANTASMA)
+
     cantidad_bruta = _valor("cantidad")
     cantidad = None
     if cantidad_bruta and not _es_celda_vacia(cantidad_bruta):
@@ -675,12 +771,13 @@ def _construir_campos(
         except ValueError as exc:
             motivo_revision = _acumular_motivo(motivo_revision, f"cantidad no interpretable: {exc}")
     elif descripcion and mapeo.get("cantidad") is not None:
-        # Exige `descripcion` ya resuelta en su columna de siempre (igual que
-        # el guard de `precio_unitario` un poco más abajo): si descripción
-        # TAMBIÉN está vacía, esto no es un desplazamiento de una sola
-        # columna sino de la fila entera, y toca `_intentar_recuperar_desalineacion`
-        # más abajo, no este recorte de una sola celda -- sin esta condición,
-        # una recuperación coincidente aquí podía "arreglar" cantidad sola y
+        # Exige `descripcion` ya resuelta (ver el bloque de arriba: ahora sí
+        # puede venir de una recuperación de columna fantasma, no solo de
+        # su columna de siempre): si descripción TAMBIÉN está vacía, esto
+        # no es un desplazamiento de una sola columna sino de la fila
+        # entera, y toca `_intentar_recuperar_desalineacion` más abajo, no
+        # este recorte de una sola celda -- sin esta condición, una
+        # recuperación coincidente aquí podía "arreglar" cantidad sola y
         # dejar la fila con pinta de resuelta antes de que la desalineación
         # completa llegara a intentarse.
         recuperada = _recuperar_cantidad_columna_fantasma(fila, mapeo)
@@ -697,18 +794,16 @@ def _construir_campos(
         if motivo_cantidad is not None:
             motivo_revision = _acumular_motivo(motivo_revision, motivo_cantidad)
 
-    precio_bruto = _valor("precio_unitario")
-    precio_unitario = None
-    if precio_bruto and not _es_celda_vacia(precio_bruto):
-        try:
-            precio_unitario = parsear_importe_es(precio_bruto)
-        except ValueError as exc:
-            motivo_revision = _acumular_motivo(motivo_revision, f"precio unitario no interpretable: {exc}")
-    elif descripcion and mapeo.get("precio_unitario") is not None:
-        # Mismo guard que arriba, mismo motivo: sin `descripcion` ya resuelta,
-        # esto puede ser una fila con la cabecera entera desplazada, no solo
-        # el precio -- se deja para `_intentar_recuperar_desalineacion`, que
-        # desplaza el mapeo completo en vez de una sola celda.
+    if precio_unitario is None and descripcion and mapeo.get("precio_unitario") is not None:
+        # Mismo guard que arriba, mismo motivo: sin `descripcion` ya
+        # resuelta, esto puede ser una fila con la cabecera entera
+        # desplazada, no solo el precio -- se deja para
+        # `_intentar_recuperar_desalineacion`, que desplaza el mapeo
+        # completo en vez de una sola celda. Va después de calcular
+        # cantidad (no antes, como el resto de este bloque): la recuperación
+        # de cantidad de arriba no depende de si el precio necesitó
+        # recuperación de columna fantasma él mismo, solo de si ya está
+        # resuelto de una forma u otra.
         recuperado = _recuperar_precio_columna_fantasma(fila, mapeo)
         if recuperado is not None:
             precio_unitario = parsear_importe_es(recuperado)
@@ -727,36 +822,15 @@ def _construir_campos(
                 "precio, sin columna propia en la cabecera de esta tabla: confirmar antes de dar por buena",
             )
 
-    # Hallazgo real (sesión de limpieza del Excel al cliente, 2026-09-06,
-    # `6.20/28510.0136_ANEJO_3.pdf` p.4, matrículas 740540009/740580020): el
-    # guard original exigía `matricula is None` asumiendo que la columna
-    # fantasma solo aparece en filas huérfanas (partida alzada). Falso: el
-    # mismo desplazamiento de columna ocurre en filas CON matrícula válida —
-    # `_recuperar_descripcion_columna_fantasma` no toca la columna de
-    # matrícula (ya extraída antes, de su propia columna), así que exigir su
-    # ausencia solo dejaba sin recuperar una descripción que sí estaba en el
-    # documento. Antes de este arreglo, esas dos filas se guardaban con
-    # `descripcion = ""` para siempre: nadie puede identificar el material
-    # sin descripción, y ninguna otra copia del mismo material existía en el
-    # documento para rellenarla por fusión.
-    if not descripcion and precio_unitario is not None:
-        # Exige precio_unitario ya interpretado en su columna de siempre: sin
-        # esto, una fila de relleno real (fragmento de descripción envuelta
-        # entre páginas, sin precio en ninguna posición cercana) se recuperaría
-        # como si fuera una fila de datos legítima solo por tener texto en la
-        # columna siguiente (`test_construir_linea_catalogo_fragmento_wrap_sin_precio_se_descarta`).
-        # El caso real que motiva esta recuperación (partida alzada del
-        # contrato, ver docstring de `_recuperar_descripcion_columna_fantasma`)
-        # siempre trae su precio bien interpretado; solo la descripción se
-        # desplaza.
-        recuperada = _recuperar_descripcion_columna_fantasma(fila, mapeo)
-        if recuperada:
-            descripcion = recuperada
-            # Texto reutilizado tal cual por `construir_lineas_desde_tabla`
-            # (marcador estable, no una columna de `LineaCatalogo`) para
-            # saber que esta línea puede seguir envuelta en las filas
-            # siguientes -- ver `_MOTIVO_DESCRIPCION_COLUMNA_FANTASMA`.
-            motivo_revision = _acumular_motivo(motivo_revision, _MOTIVO_DESCRIPCION_COLUMNA_FANTASMA)
+    # Nota histórica: la recuperación de columna fantasma de descripción
+    # (hallazgo real, sesión de limpieza del Excel al cliente, 2026-09-06,
+    # `6.20/28510.0136_ANEJO_3.pdf` p.4, matrículas 740540009/740580020)
+    # vivía aquí, al final de la función. Movida más arriba, antes de
+    # cantidad y de la recuperación de columna fantasma de precio, por el
+    # hallazgo del bloque 4/5 explicado en esa nueva ubicación -- es la
+    # misma llamada, determinista, así que repetirla aquí no cambiaría
+    # nada: si no encontró nada recuperable arriba, tampoco lo encuentra
+    # aquí.
 
     return "ok", {
         "codigo_precio": codigo_precio,
@@ -839,10 +913,19 @@ def construir_linea_catalogo(
         return None
 
     if not campos["descripcion"] and campos["precio_unitario"] is None:
-        recuperados = _intentar_recuperar_desalineacion(fila, mapeo)
-        if recuperados is None:
-            return None
-        campos = recuperados
+        if campos["codigo_precio"] is not None or campos["matricula"] is not None:
+            # Código de precio o matrícula ya con pinta real en su columna
+            # de siempre: la fila no está desalineada de cabo a rabo, solo
+            # descripción y precio caen cada uno en su propia columna
+            # fantasma -- desplazar el mapeo entero (más abajo) les robaría
+            # su columna correcta a esos dos campos (ver docstring de
+            # `_recuperar_descripcion_y_precio_columna_fantasma`).
+            campos = _recuperar_descripcion_y_precio_columna_fantasma(fila, mapeo, campos) or campos
+        if not campos["descripcion"] and campos["precio_unitario"] is None:
+            recuperados = _intentar_recuperar_desalineacion(fila, mapeo)
+            if recuperados is None:
+                return None
+            campos = recuperados
 
     precio_unitario = campos["precio_unitario"]
     precio_adjudicado = None
