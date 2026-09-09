@@ -43,8 +43,85 @@ sesión anterior. Confirmado por consulta directa a `trabajos_cola` que no se
 creó ningún trabajo `descargar_expediente`: cero sindicación, cero
 descargas, solo reproceso de los documentos ya en disco, tal como se pidió.
 
-[Completar tras el cierre del reproceso: duración real, resultado, foto de
-relleno DESPUÉS, comparación, auditoría automática de fin de ciclo.]
+**Resultado**: completado a las 22:21:08 UTC — **3 h 6,7 min**, 358/358
+expedientes activos reprocesados, ritmo medio ~31 s/expediente (en línea con
+el ritmo medido en sesiones anteriores). Cero trabajos `descargar_expediente`
+creados durante toda la ejecución (confirmado por consulta directa a
+`trabajos_cola`): cero sindicación, cero descargas de red, exactamente lo
+pedido.
+
+**Foto de relleno DESPUÉS** (mismos 358 expedientes activos):
+
+| Columna | Antes | Después | Δ |
+|---|---:|---:|---:|
+| Total líneas | 22.097 | 22.721 | +624 (+2,8%) |
+| Matrícula | 40,7% | 39,5% | −1,2 pp |
+| Descripción | 99,1% | 99,6% | +0,5 pp |
+| Código del material | 63,2% | 62,6% | −0,6 pp |
+| Cantidad | 67,7% | 65,9% | −1,8 pp |
+| Precio unitario | 99,3% | 99,4% | +0,1 pp |
+| Unidad de medida | 73,2% | 75,3% | +2,1 pp |
+| Precio adjudicado | 54,7% | 53,3% | −1,4 pp |
+| Baja de lote | 55,5% | 54,0% | −1,5 pp |
+| Completados | 26 | 27 | +1 |
+| Pendientes de revisión | 332 | 331 | −1 |
+| Código matriz (expedientes) | 58,9% | 58,9% | sin cambio (esperado: no toca el cruce) |
+
+Los descensos de 1-2 puntos en matrícula/cantidad/precio adjudicado/baja de
+lote no son una regresión: se explican porque casi todo el crecimiento neto
+(+624 líneas) se concentra en el trío ya conocido `6.20/28510.0042/0046/0047`
+(ver más abajo), cuyas líneas nuevas son en su mayoría huérfanas sin esos
+campos — diluyen la media del corpus sin empeorar ninguna línea que antes
+estuviera bien. El resto del corpus se mantiene estable, como cabía esperar
+de un reproceso sin cambios de fondo salvo la validación de coherencia y la
+caché de tablas sin cabecera.
+
+### Auditoría automática de fin de ciclo — un hallazgo real, ya acotado
+
+La auditoría que corre sola al terminar el ciclo (`app.mantenimiento.
+auditoria`) reportó **3 hallazgos de gravedad "error"** (antes había 0 en la
+última auditoría de la sesión anterior), los tres concentrados en el mismo
+trío ya identificado:
+
+- **48 grupos de líneas duplicadas exactas** (135 líneas).
+- **102 líneas sin descripción** — "no deberían existir" según la
+  comprobación permanente de `construir_linea_catalogo`.
+- **6 expedientes cuyo número de líneas cambió sin cambiar sus documentos**
+  (`6.20/28510.0042/0046/0047` y `6.22/28510.0033/0057/0058`).
+
+**Investigado antes de cerrar la sesión** (no se dejó como una cifra suelta):
+exportado el Excel real y comparado contra la base de datos cruda para medir
+el impacto real en el entregable, no solo en la base de datos:
+
+- De las 102 líneas sin descripción en base de datos (34 por expediente del
+  trío), **0 llegan al Excel** — la exclusión por mapeo incoherente
+  (`evaluar_coherencia_mapeo`, sesión anterior) ya las filtra.
+- De los 48 grupos de duplicados exactos, solo **4 grupos (8 líneas) por
+  expediente** sobreviven en el Excel real (992 filas por expediente de las
+  1.283 en base de datos) — un residuo pequeño (24 líneas en total sobre
+  19.432 filas del Excel, 0,12%), no la cifra completa de la auditoría.
+
+**Causa raíz, ya documentada, no nueva**: coincide con el hueco de
+idempotencia que la sesión de verificación del Excel de 6.599 líneas
+(2026-09-08) ya había encontrado y dejado explícitamente sin corregir
+(`docs/sesion-2026-09-08-verificacion-excel-6599.md`): una fila sin
+`codigo_precio` ni matrícula usa `hash(descripción + orden)` como clave de
+actualización; si la descripción recuperada cambia entre dos reprocesos de
+la misma tabla sin cabecera (aquí: entre el reproceso parcial de la sesión
+anterior, sobre una muestra, y este reproceso completo), la fila vieja queda
+huérfana en vez de sustituirse, en lugar de duplicar sin más. Ese día ya se
+señaló que "una poda automática necesitaría decidir primero qué pasa si solo
+se reprocesa un subconjunto de las tablas de un documento" — sigue siendo
+cierto, y sigue sin ser trabajo de una sesión de cierre. **No se ha tocado
+la base de datos para limpiar esto**: el residuo es pequeño, ya conocido y
+mayormente filtrado del entregable; forma parte de la lista de pendientes de
+abajo.
+
+**No se restaura la copia de seguridad**: el crecimiento neto es pequeño
+(+2,8%), explicado en su práctica totalidad por el mismo trío ya señalado
+como de baja confianza en la sesión anterior, y el resto del corpus no
+muestra ninguna señal de regresión (0 errores nuevos de otra categoría, los
+4 avisos son las mismas categorías ya conocidas de sesiones previas).
 
 ---
 
@@ -253,4 +330,61 @@ la siguiente.
 
 ---
 
-[Bloque 5 — Estado final: pendiente de completar tras el reproceso.]
+## Bloque 5 — Estado final
+
+- **Auditoría**: 7 hallazgos (3 errores, 4 avisos) — ver bloque 1 de arriba
+  para el detalle y la investigación del impacto real en el entregable.
+  Ninguna categoría nueva respecto a sesiones anteriores.
+- **Excel exportado**: 19.432 filas de datos (dos hojas, "Materiales" y
+  "Resumen"), sobre 22.721 líneas de catálogo en base de datos — la
+  diferencia son las exclusiones ya conocidas (huérfanas sin lote por
+  defecto, líneas descartadas, mapeos incoherentes, lista de exclusión de
+  expedientes).
+- **Despliegue de los bloques 3 y 4**: reconstruidos `adif-api-1` y
+  `adif-worker-1` desde el repositorio real (`docker compose build api
+  worker && docker compose up -d api worker`) una vez terminado el reproceso,
+  para no interrumpirlo. Migración 0025 aplicada (`alembic current` → `0025
+  (head)`). Verificado en el stack real: `POST /mantenimiento/maestro-
+  materiales/cargar` responde `configurado:false` (ruta todavía no montada,
+  como se espera), `POST /mantenimiento/maestro-materiales/completar-
+  unidades` evalúa correctamente las 2.581 líneas reales con matrícula y sin
+  unidad de medida (0 completadas, porque el maestro está vacío todavía —
+  correcto), y el mecanismo `INTERNO:` de exclusión por código interno
+  responde bien contra el código real ya desplegado.
+- **Copia de seguridad**: la del inicio de sesión (`adif_20260909_191412.dump`)
+  sigue siendo válida como punto de restauración anterior al reproceso; no se
+  ha necesitado usarla.
+
+---
+
+## Resumen para el cliente
+
+1. **Reproceso completo hecho**: los arreglos de la sesión anterior ya
+   alcanzan a los 467 expedientes, no solo a la muestra. El catálogo crece
+   un 2,8% (624 líneas), con un residuo pequeño y ya acotado (24 líneas
+   duplicadas en el Excel, sobre 19.432) que queda documentado como
+   pendiente, no oculto.
+2. **Cero y blanco ya se distinguen** en base de datos, web y Excel — no
+   hizo falta ningún cambio, se verificó y se documenta.
+3. **Agrupar por código interno sí correlaciona con la tipología real**
+   (99,4% de coherencia medida contra el Excel de códigos) — el mecanismo
+   para excluir por código interno ya está listo y desplegado; falta que el
+   cliente decida qué código, si alguno, excluir.
+4. **Maestro de materiales**: preparado para cargarlo en cuanto ADIF lo
+   facilite, con el formato exacto a pedir documentado arriba. Completará
+   unidad de medida automáticamente y sin riesgo; completar matrícula
+   necesitará una sesión de diseño propia (cruce difuso con revisión
+   humana).
+
+## Pendiente para una próxima sesión
+
+- Pruning de filas huérfanas obsoletas en tablas sin cabecera reprocesadas
+  más de una vez (causa raíz del residuo de 135 líneas duplicadas de esta
+  sesión, ya documentada desde 2026-09-08, sección "Gap de idempotencia").
+- Extracción de baja para la plantilla de boletín de Consejo de
+  Administración (pendiente desde la sesión anterior).
+- 6 documentos `ADJUDICACION_*.pdf` sin código de expediente legible.
+- Diseño del cruce difuso por descripción para completar matrícula desde el
+  maestro de materiales, cuando el cliente confirme que lo quiere.
+- Decisión del cliente sobre qué código interno (si alguno) excluir del
+  Excel entregado.

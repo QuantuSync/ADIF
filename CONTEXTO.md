@@ -1170,6 +1170,43 @@ suficientes, no ahora.
   para la plantilla de boletín de Consejo de Administración (nueva
   plantilla en la cascada, sesión propia); 6 documentos `ADJUDICACION_*.pdf`
   sin código legible, candidatos a revisión manual contra la Plataforma.
+  **Cerrado, sesión 2026-09-09 (continuación),
+  `docs/sesion-2026-09-09-reproceso-completo-y-bloques-2-3-4.md`:**
+  reproceso forzado del corpus completo lanzado (`POST /mantenimiento/
+  ejecutar`, `forzar: true`, `sindicacion_desactivada: true`, sin ninguna
+  descarga de red), 358/358 expedientes activos en 3 h 6,7 min. Catálogo
+  22.097 → 22.721 líneas (+2,8%); Excel entregado con 19.432 filas. La
+  auditoría automática de fin de ciclo pasó de 0 a 3 hallazgos de gravedad
+  "error", los tres concentrados en el trío ya conocido
+  `6.20/28510.0042/0046/0047` (líneas duplicadas exactas, líneas sin
+  descripción, recuento que cambia sin cambiar documentos) — investigado
+  contra el Excel real exportado, no solo contra la base de datos: 0 de las
+  102 líneas sin descripción llegan al entregable (la exclusión por mapeo
+  incoherente de la sesión anterior ya las filtra), y de los 48 grupos de
+  duplicados exactos solo sobrevive un residuo pequeño (24 líneas sobre
+  19.432, 0,12%). Causa raíz no es nueva: el hueco de idempotencia de
+  `guardar_lineas_catalogo` con filas sin `codigo_precio` ni matrícula ya
+  documentado en la sesión de verificación del Excel de 6.599 líneas
+  (2026-09-08) — sigue pendiente de una poda automática que decida primero
+  qué pasa si solo se reprocesa un subconjunto de las tablas de un
+  documento. No se restauró la copia de seguridad previa al reproceso
+  (`adif_20260909_191412.dump`): el residuo es pequeño y ya acotado.
+  **Misma sesión, tres bloques más:** (1) verificado que el sistema ya
+  distingue un cero real de un dato ausente en cantidad y precio, en las
+  cuatro capas (base de datos, extracción, web, Excel) — ningún cambio de
+  código hizo falta. (2) Analizada la propuesta del cliente de agrupar el
+  catálogo por código interno para separar su jefatura de otras áreas:
+  confirmada con datos reales (99,4% de coherencia entre código interno y
+  la columna `ESPECIALIDAD/DISCIPLINA` del Excel de códigos, hoy no
+  guardada en base de datos) — mecanismo de exclusión por código interno
+  (`INTERNO:NNNNN` en `EXCLUSION_EXPEDIENTES_PATH`) implementado y
+  desplegado, sin decidir qué excluir. (3) Preparada la carga del maestro
+  de materiales de SAP que ADIF va a facilitar (`MAESTRO_MATERIALES_PATH`,
+  migración 0025, tabla `maestro_materiales`): completa `unidad_medida`
+  por matrícula exacta sin pisar valores ya extraídos de documentos reales;
+  completar matrícula queda deliberadamente sin implementar (necesita
+  cruce difuso por descripción con cola de revisión, mismo criterio que el
+  cliente ya aplicó al desglose de SAP de la sesión anterior).
 
 ---
 
@@ -1190,4 +1227,5 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `sesion-2026-09-08-auditoria-automatica.md`,
 `sesion-2026-09-09-cambios-cliente-catalogo.md`,
 `sesion-2026-09-09-auditoria-mapeo-documentos.md`,
+`sesion-2026-09-09-reproceso-completo-y-bloques-2-3-4.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.
