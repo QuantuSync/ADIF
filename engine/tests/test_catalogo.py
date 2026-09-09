@@ -1936,3 +1936,35 @@ def test_construir_linea_catalogo_fila_i_sin_columnas_fantasma_no_se_toca():
 # `codigo_precio` sale `None` con el mapeo sin desplazar, así que la
 # recuperación nueva (que exige codigo_precio o matrícula ya resueltos) ni
 # se intenta, y el comportamiento no cambia.
+
+
+def test_construir_linea_catalogo_matricula_fusionada_de_dos_filas_no_revienta_varchar():
+    # Hallazgo real, verificado reprocesando 6.22/28510.0126 contra el
+    # stack real tras el arreglo de arriba (bloque 5, cambios del cliente
+    # tras revisar el catálogo): con más filas recuperadas de columna
+    # fantasma, una fila fusionada por pdfplumber con dos matrículas reales
+    # pegadas en la misma celda ("611150110\n611150111") llegaba hasta
+    # `varchar(9)` y reventaba el INSERT -- `^\d+$` sin límite de longitud
+    # la dejaba pasar como "matrícula válida" por no tener ninguna letra.
+    mapeo = {"codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": 3, "cantidad": 4, "precio_unitario": 5}
+    fila = ["P-001", "611150110\n611150111", "CABLE ARMADO DE Cu", "UD.", "1", "24,00 €"]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=123, documento_origen_id=667, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea is not None
+    assert linea["matricula"] is None
+    assert "no reconocible" in linea["motivo_revision"]
+
+
+def test_construir_linea_catalogo_matricula_de_nueve_digitos_sigue_valida():
+    mapeo = {"codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": 3, "cantidad": 4, "precio_unitario": 5}
+    fila = ["P-001", "611150110", "CABLE ARMADO DE Cu", "UD.", "1", "24,00 €"]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=123, documento_origen_id=667, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea is not None
+    assert linea["matricula"] == "611150110"

@@ -30,7 +30,22 @@ _CODIGO_PRECIO_LONGITUD_MAXIMA = LineaCatalogo.codigo_precio.type.length
 # con cualquier texto más largo. CONTEXTO.md sección 2: la matrícula "no es"
 # nunca texto, es un código de 9 dígitos; cualquier valor con una letra ya es
 # la señal de que esta fila no es lo que el mapeo de cabecera cree que es.
-_MATRICULA_VALIDA_RE = re.compile(r"^\d+$")
+#
+# Hallazgo real, bloque 5 (cambios del cliente tras revisar el catálogo,
+# sesión 2026-09-09): `^\d+$` (sin límite de longitud) deja pasar una fila
+# fusionada por `pdfplumber` (dos matrículas reales de líneas consecutivas
+# pegadas en una sola celda, "611150110\n611150111" -> "611150110611150111"
+# tras `limpiar_codigo_celda`) como si fuera una matrícula válida -- todo
+# dígitos, ninguna letra. Antes de este arreglo del bloque 5 (recuperación
+# de descripción antes que cantidad/precio), esas filas casi siempre se
+# descartaban enteras por quedarse sin descripción ni precio, así que nunca
+# llegaban a esta comprobación; al recuperarse más filas reales, unas pocas
+# con este defecto de matrícula sí llegan, y `varchar(9)` revienta el
+# INSERT en vez de mandarla a revisión. La longitud se lee de la propia
+# columna (`LineaCatalogo.matricula`), igual que `_CODIGO_PRECIO_LONGITUD_
+# MAXIMA` arriba, para que no puedan divergir.
+_MATRICULA_LONGITUD = LineaCatalogo.matricula.type.length
+_MATRICULA_VALIDA_RE = re.compile(rf"^\d{{{_MATRICULA_LONGITUD}}}$")
 
 # Hallazgo real (aviso del cliente, sesión 2026-09-07): el modelo, cuando
 # una tabla no trae ninguna columna de unidad de medida de verdad, tiende a
