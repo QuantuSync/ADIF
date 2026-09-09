@@ -53,6 +53,20 @@ from app.extraccion.texto import PaginaTexto, normalizar
 UMBRAL_DENSIDAD_NUMERICA = Decimal("0.025")
 MIN_GRUPOS_MARCADORES = 2
 
+# Bloque 5, cambios del cliente tras revisar el catálogo (sesión 2026-09-09):
+# umbral aparte, mucho más exigente, solo para aceptar una página SIN
+# ningún marcador de cabecera como continuación de la anterior (ver
+# docstring de `localizar_paginas_candidatas`). `UMBRAL_DENSIDAD_NUMERICA`
+# (0,025) es deliberadamente bajo para no perder una tabla real diluida por
+# prosa -- vale para la detección normal, que además exige marcadores, pero
+# solo no basta aquí. Medido contra los dos fixtures fijos del proyecto:
+# la página de prosa que sigue al cuadro de precios de guantes (0,049) y las
+# páginas de relleno entre los dos cuadros de traviesas (0,051-0,062) quedan
+# muy por debajo de este umbral; las 42 páginas reales de continuación de
+# `6.20/28510.0047_ANEJO_abd69efbdd39b552.pdf` (el caso real que motiva este
+# arreglo) están en 0,38-0,47 -- ni siquiera cerca del límite.
+UMBRAL_DENSIDAD_CONTINUACION = Decimal("0.20")
+
 _GRUPOS_MARCADORES: dict[str, tuple[str, ...]] = {
     "codigo": (
         "codigo de precio",
@@ -73,6 +87,12 @@ class PaginaCandidata:
     numero: int
     densidad_numerica: Decimal
     grupos_marcadores: frozenset[str]
+    # Bloque 5, cambios del cliente tras revisar el catálogo (sesión
+    # 2026-09-09): `True` cuando esta página entró solo por continuar a la
+    # anterior (ver docstring de `localizar_paginas_candidatas`), nunca
+    # porque ella misma repita ningún marcador de cabecera -- `grupos_
+    # marcadores` viene vacío en ese caso, no es un error.
+    continuacion: bool = False
 
 
 @dataclass(frozen=True)
@@ -105,13 +125,49 @@ def _grupos_presentes(texto_normalizado: str) -> frozenset[str]:
 
 
 def localizar_paginas_candidatas(paginas: list[PaginaTexto]) -> ResultadoLocalizacion:
-    candidatas = []
+    """Bloque 5, cambios del cliente tras revisar el catálogo (sesión
+    2026-09-09): dato verificado por el cliente contra la Plataforma --
+    "hay tablas sin encabezado que sí traen matrícula y cantidad", y en
+    efecto no pasaban esta etapa. Confirmado contra el PDF real
+    (`6.20/28510.0047_ANEJO_abd69efbdd39b552.pdf`, cuadro de precios por
+    matrícula de 61 páginas): la cabecera solo se imprime una vez, en la
+    primera página del cuadro; las 42 páginas de continuación siguientes
+    no repiten ninguna palabra de cabecera ("matrícula", "precio",
+    "cantidad"...) -- 0 de los 5 grupos de marcadores, aunque su densidad
+    numérica sea altísima (0,38-0,47, muy por encima del umbral) porque son
+    fila tras fila de matrícula/descripción/precio. Sin este arreglo, esas
+    42 páginas nunca llegaban ni a `extraer_tablas_pagina`: no es que la
+    tabla se descartara después por no tener cabecera reconocible, es que
+    la página entera nunca se abría.
+
+    Una página que NO trae marcadores propios se acepta igual, como
+    continuación, cuando la página INMEDIATAMENTE anterior sí es candidata
+    (por marcadores propios o por ser ella misma una continuación ya
+    aceptada) Y su propia densidad numérica supera `UMBRAL_DENSIDAD_
+    CONTINUACION` -- un umbral aparte y mucho más exigente que el de la
+    detección normal, nunca a ciegas: verificado contra los fixtures fijos
+    del proyecto que la prosa/relleno entre tablas reales (0,05-0,10) queda
+    muy por debajo, mientras que las páginas de continuación reales
+    (0,38-0,47) ni se acercan al límite. La cadena se corta en cuanto una
+    página no llega a ese umbral, así que nunca se cuela en páginas
+    posteriores no relacionadas. `etapa 5` (`app.extraccion.mapeo_cabecera`
+    vía `app.extraccion.pipeline_anejo`) es quien decide qué mapeo de
+    columnas usar para una tabla sin cabecera propia -- esto solo decide
+    que la página se ABRA."""
+    candidatas: list[PaginaCandidata] = []
+    anterior_es_candidata = False
     for pagina in paginas:
         densidad = _densidad_numerica(pagina.texto)
         if densidad < UMBRAL_DENSIDAD_NUMERICA:
+            anterior_es_candidata = False
             continue
         grupos = _grupos_presentes(normalizar(pagina.texto))
-        if len(grupos) < MIN_GRUPOS_MARCADORES:
-            continue
-        candidatas.append(PaginaCandidata(pagina.numero, densidad, grupos))
+        if len(grupos) >= MIN_GRUPOS_MARCADORES:
+            candidatas.append(PaginaCandidata(pagina.numero, densidad, grupos))
+            anterior_es_candidata = True
+        elif anterior_es_candidata and densidad >= UMBRAL_DENSIDAD_CONTINUACION:
+            candidatas.append(PaginaCandidata(pagina.numero, densidad, grupos, continuacion=True))
+            # anterior_es_candidata ya es True: se deja igual, la cadena sigue.
+        else:
+            anterior_es_candidata = False
     return ResultadoLocalizacion(candidatas=candidatas, total_paginas=len(paginas))
