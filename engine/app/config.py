@@ -47,6 +47,12 @@ class Settings(BaseSettings):
     # ella, `POST /mantenimiento/estado-sap/cargar` no tiene nada que leer).
     estado_sap_path: Optional[str] = None
 
+    # Bloque 6, cambios del cliente tras revisar el catálogo: desglose de
+    # SAP con las matrículas concretas de cada contrato (app.extraccion.
+    # sap_desglose) -- mismo mecanismo que las dos rutas de arriba. Solo lo
+    # lee la API (POST /mantenimiento/sap-desglose/cargar).
+    sap_desglose_path: Optional[str] = None
+
     # Recuperación de trabajos huérfanos (CONTEXTO.md sección 17, pendiente):
     # un trabajo `en_proceso` cuyo `bloqueado_en` supera este umbral se
     # reclama como si el worker que lo tenía hubiera desaparecido (contenedor

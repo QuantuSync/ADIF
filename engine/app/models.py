@@ -589,3 +589,37 @@ class TrabajoCola(Base):
         onupdate=func.now(),
         nullable=False,
     )
+
+
+class SapDesgloseLinea(Base):
+    """Desglose de SAP con las matrículas concretas de cada contrato (bloque
+    6, cambios del cliente tras revisar el catálogo, migración 0024) --
+    justo lo que los pliegos no traen. `codigo_expediente` es texto, no FK
+    (docstring de la migración): el cruce con `Expediente` es por clave
+    exacta cuando hace falta consultarlo, nunca una relación estructural.
+    Clave natural de una línea de pedido de compras real en SAP:
+    `documento_compras` + `posicion` -- por eso el upsert de
+    `app.extraccion.sap_desglose` usa esas dos columnas, nunca `id`."""
+
+    __tablename__ = "sap_desglose_lineas"
+
+    id = Column(Integer, primary_key=True)
+    codigo_expediente = Column(String(64), nullable=False)
+    documento_compras = Column(String(32), nullable=False)
+    posicion = Column(String(16), nullable=False)
+    material = Column(String(64), nullable=True)
+    texto_breve = Column(String(255), nullable=True)
+    cantidad_prevista = Column(Numeric(14, 3), nullable=True)
+    precio_neto = Column(Numeric(14, 4), nullable=True)
+    unidad_medida = Column(String(32), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        UniqueConstraint("documento_compras", "posicion", name="uq_sap_desglose_documento_posicion"),
+    )

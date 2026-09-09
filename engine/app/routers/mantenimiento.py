@@ -10,6 +10,7 @@ from app.config import settings
 from app.db import get_db
 from app.extraccion.descubrimiento_matriz import TIPO_TRABAJO as TIPO_TRABAJO_DESCUBRIMIENTO_PEDIDOS
 from app.extraccion.estado_sap import cargar_estado_sap
+from app.extraccion.sap_desglose import cargar_sap_desglose
 from app.mantenimiento.auditoria import TIPO_TRABAJO as TIPO_TRABAJO_AUDITORIA
 from app.mantenimiento.ciclo import TIPO_TRABAJO
 from app.mantenimiento.copia_seguridad import TIPO_TRABAJO as TIPO_TRABAJO_COPIA
@@ -22,7 +23,7 @@ from app.mantenimiento.programacion import (
 )
 from app.models import TrabajoCola
 from app.queue import encolar_trabajo
-from app.schemas import EstadoMantenimientoOut, EstadoSapCargaOut, TrabajoOut
+from app.schemas import EstadoMantenimientoOut, EstadoSapCargaOut, SapDesglosecargaOut, TrabajoOut
 from app.sindicacion.descubrimiento import TIPO_TRABAJO as TIPO_TRABAJO_SINDICACION_BACKFILL
 
 router = APIRouter()
@@ -279,3 +280,16 @@ def cargar_estado_contrato_sap(
     filas, sin red ni PDFs de por medio -- del mismo orden de coste que
     `POST /expedientes`, no del ciclo de mantenimiento."""
     return cargar_estado_sap(db, settings.estado_sap_path)
+
+
+@router.post("/mantenimiento/sap-desglose/cargar", response_model=SapDesglosecargaOut)
+def cargar_desglose_sap(
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    """Bloque 6, cambios del cliente tras revisar el catálogo: recarga
+    `sap_desglose_lineas` desde `SAP_DESGLOSE_PATH`
+    (`app.extraccion.sap_desglose`). Mismo criterio que
+    `POST /mantenimiento/estado-sap/cargar`: repetible sin duplicar (upsert
+    por documento de compras + posición), síncrono, sin pasar por la cola."""
+    return cargar_sap_desglose(db, settings.sap_desglose_path)

@@ -1113,6 +1113,23 @@ suficientes, no ahora.
   (5,07 % en vez de 0,40 %) -- ya corregido. Detalle completo, la tabla de
   las 38 líneas afectadas y los números finales en el bloque 3 de
   `docs/sesion-2026-09-08-auditoria-automatica.md`.
+- **Seis cambios del cliente tras revisar el catálogo (sesión 2026-09-09):**
+  columnas del Excel renombradas (bloque 1), punto final de `Cantidad`
+  corregido (bloque 2), `baja_lote` por línea con el mismo hueco que ya
+  tenía `precio_adjudicado` -- también se recalcula desde cero en cada
+  pasada, así que un `None` también debe borrar el valor guardado
+  (bloque 3, 30 expedientes con "Nº Lote: NNN" reprocesados), unidad de
+  medida diagnosticada sin tocar código (bloque 4: 20,1 % vacía, solo 7,3 %
+  es un defecto de extracción real -- verificado contra el PDF -- el resto
+  es el documento sin columna de unidad o con la unidad embebida en otra
+  celda), lista de exclusión de expedientes (bloque 5,
+  `EXCLUSION_EXPEDIENTES_PATH`), y desglose de SAP con matrículas concretas
+  cargado como fuente permanente (bloque 6, `SAP_DESGLOSE_PATH`,
+  `sap_desglose_lineas`) con la cadena de precios licitación→adjudicado→final
+  verificada contra datos reales (40/60 coinciden) pero sin implementar
+  todavía ni la derivación del coeficiente ni la completitud automática de
+  matrícula (encargo explícito: "no lo implementes todavía"). Detalle
+  completo y números en `docs/sesion-2026-09-09-cambios-cliente-catalogo.md`.
 
 ---
 
@@ -1131,4 +1148,5 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `sesion-2026-09-08-verificacion-excel-6599.md`,
 `sesion-2026-09-08-herencia-lote-continuacion.md`,
 `sesion-2026-09-08-auditoria-automatica.md`,
+`sesion-2026-09-09-cambios-cliente-catalogo.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.
