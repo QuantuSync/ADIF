@@ -1481,18 +1481,24 @@ def guardar_lineas_catalogo(
             for campo, valor in datos.items():
                 if campo == "clave_linea":
                     continue
-                if campo == "precio_adjudicado":
-                    # Derivado, nunca leído del documento (CONTEXTO.md
-                    # sección 4: `precio_unitario * (1 - baja_lote)`, o
-                    # `None` si falta cualquiera de los dos) -- cada pasada
-                    # lo recalcula desde cero, así que un `None` aquí SÍ
-                    # significa "ya no se puede derivar", nunca "esta
-                    # pasada no trajo el dato" (que es lo que justifica no
-                    # pisar el resto de campos). Hallazgo real, sesión de
-                    # medición del alcance 2026-09-08: 336 líneas de
-                    # `6.20/28510.0041` seguían con el precio adjudicado de
-                    # una baja ya corregida a "desconocida" porque este
-                    # bucle nunca llegaba a borrarlo.
+                if campo in ("precio_adjudicado", "baja_lote"):
+                    # Ambos se recalculan desde cero en cada pasada -- nunca
+                    # "esta pasada no trajo el dato" (que es lo que justifica
+                    # no pisar el resto de campos). `precio_adjudicado` es
+                    # derivado (CONTEXTO.md sección 4: `precio_unitario *
+                    # (1 - baja_lote)`, o `None` si falta cualquiera de los
+                    # dos); `baja_lote` se copia de `lote.baja_lote`, que
+                    # `app.extraccion.orquestador` ya sobrescribe sin
+                    # condición en cada extracción -- un `None` aquí SÍ
+                    # significa "ya no se puede confirmar", nunca "no se
+                    # miró". Hallazgo real, sesión de medición del alcance
+                    # 2026-09-08: 336 líneas de `6.20/28510.0041` seguían con
+                    # el precio adjudicado de una baja ya corregida a
+                    # "desconocida" porque este bucle nunca llegaba a
+                    # borrarlo -- verificado de nuevo, sesión del bloque 3 de
+                    # cambios del cliente: la propia `baja_lote` por línea
+                    # tenía el mismo hueco (seguía en 97,73 % pese a que
+                    # `lote.baja_lote` ya estaba en blanco).
                     setattr(existente, campo, valor)
                 elif valor is not None:
                     setattr(existente, campo, valor)
