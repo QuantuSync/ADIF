@@ -141,7 +141,20 @@ def importe_como_decimal(campo):
     (`app.extraccion.invalidado` -- encontrado pero no atribuible, ver
     docstring de `CamposAnuncioPcsp`) o un `CampoAnclado` real; los dos
     primeros pasan tal cual, sin normalizar nada, para que el llamador siga
-    distinguiéndolos."""
+    distinguiéndolos.
+
+    Bloque 3, sesión 2026-09-10: un literal encontrado por la etiqueta fija
+    pero que no se puede parsear como importe (p.ej. `parsear_numero_es`
+    rechazando una agrupación de miles inválida, mismo arreglo de esta
+    sesión) degrada a `INVALIDADO`, nunca deja que `ValueError` escape --
+    esta función se llama sin try/except alrededor
+    (`app.extraccion.orquestador`, bloque "Nº Lote: NNN"), y CONTEXTO.md
+    sección 12 exige que un valor no interpretable vaya a revisión, nunca
+    tumbe el expediente entero. Hallazgo real: expediente `6.20/28510.0062`,
+    literal `'1.10'`, reproceso completo del bloque 5."""
     if campo is None or campo is INVALIDADO:
         return campo
-    return parsear_importe_es(campo.valor)
+    try:
+        return parsear_importe_es(campo.valor)
+    except ValueError:
+        return INVALIDADO

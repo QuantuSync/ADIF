@@ -83,6 +83,20 @@ from app.extraccion.campos_pcsp import CODIGO_EXPEDIENTE_RE, CampoAnclado
 from app.extraccion.normalizacion import parsear_importe_es
 from app.extraccion.texto import PaginaTexto
 
+
+def _importe_o_none(texto: str) -> Optional[Decimal]:
+    """Bloque 3, sesión 2026-09-10: un importe que el regex sí encontró pero
+    que no se puede parsear (p.ej. `parsear_numero_es` rechazando una
+    agrupación de miles inválida) no debe tumbar el expediente entero
+    (CONTEXTO.md sección 12) -- se trata como "no encontrado", igual que si
+    el regex no hubiera casado nada. Mismo hallazgo que
+    `app.extraccion.campos_pcsp.importe_como_decimal`, expediente
+    `6.20/28510.0062` del reproceso completo del bloque 5."""
+    try:
+        return parsear_importe_es(texto)
+    except ValueError:
+        return None
+
 # Ancla mínima común a las 15 variantes reales: "LOTE" + número, con o sin
 # "En el"/"-"/"▪"/"•"/numeración ("1º.-") delante. Deliberadamente NO exige
 # ninguno de esos prefijos -- son justo lo que varía entre documentos.
@@ -239,7 +253,7 @@ def extraer_lotes_declarados(paginas: list[PaginaTexto]) -> ResultadoLotes:
         return ResultadoLotes(lotes=[], lotes_totales_declarados=None, codigo_principal_declarado=None)
 
     importes_licitacion = {
-        m.group(1): parsear_importe_es(m.group(2)) for m in _TABLA_LICITACION_LOTE_RE.finditer(texto)
+        m.group(1): _importe_o_none(m.group(2)) for m in _TABLA_LICITACION_LOTE_RE.finditer(texto)
     }
 
     # Acumulador por identificador: primer valor no nulo encontrado gana,
@@ -277,7 +291,7 @@ def extraer_lotes_declarados(paginas: list[PaginaTexto]) -> ResultadoLotes:
         if entrada["importe_adjudicacion"] is None:
             m_imp = _IMPORTE_ADJUDICACION_LOTE_RE.search(ventana)
             if m_imp:
-                entrada["importe_adjudicacion"] = parsear_importe_es(m_imp.group(1))
+                entrada["importe_adjudicacion"] = _importe_o_none(m_imp.group(1))
 
         if entrada["adjudicatario"] is None:
             m_adj = _ADJUDICATARIO_RE.search(ventana)

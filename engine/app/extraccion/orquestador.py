@@ -558,10 +558,23 @@ def _extraer_campos_expediente(
             adj = extraer_importe_adjudicacion_lc27(item.paginas)
             obj = extraer_objeto_contrato_lc27(item.paginas)
             adjc = extraer_adjudicatario_lc27(item.paginas)
+            # Bloque 3, sesión 2026-09-10: un importe encontrado por
+            # etiqueta pero no interpretable (mismo hallazgo que
+            # `app.extraccion.campos_pcsp.importe_como_decimal`, CONTEXTO.md
+            # sección 12) se trata como "no encontrado" -- deja
+            # `licitacion_lc27`/`adjudicacion_lc27` en `None`, elegible para
+            # que un documento posterior sí lo resuelva, en vez de tumbar el
+            # expediente entero.
             if lic and licitacion_lc27 is None:
-                licitacion_lc27 = (parsear_importe_es(lic.valor), item.documento.id, lic.pagina, lic.fragmento)
+                try:
+                    licitacion_lc27 = (parsear_importe_es(lic.valor), item.documento.id, lic.pagina, lic.fragmento)
+                except ValueError:
+                    pass
             if adj and adjudicacion_lc27 is None:
-                adjudicacion_lc27 = (parsear_importe_es(adj.valor), item.documento.id, adj.pagina, adj.fragmento)
+                try:
+                    adjudicacion_lc27 = (parsear_importe_es(adj.valor), item.documento.id, adj.pagina, adj.fragmento)
+                except ValueError:
+                    pass
             if obj and objeto_lc27 is None:
                 objeto_lc27 = (obj.valor, item.documento.id, obj.pagina, obj.fragmento)
             if adjc and adjudicatario_lc27 is None:

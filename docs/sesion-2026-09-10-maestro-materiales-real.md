@@ -299,3 +299,111 @@ para esta muestra: no había residuo que podar porque ya se habían
 reprocesado varias veces con el código actual). El mecanismo queda armado
 para el reproceso completo del bloque 5, que es donde de verdad se espera
 que encuentre y limpie el residuo real de sesiones anteriores.
+
+## Bloque 5 — Reproceso completo: copia de seguridad, foto de relleno, y un defecto encontrado en vivo
+
+Copia de seguridad manual antes de empezar: `adif_20260910_160317.dump`
+(2.866.750 bytes, 8 copias conservadas). Foto de relleno por columna antes
+del reproceso (22.724 líneas):
+
+| Columna | Relleno |
+|---|---|
+| `codigo_precio` | 84,9% |
+| `matricula` | 39,5% |
+| `descripcion` | 99,6% |
+| `codigo_material` | 62,6% |
+| `cantidad` | 65,9% |
+| `precio_unitario` | 99,4% |
+| `unidad_medida` | 84,7% |
+| `baja_lote` | 54,0% |
+| `precio_adjudicado` | 53,3% |
+| `codigo_interno` | 0,0% (columna vestigial, nunca escrita a nivel de línea -- no es una regresión de esta sesión) |
+| líneas con lote asignado | 90,2% |
+
+Lanzado `POST /mantenimiento/ejecutar` (`forzar: true`,
+`sindicacion_desactivada: true`) a las 16:03:55 UTC, trabajo `4097`, 358
+expedientes activos.
+
+### Defecto encontrado en vivo: `parsear_numero_es` sin `try/except` en cinco puntos más
+
+A la hora y cuarto de reproceso (189/358 completados), 1 expediente
+(`6.20/28510.0062`) apareció `fallido` con
+`agrupación de miles no válida en '1.10' (¿un código, no un número?)` --
+efecto colateral directo del arreglo del bloque 3: rechaza correctamente
+un valor ambiguo, pero en cinco puntos del código la llamada a
+`parsear_numero_es`/`parsear_importe_es`/`parsear_porcentaje_es` no estaba
+protegida con `try/except`, así que la excepción escapaba hasta el
+`except Exception` de cabecera de `ejecutar_extraccion_expediente`
+(`orquestador.py:1312`), que sí marca `expediente.estado = fallido` y
+**vuelve a lanzar la excepción** (`raise`) -- exactamente para que
+`app.worker`/`app.queue.ejecutar_trabajo` puedan registrar el fallo del
+`trabajo_cola`, pero con el efecto de que el expediente entero queda
+`fallido` (una interrupción real) en vez de `pendiente_revision` (el
+degradado correcto, CONTEXTO.md sección 12: "lo que no cuadra va a la cola
+de revisión"). Localizado y corregido en los cinco puntos reales:
+
+1. `app.extraccion.campos_pcsp.importe_como_decimal` -- el causante real
+   del fallo de `6.20/28510.0062` (camino "Nº Lote: NNN" del Anuncio PCSP).
+   Degrada a `INVALIDADO` (el mismo estado de tres que ya usa esta función
+   para "encontrado pero no atribuible"), no a una excepción.
+2. `app.extraccion.lotes._importe_o_none` (nuevo, dos puntos de llamada:
+   `importes_licitacion` y `importe_adjudicacion` por lote) -- degrada a
+   `None`, mismo criterio que "no encontrado".
+3. `app.extraccion.orquestador` (camino LC27, `licitacion_lc27`/
+   `adjudicacion_lc27`) -- ahora con `try/except` alrededor, deja el valor
+   sin resolver (`None`) para que un documento posterior pueda resolverlo.
+4. `app.extraccion.modelo_precio_indexado.detectar_modelo_precio_indexado`
+   -- sigue buscando en las páginas siguientes en vez de abortar (alcance
+   real limitado: solo los 3 expedientes conocidos de la segunda familia de
+   baja).
+5. `app.extraccion.baja` (`buscar_baja_en_texto`,
+   `extraer_baja_declarada`) -- prueba el siguiente patrón/página en vez de
+   propagar, defensa en profundidad aunque una baja con más de 3 dígitos en
+   la parte entera es improbable en la práctica.
+
+7 tests nuevos, 594 pasan. Solo 1 expediente había fallado por esta causa
+en el momento de encontrarlo.
+
+### Efecto secundario del despliegue en caliente: el ciclo se reinició, no se reanudó
+
+Para que el arreglo cubriera el resto del reproceso (en marcha) se
+reconstruyó y redesplegó `api`/`worker` (`docker compose up -d`). Esto
+recreó el contenedor `worker`, interrumpiendo el trabajo `mantenimiento_ciclo`
+(`4097`) a mitad de ejecución (~1h30, 200/358 completados). El mecanismo de
+recuperación de trabajos huérfanos (`app.queue.reclamar_trabajos_huerfanos`,
+umbral 300s) lo detectó como huérfano y lo reintentó (`intentos` 1→2) --
+pero el reintento **no reanudó por donde iba: volvió a ejecutar
+`ejecutar_ciclo_mantenimiento` desde el principio** con el mismo payload
+(`forzar: true`), así que re-evaluó y re-encoló los 358 expedientes
+completos, sin distinguir los ~200 que el primer intento ya había
+reprocesado con éxito segundos antes. Pendientes de extracción pasó de 156
+a 511 de golpe (duplicados para buena parte de los ya hechos).
+
+**Sin corrupción de datos** (CONTEXTO.md sección 9.9: reprocesar es
+idempotente, así que repetir un expediente ya hecho no lo daña, solo
+desperdicia tiempo) pero sí una duplicación real de horas de cómputo. **No
+se ha cortado el reproceso** (encargo explícito del cliente: cortarlo ahora
+sería peor). Causa raíz, riesgo real para este entorno concreto, y
+propuesta de arreglo (sin implementar, para la próxima sesión) documentados
+en CONTEXTO.md, sección "Pendiente de resolver" -- resumen: (1)
+`bloqueado_en` nunca se refresca mientras un trabajo corre, así que
+CUALQUIER reinicio del worker durante un `mantenimiento_ciclo` real (que
+dura horas por diseño) lo marca huérfano casi con certeza, no como caso
+raro -- y este entorno de desarrollo reinicia `dockerd`/WSL varias veces al
+día, hallazgo ya documentado en sesiones anteriores; (2) `debe_extraer`
+con `forzar=True` no distingue "obsoleto desde antes de este ciclo" de "ya
+resuelto por un intento anterior de este mismo ciclo" -- la información
+para distinguirlo (`Expediente.extraido_en` vs. `TrabajoCola.created_at`
+del propio ciclo) ya existe, solo falta la comprobación.
+
+**Riesgo abierto mientras el reproceso de esta sesión termina:** el trabajo
+`4097` va ya por su segundo intento de tres (`max_intentos=3`) -- un tercer
+reinicio del worker antes de que termine lo marcaría `fallido` en firme, no
+huérfano-y-reintentable. El worker no se ha vuelto a tocar desde este
+hallazgo.
+
+### Resultado final
+
+Pendiente de cerrar hasta que el reproceso (ahora en su segunda pasada
+completa) termine -- ver el bloque 6 para el resultado final, la
+comparación de relleno antes/después y el informe de cierre.
