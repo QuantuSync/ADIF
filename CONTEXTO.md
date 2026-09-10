@@ -1030,7 +1030,20 @@ suficientes, no ahora.
   huérfana en vez de sustituirse. 5 filas así, limpiadas a mano tras
   verificar cada una contra su reemplazo real; una poda automática
   necesitaría decidir primero qué pasa si solo se reprocesa un subconjunto
-  de las tablas de un documento, fuera de esta sesión. **Cuarto punto,
+  de las tablas de un documento, fuera de esta sesión.
+  **Cerrado, bloque 4, sesión 2026-09-10:** el subconjunto nunca ocurre —
+  `procesar_anejo` extrae siempre el documento entero en una pasada, y solo
+  se usa si termina sin excepción. `podar_lineas_obsoletas_de_documento`
+  (`app/catalogo.py`) borra, dentro de `(expediente_id, documento_id)`,
+  cualquier línea que `guardar_lineas_catalogo` no tocó en este ciclo;
+  `guardar_lineas_catalogo` devuelve `ids_tocadas` para que el orquestador
+  las acumule por documento y pode una sola vez al terminarlo. Silenciosa,
+  sin `motivo_revision` (mismo criterio que `_limpiar_huerfana_superada`);
+  contada en `lineas_podadas` del resumen. 7 tests nuevos, 591 pasan.
+  Verificado en el stack real (3 expedientes del bloque 3 + muestra de 15
+  más): 22.724 líneas antes y después, sin cambios — el mecanismo queda
+  armado para que el reproceso completo del bloque 5 limpie el residuo real
+  acumulado de sesiones anteriores. **Cuarto punto,
   analizado sin tocar código:** el motivo mayoritario de las 3.102 líneas
   pendientes ("ninguna cabecera LOTE N", 2.001 líneas) concentra el 79,7 %
   en un único documento de 37 páginas compartido por dos expedientes

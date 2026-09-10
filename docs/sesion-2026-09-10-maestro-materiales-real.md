@@ -245,3 +245,57 @@ de código de precio) queda pendiente para una sesión dedicada — no se
 intenta aquí por el riesgo de tocar el mecanismo de caché de firma
 estructural compartido con el resto del corpus sin una verificación
 completa.
+
+## Bloque 4 — Poda de filas huérfanas obsoletas
+
+Cierra el hueco de idempotencia documentado desde la sesión de
+verificación del Excel de 6.599 líneas (2026-09-08): `guardar_lineas_catalogo`
+nunca borraba una línea de un reproceso anterior del MISMO documento que ya
+no aparece en el nuevo, porque una línea sin `codigo_precio` ni matrícula
+usa `hash(descripción + orden_aparicion)` como clave (`calcular_clave_linea`)
+— si un arreglo posterior cambia qué texto cae en `descripcion` para esa
+fila (exactamente lo que hicieron varios arreglos de mapeo de cabecera a lo
+largo de esta y otras sesiones), la clave cambia y la fila vieja queda
+huérfana en vez de sustituirse. 5 filas así se limpiaron a mano en su día;
+sin poda automática, cada arreglo de mapeo futuro deja el mismo residuo.
+
+**El bloqueo de aquella sesión era decidir qué pasa si solo se reprocesa un
+subconjunto de las tablas de un documento — resuelto: no pasa.**
+`procesar_anejo` (`app.extraccion.orquestador`) extrae siempre el documento
+entero (todas sus tablas, todos sus grupos/lotes) en una sola pasada, y el
+resultado solo se usa si termina sin excepción — si falla, ese documento
+entero se salta este ciclo (`db.rollback()`) y la poda ni se invoca. Podar
+por `(expediente_id, documento_id)` tras un `procesar_anejo` que sí terminó
+es seguro: el conjunto de `id` tocados por TODAS las llamadas a
+`guardar_lineas_catalogo` de ese documento en este ciclo es, por
+construcción, el conjunto completo y actual de lo que ese documento
+produce hoy.
+
+Implementado: `guardar_lineas_catalogo` devuelve ahora `ids_tocadas`
+(creadas + actualizadas, tras un `flush()` para tener `id` asignado);
+`podar_lineas_obsoletas_de_documento` (`app/catalogo.py`) borra, dentro de
+`(expediente_id, documento_id)`, cualquier línea que no esté en ese
+conjunto — excluye explícitamente `heredado_de_matriz` como red de
+seguridad barata (aunque el propio límite de documento ya la protege,
+CONTEXTO.md sección 3: el pedido nunca procesa por su cuenta el documento
+de la matriz). El orquestador acumula `ids_tocadas` de todos los grupos de
+un documento y poda una sola vez al terminarlo, nunca dentro del bucle de
+grupos (para que un grupo no pode lo que otro grupo del mismo documento
+acaba de tocar). Silenciosa a propósito, sin `motivo_revision` (mismo
+criterio que `_limpiar_huerfana_superada`, que ya borra huérfanas
+superadas sin generar aviso): podar es idempotencia esperada, no un
+hallazgo dudoso — se cuenta igual (`lineas_podadas`, nuevo campo en el
+resumen de `POST /expedientes/{id}/extraer` y del ciclo de mantenimiento)
+para que quede visible en el informe del reproceso. 7 tests nuevos
+(`ids_tocadas`, y cinco variantes de la poda: borra lo obsoleto, no toca
+otro documento, no toca otro expediente, no borra `heredado_de_matriz`,
+sin nada que podar). 591 tests pasan.
+
+Verificado contra el stack real: reprocesados los 3 expedientes del bloque
+3 (otra vez) más una muestra aleatoria de 15 expedientes reales ya
+completados — 22.724 líneas antes y después, ni una de más ni una de
+menos, `lineas_podadas` presente en el resultado de cada trabajo (en `0`
+para esta muestra: no había residuo que podar porque ya se habían
+reprocesado varias veces con el código actual). El mecanismo queda armado
+para el reproceso completo del bloque 5, que es donde de verdad se espera
+que encuentre y limpie el residuo real de sesiones anteriores.

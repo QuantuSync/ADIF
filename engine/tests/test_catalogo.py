@@ -8,6 +8,7 @@ from app.catalogo import (
     construir_linea_catalogo,
     construir_lineas_desde_tabla,
     guardar_lineas_catalogo,
+    podar_lineas_obsoletas_de_documento,
 )
 from app.extraccion.tabla import TablaExtraida
 from app.models import Expediente, Lote, LineaCatalogo
@@ -2013,3 +2014,106 @@ def test_construir_linea_catalogo_matricula_de_nueve_digitos_sigue_valida():
 
     assert linea is not None
     assert linea["matricula"] == "611150110"
+
+
+# --- ids_tocadas / podar_lineas_obsoletas_de_documento (bloque 4, sesión 2026-09-10) ---
+
+
+def test_guardar_lineas_catalogo_devuelve_ids_tocadas(db_session):
+    lote = _lote(db_session)
+    mapeo = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": None, "cantidad": None, "precio_unitario": 2}
+    fila = ["P-001", "Guante", "24,00"]
+    lineas = [construir_linea_catalogo(fila, mapeo, 11, None, lote.expediente_id, None, 0)]
+
+    creada = guardar_lineas_catalogo(db_session, lote.id, lineas)
+    db_session.commit()
+    linea_id = db_session.query(LineaCatalogo).filter_by(lote_id=lote.id, clave_linea="P-001").one().id
+
+    assert creada.ids_tocadas == frozenset({linea_id})
+
+    actualizada = guardar_lineas_catalogo(db_session, lote.id, lineas)
+    assert actualizada.ids_tocadas == frozenset({linea_id})
+
+
+def _linea_directa(db_session, *, expediente_id, documento_origen_id, clave, heredado_de_matriz=None):
+    linea = LineaCatalogo(
+        expediente_id=expediente_id,
+        lote_id=None,
+        clave_linea=clave,
+        orden_aparicion=0,
+        descripcion=f"Material {clave}",
+        documento_origen_id=documento_origen_id,
+        heredado_de_matriz=heredado_de_matriz,
+    )
+    db_session.add(linea)
+    db_session.commit()
+    return linea
+
+
+def test_podar_lineas_obsoletas_de_documento_borra_lo_que_ya_no_se_toco(db_session):
+    # Caso real del bloque 4: dos filas del mismo documento en un reproceso
+    # anterior, una de las cuales ya no aparece en el reproceso actual (su
+    # clave cambió, p.ej. porque un arreglo de mapeo cambió qué texto cae en
+    # `descripcion`) -- debe podarse, la otra no.
+    expediente = Expediente(codigo_expediente="6.24/28510.8888")
+    db_session.add(expediente)
+    db_session.commit()
+    conservada = _linea_directa(db_session, expediente_id=expediente.id, documento_origen_id=50, clave="a")
+    obsoleta = _linea_directa(db_session, expediente_id=expediente.id, documento_origen_id=50, clave="b-vieja")
+
+    podadas = podar_lineas_obsoletas_de_documento(db_session, expediente.id, 50, frozenset({conservada.id}))
+
+    assert podadas == 1
+    assert db_session.get(LineaCatalogo, obsoleta.id) is None
+    assert db_session.get(LineaCatalogo, conservada.id) is not None
+
+
+def test_podar_lineas_obsoletas_de_documento_no_toca_otro_documento(db_session):
+    expediente = Expediente(codigo_expediente="6.24/28510.8887")
+    db_session.add(expediente)
+    db_session.commit()
+    de_otro_documento = _linea_directa(db_session, expediente_id=expediente.id, documento_origen_id=51, clave="c")
+
+    podadas = podar_lineas_obsoletas_de_documento(db_session, expediente.id, 50, frozenset())
+
+    assert podadas == 0
+    assert db_session.get(LineaCatalogo, de_otro_documento.id) is not None
+
+
+def test_podar_lineas_obsoletas_de_documento_no_toca_otro_expediente(db_session):
+    expediente_1 = Expediente(codigo_expediente="6.24/28510.8886")
+    expediente_2 = Expediente(codigo_expediente="6.24/28510.8885")
+    db_session.add_all([expediente_1, expediente_2])
+    db_session.commit()
+    de_otro_expediente = _linea_directa(db_session, expediente_id=expediente_2.id, documento_origen_id=50, clave="d")
+
+    podadas = podar_lineas_obsoletas_de_documento(db_session, expediente_1.id, 50, frozenset())
+
+    assert podadas == 0
+    assert db_session.get(LineaCatalogo, de_otro_expediente.id) is not None
+
+
+def test_podar_lineas_obsoletas_de_documento_no_borra_heredada_de_matriz(db_session):
+    # Una línea heredada de la matriz nunca debería aparecer bajo el
+    # `documento_origen_id` que el PEDIDO procesa por su cuenta (ese
+    # documento es de la matriz, CONTEXTO.md sección 3) -- pero se excluye
+    # explícitamente igual, como red de seguridad barata.
+    expediente = Expediente(codigo_expediente="6.24/28510.8884")
+    db_session.add(expediente)
+    db_session.commit()
+    heredada = _linea_directa(
+        db_session, expediente_id=expediente.id, documento_origen_id=50, clave="e", heredado_de_matriz=True
+    )
+
+    podadas = podar_lineas_obsoletas_de_documento(db_session, expediente.id, 50, frozenset())
+
+    assert podadas == 0
+    assert db_session.get(LineaCatalogo, heredada.id) is not None
+
+
+def test_podar_lineas_obsoletas_de_documento_sin_nada_que_podar(db_session):
+    expediente = Expediente(codigo_expediente="6.24/28510.8883")
+    db_session.add(expediente)
+    db_session.commit()
+
+    assert podar_lineas_obsoletas_de_documento(db_session, expediente.id, 50, frozenset()) == 0

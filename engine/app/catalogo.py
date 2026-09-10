@@ -1281,6 +1281,12 @@ def construir_lineas_desde_tabla(
 class ResultadoGuardadoCatalogo:
     creadas: int
     actualizadas: int
+    # Bloque 4, sesión 2026-09-10: `id` de toda línea creada o actualizada
+    # en esta llamada -- el llamador (`ejecutar_extraccion_expediente`) las
+    # acumula por documento para saber, al terminar de guardar TODOS los
+    # grupos/lotes de ese documento, qué líneas YA guardadas de ese mismo
+    # documento no se tocaron esta vez (`podar_lineas_obsoletas_de_documento`).
+    ids_tocadas: frozenset[int] = frozenset()
 
 
 def _firma_material(datos: dict) -> Optional[tuple]:
@@ -1632,6 +1638,7 @@ def guardar_lineas_catalogo(
     distingue sin ambigüedad dos tablas de la misma página."""
     creadas = 0
     actualizadas = 0
+    objetos_tocados: list[LineaCatalogo] = []
     fusion_material = lote_id is not None
     for datos in _combinar_por_clave(lineas, permitir_fusion_material=fusion_material):
         # Transitorio, nunca una columna de `LineaCatalogo` -- se retira
@@ -1680,9 +1687,12 @@ def guardar_lineas_catalogo(
             existente = duplicados_por_firma.pop(0)
 
         if existente is None:
-            db.add(LineaCatalogo(lote_id=lote_id, **datos))
+            nueva = LineaCatalogo(lote_id=lote_id, **datos)
+            db.add(nueva)
             creadas += 1
+            objetos_tocados.append(nueva)
         else:
+            objetos_tocados.append(existente)
             # `clave_linea` se recalcula aparte, más abajo: cuando la fila
             # existente se encontró por firma (no por clave exacta),
             # `datos["clave_linea"]` puede ser justo la clave *distinta* que
@@ -1768,4 +1778,62 @@ def guardar_lineas_catalogo(
             actualizadas += 1
         if lote_id is not None:
             _limpiar_huerfana_superada(db, datos["expediente_id"], clave_huerfana_hipotetica)
-    return ResultadoGuardadoCatalogo(creadas=creadas, actualizadas=actualizadas)
+    # `flush()`, no `commit()` (docstring: el llamador decide cuándo): las
+    # líneas recién creadas no tienen `id` hasta que el `INSERT` viaja a
+    # postgres, y el llamador necesita esos `id` YA (bloque 4, sesión
+    # 2026-09-10) para saber, al terminar de guardar todos los grupos de un
+    # documento, qué guardar_lineas_catalogo pasa por alto.
+    db.flush()
+    ids_tocadas = frozenset(obj.id for obj in objetos_tocados)
+    return ResultadoGuardadoCatalogo(creadas=creadas, actualizadas=actualizadas, ids_tocadas=ids_tocadas)
+
+
+def podar_lineas_obsoletas_de_documento(
+    db: Session, expediente_id: int, documento_id: int, ids_conservar: frozenset[int]
+) -> int:
+    """Bloque 4, sesión 2026-09-10: cierra el hueco de idempotencia
+    documentado desde la sesión de verificación del Excel de 6.599 líneas
+    (2026-09-08) — `guardar_lineas_catalogo` nunca borraba una línea de un
+    reproceso anterior del MISMO documento que ya no aparece en el nuevo,
+    porque una línea sin `codigo_precio` ni matrícula usa
+    `hash(descripción + orden_aparicion)` como clave (`calcular_clave_linea`):
+    si un arreglo posterior cambia qué texto cae en `descripcion` para esa
+    fila (exactamente lo que hicieron los arreglos de mapeo de cabecera de
+    varias sesiones), la clave cambia y la fila vieja queda huérfana en vez
+    de sustituirse.
+
+    El bloqueo de aquella sesión era decidir qué pasa si solo se reprocesa
+    un SUBCONJUNTO de las tablas de un documento -- no pasa: `procesar_anejo`
+    (`app.extraccion.orquestador`) extrae SIEMPRE el documento entero (todas
+    sus tablas, todos sus grupos/lotes) en una sola pasada, y solo se
+    considera si termina sin excepción (si falla, el documento entero se
+    salta este ciclo, `db.rollback()`, y esta función ni se llama). Por eso
+    podar por `(expediente_id, documento_id)` tras un `procesar_anejo` que sí
+    terminó es seguro: `ids_conservar` (la unión de `ids_tocadas` de TODAS
+    las llamadas a `guardar_lineas_catalogo` de ese documento en este ciclo)
+    es, por construcción, el conjunto completo y actual de líneas que ese
+    documento produce hoy -- cualquier línea de ese mismo documento que no
+    esté ahí es del pasado.
+
+    Nunca cruza el límite de documento ni de expediente: una línea heredada
+    de la matriz (`heredado_de_matriz`) tiene `documento_origen_id` del
+    documento de la MATRIZ, que el pedido nunca procesa por su cuenta -- el
+    filtro por `documento_id` ya la protege sin necesidad de excluirla a
+    mano, pero se excluye explícitamente igual, como red de seguridad
+    barata ante un futuro documento compartido entre expediente y matriz."""
+    consulta = db.query(LineaCatalogo).filter(
+        LineaCatalogo.expediente_id == expediente_id,
+        LineaCatalogo.documento_origen_id == documento_id,
+        LineaCatalogo.heredado_de_matriz.is_not(True),
+    )
+    if ids_conservar:
+        consulta = consulta.filter(LineaCatalogo.id.notin_(ids_conservar))
+    candidatas = consulta.all()
+    # Borrado ORM objeto a objeto, no un `.delete()` masivo (mismo criterio
+    # que `_limpiar_huerfana_superada`/la fusión por firma de arriba): el
+    # volumen esperado por documento es bajo, y así el `Session` queda
+    # sincronizado sin depender de `synchronize_session`.
+    for linea in candidatas:
+        db.delete(linea)
+    db.flush()
+    return len(candidatas)

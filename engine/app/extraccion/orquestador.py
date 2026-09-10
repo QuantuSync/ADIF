@@ -30,7 +30,7 @@ from typing import Optional
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from app.catalogo import guardar_lineas_catalogo
+from app.catalogo import guardar_lineas_catalogo, podar_lineas_obsoletas_de_documento
 from app.extraccion.baja import (
     BajaDeclarada,
     elegir_baja_preferida,
@@ -723,6 +723,7 @@ def ejecutar_extraccion_expediente(
             "tablas_procesadas": 0,
             "lineas_creadas": 0,
             "lineas_actualizadas": 0,
+            "lineas_podadas": 0,
             "llamadas_modelo": 0,
             "lotes": [],
             "baja_global": None,
@@ -755,6 +756,7 @@ def ejecutar_extraccion_expediente(
         motivo_revision: Optional[str] = None
         estado_especial: Optional[EstadoExpediente] = None
         lineas_creadas = lineas_actualizadas = tablas_procesadas = llamadas_modelo = 0
+        lineas_podadas = 0
         documentos_procesados = 0
         documentos_pliego_omitidos: list[str] = []
         documentos_escaneados: list[str] = []
@@ -1095,11 +1097,29 @@ def ejecutar_extraccion_expediente(
                         for linea in resultado.lineas:
                             identificador = linea.pop("identificador_lote")
                             grupos.setdefault(identificador, []).append(linea)
+                        # Bloque 4, sesión 2026-09-10: `ids_tocadas` de TODOS
+                        # los grupos de este documento, para podar al final
+                        # (ver docstring de `podar_lineas_obsoletas_de_documento`)
+                        # -- nunca dentro del bucle, porque un grupo no debe
+                        # podar lo que otro grupo del MISMO documento acaba
+                        # de tocar.
+                        ids_tocadas_documento: set[int] = set()
                         for identificador, lineas_grupo in grupos.items():
                             lote_id = lotes_por_identificador.get(identificador) if identificador is not None else None
                             guardado = guardar_lineas_catalogo(db, lote_id, lineas_grupo)
                             lineas_creadas_doc += guardado.creadas
                             lineas_actualizadas_doc += guardado.actualizadas
+                            ids_tocadas_documento |= guardado.ids_tocadas
+                        # Silenciosa a propósito, sin motivo_revision (no
+                        # manda el expediente a revisión): mismo criterio que
+                        # `_limpiar_huerfana_superada`, que ya borra huérfanas
+                        # superadas sin avisar -- la poda es idempotencia
+                        # esperada, no un hallazgo dudoso. Se cuenta igual
+                        # (`lineas_podadas`, en el resumen final) para que
+                        # quede visible en el informe del reproceso.
+                        lineas_podadas += podar_lineas_obsoletas_de_documento(
+                            db, expediente.id, item.documento.id, frozenset(ids_tocadas_documento)
+                        )
                     item.documento.procesado_en = datetime.now(timezone.utc)
                     db.commit()
                 except Exception as exc:  # noqa: BLE001
@@ -1280,6 +1300,7 @@ def ejecutar_extraccion_expediente(
             "tablas_procesadas": tablas_procesadas,
             "lineas_creadas": lineas_creadas,
             "lineas_actualizadas": lineas_actualizadas,
+            "lineas_podadas": lineas_podadas,
             "llamadas_modelo": llamadas_modelo,
             "lotes": [l.identificador_lote for l in lotes],
             "baja_global": str(expediente.baja_global) if expediente.baja_global is not None else None,
