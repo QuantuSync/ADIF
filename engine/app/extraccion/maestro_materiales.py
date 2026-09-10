@@ -11,15 +11,20 @@ entrada permanente, mismo mecanismo que `app.extraccion.estado_sap`/
 montada por bind-mount, repetible sin duplicar (upsert por `matricula`, la
 clave natural de un material en SAP).
 
-Formato mínimo esperado a pedir al cliente -- tres columnas, incluidas ya en
-el desglose de SAP que el cliente facilitó en la sesión anterior
-(`app.extraccion.sap_desglose`, bloque 6), mismo vocabulario para no pedir
-dos nombres distintos de la misma cosa:
-    - "Material"            matrícula, 9 dígitos.
-    - "Texto breve"          descripción del material.
-    - "Unidad medida base"   unidad de medida.
+Formato real, recibido y verificado bloque 1, sesión 2026-09-10
+(`LISTADO_MATERIALES_UNIDAD__MEDIDA.xlsx`, 32.116 filas, sin huecos) --
+distinto del que se suponía al preparar la carga (sesión 2026-09-09: se
+esperaba "Texto breve"/"Unidad medida base", nombres tomados por analogía
+del desglose de SAP del bloque 6 anterior; el maestro real usa otros dos):
+    - "Material"        matrícula. 31.665 de nueve dígitos, 440 de cuatro y
+                         11 de diez (categorías genéricas de SAP) -- ver
+                         migración 0026 para por qué `MaestroMaterial.matricula`
+                         ensancha a `String(10)`.
+    - "Denominación"     descripción del material.
+    - "UM base"          unidad de medida. 18 unidades distintas, "UN" en
+                         el 96% de las filas.
 
-Cómo se cruzaría, en dos pasos separados y ninguno automático por completo:
+Cómo se cruza, en dos pasos separados y ninguno automático por completo:
 
 1. Completar UNIDAD DE MEDIDA (`completar_unidades_desde_maestro`): join
    determinista por `matricula` exacta -- la línea de catálogo YA tiene
@@ -27,7 +32,11 @@ Cómo se cruzaría, en dos pasos separados y ninguno automático por completo:
    ambigüedad, se puede automatizar sin más red de seguridad que "nunca pisar
    un valor ya extraído" (ver más abajo). Techo real: solo alcanza a las
    líneas que YA tienen matrícula pero no unidad -- no las que carecen de
-   las dos cosas.
+   las dos cosas. De paso (mismo encargo, bloque 1): cuando la línea YA
+   tiene su propia unidad Y el maestro trae una distinta para la misma
+   matrícula, la discrepancia se anota (`unidad_medida_discrepancia_maestro`)
+   para revisión humana, nunca se corrige sola -- "es información útil",
+   no un error a resolver en silencio.
 
 2. Completar MATRÍCULA -- deliberadamente NO implementado en esta sesión.
    El maestro de materiales no trae ninguna clave que ya tengamos en las
@@ -63,8 +72,8 @@ from sqlalchemy.orm import Session
 from app.models import LineaCatalogo, MaestroMaterial
 
 COLUMNA_MATRICULA = "Material"
-COLUMNA_DESCRIPCION = "Texto breve"
-COLUMNA_UNIDAD_MEDIDA = "Unidad medida base"
+COLUMNA_DESCRIPCION = "Denominación"
+COLUMNA_UNIDAD_MEDIDA = "UM base"
 
 _COLUMNAS_REQUERIDAS = (COLUMNA_MATRICULA,)
 
@@ -182,27 +191,64 @@ class ResumenCompletarUnidades:
     lineas_evaluadas: int = 0
     lineas_completadas: int = 0
     sin_matricula_en_maestro: int = 0
+    # Bloque 1, sesión 2026-09-10: líneas que YA traían su propia unidad
+    # (del documento real) y el maestro da una distinta para la misma
+    # matrícula -- anotadas, nunca corregidas solas.
+    discrepancias_detectadas: int = 0
 
     def to_dict(self) -> dict:
         return {
             "lineas_evaluadas": self.lineas_evaluadas,
             "lineas_completadas": self.lineas_completadas,
             "sin_matricula_en_maestro": self.sin_matricula_en_maestro,
+            "discrepancias_detectadas": self.discrepancias_detectadas,
         }
 
 
+# Medido contra el maestro real cargado en este bloque: sin esto, "UD"/
+# "UD."/"ud" del documento contra "UN" del maestro por sí solas producían
+# 3.281 de 3.636 discrepancias -- la misma unidad real (SAP y los pliegos
+# usan abreviaturas distintas para "unidad"), no una discrepancia de
+# sustancia. Sinónimos verificados, no adivinados: solo variantes gráficas
+# de "unidad", nunca una unidad físicamente distinta (Kg/M/UN sí se dejan
+# como discrepancia real).
+_SINONIMOS_UNIDAD = {
+    "UD": "UN",
+    "UDS": "UN",
+    "UNIDAD": "UN",
+    "UNIDADES": "UN",
+}
+
+
+def _normalizada(unidad: Optional[str]) -> Optional[str]:
+    """Compara sin dejarse engañar por mayúsculas/espacios/puntos sobrantes
+    (CONTEXTO.md sección 8) ni por sinónimos gráficos conocidos de la misma
+    unidad real -- una diferencia de caja o de abreviatura no es una
+    discrepancia real."""
+    if unidad is None:
+        return None
+    texto = unidad.strip().upper().rstrip(".")
+    if not texto:
+        return None
+    return _SINONIMOS_UNIDAD.get(texto, texto)
+
+
 def completar_unidades_desde_maestro(db: Session) -> ResumenCompletarUnidades:
-    """Rellena `LineaCatalogo.unidad_medida` por `matricula` exacta, SOLO
-    donde la línea ya tiene matrícula y no tiene unidad -- nunca pisa un
-    valor ya extraído (docstring del módulo). Marca
-    `unidad_medida_completada_desde_maestro = True` en cada línea que toca,
-    para que la trazabilidad distinga este origen del documento real."""
+    """Dos pasadas sobre toda línea con matrícula, nunca solo las que faltan:
+
+    1. Sin unidad propia: la rellena desde el maestro (`lineas_completadas`)
+       y marca `unidad_medida_completada_desde_maestro = True` -- mismo
+       comportamiento que antes.
+    2. Con unidad propia que no coincide con la del maestro: NUNCA la pisa
+       (encargo explícito del cliente, bloque 1) -- anota la unidad del
+       maestro en `unidad_medida_discrepancia_maestro` para que quede en
+       trazabilidad y pueda revisarse, y cuenta en
+       `discrepancias_detectadas`. Si coincide (incluida una discrepancia
+       anotada en una pasada anterior que ya no aplica, p. ej. tras
+       recargar el maestro), limpia la marca en vez de dejarla obsoleta."""
     resumen = ResumenCompletarUnidades()
     lineas = db.execute(
-        select(LineaCatalogo).where(
-            LineaCatalogo.matricula.is_not(None),
-            LineaCatalogo.unidad_medida.is_(None),
-        )
+        select(LineaCatalogo).where(LineaCatalogo.matricula.is_not(None))
     ).scalars().all()
 
     if not lineas:
@@ -215,14 +261,27 @@ def completar_unidades_desde_maestro(db: Session) -> ResumenCompletarUnidades:
     unidad_por_matricula = {m.matricula: m.unidad_medida for m in maestros if m.unidad_medida}
 
     for linea in lineas:
-        resumen.lineas_evaluadas += 1
-        unidad = unidad_por_matricula.get(linea.matricula)
-        if unidad is None:
-            resumen.sin_matricula_en_maestro += 1
+        unidad_maestro = unidad_por_matricula.get(linea.matricula)
+
+        if linea.unidad_medida is None:
+            resumen.lineas_evaluadas += 1
+            if unidad_maestro is None:
+                resumen.sin_matricula_en_maestro += 1
+                continue
+            linea.unidad_medida = unidad_maestro
+            linea.unidad_medida_completada_desde_maestro = True
+            resumen.lineas_completadas += 1
             continue
-        linea.unidad_medida = unidad
-        linea.unidad_medida_completada_desde_maestro = True
-        resumen.lineas_completadas += 1
+
+        if unidad_maestro is None:
+            continue
+        if _normalizada(unidad_maestro) == _normalizada(linea.unidad_medida):
+            if linea.unidad_medida_discrepancia_maestro is not None:
+                linea.unidad_medida_discrepancia_maestro = None
+            continue
+        if linea.unidad_medida_discrepancia_maestro != unidad_maestro:
+            linea.unidad_medida_discrepancia_maestro = unidad_maestro
+        resumen.discrepancias_detectadas += 1
 
     db.commit()
     return resumen

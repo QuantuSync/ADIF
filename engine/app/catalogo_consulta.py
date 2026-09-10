@@ -216,6 +216,8 @@ def fila_a_dict(
         "comentarios": linea.comentarios,
         "motivo_revision": linea.motivo_revision,
         "heredado_de_matriz": linea.heredado_de_matriz,
+        "unidad_medida_completada_desde_maestro": linea.unidad_medida_completada_desde_maestro,
+        "unidad_medida_discrepancia_maestro": linea.unidad_medida_discrepancia_maestro,
         "estado_revision": linea.estado_revision.value,
         "documento_origen_id": linea.documento_origen_id,
         "documento_origen_nombre": nombre_archivo,

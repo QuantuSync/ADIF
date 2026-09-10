@@ -158,6 +158,13 @@ class LineaCatalogoOut(BaseModel):
     # `documento_origen_id`/`pagina`/`fragmento` de abajo siguen apuntando al
     # documento real de origen (el de la matriz): la trazabilidad no cambia.
     heredado_de_matriz: Optional[bool] = None
+    # Bloque 1, sesión 2026-09-10: `True` cuando `unidad_medida` se rellenó
+    # desde `maestro_materiales` (el documento propio no la traía).
+    unidad_medida_completada_desde_maestro: Optional[bool] = None
+    # La unidad que dice el maestro cuando no coincide con la que ya tiene
+    # la línea (del documento real) -- `unidad_medida` nunca se pisa, esto
+    # solo señala la discrepancia para revisión.
+    unidad_medida_discrepancia_maestro: Optional[str] = None
     estado_revision: str
     # Trazabilidad (CONTEXTO.md sección 9.10 y encargo de esta sesión, punto 2):
     # de qué documento, página y fragmento salió esta línea.
@@ -289,6 +296,7 @@ class MaestroMaterialesCompletarOut(BaseModel):
     lineas_evaluadas: int = 0
     lineas_completadas: int = 0
     sin_matricula_en_maestro: int = 0
+    discrepancias_detectadas: int = 0
 
 
 class TrabajoOut(BaseModel):
