@@ -77,8 +77,15 @@ def detectar_modelo_precio_indexado(paginas: list[PaginaTexto]) -> Optional[Mode
     for pagina in paginas:
         m = _COEFICIENTE_TRANSFORMACION_RE.search(pagina.texto)
         if m:
-            coeficiente = parsear_numero_es(m.group(1))
-            break
+            # Bloque 3, sesión 2026-09-10: un valor encontrado pero no
+            # interpretable no debe tumbar el expediente (CONTEXTO.md
+            # sección 12) -- se sigue buscando en las páginas restantes en
+            # vez de propagar la excepción.
+            try:
+                coeficiente = parsear_numero_es(m.group(1))
+                break
+            except ValueError:
+                continue
 
     return ModeloPrecioIndexadoDetectado(
         coeficiente_transformacion=coeficiente,

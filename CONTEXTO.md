@@ -1278,6 +1278,66 @@ suficientes, no ahora.
   de la sesión 2026-09-09, así que no hay impacto visible para el cliente.
   Rediseñar el mapeo de columnas para esta forma de tabla sin cabecera
   queda pendiente de una sesión dedicada.
+- **Un `mantenimiento_ciclo` interrumpido se reinicia entero en vez de
+  reanudarse: documentado, sin implementar (bloque 5, sesión 2026-09-10,
+  encargo explícito del cliente -- "lo vemos cuando termine el
+  reproceso").** Destapado en vivo durante el reproceso completo de 358
+  expedientes: reiniciar el contenedor `worker` a mitad del ciclo (para
+  desplegar el arreglo del bloque 3, ver más arriba) dejó el propio trabajo
+  `mantenimiento_ciclo` (id 4097, ~1h30 de ejecución en ese momento)
+  huérfano -- `reclamar_trabajos_huerfanos` lo detectó por `bloqueado_en`
+  vencido y lo reintentó. El reintento no reanudó por donde iba: volvió a
+  ejecutar `ejecutar_ciclo_mantenimiento` desde el principio con el mismo
+  payload (`forzar: true`), así que re-encoló los 358 expedientes enteros
+  -- incluidos los ~200 que el primer intento ya había reprocesado con
+  éxito segundos antes. Pendientes de extracción pasó de 156 a 511 de golpe.
+  No corrompe nada (CONTEXTO.md sección 9.9: reprocesar es idempotente), pero
+  duplica horas de trabajo ya hecho.
+
+  **Dos causas distintas, compuestas:**
+  1. `app.queue.reclamar_trabajos_huerfanos` usa un único umbral
+     (`worker_orphan_threshold_seconds`, 300 s) para todo tipo de trabajo, y
+     `tomar_siguiente_trabajo` fija `bloqueado_en` una sola vez al arrancar
+     el trabajo -- nunca se refresca mientras corre. Un `extraer_expediente`
+     normal (30-200 s medidos) nunca se acerca a ese umbral, pero
+     `mantenimiento_ciclo` **drena la cola de forma síncrona dentro de sí
+     mismo** (`app/mantenimiento/ciclo.py`, docstring del módulo) y puede
+     durar horas (3h07 medidas en la sesión 2026-09-09, ~3h en esta) --
+     **cualquier reinicio del worker durante un ciclo real, deliberado o no,
+     lo marca huérfano casi con certeza**, no como caso raro. Esto no es
+     hipotético: CONTEXTO.md sección 13 y
+     `docs/tolerancia-reinicios-dockerd.md` ya documentan que este entorno
+     de desarrollo sufre reinicios de `dockerd`/WSL varias veces al día.
+  2. Aunque el reintento esté justificado (un `dockerd` real caído a mitad,
+     no solo un redeploy), `debe_extraer` (`app/mantenimiento/frescura.py`)
+     no distingue "obsoleto desde antes de que este ciclo empezara" de "ya
+     lo hizo un intento anterior de ESTE MISMO ciclo": con `forzar=True`
+     devuelve `True` sin mirar nada más, así que el reintento no tiene forma
+     de saber que gran parte del trabajo ya está hecho.
+
+  **Propuesta, sin implementar:**
+  - Para la causa 1: heartbeat, no umbral más alto -- refrescar
+    `trabajo.bloqueado_en = now()` en cada vuelta del drenaje síncrono de
+    `ejecutar_ciclo_mantenimiento` (ya hay una vuelta por trabajo drenado,
+    es el punto natural). Un umbral más alto solo retrasaría detectar un
+    cuelgue real de horas; un heartbeat detecta un cuelgue real rápido y
+    tolera una ejecución larga y sana indefinidamente.
+  - Para la causa 2: la información ya existe, como señaló el cliente --
+    `Expediente.extraido_en` (cuándo se completó de verdad la última
+    extracción) y `TrabajoCola.created_at` (cuándo se pidió ESTE ciclo, fijo
+    entre reintentos). Añadir a `debe_extraer` una comprobación previa a la
+    de `forzar`: si `expediente.extraido_en` es posterior a
+    `trabajo.created_at` del propio ciclo, ya lo hizo un intento anterior de
+    este mismo ciclo -- se salta, incluso con `forzar=True`. `forzar` pasa a
+    significar "ignora lo obsoleto de antes de pedir este ciclo", no "repite
+    ciegamente en cada reintento de este mismo ciclo". Cambio pequeño y
+    localizado (una condición más al principio de `debe_extraer`, un
+    parámetro nuevo que ya tienen sus dos llamadores a mano).
+  - Riesgo operativo inmediato mientras esto siga sin arreglar: el trabajo
+    4097 de esta sesión ya va por su segundo intento (`intentos=2` de
+    `max_intentos=3`) -- un tercer reinicio del worker antes de que termine
+    lo marcaría `fallido` sin más reintentos, no huérfano-y-reintentable. No
+    tocar el worker hasta que termine este reproceso.
 
 ---
 

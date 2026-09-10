@@ -158,7 +158,14 @@ def buscar_baja_en_texto(texto: str) -> Optional[BajaEnTexto]:
     for patron in (_BAJA_RE, _BAJA_INVERTIDA_RE, _BAJA_ETIQUETA_RE):
         m = patron.search(texto)
         if m:
-            return BajaEnTexto(baja=parsear_porcentaje_es(m.group(1)), fragmento=m.group(0).strip())
+            # Bloque 3, sesión 2026-09-10: un valor que casó el patrón pero
+            # no se puede parsear no debe tumbar el expediente (CONTEXTO.md
+            # sección 12) -- se prueba el siguiente patrón en vez de
+            # propagar la excepción.
+            try:
+                return BajaEnTexto(baja=parsear_porcentaje_es(m.group(1)), fragmento=m.group(0).strip())
+            except ValueError:
+                continue
     return None
 
 
@@ -176,12 +183,15 @@ def extraer_baja_declarada(
     for pagina in paginas:
         m = _BAJA_RE.search(pagina.texto)
         if m:
-            return BajaDeclarada(
-                baja=parsear_porcentaje_es(m.group(1)),
-                pagina=pagina.numero,
-                fragmento=m.group(0).strip(),
-                tipo_documento=tipo_documento,
-            )
+            try:
+                return BajaDeclarada(
+                    baja=parsear_porcentaje_es(m.group(1)),
+                    pagina=pagina.numero,
+                    fragmento=m.group(0).strip(),
+                    tipo_documento=tipo_documento,
+                )
+            except ValueError:
+                pass
     # Ninguna página trajo la frase estricta "baja ... del N% ... precios
     # unitarios": antes de rendirse, se prueban las variantes más laxas (ver
     # docstrings de `_BAJA_INVERTIDA_RE` y `_BAJA_ETIQUETA_RE`) — solo como
@@ -190,12 +200,15 @@ def extraer_baja_declarada(
         for patron in (_BAJA_INVERTIDA_RE, _BAJA_ETIQUETA_RE):
             m = patron.search(pagina.texto)
             if m:
-                return BajaDeclarada(
-                    baja=parsear_porcentaje_es(m.group(1)),
-                    pagina=pagina.numero,
-                    fragmento=m.group(0).strip(),
-                    tipo_documento=tipo_documento,
-                )
+                try:
+                    return BajaDeclarada(
+                        baja=parsear_porcentaje_es(m.group(1)),
+                        pagina=pagina.numero,
+                        fragmento=m.group(0).strip(),
+                        tipo_documento=tipo_documento,
+                    )
+                except ValueError:
+                    continue
     return None
 
 

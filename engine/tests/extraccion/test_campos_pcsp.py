@@ -1,6 +1,7 @@
 from decimal import Decimal
 
-from app.extraccion.campos_pcsp import extraer_campos_anuncio_pcsp, importe_como_decimal
+from app.extraccion.campos_pcsp import CampoAnclado, extraer_campos_anuncio_pcsp, importe_como_decimal
+from app.extraccion.invalidado import INVALIDADO
 from app.extraccion.texto import PaginaTexto, extraer_texto
 from tests import fixtures as fx
 
@@ -87,6 +88,22 @@ def test_anuncio_sin_matriz_no_inventa_una():
 
 def test_importe_como_decimal_de_campo_ausente_es_none():
     assert importe_como_decimal(None) is None
+
+
+def test_importe_como_decimal_no_interpretable_degrada_a_invalidado():
+    # Bloque 3, sesión 2026-09-10: expediente real 6.20/28510.0062 del
+    # reproceso completo -- un literal encontrado por la etiqueta fija pero
+    # que `parsear_numero_es` rechaza (agrupación de miles inválida) no debe
+    # propagar la excepción y tumbar el expediente entero (CONTEXTO.md
+    # sección 12), sin try/except alrededor de esta llamada en el
+    # orquestador.
+    campo = CampoAnclado(valor="1.10", pagina=3, fragmento="Importe: 1.10")
+
+    assert importe_como_decimal(campo) is INVALIDADO
+
+
+def test_importe_como_decimal_invalidado_pasa_tal_cual():
+    assert importe_como_decimal(INVALIDADO) is INVALIDADO
 
 
 def test_numero_lotes_en_anuncio_sin_desglose_por_lote():

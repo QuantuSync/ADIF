@@ -1,12 +1,21 @@
 from decimal import Decimal
 
-from app.extraccion.lotes import extraer_lotes_declarados
+from app.extraccion.lotes import _importe_o_none, extraer_lotes_declarados
 from app.extraccion.texto import extraer_texto
 from tests import fixtures as fx
 
 
 def _por_identificador(resultado):
     return {l.identificador: l for l in resultado.lotes}
+
+
+def test_importe_o_none_devuelve_none_en_vez_de_reventar():
+    # Bloque 3, sesión 2026-09-10: mismo hallazgo que
+    # `app.extraccion.campos_pcsp.importe_como_decimal` (expediente real
+    # 6.20/28510.0062) -- un importe que el regex encontró pero
+    # `parsear_numero_es` rechaza no debe propagar la excepción.
+    assert _importe_o_none("1.10") is None
+    assert _importe_o_none("7.915,61") == Decimal("7915.61")
 
 
 def test_documento_sin_ninguna_mencion_de_lote_no_declara_nada():
