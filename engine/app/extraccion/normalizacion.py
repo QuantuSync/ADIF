@@ -52,10 +52,35 @@ def _resolver_valor_duplicado(cadena: str) -> str:
     return cadena
 
 
+# Bloque 3, sesión 2026-09-10: un importe real con separador de miles nunca
+# tiene un grupo de menos de tres dígitos salvo el primero -- "7.915,61" sí
+# (grupos "7"/"915"), pero "03.361.140.1" (una referencia normativa E.T. con
+# puntos, no un importe) no, porque el último grupo es "1". Sin este guard,
+# `parsear_numero_es` aceptaba cualquier cadena con puntos como si fueran
+# separadores de miles válidos y la colaba como número — causa raíz real y
+# verificada contra el PDF del defecto de 33.611.401 € (`6.20/28510.0042`/
+# `0046`/`0047`, P-0067 "CZI-OB-B1-54-0,11(S/PROL)": el precio real es
+# 7.915,61 €, en la columna vecina; `03.361.140.1`, la referencia normativa
+# de la fila, es lo que se coló como precio tras recuperarse por error de la
+# columna fantasma de al lado). Solo se aplica a la parte que de verdad usa
+# el punto como separador de miles (la entera, con o sin coma detrás) —
+# nunca a los decimales.
+def _grupos_de_miles_validos(parte_entera: str) -> bool:
+    grupos = parte_entera.split(".")
+    if len(grupos) == 1:
+        return True
+    if not (1 <= len(grupos[0]) <= 3):
+        return False
+    return all(len(grupo) == 3 for grupo in grupos[1:])
+
+
 def parsear_numero_es(cadena: str) -> Decimal:
     """"138.000,00 €" -> Decimal("138000.00"). "145.100 EUR." ->
     Decimal("145100") (sin coma: el punto es separador de miles, no
-    decimal — nunca hay más de una convención dentro del mismo documento)."""
+    decimal — nunca hay más de una convención dentro del mismo documento).
+    Rechaza una cadena cuyos puntos no forman una agrupación de miles válida
+    (`_grupos_de_miles_validos`) -- probablemente un código con puntos, no
+    un número."""
     if cadena is None:
         raise ValueError("no hay número que parsear (cadena es None)")
     if _PATRON_CID.search(cadena):
@@ -69,8 +94,12 @@ def parsear_numero_es(cadena: str) -> Decimal:
         raise ValueError(f"no hay dígitos en {cadena!r}")
     if "," in limpio:
         entero, _, decimales = limpio.rpartition(",")
+        if entero and not _grupos_de_miles_validos(entero):
+            raise ValueError(f"agrupación de miles no válida en {cadena!r} (¿un código, no un número?)")
         limpio = f"{entero.replace('.', '')}.{decimales}"
     else:
+        if not _grupos_de_miles_validos(limpio):
+            raise ValueError(f"agrupación de miles no válida en {cadena!r} (¿un código, no un número?)")
         limpio = limpio.replace(".", "")
     try:
         return Decimal(limpio)

@@ -82,6 +82,34 @@ def test_normalizar_guiones_no_toca_el_guion_ascii_ni_el_resto():
     assert normalizar_guiones("BRIDA DE FIJACIÓN") == "BRIDA DE FIJACIÓN"
 
 
+def test_codigo_con_puntos_no_es_un_importe():
+    # Bloque 3, sesión 2026-09-10: causa raíz real del defecto de
+    # 33.611.401 € (6.20/28510.0042/0046/0047) -- una referencia normativa
+    # con puntos ("03.361.140.1") no es un importe con separador de miles
+    # real (el último grupo tiene 1 dígito, no 3) y no debe colarse como si
+    # lo fuera.
+    with pytest.raises(ValueError, match="agrupación de miles"):
+        parsear_numero_es("03.361.140.1")
+
+
+def test_codigo_con_puntos_y_coma_tampoco_es_un_importe():
+    with pytest.raises(ValueError, match="agrupación de miles"):
+        parsear_numero_es("03.361.14,1")
+
+
+def test_grupo_de_miles_corto_en_medio_es_error():
+    with pytest.raises(ValueError, match="agrupación de miles"):
+        parsear_numero_es("1.23.456")
+
+
+def test_primer_grupo_puede_tener_menos_de_tres_digitos():
+    # El primer grupo de una cifra con miles reales puede tener 1-3 dígitos
+    # ("7.915,61" son solo 7.915 €) -- solo los grupos siguientes deben ser
+    # de exactamente tres.
+    assert parsear_numero_es("7.915,61") == Decimal("7915.61")
+    assert parsear_numero_es("915,61") == Decimal("915.61")
+
+
 def test_limpiar_codigo_celda_normaliza_el_guion():
     # Punto único de normalización (CONTEXTO.md sección 8): el código de
     # precio que llega al catálogo queda con guion ASCII sin importar cuál

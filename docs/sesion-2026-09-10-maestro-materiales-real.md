@@ -105,3 +105,143 @@ pasan contra el stack real.
 nuevas, 0 sin matrícula. `POST
 /mantenimiento/maestro-materiales/completar-unidades` → resultado de
 arriba.
+
+## Bloque 2 — La denominación como vía para la matrícula (análisis, sin implementar)
+
+Encargo: analizar si la denominación del maestro sirve para proponer
+matrícula a las líneas sin ella, **sin implementar nada**. Medido con
+`difflib` (índice invertido por palabra para acotar candidatos, sin
+dependencias nuevas) contra las 13.735 líneas reales del catálogo sin
+matrícula (no las 11.340 que traía el encargo — la cifra del cliente es de
+antes del reproceso de la sesión 2026-09-09 que hizo crecer el catálogo de
+22.097 a 22.721 líneas; mismo fenómeno, población algo mayor hoy).
+
+| Categoría | Líneas | % |
+|---|---|---|
+| Coincidencia exacta (normalizada: mayúsculas, sin acentos, espacios colapsados) | 1.182 | 8,6% |
+| Alta similitud (`difflib` ≥ 0,85), no exacta | 2.712 | 19,7% |
+| Sin ningún parecido razonable | 9.841 | 71,6% |
+
+**Riesgo de coincidencia múltiple, confirmado y con dos causas distintas:**
+
+1. **Estructural, del lado del maestro.** De las 28.782 denominaciones
+   normalizadas distintas (32.116 filas), 2.388 (8,3%) mapean a más de una
+   matrícula distinta — afecta a 5.722 filas del maestro (17,8% del total).
+   Es decir: incluso una coincidencia exacta y limpia con una denominación
+   del maestro tiene ~1 entre 5 de probabilidad de no bastar por sí sola
+   para identificar una única matrícula. De las 1.182 coincidencias
+   exactas de la tabla de arriba, 33 caen en una denominación ambigua.
+2. **Del umbral de similitud en sí.** De las 2.712 líneas de "alta
+   similitud", **1.807 (66,6%)** tienen más de un candidato por encima del
+   umbral 0,85 a la vez — la mayoría de los "casi seguro" no lo son tanto.
+   Caso real que lo ilustra (de la propia muestra): *"TORNILLO CABEZA
+   HEXAGONAL, M22X325 MM"* enlaza con 0,958 de similitud a *"TORNILLO
+   CABEZA EXAGONAL M22X275 MM"* — **son tornillos de longitud distinta**
+   (325 mm vs. 275 mm), un candidato de similitud alta pero
+   sustancialmente incorrecto si se asignara solo. La similitud de texto
+   no distingue una cifra que cambia en medio de una cadena por lo demás
+   idéntica — justo el patrón que este catálogo tiene por decenas (M22,
+   M25... × distintas longitudes).
+
+El 71,6% "sin parecido" no es, en su mayoría, una carencia del método: es
+descripción de servicio o partida alzada real (CONTEXTO.md sección 2,
+"partida alzada... es legítima, no un error") que nunca tuvo matrícula
+porque no es un material de catálogo — "Balasto sobre camión en cantera",
+"PARTIDA ALZADA PARA IMPREVISTOS", "Engrasador completo con 1 distribuidor.
+Carril 54 kg/ml" no tienen mejor candidato porque no deberían tenerlo.
+
+**Conclusión, sin implementar nada (encargo explícito):** si esto se
+construye, tiene que ser una cola de candidatos para confirmación humana
+(mismo patrón ya en producción para `posible_duplicado_de`,
+`app.catalogo.buscar_posible_duplicado_huerfana`, sesión 2026-09-07),
+nunca una asignación automática ni siquiera para el 8,6% de coincidencia
+exacta — la ambigüedad estructural del maestro (2.388 denominaciones que no
+identifican un material único) hace que ni una coincidencia perfecta de
+texto sea prueba suficiente por sí sola.
+
+## Bloque 3 — Dos defectos pendientes
+
+### 1. El precio unitario de 33.611.401 €: causa raíz encontrada y corregida
+
+Localizado: `6.20/28510.0042`, `0046` y `0047` (mismo documento compartido
+entre los tres expedientes hermanos, `codigo_precio` `611450216`,
+"CZI-OB-B1-54-0,11(S/PROL)"). Comprobado contra el PDF real
+(`pdfplumber` sobre la página 32 del anejo): la fila real es
+`['611450216', 'CZI-OB-B1-54-0,11(S/PROL)', 'P16.2263.00', '03.361.140.1',
+'', '7.915,61 €', '', None]` — el precio real es **7.915,61 €** (columna 5),
+coherente con sus vecinos de tabla (todos entre 6.800 € y 9.040 €).
+
+Causa raíz, verificada en `parsear_numero_es`
+(`app/extraccion/normalizacion.py`): la columna 4 (donde vive el precio en
+el resto de filas de esta tabla) sale vacía SOLO en esta fila, así que
+`_recuperar_columna_fantasma` prueba la columna vecina anterior (índice 3)
+antes que la siguiente (índice 5, la correcta) — y la anterior,
+`'03.361.140.1'` (la referencia normativa E.T. del material, no un
+importe), pasaba el parseo igual: `parsear_numero_es` no comprobaba que los
+puntos de una cifra sin coma formaran una agrupación de miles real (grupos
+de 3 dígitos tras el primero), así que le quitaba los puntos sin más y
+devolvía `33611401`. Corregido con `_grupos_de_miles_validos`: rechaza
+cualquier cadena cuyo último grupo no tenga exactamente 3 dígitos (salvo
+que no haya ningún punto). 4 tests nuevos, 585 pasan.
+
+**Revisados los otros casos del mismo tipo, por debajo de ese valor:** las
+3.257 líneas del corpus que usan esta misma vía de recuperación de columna
+fantasma para el precio se revisaron por magnitud — ninguna otra se acerca
+al orden de los millones; la siguiente más alta es 458.451,02 €
+(`6.23/28510.0051`/`0060`, código `P-0001`..`P-0006`), dentro de rango
+plausible para equipo ferroviario caro y ya marcada con el mismo
+`motivo_revision` de siempre para confirmación humana. No hay más casos del
+defecto de agrupación de miles inválida en el rango investigado.
+
+Verificado reprocesando los 3 expedientes reales contra el stack: las tres
+líneas pasan de 33.611.401,00 € a 7.915,61 €, idéntico al valor real del
+documento.
+
+### 2. Los "9 grupos duplicados, 18 filas": el planteamiento no era correcto
+
+**Esto cambia el planteamiento del encargo — anotado aquí, no bloqueado
+esperando respuesta.** El encargo asumía que eran el hueco de idempotencia
+ya documentado (`guardar_lineas_catalogo` no borra una fila de un reproceso
+anterior cuya clave cambió). Verificado contra el PDF real y contra un
+reproceso deliberado de los 3 expedientes: **no lo son.**
+
+Los 18 registros son 9 pares/tríos de **materiales real y físicamente
+distintos** (comprobado contra la página 35 del mismo anejo:
+`615250090` "SCI-P-54-DD-318 P/DS-P-54-318-0'09-CR-D", `615250091`
+"SCI-P-54-DI 318 P/DS-P-54-318-0'09-CR-D" y `615260094` "SCI-P-60-AR-CAC-
+D.D. P/DSH-P-60-318-0,09" — tres matrículas de 9 dígitos distintas, tres
+descripciones distintas, tres piezas de agujas de vía D/I con el mismo
+precio de catálogo del fabricante, 18.268,00 € los tres) que **pierden su
+matrícula y su descripción por el mismo defecto de mapeo de columnas de
+"tabla sin cabecera"** ya conocido para este trío de expedientes (CONTEXTO.md,
+sesión 2026-09-09): el modelo asigna la columna 0 (la matrícula real) a
+`codigo_precio`, intenta leer `matricula` de la columna 1 (que es en
+realidad la descripción) y la descarta por no tener forma de matrícula, y
+`descripcion` acaba apuntando a una columna vacía para estas filas cortas
+de 5 celdas. El texto real de la descripción SÍ queda, de hecho, capturado
+-- dentro de `motivo_revision` ("valor de matrícula no reconocible,
+descartado: ..."), solo que no en la columna `descripcion`.
+
+Prueba decisiva: se reprocesaron los 3 expedientes a propósito para este
+bloque. Si fuera un hueco de idempotencia, un reproceso adicional habría
+generado una tercera copia (la clave inestable produce una fila nueva cada
+vez). **No ocurrió** — las mismas 18 filas, con los mismos `id`, siguen
+ahí, ni una más ni una menos: la clave es estable, el guardado es
+idempotente de verdad para estas filas. Lo que parecía "duplicado" es un
+artefacto de mirar solo las columnas visibles (`codigo_precio`,
+`matricula`, `descripcion`, `precio_unitario`) después de que tres
+materiales reales y distintos quedaran todos en blanco por el mismo motivo.
+
+**Decisión: no se borra ni se fusiona nada.** Hacerlo habría eliminado 9
+materiales reales y distintos del catálogo del cliente por parecerse en una
+consulta SQL superficial — exactamente el tipo de "corrección automática
+silenciosa" que CONTEXTO.md prohíbe (sección 12: "lo que no cuadra no se
+corrige solo, va a la cola de revisión"). Las 18 filas ya están excluidas
+del Excel entregable (mismo mecanismo de `evaluar_coherencia_mapeo` de la
+sesión 2026-09-09, "tabla descartada del catálogo entregable"), así que no
+hay impacto visible para el cliente hoy. Rediseñar el mapeo de columnas
+para esta forma concreta de tabla sin cabecera (filas cortas, sin columna
+de código de precio) queda pendiente para una sesión dedicada — no se
+intenta aquí por el riesgo de tocar el mecanismo de caché de firma
+estructural compartido con el resto del corpus sin una verificación
+completa.

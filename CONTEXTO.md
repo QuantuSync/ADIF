@@ -1224,6 +1224,47 @@ suficientes, no ahora.
   son un precio o una referencia normativa (DIN) metidos en la columna de
   unidad, mismo patrón que el defecto de "unidad ajena" ya cerrado en
   2026-09-07 pero no cubierto por esa validación.
+- **Denominación del maestro como vía para la matrícula: analizado, sin
+  implementar (bloque 2, sesión 2026-09-10).** De 13.735 líneas sin
+  matrícula: 8,6% coincide exacto con una denominación del maestro, 19,7%
+  con alta similitud (`difflib` ≥ 0,85) no exacta, 71,6% sin parecido
+  razonable (mayoría partidas alzadas/servicios reales sin matrícula por
+  diseño, CONTEXTO.md sección 2). Riesgo de coincidencia múltiple
+  confirmado y serio: 2.388 de las 28.782 denominaciones normalizadas
+  distintas del maestro (8,3%) mapean a más de una matrícula; de las líneas
+  de "alta similitud", el 66,6% (1.807) tiene más de un candidato por
+  encima del umbral a la vez, con un caso real de dos tornillos de longitud
+  distinta (M22×325 vs. M22×275) enlazados a 0,958 de similitud. Si esto se
+  implementa algún día, tiene que ser cola de candidatos para confirmación
+  humana, nunca asignación automática — ni siquiera para el 8,6% exacto.
+- **Precio unitario de 33.611.401 €: causa raíz encontrada y corregida
+  (bloque 3.1, sesión 2026-09-10).** `parsear_numero_es`
+  (`app/extraccion/normalizacion.py`) aceptaba cualquier cadena con puntos
+  como separador de miles válido sin comprobar que los grupos tuvieran tres
+  dígitos — una referencia normativa con puntos (`03.361.140.1`,
+  recuperada por error de una columna fantasma vecina en
+  `6.20/28510.0042`/`0046`/`0047`) se colaba como `33.611.401`. Corregido
+  (`_grupos_de_miles_validos`, 4 tests nuevos); verificado contra el PDF
+  real que el precio correcto es 7.915,61 € y que el reproceso de los 3
+  expedientes lo corrige solo. Revisadas las 3.257 líneas que usan la misma
+  vía de recuperación: ninguna otra se acerca a ese orden de magnitud
+  (la siguiente más alta, 458.451,02 €, es plausible y ya está marcada
+  para revisión).
+- **"9 grupos duplicados, 18 filas" en `6.20/28510.0042`/`0046`/`0047`: el
+  planteamiento del encargo no era correcto (bloque 3.2, sesión
+  2026-09-10).** No es el hueco de idempotencia conocido — verificado
+  reprocesando los 3 expedientes a propósito: las mismas 18 filas, mismos
+  `id`, sin ninguna copia adicional (una clave inestable habría generado
+  una tercera copia; no ocurrió). Son 9 pares/tríos de materiales reales y
+  distintos (matrículas de 9 dígitos y descripciones distintas,
+  verificado contra el PDF, p. ej. piezas de aguja D/I con el mismo precio
+  de fabricante) que pierden matrícula y descripción por el defecto de
+  mapeo de "tabla sin cabecera" ya conocido para este trío — no por
+  duplicación. **No se borra ni se fusiona nada** (destruiría 9 materiales
+  reales); ya están excluidas del Excel entregable por el mismo mecanismo
+  de la sesión 2026-09-09, así que no hay impacto visible para el cliente.
+  Rediseñar el mapeo de columnas para esta forma de tabla sin cabecera
+  queda pendiente de una sesión dedicada.
 
 ---
 
