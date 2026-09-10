@@ -1338,6 +1338,27 @@ suficientes, no ahora.
     `max_intentos=3`) -- un tercer reinicio del worker antes de que termine
     lo marcaría `fallido` sin más reintentos, no huérfano-y-reintentable. No
     tocar el worker hasta que termine este reproceso.
+  **Cerrado el reproceso, mismo bloque:** terminó sin más incidentes
+  (segundo intento, 4h19min). Único fallo real: `6.20/28510.0062` (el
+  mismo defecto ya corregido, ocurrido antes del despliegue del arreglo) --
+  reprocesado a mano después, termina en `pendiente_revision` con motivo
+  legítimo, sin volver a tumbar el expediente. La auditoría automática de
+  fin de ciclo marcó 15 expedientes como "error" (recuento cambia sin
+  cambiar documentos) -- verificado que es la poda del bloque 4 actuando
+  por primera vez sobre residuo real (832 líneas podadas en total,
+  `lineas_podadas` de cada expediente cruzado contra la lista de la
+  auditoría), no un defecto nuevo; pendiente de una sesión futura enseñar a
+  `detectar_crecimiento_sin_cambios` a distinguir esto de una subida sin
+  explicar. Catálogo: 22.724→21.892 líneas (−832, exactamente lo podado);
+  relleno de `unidad_medida` 84,7%→86,6%, `matricula` 39,5%→40,1%,
+  `cantidad` 65,9%→67,6%, resto de columnas estable o en ligera subida.
+  Excel exportado (`GET /catalogo/exportar.xlsx`): 18.857 filas en
+  "Materiales" (19.432 en la sesión anterior, baja por la poda y por
+  exclusiones más precisas, no por pérdida de datos) + 3.035 pendientes de
+  revisión en "Resumen", cuadra exacto con el total de la base de datos.
+  Detalle completo, la tabla de relleno antes/después por columna y el
+  cierre de los seis bloques del encargo en
+  `docs/sesion-2026-09-10-maestro-materiales-real.md`.
 
 ---
 

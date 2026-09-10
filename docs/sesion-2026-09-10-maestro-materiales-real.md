@@ -404,6 +404,135 @@ hallazgo.
 
 ### Resultado final
 
-Pendiente de cerrar hasta que el reproceso (ahora en su segunda pasada
-completa) termine -- ver el bloque 6 para el resultado final, la
-comparación de relleno antes/después y el informe de cierre.
+Terminado a las 22:06 UTC del 2026-09-10 (segundo intento, 4h19min de
+ejecución tras el reinicio). `expedientes_evaluados=358`,
+`extracciones_lanzadas=358`, `trabajos_drenados=514`. Un único fallo real
+en todo el reproceso: `6.20/28510.0062` (el defecto ya corregido del
+bloque 3, anterior al despliegue del arreglo) -- reprocesado a mano después
+de cerrar el ciclo, termina en `pendiente_revision` con un motivo legítimo
+("no se extrajo ninguna línea de catálogo de los documentos descargados"),
+sin volver a tumbar el expediente. Ningún otro fallo nuevo desde que se
+desplegó el arreglo del bloque 3.
+
+Auditoría automática de fin de ciclo: 4 avisos ya conocidos (huérfanas sin
+lote, precio desproporcionado, cantidad con forma de año, importe de
+licitación compartido entre expedientes hermanos) y **un hallazgo de
+gravedad "error"**: 15 expedientes cuyo número de líneas cambió sin cambiar
+sus documentos (`6.20/28510.0042/0046/0047`, `6.21/28510.0058/0130/0135/
+0136/0137/0138`, `6.22/28510.0033/0057/0058`, `6.24/28510.0184/0209`,
+`6.25/28510.0214`). **Verificado que no es un defecto nuevo**: los 15
+coinciden exactamente con los expedientes donde
+`podar_lineas_obsoletas_de_documento` (bloque 4) encontró y limpió residuo
+real por primera vez (`lineas_podadas` entre 2 y 153 según el expediente,
+832 líneas podadas en total, comprobado cruzando `trabajos_cola.resultado`
+de cada uno) -- es la poda actuando exactamente como se diseñó, no una
+duplicación. La comprobación de integridad de la auditoría
+(`app.mantenimiento.frescura.detectar_crecimiento_sin_cambios`) no conoce
+todavía el mecanismo de poda del bloque 4 y por eso lo marca como
+sospechoso; pendiente de un ajuste menor en una sesión futura (enseñarle a
+distinguir una bajada de recuento explicada por `lineas_podadas` de una
+subida sin explicación, que es el caso real que sí debe seguir marcando).
+
+### Comparación de relleno por columna (catálogo completo en base de datos)
+
+| Columna | Antes | Después |
+|---|---|---|
+| Total de líneas | 22.724 | 21.892 (−832, exactamente lo podado) |
+| `codigo_precio` | 84,9% | 86,2% |
+| `matricula` | 39,5% | 40,1% |
+| `descripcion` | 99,6% | 100,0% |
+| `codigo_material` | 62,6% | 62,9% |
+| `cantidad` | 65,9% | 67,6% |
+| `precio_unitario` | 99,4% | 99,3% |
+| `unidad_medida` | 84,7% | 86,6% |
+| `baja_lote` | 54,0% | 54,8% |
+| `precio_adjudicado` | 53,3% | 54,2% |
+| líneas con lote asignado | 90,2% | 90,3% |
+
+(`codigo_interno` a nivel de línea se queda al 0,0% en ambas fotos --
+columna vestigial nunca escrita, no confundir con la columna "Código
+interno" del Excel entregado, que sale de `Expediente.codigo_interno` y
+está al 96,6% en el propio Excel, ver más abajo.)
+
+### Excel entregado
+
+`GET /catalogo/exportar.xlsx` -- 1.426.536 bytes, dos hojas:
+
+- **Materiales**: 18.857 filas (antes, sesión 2026-09-09: 19.432 -- baja
+  por la poda del bloque 4 y por líneas que ahora se excluyen con más
+  precisión, no por pérdida de datos reales). Relleno: código interno
+  96,6%, código de expediente 96,6%, código matriz 66,6%, título expediente
+  93,5%, matrícula 41,8%, descripción 100,0%, código de material 65,2%,
+  cantidad 74,1%, precio unitario 99,3%, lote 100,0% (las huérfanas sin
+  lote se excluyen por diseño), precio adjudicado 62,7%, baja del lote
+  63,3%, unidad de medida 88,0%, estado del contrato SAP 73,4%,
+  comentarios 0,0% (columna de notas humanas, nunca se rellena sola).
+- **Resumen**: 3.035 líneas pendientes de revisión no incluidas en
+  "Materiales" (18.857+3.035=21.892, cuadra con el total de la base de
+  datos), desglosadas en lenguaje llano por motivo -- 1.143 tablas que
+  parecen continuar de página sin lote confirmable, 917 tablas sin
+  cabecera propia con mapeo incoherente descartado, 597 sin ninguna
+  mención de lote cercana, 378 con un número de lote que no coincide con
+  ninguno confirmado del expediente.
+
+## Cierre de la sesión
+
+Los seis bloques del encargo, cerrados:
+
+1. **Maestro de materiales real**: cargado (32.116 filas), `unidad_medida`
+   75,3%→84,7% en el momento de cargarlo (2.149 líneas), 354 discrepancias
+   documento-vs-SAP marcadas para revisión sin pisar el documento.
+2. **Denominación→matrícula**: analizado a fondo, nada implementado (encargo
+   explícito) -- riesgo de coincidencia múltiple confirmado y serio, tabla
+   de candidatos para cola de revisión si se decide construir en el futuro.
+3. **Dos defectos**: el precio de 33.611.401 € (causa raíz real: agrupación
+   de miles inválida coló una referencia normativa como importe) corregido
+   y verificado contra el PDF; los "9 grupos duplicados" resultaron NO
+   serlo -- son 9 materiales reales y distintos, no se tocan.
+4. **Poda de huérfanas obsoletas**: implementada, cierra un hueco de
+   idempotencia documentado desde 2026-09-08; verificada en el reproceso
+   real (832 líneas de residuo genuino limpiadas, sin falsos positivos).
+5. **Reproceso completo**: copia de seguridad y foto de relleno previas,
+   358 expedientes reprocesados, un defecto de invariante encontrado y
+   corregido en vivo (un valor no interpretable tumbaba el expediente en
+   vez de degradar a revisión, cinco puntos corregidos), y un fallo de
+   diseño del propio mecanismo de reintento documentado sin implementar
+   (encargo explícito del cliente): un `mantenimiento_ciclo` interrumpido
+   se reinicia entero en vez de reanudarse, duplicando horas de trabajo ya
+   hecho -- causa raíz y propuesta en CONTEXTO.md.
+6. **Cierre**: auditoría automática (0 errores reales, el único "error"
+   explicado como la poda funcionando), Excel exportado y verificado,
+   comparación de relleno antes/después de este documento.
+
+**Decisiones tomadas que cambian el planteamiento original del encargo**
+(anotadas en su bloque, resumidas aquí para no perderlas):
+- Las columnas reales del maestro de materiales (`Denominación`/`UM base`)
+  no eran las que se habían supuesto al preparar la carga.
+- Los "9 grupos duplicados" del bloque 3 no eran duplicados de idempotencia
+  -- son materiales reales distintos con el mismo defecto de mapeo que el
+  precio de 33,6M€, y no se borran.
+- El arreglo de agrupación de miles del bloque 3 expuso un fallo de
+  invariante preexistente (cinco puntos sin `try/except`) que ha tumbado
+  expedientes "varias veces con distintas causas" -- corregido de raíz, no
+  solo el síntoma puntual.
+- Reiniciar el worker en caliente para desplegar ese arreglo destapó un
+  fallo de diseño distinto (ciclo interrumpido se reinicia, no se reanuda)
+  -- documentado y propuesto, no implementado, por encargo explícito.
+
+**Pendiente real para una sesión futura** (todo explícitamente fuera de
+alcance de esta sesión, no olvidado):
+- Cola de candidatos denominación→matrícula (bloque 2), si el cliente
+  decide construirla.
+- Rediseñar el mapeo de columnas de la tabla sin cabecera de
+  `6.20/28510.0042/0046/0047` (filas cortas sin columna de código de
+  precio) -- sigue perdiendo matrícula/descripción de 9 materiales reales,
+  aunque no llegan al Excel.
+- Resumibilidad de `mantenimiento_ciclo` (heartbeat en `bloqueado_en` +
+  comparar `Expediente.extraido_en` contra `TrabajoCola.created_at` del
+  propio ciclo en `debe_extraer`) -- causa raíz y propuesta ya en
+  CONTEXTO.md.
+- Enseñar a `detectar_crecimiento_sin_cambios` a distinguir una bajada de
+  recuento explicada por `lineas_podadas` de una subida sin explicación.
+- Completar matrícula por cruce difuso con el maestro de materiales
+  (bloque 2) sigue deliberadamente sin implementar, mismo criterio que el
+  desglose de SAP de la sesión anterior.
