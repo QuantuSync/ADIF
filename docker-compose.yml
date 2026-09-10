@@ -45,6 +45,11 @@ services:
       # (app.extraccion.sap_desglose) -- mismo mecanismo que las dos rutas
       # de arriba. Solo lo lee la API (POST /mantenimiento/sap-desglose/cargar).
       SAP_DESGLOSE_PATH: ${SAP_DESGLOSE_PATH:-}
+      # Bloque 1, sesión 2026-09-10: maestro de materiales de SAP
+      # (app.extraccion.maestro_materiales) -- mismo mecanismo que las dos
+      # rutas de arriba. Solo lo lee la API (POST
+      # /mantenimiento/maestro-materiales/cargar).
+      MAESTRO_MATERIALES_PATH: ${MAESTRO_MATERIALES_PATH:-}
       # Bloque 5, cambios del cliente tras revisar el catálogo: lista de
       # exclusión de expedientes (app/exclusion.py), un fichero de texto
       # plano -- una entrada por línea, código exacto ("6.24/28510.0088")

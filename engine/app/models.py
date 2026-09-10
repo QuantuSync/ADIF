@@ -413,6 +413,13 @@ class LineaCatalogo(Base):
     # `documento_origen_id`/`pagina`/`fragmento` seguirían apuntando al PDF
     # real pero ese valor concreto ya no vendría de ahí.
     unidad_medida_completada_desde_maestro = Column(Boolean, nullable=True)
+    # Bloque 1, sesión 2026-09-10 (migración 0026): la unidad que dice
+    # `maestro_materiales` cuando esta línea YA tiene su propia
+    # `unidad_medida` (del documento real) y no coincide -- nunca pisa
+    # `unidad_medida`, solo deja la discrepancia anotada para revisión
+    # humana (encargo explícito del cliente: "es información útil").
+    # `None` en el caso normal (sin matrícula, sin maestro, o coincide).
+    unidad_medida_discrepancia_maestro = Column(String(32), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),
@@ -650,7 +657,12 @@ class MaestroMaterial(Base):
     __tablename__ = "maestro_materiales"
 
     id = Column(Integer, primary_key=True)
-    matricula = Column(String(9), nullable=False, unique=True)
+    # String(10), no 9: el fichero real trae 31.665 códigos de nueve dígitos
+    # pero también 440 de cuatro y 11 de diez (categorías genéricas de SAP,
+    # migración 0026). Una matrícula de línea de catálogo siempre tiene
+    # nueve dígitos por definición de dominio, así que las de diez nunca
+    # casan con ninguna línea -- no rompe el cruce, solo evita truncar la carga.
+    matricula = Column(String(10), nullable=False, unique=True)
     descripcion = Column(String(255), nullable=True)
     unidad_medida = Column(String(32), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

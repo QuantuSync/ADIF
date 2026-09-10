@@ -1207,6 +1207,23 @@ suficientes, no ahora.
   completar matrícula queda deliberadamente sin implementar (necesita
   cruce difuso por descripción con cola de revisión, mismo criterio que el
   cliente ya aplicó al desglose de SAP de la sesión anterior).
+- **Maestro de materiales de SAP: recibido y cargado (bloque 1, sesión
+  2026-09-10, `docs/sesion-2026-09-10-maestro-materiales-real.md`).** El
+  fichero real (`LISTADO_MATERIALES_UNIDAD__MEDIDA.xlsx`, 32.116 filas, sin
+  huecos) trae columnas distintas de las que se habían supuesto al
+  preparar la carga (`Denominación`/`UM base`, no `Texto breve`/`Unidad
+  medida base`) — corregido, junto con `maestro_materiales.matricula`
+  ensanchada a `String(10)` (migración 0026, códigos de SAP de 4 y 10
+  dígitos además de los 9 del dominio). `unidad_medida` pasa de 75,3% a
+  **84,7%** (2.149 líneas ganan unidad); 432 líneas con matrícula no
+  aparecen en el maestro de SAP. Añadida detección de discrepancia
+  documento-vs-SAP (`unidad_medida_discrepancia_maestro`, nunca pisa
+  `unidad_medida`): 354 casos reales tras filtrar sinónimos gráficos de
+  "unidad" (`UD`/`UDS`/`UNIDAD` → `UN`, que por sí solos habrían inflado la
+  cifra a 3.636 sin ser una discrepancia de sustancia) — de los 354, ~30
+  son un precio o una referencia normativa (DIN) metidos en la columna de
+  unidad, mismo patrón que el defecto de "unidad ajena" ya cerrado en
+  2026-09-07 pero no cubierto por esa validación.
 
 ---
 
@@ -1228,4 +1245,5 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `sesion-2026-09-09-cambios-cliente-catalogo.md`,
 `sesion-2026-09-09-auditoria-mapeo-documentos.md`,
 `sesion-2026-09-09-reproceso-completo-y-bloques-2-3-4.md`,
+`sesion-2026-09-10-maestro-materiales-real.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.

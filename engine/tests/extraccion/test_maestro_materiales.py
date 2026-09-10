@@ -20,7 +20,7 @@ from app.models import (
     TipoDocumento,
 )
 
-_CABECERA = ["Material", "Texto breve", "Unidad medida base"]
+_CABECERA = ["Material", "Denominación", "UM base"]
 
 
 @pytest.fixture
@@ -141,9 +141,9 @@ def test_validar_ruta_rechaza_ruta_inexistente(tmp_path):
 # --- `completar_unidades_desde_maestro` ---
 
 
-def _crear_linea(db_session, *, matricula, unidad_medida, precio=Decimal("10.00")):
+def _crear_linea(db_session, *, matricula, unidad_medida, precio=Decimal("10.00"), sufijo=""):
     expediente = Expediente(
-        codigo_expediente=f"6.24/28510.{matricula}",
+        codigo_expediente=f"6.24/28510.{matricula}{sufijo}",
         nombre_proyecto="Expediente de prueba",
         estado=EstadoExpediente.completado,
     )
@@ -153,14 +153,16 @@ def _crear_linea(db_session, *, matricula, unidad_medida, precio=Decimal("10.00"
     db_session.add(lote)
     db_session.commit()
     documento = Documento(
-        tipo_documento=TipoDocumento.anejo, hash=f"hash-{matricula}", ruta_almacenamiento=f"{matricula}.pdf"
+        tipo_documento=TipoDocumento.anejo,
+        hash=f"hash-{matricula}{sufijo}",
+        ruta_almacenamiento=f"{matricula}{sufijo}.pdf",
     )
     db_session.add(documento)
     db_session.commit()
     linea = LineaCatalogo(
         lote_id=lote.id,
         expediente_id=expediente.id,
-        clave_linea=f"clave-{matricula}",
+        clave_linea=f"clave-{matricula}{sufijo}",
         orden_aparicion=1,
         matricula=matricula,
         descripcion="Material de prueba",
@@ -200,6 +202,61 @@ def test_no_pisa_unidad_ya_extraida_del_documento(db_session, excel_maestro):
     db_session.refresh(linea)
     assert linea.unidad_medida == "KG"
     assert linea.unidad_medida_completada_desde_maestro is None
+
+
+def test_discrepancia_se_anota_sin_pisar_la_unidad(db_session, excel_maestro):
+    # Bloque 1, sesión 2026-09-10: encargo explícito -- "si el documento
+    # dice una cosa y SAP otra, deja la del documento y marca la
+    # discrepancia para revisión, porque es información útil".
+    cargar_maestro_materiales(db_session, excel_maestro)
+    linea = _crear_linea(db_session, matricula="603000210", unidad_medida="KG")
+
+    resumen = completar_unidades_desde_maestro(db_session)
+
+    assert resumen.discrepancias_detectadas == 1
+    db_session.refresh(linea)
+    assert linea.unidad_medida == "KG"
+    assert linea.unidad_medida_discrepancia_maestro == "UN"
+
+
+def test_sin_discrepancia_cuando_solo_difiere_en_caja_o_espacios(db_session, excel_maestro):
+    cargar_maestro_materiales(db_session, excel_maestro)
+    linea = _crear_linea(db_session, matricula="603000210", unidad_medida=" un ")
+
+    resumen = completar_unidades_desde_maestro(db_session)
+
+    assert resumen.discrepancias_detectadas == 0
+    db_session.refresh(linea)
+    assert linea.unidad_medida_discrepancia_maestro is None
+
+
+def test_sin_discrepancia_para_sinonimos_conocidos_de_unidad(db_session, excel_maestro):
+    # El maestro dice "UN"; el documento real usa una abreviatura distinta
+    # de la misma unidad ("unidad") -- no es una discrepancia de sustancia.
+    cargar_maestro_materiales(db_session, excel_maestro)
+    for i, variante in enumerate(("UD", "UD.", "ud", "Uds", "unidad", "UNIDADES")):
+        linea = _crear_linea(db_session, matricula="603000210", unidad_medida=variante, sufijo=f"-{i}")
+        resumen = completar_unidades_desde_maestro(db_session)
+        assert resumen.discrepancias_detectadas == 0, variante
+        db_session.refresh(linea)
+        assert linea.unidad_medida_discrepancia_maestro is None, variante
+
+
+def test_discrepancia_obsoleta_se_limpia_si_deja_de_aplicar(db_session, excel_maestro):
+    cargar_maestro_materiales(db_session, excel_maestro)
+    linea = _crear_linea(db_session, matricula="603000210", unidad_medida="KG")
+    completar_unidades_desde_maestro(db_session)
+    db_session.refresh(linea)
+    assert linea.unidad_medida_discrepancia_maestro == "UN"
+
+    linea.unidad_medida = "UN"
+    db_session.commit()
+
+    resumen = completar_unidades_desde_maestro(db_session)
+
+    assert resumen.discrepancias_detectadas == 0
+    db_session.refresh(linea)
+    assert linea.unidad_medida_discrepancia_maestro is None
 
 
 def test_no_completa_si_la_matricula_no_esta_en_el_maestro(db_session):
