@@ -591,7 +591,40 @@ def _snapshot_expedientes(db: Session) -> dict[str, dict]:
     return {f[0]: {"lineas": f[2], "huella_documentos": f[1]} for f in filas}
 
 
-def _check_crecimiento_sin_cambios(db: Session, snapshot_anterior: Optional[dict]) -> list[Hallazgo]:
+def _lineas_podadas_por_expediente(
+    db: Session, codigos: list[str], desde, hasta
+) -> dict[str, int]:
+    """Suma `lineas_podadas` (`app.extraccion.orquestador`, Bloque 4 de la
+    sesión del maestro de materiales, 2026-09-10) de todos los trabajos
+    `extraer_expediente` completados de cada expediente entre dos
+    ejecuciones de esta auditoría (`desde` exclusive, `hasta` inclusive --
+    los propios `created_at` de la auditoría anterior y de la actual). Varias
+    extracciones del mismo expediente pueden haber corrido entre dos
+    auditorías (reintentos, un ciclo con varias pasadas): se suman todas, no
+    solo la última."""
+    if not codigos:
+        return {}
+    filas = db.execute(
+        select(Expediente.codigo_expediente, TrabajoCola.resultado)
+        .join(TrabajoCola, TrabajoCola.expediente_id == Expediente.id)
+        .where(
+            Expediente.codigo_expediente.in_(codigos),
+            TrabajoCola.tipo == "extraer_expediente",
+            TrabajoCola.estado == EstadoTrabajo.completado,
+            TrabajoCola.created_at > desde,
+            TrabajoCola.created_at <= hasta,
+        )
+    ).all()
+    podadas: dict[str, int] = {}
+    for codigo, resultado in filas:
+        n = (resultado or {}).get("lineas_podadas") or 0
+        podadas[codigo] = podadas.get(codigo, 0) + n
+    return podadas
+
+
+def _check_crecimiento_sin_cambios(
+    db: Session, snapshot_anterior: Optional[dict], creado_en_anterior, creado_en_actual
+) -> list[Hallazgo]:
     """"Expedientes cuyo número de líneas cambia sin que hayan cambiado sus
     documentos". El propio `app.mantenimiento.frescura.detectar_crecimiento_
     sin_cambios` ya vigila esto EXPEDIENTE A EXPEDIENTE en el momento de
@@ -602,7 +635,19 @@ def _check_crecimiento_sin_cambios(db: Session, snapshot_anterior: Optional[dict
     (`snapshot_expedientes`, guardado en el resultado de cada ejecución) y
     la de ahora: mismo `huella_documentos`, número de líneas distinto. Sin
     ejecución anterior que comparar (primera vez que corre esta auditoría),
-    no hay nada que decir todavía."""
+    no hay nada que decir todavía.
+
+    Bloque 4, sesión 2026-09-11 (hallazgo real del reproceso completo de la
+    sesión anterior: 15 expedientes marcados "error" que en realidad eran
+    `podar_lineas_obsoletas_de_documento`, Bloque 4 de la sesión del maestro
+    de materiales, limpiando 832 líneas de residuo genuino por primera vez).
+    Una BAJADA de recuento no es automáticamente sospechosa: si la suma de
+    `lineas_podadas` de las extracciones de ese expediente entre las dos
+    auditorías explica exactamente la diferencia, es poda funcionando como
+    se diseñó -- aviso informativo, no error. Una SUBIDA nunca la explica la
+    poda (que solo borra) -- sigue siendo error siempre. Una bajada que la
+    poda no explica del todo (poda insuficiente, o ninguna poda registrada)
+    también sigue siendo error: solo se degrada lo que de verdad cuadra."""
     if not snapshot_anterior:
         return []
     actual = _snapshot_expedientes(db)
@@ -615,25 +660,64 @@ def _check_crecimiento_sin_cambios(db: Session, snapshot_anterior: Optional[dict
         huella_ahora = ahora.get("huella_documentos")
         if huella_antes is None or huella_ahora is None or huella_antes != huella_ahora:
             continue
-        if antes.get("lineas") != ahora.get("lineas"):
-            afectados.append(codigo)
+        diferencia = ahora.get("lineas") - antes.get("lineas")
+        if diferencia != 0:
+            afectados.append((codigo, diferencia))
     if not afectados:
         return []
-    expedientes, total = _limitar_expedientes(afectados)
-    return [
-        Hallazgo(
-            categoria="lineas_cambian_sin_cambiar_documentos",
-            gravedad="error",
-            mensaje=(
-                f"{total} expediente(s) cuyo número de líneas de catálogo cambió respecto a la "
-                "ejecución anterior de esta auditoría sin que cambiara su huella de documentos -- "
-                "mismo síntoma que motivó la comprobación de integridad de "
-                "`app.mantenimiento.frescura.detectar_crecimiento_sin_cambios` (auditoría 2026-09-05)."
-            ),
-            expedientes=expedientes,
-            total_afectados=total,
+
+    decrecientes = [codigo for codigo, diferencia in afectados if diferencia < 0]
+    podadas = (
+        _lineas_podadas_por_expediente(db, decrecientes, creado_en_anterior, creado_en_actual)
+        if creado_en_anterior is not None
+        else {}
+    )
+
+    sin_explicar = []
+    explicados_por_poda = []
+    for codigo, diferencia in afectados:
+        if diferencia < 0 and podadas.get(codigo, 0) == -diferencia:
+            explicados_por_poda.append(codigo)
+        else:
+            sin_explicar.append(codigo)
+
+    hallazgos: list[Hallazgo] = []
+    if explicados_por_poda:
+        expedientes, total = _limitar_expedientes(explicados_por_poda)
+        hallazgos.append(
+            Hallazgo(
+                categoria="lineas_bajan_explicado_por_poda",
+                gravedad="aviso",
+                mensaje=(
+                    f"{total} expediente(s) cuyo número de líneas bajó respecto a la ejecución anterior "
+                    "de esta auditoría sin cambiar su huella de documentos, explicado exactamente por "
+                    "`lineas_podadas` de sus extracciones en ese intervalo -- poda de huérfanas obsoletas "
+                    "funcionando como se diseñó (CONTEXTO.md, sesión del maestro de materiales, bloque 4), "
+                    "no una duplicación."
+                ),
+                expedientes=expedientes,
+                total_afectados=total,
+            )
         )
-    ]
+    if sin_explicar:
+        expedientes, total = _limitar_expedientes(sin_explicar)
+        hallazgos.append(
+            Hallazgo(
+                categoria="lineas_cambian_sin_cambiar_documentos",
+                gravedad="error",
+                mensaje=(
+                    f"{total} expediente(s) cuyo número de líneas de catálogo cambió respecto a la "
+                    "ejecución anterior de esta auditoría sin que cambiara su huella de documentos, y sin "
+                    "que la poda de huérfanas obsoletas explique la diferencia (subida siempre es "
+                    "sospechosa; una bajada solo se descarta si `lineas_podadas` la explica exactamente) "
+                    "-- mismo síntoma que motivó la comprobación de integridad de "
+                    "`app.mantenimiento.frescura.detectar_crecimiento_sin_cambios` (auditoría 2026-09-05)."
+                ),
+                expedientes=expedientes,
+                total_afectados=total,
+            )
+        )
+    return hallazgos
 
 
 def _check_vacios_por_columna(
@@ -725,7 +809,12 @@ def ejecutar_auditoria(db: Session, trabajo: TrabajoCola) -> dict:
     hallazgos += _check_bajas(db)
     hallazgos += _check_importe_licitacion_sospechoso(db)
     hallazgos += _check_firma_cabecera(db)
-    hallazgos += _check_crecimiento_sin_cambios(db, snapshot_anterior)
+    hallazgos += _check_crecimiento_sin_cambios(
+        db,
+        snapshot_anterior,
+        creado_en_anterior=anterior.created_at if anterior is not None else None,
+        creado_en_actual=trabajo.created_at,
+    )
     vacios_por_columna, hallazgos_vacios = _check_vacios_por_columna(lineas, resultado_anterior)
     hallazgos += hallazgos_vacios
 
