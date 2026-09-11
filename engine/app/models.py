@@ -72,6 +72,20 @@ class TipoDocumento(str, enum.Enum):
     otro = "otro"
 
 
+class OrigenDocumento(str, enum.Enum):
+    """Bloque 6, sesión de comparación documento-vs-listado interno: de dónde
+    viene el fichero físico -- descargado con navegador de la Plataforma
+    (`app.scraping.job`, el único camino hasta esta sesión) o aportado a mano
+    por el cliente vía una carpeta local (`app.ingesta_local`, expedientes
+    vigentes en su SAP que todavía no están publicados). Vive en `Documento`,
+    no en `DocumentoExpediente`: es una propiedad del fichero, no de qué
+    expediente lo enlaza -- el mismo contenido (mismo hash) nunca cambia de
+    procedencia real por enlazarse a un segundo expediente."""
+
+    plataforma = "plataforma"
+    manual = "manual"
+
+
 class EstadoRevisionLinea(str, enum.Enum):
     sin_revisar = "sin_revisar"
     pendiente = "pendiente"
@@ -203,6 +217,28 @@ class Expediente(Base):
     # hay con qué filtrar la búsqueda en la Plataforma. Se limpia solo en
     # cuanto la búsqueda consigue lanzarse de verdad.
     aviso_descubrimiento_pedidos = Column(Text, nullable=True)
+    # Migración 0028 (bloque 6, sesión de comparación documento-vs-listado
+    # interno, `app.ingesta_local`): la carpeta de ingesta manual de este
+    # expediente contenía un documento cuyo código propio declarado (Anuncio
+    # PCSP "Número de Expediente", Contrato "Contrato nº") no coincide con el
+    # código de la carpeta -- no se adivina cuál es el correcto, ese
+    # documento no se enlaza y queda aquí para revisión manual. Se
+    # recalcula entero en cada ingesta (nunca se acumula sobre un aviso
+    # viejo, mismo criterio que `aviso_sindicacion`): `None` cuando la
+    # ingesta más reciente no encontró ningún documento así.
+    aviso_ingesta_manual = Column(Text, nullable=True)
+    # Migración 0028: este expediente combina, para el mismo tipo de
+    # documento (Anuncio PCSP, Propuesta LC.27, Contrato...), un documento
+    # descargado de la Plataforma y uno aportado a mano
+    # (`OrigenDocumento.manual`) -- señal de que puede haber dos versiones
+    # del mismo hecho conviviendo. La cascada ya resuelve el desacuerdo a
+    # favor de la Plataforma (`app.extraccion.orquestador`, documentos de la
+    # Plataforma se evalúan primero), pero el valor descartado del aportado
+    # a mano no se pierde solo porque perdió: este aviso señala que hace
+    # falta revisar si el documento manual sigue haciendo falta. Recalculado
+    # entero en cada extracción, nunca acumulado (mismo criterio que
+    # `aviso_sindicacion`).
+    aviso_conflicto_documento_manual = Column(Text, nullable=True)
     # Bloque 1, sesión del Excel de ejecución SAP (2026-09-07): estado del
     # CONTRATO frente a ADIF ("En ejecución", ...), distinto de `estado` de
     # arriba (estado de PROCESAMIENTO de este sistema: descargando,
@@ -313,6 +349,16 @@ class Documento(Base):
     hash = Column(String(64), nullable=False, unique=True)
     ruta_almacenamiento = Column(String(512), nullable=False)
     paginas = Column(Integer, nullable=True)
+    # Migración 0028 (bloque 6, sesión de comparación documento-vs-listado
+    # interno): ver docstring de `OrigenDocumento`. `server_default`
+    # "plataforma" porque todo documento anterior a esta sesión llegó por
+    # scraping -- nunca hubo otra vía hasta `app.ingesta_local`.
+    origen = Column(
+        Enum(OrigenDocumento, name="origen_documento"),
+        nullable=False,
+        default=OrigenDocumento.plataforma,
+        server_default=OrigenDocumento.plataforma.value,
+    )
     procesado_en = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 

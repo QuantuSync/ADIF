@@ -13,6 +13,7 @@ from app.extraccion.descubrimiento_matriz import TIPO_TRABAJO as TIPO_TRABAJO_DE
 from app.extraccion.estado_sap import cargar_estado_sap
 from app.extraccion.maestro_materiales import cargar_maestro_materiales, completar_unidades_desde_maestro
 from app.extraccion.sap_desglose import cargar_sap_desglose
+from app.ingesta_local import TIPO_TRABAJO as TIPO_TRABAJO_INGESTA_LOCAL
 from app.mantenimiento.auditoria import TIPO_TRABAJO as TIPO_TRABAJO_AUDITORIA
 from app.mantenimiento.ciclo import TIPO_TRABAJO
 from app.mantenimiento.copia_seguridad import TIPO_TRABAJO as TIPO_TRABAJO_COPIA
@@ -270,6 +271,39 @@ def historial_auditoria_catalogo(
     return db.execute(
         select(TrabajoCola)
         .where(TrabajoCola.tipo == TIPO_TRABAJO_AUDITORIA)
+        .order_by(TrabajoCola.created_at.desc())
+        .limit(limite)
+    ).scalars().all()
+
+
+@router.post("/mantenimiento/ingesta-local/ejecutar", response_model=TrabajoOut)
+def lanzar_ingesta_local(
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    """Bloque 6, sesión de comparación documento-vs-listado interno: botón
+    manual para recorrer `INGESTA_LOCAL_PATH` (`app.ingesta_local`) --
+    expedientes vigentes en el SAP del cliente aportados por una carpeta
+    local, en vez de descargados con navegador. Sin programación propia
+    (a diferencia del ciclo de mantenimiento): el cliente avisa cuando su
+    macro deja ficheros nuevos, no hace falta sondear solo."""
+    trabajo = encolar_trabajo(db, tipo=TIPO_TRABAJO_INGESTA_LOCAL)
+    return trabajo
+
+
+@router.get("/mantenimiento/ingesta-local/historial", response_model=list[TrabajoOut])
+def historial_ingesta_local(
+    limite: int = Query(default=20, ge=1, le=200),
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    """Igual que `GET /mantenimiento/auditoria/historial`: misma
+    `trabajos_cola`, sin tabla nueva -- `resultado` de cada fila trae el
+    resumen (`ResumenIngestaLocal.to_dict()`: carpetas leídas, expedientes
+    nuevos, documentos nuevos, avisos de código discrepante...)."""
+    return db.execute(
+        select(TrabajoCola)
+        .where(TrabajoCola.tipo == TIPO_TRABAJO_INGESTA_LOCAL)
         .order_by(TrabajoCola.created_at.desc())
         .limit(limite)
     ).scalars().all()

@@ -115,6 +115,93 @@ function FilaHallazgo({ hallazgo }: { hallazgo: HallazgoAuditoria }) {
   );
 }
 
+// Bloque 6, sesión de comparación documento-vs-listado interno: forma de
+// `resultado` de un trabajo `ingesta_local`
+// (`app.ingesta_local.ResumenIngestaLocal.to_dict`).
+type ResumenIngestaLocal = {
+  configurado: boolean;
+  carpetas_leidas: number;
+  carpetas_sin_codigo_reconocible: number;
+  expedientes_nuevos: number;
+  expedientes_existentes: number;
+  documentos_nuevos: number;
+  documentos_ya_conocidos: number;
+  enlaces_nuevos: number;
+  documentos_codigo_declarado_distinto: number;
+  expedientes_reencolados: number;
+};
+
+// Sin programación propia (a diferencia de la auditoría, que se encola sola
+// al final de cada ciclo): el cliente avisa cuando su macro deja ficheros
+// nuevos en la carpeta, así que esto es solo un botón manual y su último
+// resultado -- no hace falta la forma completa de `EstadoMantenimiento`
+// (frecuencia, próxima ejecución) que no aplica aquí.
+function PanelIngestaLocal({
+  ultimaEjecucion, onLanzar, lanzando,
+}: {
+  ultimaEjecucion: Trabajo | null;
+  onLanzar: () => void;
+  lanzando: boolean;
+}) {
+  const resultado = (ultimaEjecucion?.resultado ?? null) as ResumenIngestaLocal | null;
+  return (
+    <div className="card" style={{ marginBottom: "1.5rem" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "1rem" }}>
+        <div>
+          <p className="section-label" style={{ margin: 0 }}>Ingesta manual de documentos</p>
+          <p className="muted" style={{ margin: "0.3rem 0 0" }}>
+            Expedientes vigentes en el SAP del cliente que no están publicados en la Plataforma, aportados en una
+            carpeta local.
+          </p>
+        </div>
+        <button
+          onClick={onLanzar}
+          disabled={lanzando || ultimaEjecucion?.estado === "en_proceso" || ultimaEjecucion?.estado === "pendiente"}
+          className="btn btn-secondary"
+        >
+          {lanzando ? "Lanzando…" : "Ejecutar ahora"}
+        </button>
+      </div>
+      {!ultimaEjecucion ? (
+        <p className="muted" style={{ marginTop: "0.8rem" }}>Todavía no se ha ejecutado nunca.</p>
+      ) : ultimaEjecucion.estado !== "completado" ? (
+        <div style={{ marginTop: "0.8rem" }}>
+          <span className={`status ${ultimaEjecucion.estado === "fallido" ? "status-attn" : ""}`}>
+            {ultimaEjecucion.estado === "fallido" ? "La última ejecución falló" : ultimaEjecucion.estado}
+          </span>
+          {ultimaEjecucion.error && <p style={{ margin: "0.35rem 0 0" }}>{ultimaEjecucion.error}</p>}
+        </div>
+      ) : !resultado?.configurado ? (
+        <p className="muted" style={{ marginTop: "0.8rem" }}>
+          No hay ninguna ruta configurada (<code>INGESTA_LOCAL_PATH</code>) -- no hace nada.
+        </p>
+      ) : (
+        <div className="muted" style={{ marginTop: "0.8rem", fontSize: "0.85rem" }}>
+          {formatearFecha(ultimaEjecucion.created_at)} · {resultado.carpetas_leidas} carpeta(s) leída(s) ·{" "}
+          {resultado.expedientes_nuevos} expediente(s) nuevo(s), {resultado.expedientes_existentes} ya
+          conocido(s) · {resultado.documentos_nuevos} documento(s) nuevo(s), {resultado.enlaces_nuevos} enlace(s)
+          nuevo(s)
+          {resultado.carpetas_sin_codigo_reconocible > 0 && (
+            <div>
+              <span className="status status-attn">
+                {resultado.carpetas_sin_codigo_reconocible} carpeta(s) sin código de expediente reconocible
+              </span>
+            </div>
+          )}
+          {resultado.documentos_codigo_declarado_distinto > 0 && (
+            <div>
+              <span className="status status-attn">
+                {resultado.documentos_codigo_declarado_distinto} documento(s) cuyo código propio no coincide con
+                su carpeta -- sin enlazar, ver el expediente correspondiente
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PanelAuditoria({ estado }: { estado: EstadoMantenimiento | null }) {
   if (!estado) return null;
   const trabajo = estado.ultima_ejecucion;
@@ -176,28 +263,47 @@ export default function MantenimientoPanel({ apiUrl }: { apiUrl: string }) {
   const [estado, setEstado] = useState<EstadoMantenimiento | null>(null);
   const [historial, setHistorial] = useState<Trabajo[]>([]);
   const [estadoAuditoria, setEstadoAuditoria] = useState<EstadoMantenimiento | null>(null);
+  const [ultimaIngesta, setUltimaIngesta] = useState<Trabajo | null>(null);
   // Conexión (sondeo pasivo): gateado, igual que en el resto de paneles.
   // `errorAccion` es de "lanzar ahora" -- una acción directa, avisa ya.
   const { error: errorConexion, confirmado, cargando, registrarExito, registrarFallo } = useReintentoConexion();
   const [errorAccion, setErrorAccion] = useState<string | null>(null);
   const [lanzando, setLanzando] = useState(false);
+  const [lanzandoIngesta, setLanzandoIngesta] = useState(false);
 
   async function recargar() {
     try {
-      const [resEstado, resHistorial, resAuditoria] = await Promise.all([
+      const [resEstado, resHistorial, resAuditoria, resIngesta] = await Promise.all([
         fetch(`${apiUrl}/mantenimiento/estado`, { cache: "no-store" }),
         fetch(`${apiUrl}/mantenimiento/historial`, { cache: "no-store" }),
         fetch(`${apiUrl}/mantenimiento/auditoria/estado`, { cache: "no-store" }),
+        fetch(`${apiUrl}/mantenimiento/ingesta-local/historial?limite=1`, { cache: "no-store" }),
       ]);
       if (!resEstado.ok) throw new Error(`la API respondió ${resEstado.status}`);
       if (!resHistorial.ok) throw new Error(`la API respondió ${resHistorial.status}`);
       if (!resAuditoria.ok) throw new Error(`la API respondió ${resAuditoria.status}`);
+      if (!resIngesta.ok) throw new Error(`la API respondió ${resIngesta.status}`);
       setEstado(await resEstado.json());
       setHistorial(await resHistorial.json());
       setEstadoAuditoria(await resAuditoria.json());
+      const historialIngesta: Trabajo[] = await resIngesta.json();
+      setUltimaIngesta(historialIngesta[0] ?? null);
       registrarExito();
     } catch (e) {
       registrarFallo(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function lanzarIngestaLocal() {
+    setLanzandoIngesta(true);
+    try {
+      const res = await fetch(`${apiUrl}/mantenimiento/ingesta-local/ejecutar`, { method: "POST" });
+      if (!res.ok) throw new Error(`la API respondió ${res.status}`);
+      await recargar();
+    } catch (e) {
+      setErrorAccion(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLanzandoIngesta(false);
     }
   }
 
@@ -317,6 +423,8 @@ export default function MantenimientoPanel({ apiUrl }: { apiUrl: string }) {
           </div>
 
           <PanelAuditoria estado={estadoAuditoria} />
+
+          <PanelIngestaLocal ultimaEjecucion={ultimaIngesta} onLanzar={lanzarIngestaLocal} lanzando={lanzandoIngesta} />
 
           <p className="section-label">Histórico</p>
           <div className="table-scroll">

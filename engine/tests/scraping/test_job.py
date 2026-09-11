@@ -9,9 +9,17 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.models import Documento, DocumentoExpediente, EstadoExpediente, Expediente, TipoDocumento, TrabajoCola
+from app.models import (
+    Documento,
+    DocumentoExpediente,
+    EstadoExpediente,
+    Expediente,
+    OrigenDocumento,
+    TipoDocumento,
+    TrabajoCola,
+)
 from app.scraping.job import ejecutar_scraping_expediente
-from app.scraping.pcsp import ExpedienteNoPublicadoError
+from app.scraping.pcsp import DocumentoDescargado, ExpedienteNoPublicadoError, ResultadoScraping
 
 
 def _crear_trabajo(db_session, codigo_expediente: str, estado: EstadoExpediente = EstadoExpediente.pendiente) -> TrabajoCola:
@@ -144,3 +152,48 @@ def test_no_encontrado_sin_documentos_sigue_marcando_sin_publicar(db_session, mo
 
     expediente = db_session.get(Expediente, trabajo.expediente_id)
     assert expediente.estado == EstadoExpediente.sin_publicar
+
+
+# Bloque 6, sesión de comparación documento-vs-listado interno: "si mañana
+# aparece publicado, hay que poder distinguirlos" -- un documento aportado a
+# mano (`app.ingesta_local`) cuyo hash coincide con uno descargado de verdad
+# de la Plataforma deja de ser "aportado" y pasa a confirmarse.
+def test_documento_manual_se_confirma_como_plataforma_al_descargarse_de_verdad(db_session, monkeypatch):
+    _sin_espera(monkeypatch)
+    trabajo = _crear_trabajo(db_session, "6.24/28510.0008")
+    expediente = db_session.get(Expediente, trabajo.expediente_id)
+    documento_manual = Documento(
+        tipo_documento=TipoDocumento.otro,
+        hash="hash-compartido",
+        ruta_almacenamiento="6.24_28510.0008/MANUAL_hash-compartido.pdf",
+        origen=OrigenDocumento.manual,
+    )
+    db_session.add(documento_manual)
+    db_session.commit()
+
+    async def _scrape_mismo_hash(*args, **kwargs):
+        return ResultadoScraping(
+            codigo_encontrado="6.24/28510.0008",
+            documentos=[
+                DocumentoDescargado(
+                    categoria="ANEJO", label="ANEJO_1.pdf", contenido=b"contenido", hash="hash-compartido"
+                )
+            ],
+        )
+
+    monkeypatch.setattr("app.scraping.job.scrape_expediente", _scrape_mismo_hash)
+
+    class _StorageFalsa:
+        def guardar(self, nombre, contenido):
+            raise AssertionError("no debe guardar de nuevo un documento ya existente")
+
+    ejecutar_scraping_expediente(db_session, storage=_StorageFalsa(), trabajo=trabajo)
+
+    db_session.refresh(documento_manual)
+    assert documento_manual.origen == OrigenDocumento.plataforma
+    # Sigue siendo el mismo `Documento`, no uno duplicado.
+    assert db_session.query(Documento).filter_by(hash="hash-compartido").count() == 1
+    enlace = db_session.query(DocumentoExpediente).filter_by(
+        documento_id=documento_manual.id, expediente_id=expediente.id
+    ).one()
+    assert enlace.nombre_archivo == "ANEJO_1.pdf"

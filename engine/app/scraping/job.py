@@ -9,7 +9,15 @@ from sqlalchemy.orm import Session
 
 from app.extraccion.herencia_matriz import reencolar_pedidos_esperando_matriz
 from app.interfaces.document_storage import DocumentStorage
-from app.models import Documento, DocumentoExpediente, EstadoExpediente, Expediente, TipoDocumento, TrabajoCola
+from app.models import (
+    Documento,
+    DocumentoExpediente,
+    EstadoExpediente,
+    Expediente,
+    OrigenDocumento,
+    TipoDocumento,
+    TrabajoCola,
+)
 from app.queue import encolar_trabajo
 from app.scraping.limitador import esperar_turno
 from app.scraping.pcsp import ExpedienteNoPublicadoError, safe, scrape_expediente
@@ -124,6 +132,14 @@ def ejecutar_scraping_expediente(db: Session, storage: DocumentStorage, trabajo:
             )
             db.add(existente)
             db.flush()  # necesita existente.id para el enlace de abajo
+        elif existente.origen == OrigenDocumento.manual:
+            # Bloque 6, sesión de comparación documento-vs-listado interno:
+            # "si mañana aparece publicado, hay que poder distinguirlos" --
+            # el mismo contenido (mismo hash) que se había aportado a mano
+            # ahora se confirma con una descarga real de la Plataforma. Deja
+            # de ser "aportado" y pasa a ser el mismo fichero, con
+            # verificación oficial.
+            existente.origen = OrigenDocumento.plataforma
 
         # Sesión de colisión de hash entre expedientes hermanos (2026-09-08,
         # migración 0021): el documento puede ya existir (mismo contenido
