@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -78,6 +79,21 @@ class ResumenCiclo:
             "descubrimiento": self.descubrimiento,
             "auditoria": self.auditoria,
         }
+
+
+def _renovar_bloqueo(db: Session, trabajo: TrabajoCola) -> None:
+    """Latido de resumibilidad (sesión 2026-09-11, propuesta ya documentada en
+    CONTEXTO.md "pendiente de resolver"): `tomar_siguiente_trabajo` fija
+    `bloqueado_en` una sola vez al arrancar el trabajo y nunca lo refresca
+    mientras corre -- un `mantenimiento_ciclo` real dura horas por diseño
+    (drena la cola de forma síncrona dentro de sí mismo), así que cualquier
+    reinicio del worker durante una ejecución sana lo marcaba huérfano casi
+    con certeza (`reclamar_trabajos_huerfanos`, umbral de 300 s). Refrescar
+    `bloqueado_en` en cada vuelta del drenaje (ya hay una por trabajo
+    drenado, es el punto natural) hace que un reinicio real detecte un
+    cuelgue rápido de verdad sin penalizar una ejecución larga y viva."""
+    trabajo.bloqueado_en = datetime.now(timezone.utc)
+    db.commit()
 
 
 def _documentos_por_expediente(db: Session, expedientes: list[Expediente]) -> dict[int, list[Documento]]:
@@ -168,7 +184,7 @@ def ejecutar_ciclo_mantenimiento(
             # duplicado, antes incluso de saber qué documentos trajo.
             continue
 
-        if debe_extraer(expediente, documentos, forzar_expediente):
+        if debe_extraer(expediente, documentos, forzar_expediente, ciclo_creado_en=trabajo.created_at):
             encolar_trabajo(db, tipo="extraer_expediente", expediente_id=expediente.id)
             resumen.extracciones_lanzadas += 1
         else:
@@ -184,6 +200,7 @@ def ejecutar_ciclo_mantenimiento(
             break
         ejecutar_trabajo(db, siguiente, manejadores)
         resumen.trabajos_drenados += 1
+        _renovar_bloqueo(db, trabajo)
 
     # BLOQUE 1, sesión de auditoría automática (2026-09-08): "que corra sola
     # al terminar cada ciclo de mantenimiento" -- se encola DESPUÉS de que el
