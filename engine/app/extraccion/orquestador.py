@@ -76,6 +76,7 @@ from app.models import (
     LineaCatalogo,
     Lote,
     ModeloPrecio,
+    OrigenDocumento,
     TipoDocumento,
     TrabajoCola,
     TrazaOrigen,
@@ -270,6 +271,66 @@ def _clasificar_documentos(db: Session, storage: DocumentStorage, documentos: li
         )
     db.commit()
     return resultado
+
+
+def _priorizar_por_origen(items: list[_Documento]) -> list[_Documento]:
+    """Bloque 6, sesión de comparación documento-vs-listado interno
+    (política confirmada por el cliente): cuando el mismo expediente trae,
+    para el mismo tipo de documento, uno descargado de la Plataforma y uno
+    aportado a mano (`app.ingesta_local`), gana la Plataforma. El resto de
+    la cascada ya resuelve "varios documentos declaran lo mismo distinto"
+    por "primero que aparece gana" o por prioridad de plantilla con
+    desempate por orden de lista (`app.extraccion.baja.
+    elegir_baja_preferida`, `_nivel_campo` de más abajo...) -- reordenar una
+    sola vez aquí, antes de que nada de eso se ejecute, hace que esos
+    mecanismos ya existentes y ya probados prefieran la Plataforma sin
+    tocarlos uno a uno. `sorted` es estable: dentro del mismo origen, el
+    orden relativo no cambia."""
+    return sorted(items, key=lambda item: 1 if item.documento.origen == OrigenDocumento.manual else 0)
+
+
+# Tipos de documento que declaran hechos propios del expediente (baja,
+# importes, adjudicatario, objeto del contrato) -- un anejo/pliego sin firma
+# ni adjudicación no puede "contradecir" nada de eso, así que queda fuera de
+# `_detectar_conflicto_origen` (que sí vigila `anejo`: dos cuadros de
+# precios de origen distinto, uno por tipo, es la otra forma real de
+# desacuerdo entre las dos fuentes).
+_TIPOS_CON_CONFLICTO_RELEVANTE = frozenset({
+    TipoDocumento.anuncio_pcsp,
+    TipoDocumento.propuesta_lc27,
+    TipoDocumento.resolucion_adjudicacion,
+    TipoDocumento.propuesta_dt,
+    TipoDocumento.contrato,
+    TipoDocumento.anejo,
+})
+
+
+def _detectar_conflicto_origen(items: list[_Documento]) -> Optional[str]:
+    """Bloque 6: aviso informativo, nunca bloqueante (mismo criterio que
+    `aviso_sindicacion`, CONTEXTO.md sección 12) de que este expediente
+    combina, para el MISMO tipo de documento, uno descargado de la
+    Plataforma y uno aportado a mano -- señal de que puede haber dos
+    versiones del mismo hecho. `_priorizar_por_origen` ya resuelve el
+    desacuerdo de VALOR a favor de la Plataforma; esto no intenta
+    diferenciar campo a campo cuál exactamente discrepó -- solo señala
+    dónde mirar, para no dar por hecho en silencio que el documento
+    aportado a mano ya no hace falta. Recalculado entero en cada extracción
+    (el llamador lo asigna sin condición, nunca lo acumula sobre un aviso
+    de una pasada anterior)."""
+    tipos_por_origen: dict[TipoDocumento, set[OrigenDocumento]] = {}
+    for item in items:
+        if item.tipo not in _TIPOS_CON_CONFLICTO_RELEVANTE:
+            continue
+        origen = item.documento.origen or OrigenDocumento.plataforma
+        tipos_por_origen.setdefault(item.tipo, set()).add(origen)
+    mixtos = sorted(tipo.value for tipo, origenes in tipos_por_origen.items() if len(origenes) > 1)
+    if not mixtos:
+        return None
+    return (
+        "combina documentos descargados de la Plataforma y aportados a mano para el mismo tipo de documento "
+        f"({', '.join(mixtos)}) -- en caso de desacuerdo prevalece la Plataforma; revisar si el documento "
+        "aportado a mano sigue haciendo falta"
+    )
 
 
 @dataclass(frozen=True)
@@ -799,11 +860,13 @@ def ejecutar_extraccion_expediente(
             # este cruce aquí, estos 7 nunca podrían heredar nada aunque su
             # matriz sí esté disponible.
             motivo_revision = _acumular_motivo(motivo_revision, asegurar_cruce_codigos(db, expediente))
+            expediente.aviso_conflicto_documento_manual = None
             db.commit()
             lotes = [_obtener_o_crear_lote(db, expediente.id, LOTE_UNICO)]
         else:
-            items = _clasificar_documentos(db, storage, list(documentos))
+            items = _priorizar_por_origen(_clasificar_documentos(db, storage, list(documentos)))
             documentos_procesados = len(items)
+            expediente.aviso_conflicto_documento_manual = _detectar_conflicto_origen(items)
 
             # CONTEXTO.md sección 26, criterio del cliente: solo bajas de
             # material por lotes, un contrato de obra queda fuera de alcance.

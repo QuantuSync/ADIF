@@ -123,6 +123,16 @@ services:
       # Ver comentario en el servicio "api": mismo cruce, el worker lo
       # rellena al terminar la extracción de cada expediente.
       CODIGOS_PROYECTO_PATH: ${CODIGOS_PROYECTO_PATH:-}
+      # Bloque 6, sesión de comparación documento-vs-listado interno:
+      # segunda vía de ingesta (app/ingesta_local.py) -- expedientes
+      # vigentes en el SAP del cliente que no están publicados en la
+      # Plataforma, aportados por una macro propia en esta carpeta (montada
+      # por bind-mount, una subcarpeta por expediente -- ver docstring del
+      # módulo y docs/ingesta-manual-convencion-carpetas.md). Solo el
+      # worker la procesa (trabajo de cola "ingesta_local", lanzado desde
+      # /mantenimiento/ingesta-local/ejecutar). Vacío por defecto: no hace
+      # nada.
+      INGESTA_LOCAL_PATH: ${INGESTA_LOCAL_PATH:-}
       # Bloque 2, descubrimiento por sindicación (CONTEXTO.md sección 24):
       # departamentos de ADIF que se dan de alta solos. "28510" por defecto
       # -- el único que usa el corpus de hoy. Lista separada por comas.

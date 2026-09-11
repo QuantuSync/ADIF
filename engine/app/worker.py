@@ -10,6 +10,8 @@ from app.extraccion.cruce_codigos import validar_ruta_codigos_proyecto
 from app.extraccion.descubrimiento_matriz import TIPO_TRABAJO as TIPO_DESCUBRIMIENTO_PEDIDOS
 from app.extraccion.descubrimiento_matriz import descubrir_pedidos_de_matrices_conocidas
 from app.extraccion.orquestador import ejecutar_extraccion_expediente
+from app.ingesta_local import TIPO_TRABAJO as TIPO_INGESTA_LOCAL
+from app.ingesta_local import ingerir_carpeta_local
 from app.interfaces.document_storage import LocalDiskStorage
 from app.interfaces.model_provider import APIModelProvider, CachedModelProvider
 from app.mantenimiento.auditoria import TIPO_TRABAJO as TIPO_AUDITORIA_CATALOGO
@@ -183,6 +185,15 @@ def procesar_sindicacion_backfill(db, trabajo) -> dict:
     return resumen.to_dict()
 
 
+def procesar_ingesta_local(db, trabajo) -> dict:
+    """Bloque 6, sesión de comparación documento-vs-listado interno: segunda
+    vía de ingesta, además del scraping (`app.ingesta_local`). Sin payload --
+    siempre recorre `INGESTA_LOCAL_PATH` entero; repetible sin duplicar nada
+    (idempotencia por hash, igual que `procesar_descargar_expediente`)."""
+    resumen = ingerir_carpeta_local(db, storage, settings.ingesta_local_path)
+    return resumen.to_dict()
+
+
 def procesar_descubrimiento_pedidos(db, trabajo) -> dict:
     """Descubrimiento inverso matriz -> pedidos (sesión de descubrimiento
     inverso, app.extraccion.descubrimiento_matriz): payload opcional
@@ -202,6 +213,7 @@ MANEJADORES = {
     TIPO_SINDICACION_BACKFILL: procesar_sindicacion_backfill,
     TIPO_DESCUBRIMIENTO_PEDIDOS: procesar_descubrimiento_pedidos,
     TIPO_AUDITORIA_CATALOGO: ejecutar_auditoria,
+    TIPO_INGESTA_LOCAL: procesar_ingesta_local,
 }
 
 

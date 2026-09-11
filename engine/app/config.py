@@ -186,5 +186,16 @@ class Settings(BaseSettings):
     # por defecto: sin esta variable, no se excluye ningún título.
     exclusion_palabras_titulo_path: Optional[str] = None
 
+    # Bloque 6, sesión de comparación documento-vs-listado interno: segunda
+    # vía de ingesta (`app.ingesta_local`), para expedientes vigentes en el
+    # SAP del cliente que no están publicados en la Plataforma -- una macro
+    # propia deja los PDF en esta ruta (montada por bind-mount, mismo
+    # mecanismo que `codigos_proyecto_path` y el resto de fuentes de
+    # entrada), una subcarpeta por expediente (ver docstring del módulo y
+    # docs/ingesta-manual-convencion-carpetas.md, pensado para enviárselo al
+    # cliente). Vacío por defecto: sin esta variable, la ingesta no hace
+    # nada.
+    ingesta_local_path: Optional[str] = None
+
 
 settings = Settings()

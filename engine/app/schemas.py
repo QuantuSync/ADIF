@@ -85,6 +85,17 @@ class ExpedienteOut(BaseModel):
     # solo "sin adjudicatario extraído todavía") -- mismo patrón informativo
     # que `aviso_sindicacion`, nunca bloqueante.
     aviso_descubrimiento_pedidos: Optional[str] = None
+    # Bloque 6, sesión de comparación documento-vs-listado interno
+    # (`app.ingesta_local`): un documento de la carpeta de ingesta manual
+    # declara su propio código distinto del de su carpeta -- no se enlaza
+    # sin revisión. Mismo patrón informativo que `aviso_sindicacion`.
+    aviso_ingesta_manual: Optional[str] = None
+    # Este expediente combina, para el mismo tipo de documento, uno
+    # descargado de la Plataforma y uno aportado a mano -- la Plataforma ya
+    # gana en la cascada, esto solo señala dónde revisar si el aportado a
+    # mano sigue haciendo falta. Mismo patrón informativo que
+    # `aviso_sindicacion`.
+    aviso_conflicto_documento_manual: Optional[str] = None
     # Bloque 1, sesión del Excel de ejecución SAP (2026-09-07): estado del
     # CONTRATO frente a ADIF, distinto de `estado` de arriba (estado de
     # PROCESAMIENTO de este sistema) -- ver docstring de
@@ -102,6 +113,11 @@ class DocumentoOut(BaseModel):
     nombre_archivo: str
     paginas: Optional[int] = None
     procesado_en: Optional[datetime] = None
+    # Bloque 6, sesión de comparación documento-vs-listado interno:
+    # "plataforma" (descargado con navegador, CONTEXTO.md sección 10) o
+    # "manual" (aportado por el cliente, `app.ingesta_local`) -- ver
+    # docstring de `OrigenDocumento`.
+    origen: str = "plataforma"
 
 
 class LineaCatalogoPosibleDuplicado(BaseModel):
