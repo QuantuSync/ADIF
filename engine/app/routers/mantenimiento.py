@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.auth import Usuario, get_current_user
 from app.config import settings
 from app.db import get_db
+from app.extraccion.candidatos_matricula import calcular_candidatos
 from app.extraccion.descubrimiento_matriz import TIPO_TRABAJO as TIPO_TRABAJO_DESCUBRIMIENTO_PEDIDOS
 from app.extraccion.estado_sap import cargar_estado_sap
 from app.extraccion.maestro_materiales import cargar_maestro_materiales, completar_unidades_desde_maestro
@@ -28,6 +29,7 @@ from app.schemas import (
     EstadoMantenimientoOut,
     EstadoSapCargaOut,
     MaestroMaterialesCargaOut,
+    ResumenCandidatosMatriculaOut,
     MaestroMaterialesCompletarOut,
     SapDesglosecargaOut,
     TrabajoOut,
@@ -329,3 +331,20 @@ def completar_unidades_de_medida(
     propósito: cargar el maestro no debe escribir en el catálogo sin que
     alguien lo pida explícitamente."""
     return completar_unidades_desde_maestro(db)
+
+
+@router.post("/mantenimiento/candidatos-matricula/calcular", response_model=ResumenCandidatosMatriculaOut)
+def calcular_candidatos_de_matricula(
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    """Bloque 1, sesión 2026-09-11: recalcula la cola de candidatos de
+    matrícula (`app.extraccion.candidatos_matricula.calcular_candidatos`)
+    contra el estado actual del catálogo y del maestro de materiales --
+    nunca asigna nada por sí solo, solo repuebla las opciones que
+    `GET /revision/candidatos-matricula` presenta para confirmación humana.
+    Síncrono, mismo criterio que el resto de esta sección: se puede volver a
+    llamar tantas veces como haga falta (p.ej. tras recargar el maestro, o
+    tras un reproceso que cambie qué líneas tienen matrícula) sin duplicar
+    nada -- borra y reconstruye la cola entera cada vez."""
+    return calcular_candidatos(db)

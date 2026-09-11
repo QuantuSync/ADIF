@@ -19,6 +19,7 @@ _TABLAS = [
     models.CandidatoAcuerdoMarco.__table__,
     models.SapDesgloseLinea.__table__,
     models.MaestroMaterial.__table__,
+    models.CandidatoMatricula.__table__,
 ]
 
 
