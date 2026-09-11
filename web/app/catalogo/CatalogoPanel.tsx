@@ -135,6 +135,22 @@ function celdaLote(linea: LineaCatalogo) {
   );
 }
 
+// Bloque 1, sesión de comparación documento-vs-listado interno: el título tal
+// como lo declara el propio documento (`Expediente.nombre_proyecto`, etiqueta
+// fija "Objeto del Contrato" -- CONTEXTO.md sección 7), siempre independiente
+// del cruce con el Excel de códigos. Vacío solo cuando el documento propio no
+// llegó a declararlo (p. ej. expediente sin Anuncio PCSP ni Propuesta LC.27
+// procesados todavía), nunca por falta de cruce.
+function celdaTitulo(linea: LineaCatalogo) {
+  if (linea.nombre_proyecto) return linea.nombre_proyecto;
+  return (
+    <DatoVacio
+      motivo="no-consta"
+      titulo="El documento propio de este expediente todavía no declara un objeto/título de contrato."
+    />
+  );
+}
+
 // Código de precio vacío: el cuadro de precios de origen no trae un
 // identificador de línea distinto para esta fila (CONTEXTO.md sección 2, la
 // matrícula es la única clave alternativa cuando falta). Definitivo, nada
@@ -387,6 +403,7 @@ export default function CatalogoPanel({ apiUrl }: { apiUrl: string }) {
               <thead>
                 <tr>
                   <th>Expediente</th>
+                  <th>Título expediente</th>
                   <th>Lote</th>
                   <th>Matrícula</th>
                   <th>Código</th>
@@ -410,6 +427,7 @@ export default function CatalogoPanel({ apiUrl }: { apiUrl: string }) {
                       }`}
                     >
                       <td>{linea.codigo_expediente}</td>
+                      <td>{celdaTitulo(linea)}</td>
                       <td>{celdaLote(linea)}</td>
                       <td style={linea.matricula ? { fontWeight: 700 } : undefined} className="mono">
                         {celdaConCausaDeVacio(
