@@ -803,6 +803,36 @@ def test_guardar_lineas_catalogo_borra_precio_adjudicado_cuando_la_baja_deja_de_
     assert linea.precio_unitario == Decimal("1000")  # el resto de campos sigue intacto
 
 
+def test_guardar_lineas_catalogo_limpia_motivo_revision_cuando_la_pasada_nueva_no_encuentra_nada(db_session):
+    # Bloque 2, sesión de comparación documento-vs-listado interno: cuarta
+    # aparición del mismo defecto que `precio_adjudicado`/`baja_lote`
+    # (`test_guardar_lineas_catalogo_borra_precio_adjudicado_cuando_la_baja_
+    # deja_de_conocerse`, arriba) y que motivó el estado `INVALIDADO`.
+    # `_construir_campos` recalcula `motivo_revision` de cero en cada
+    # llamada -- un `None` en una pasada posterior significa "ya no hay
+    # motivo", nunca "no se evaluó", y debe limpiar el aviso viejo.
+    lote = _lote(db_session)
+    mapeo = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": None, "cantidad": 2, "precio_unitario": 3}
+
+    con_motivo = construir_linea_catalogo(
+        ["P-001", "Material X", "no-es-un-numero", "24,00"], mapeo, 1, None, lote.expediente_id, None, 0
+    )
+    guardar_lineas_catalogo(db_session, lote.id, [con_motivo])
+    linea = db_session.query(LineaCatalogo).filter_by(lote_id=lote.id, clave_linea="P-001").one()
+    assert linea.motivo_revision is not None
+    assert "cantidad no interpretable" in linea.motivo_revision
+
+    sin_motivo = construir_linea_catalogo(
+        ["P-001", "Material X", "30", "24,00"], mapeo, 1, None, lote.expediente_id, None, 0
+    )
+    guardar_lineas_catalogo(db_session, lote.id, [sin_motivo])
+
+    # Mismo objeto (identity map de SQLAlchemy), sin `commit()` de por
+    # medio -- comprobado directo, igual que el test de `precio_adjudicado`.
+    assert linea.motivo_revision is None
+    assert linea.cantidad == Decimal("30")  # el resto de campos sigue actualizándose con normalidad
+
+
 def test_combinar_por_clave_funde_repeticiones_dentro_del_mismo_lote_de_lineas():
     # Bug real (sesión de validación del mapeo de cabecera contra la API):
     # SessionLocal (app/db.py) usa autoflush=False, así que un mismo
