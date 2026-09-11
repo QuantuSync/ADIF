@@ -104,6 +104,17 @@ COLUMNAS = [
     # Excel. Al final de todo, cuarta columna añadida -- mismo criterio que
     # las tres anteriores.
     "Estado del contrato (SAP)",
+    # Bloque 1, sesión de comparación documento-vs-listado interno: el
+    # número de expediente y el objeto/título tal como los declara el propio
+    # documento de la Plataforma, siempre rellenos con independencia de si
+    # el expediente cruzó con el Excel de códigos de ADIF -- a diferencia de
+    # "Código de expediente"/"Código interno" (arriba, gated por
+    # `expediente.codigos_cruzados`), para que el cliente pueda comparar lo
+    # que dice el documento contra lo que dice su listado interno y detectar
+    # errores de cualquiera de las dos fuentes. Añadidas al final, sin
+    # desplazar ninguna columna existente -- "Comentarios" se queda última.
+    "Nº de expediente (documento)",
+    "Objeto del contrato (documento)",
     # Segunda tanda de cambios del cliente tras revisar el catálogo (bloque
     # 1, sesión 2026-09-09): la única de las once columnas originales que el
     # cliente pidió mover -- de la novena posición al final de todas,
@@ -331,6 +342,13 @@ def generar_excel_catalogo(db: Session, incluir_pendientes_sin_lote: bool = Fals
                 _celda_numero(linea.baja_lote),
                 _celda_texto_o_espacio(linea.unidad_medida),
                 _celda_texto_o_espacio(expediente.estado_contrato_sap),
+                # Siempre el dato del documento, nunca gated por `cruzado`
+                # (ver comentario de `COLUMNAS` arriba) -- `codigo_expediente`
+                # no es nullable (CONTEXTO.md sección 20: se corrige en el
+                # sitio con el "Número de Expediente" propio del Anuncio
+                # PCSP en cuanto se lee, `app.extraccion.identidad_expediente`).
+                _celda_texto_o_espacio(expediente.codigo_expediente),
+                _celda_texto_o_espacio(expediente.nombre_proyecto),
                 _celda_texto_o_espacio(linea.comentarios),
             ])
             hoja.cell(row=fila, column=_COLUMNA_CANTIDAD).number_format = _formato_cantidad(linea.cantidad)

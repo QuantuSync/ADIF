@@ -254,7 +254,9 @@ def test_exportar_catalogo_genera_xlsx_con_columnas_del_formato_esperado(cliente
         "Matrícula del material", "Descripción del material", "Código del material",
         "Cantidad", "Precio unitario", "Lote",
         "Precio adjudicado", "Baja del lote", "Unidad de medida",
-        "Estado del contrato (SAP)", "Comentarios",
+        "Estado del contrato (SAP)",
+        "Nº de expediente (documento)", "Objeto del contrato (documento)",
+        "Comentarios",
     ]
     fila = [c.value for c in next(hoja.iter_rows(min_row=2, max_row=2))]
     assert fila[3] == "SUMINISTRO DE GUANTES CONTRA RIESGO ELECTRICO."
@@ -276,9 +278,16 @@ def test_exportar_catalogo_genera_xlsx_con_columnas_del_formato_esperado(cliente
     # Aviso del cliente (sesión 2026-09-07): unidad de medida, al final de
     # todo, después de las dos columnas ya añadidas.
     assert fila[12] == "UN"
+    # Bloque 1, sesión de comparación documento-vs-listado interno: el
+    # número de expediente y el objeto/título del documento SIEMPRE se
+    # rellenan, aunque el expediente no haya cruzado con el Excel de
+    # códigos (a diferencia de fila[0]/fila[1] de arriba, vacíos en este
+    # mismo test por la misma razón).
+    assert fila[14] == "6.24/28510.0008"
+    assert fila[15] == "SUMINISTRO DE GUANTES CONTRA RIESGO ELECTRICO."
     # Segunda tanda de cambios del cliente (bloque 1, sesión 2026-09-09):
     # "Comentarios" se mueve al final de todas las columnas.
-    assert fila[14] == " "
+    assert fila[16] == " "
 
 
 def _agregar_linea_huerfana(db_session, expediente, documento, *, motivo):
