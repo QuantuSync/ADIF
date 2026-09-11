@@ -59,6 +59,14 @@ services:
       # que el cliente pidió que desaparecieran). Vacío por defecto: sin
       # esta variable, no se excluye ningún expediente.
       EXCLUSION_EXPEDIENTES_PATH: ${EXCLUSION_EXPEDIENTES_PATH:-}
+      # Bloque 3, sesión de comparación documento-vs-listado interno: filtro
+      # por palabras del título del contrato (app/exclusion.py,
+      # ExclusionPalabrasTitulo) -- mismo mecanismo y mismo alcance que
+      # EXCLUSION_EXPEDIENTES_PATH de arriba (solo la API la lee, solo
+      # esconde de GET /catalogo y el Excel), pero por texto libre del
+      # título en vez de por código de expediente/departamento. Vacío por
+      # defecto: sin esta variable, no se excluye ningún título.
+      EXCLUSION_PALABRAS_TITULO_PATH: ${EXCLUSION_PALABRAS_TITULO_PATH:-}
       # Orígenes permitidos para CORS (app/config.py): el navegador llama a
       # esta API desde fuera de la red de Docker, en el origen donde corre
       # "web". Lista separada por comas si hace falta más de uno.
