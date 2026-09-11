@@ -51,6 +51,33 @@ def test_departamento_fuera_de_lista_no_se_da_de_alta(tmp_path, db_session, monk
     assert db_session.query(Expediente).filter_by(codigo_expediente="3.24/20830.0154").one_or_none() is None
 
 
+# Bloque 4, sesión de comparación documento-vs-listado interno: el cliente
+# planteó que puede haber contratos en ejecución de otro departamento --
+# comprobado que `sindicacion_departamentos_adif` ya admite una lista
+# separada por comas (`_departamentos_configurados`), no un único
+# departamento fijo. Sin cambio de código, esta prueba lo deja verificado.
+def test_admite_una_lista_de_varios_departamentos(tmp_path, db_session, monkeypatch):
+    from app import config
+    monkeypatch.setattr(config.settings, "sindicacion_departamentos_adif", "28510,28520")
+
+    zip_path = construir_zip(
+        tmp_path / "prueba.zip",
+        [
+            entrada_xml("6.24/28510.0088", "ADIF - Presidencia", "PUB", "2024-08-01T00:00:00+02:00", "1", "1"),
+            entrada_xml("6.24/28520.0001", "ADIF - Presidencia", "PUB", "2024-08-01T00:00:00+02:00", "1", "1"),
+            entrada_xml("3.24/20830.0154", "ADIF Alta Velocidad - Consejo de Administración", "PUB", "2024-08-01T00:00:00+02:00", "1", "1"),
+        ],
+    )
+
+    resumen = descubrir_novedades(db_session, periodo="202408", ruta_zip=zip_path)
+
+    assert resumen.expedientes_adif_total == 3
+    assert resumen.expedientes_filtrados == 2
+    assert db_session.query(Expediente).filter_by(codigo_expediente="6.24/28510.0088").one_or_none() is not None
+    assert db_session.query(Expediente).filter_by(codigo_expediente="6.24/28520.0001").one_or_none() is not None
+    assert db_session.query(Expediente).filter_by(codigo_expediente="3.24/20830.0154").one_or_none() is None
+
+
 def test_organo_no_adif_se_ignora(tmp_path, db_session, monkeypatch):
     from app import config
     monkeypatch.setattr(config.settings, "sindicacion_departamentos_adif", "28510")
