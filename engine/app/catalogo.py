@@ -1712,11 +1712,11 @@ def guardar_lineas_catalogo(
             for campo, valor in datos.items():
                 if campo == "clave_linea":
                     continue
-                if campo in ("precio_adjudicado", "baja_lote"):
-                    # Ambos se recalculan desde cero en cada pasada -- nunca
-                    # "esta pasada no trajo el dato" (que es lo que justifica
-                    # no pisar el resto de campos). `precio_adjudicado` es
-                    # derivado (CONTEXTO.md sección 4: `precio_unitario *
+                if campo in ("precio_adjudicado", "baja_lote", "motivo_revision"):
+                    # Los tres se recalculan desde cero en cada pasada --
+                    # nunca "esta pasada no trajo el dato" (que es lo que
+                    # justifica no pisar el resto de campos). `precio_adjudicado`
+                    # es derivado (CONTEXTO.md sección 4: `precio_unitario *
                     # (1 - baja_lote)`, o `None` si falta cualquiera de los
                     # dos); `baja_lote` se copia de `lote.baja_lote`, que
                     # `app.extraccion.orquestador` ya sobrescribe sin
@@ -1730,6 +1730,24 @@ def guardar_lineas_catalogo(
                     # cambios del cliente: la propia `baja_lote` por línea
                     # tenía el mismo hueco (seguía en 97,73 % pese a que
                     # `lote.baja_lote` ya estaba en blanco).
+                    #
+                    # `motivo_revision` es la cuarta aparición del mismo
+                    # defecto (bloque 2, sesión de comparación
+                    # documento-vs-listado interno): `_construir_campos`
+                    # (y la construcción de la línea completa que lo envuelve)
+                    # lo recalculan de cero en cada llamada -- nunca acumulan
+                    # sobre el valor ya guardado -- así que un `None` aquí
+                    # significa igual "esta pasada, con los datos que tiene
+                    # ahora, no encuentra ningún motivo", nunca "no se
+                    # evaluó". Sin este tratamiento, un motivo de una pasada
+                    # anterior (p.ej. "cantidad no interpretable") se quedaba
+                    # pegado para siempre aunque un arreglo posterior
+                    # resolviera el problema de verdad y la pasada nueva ya no
+                    # tuviera nada que decir. Distinto del camino de herencia
+                    # de matriz (`app.extraccion.herencia_matriz`), que ni
+                    # siquiera incluye esta clave en `datos` -- ahí sí es
+                    # "no evaluado", y este bucle nunca la toca porque no
+                    # aparece en `datos.items()`.
                     setattr(existente, campo, valor)
                 elif valor is INVALIDADO:
                     # Bloque 3, sesión 2026-09-11 (mismo mecanismo ya
@@ -1755,9 +1773,14 @@ def guardar_lineas_catalogo(
                 # pieza física: se absorben en `existente` (los campos que
                 # le falten se rellenan desde cada una) y se borran, en vez
                 # de dejarlas como duplicados que ningún reproceso futuro
-                # vuelve a mirar.
+                # vuelve a mirar. `motivo_revision` queda fuera (bloque 2,
+                # sesión de comparación documento-vs-listado interno): ya se
+                # fijó arriba con la evaluación fresca de esta pasada --
+                # rellenarlo aquí desde una fila abandonada resucitaría
+                # exactamente el motivo obsoleto que el arreglo de arriba
+                # acaba de limpiar.
                 for campo in LineaCatalogo.__table__.columns.keys():
-                    if campo in ("id", "lote_id", "clave_linea"):
+                    if campo in ("id", "lote_id", "clave_linea", "motivo_revision"):
                         continue
                     valor_heredado = getattr(duplicado, campo)
                     if valor_heredado is not None and getattr(existente, campo) is None:
