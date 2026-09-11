@@ -28,7 +28,16 @@ from app.models import Documento, EstadoExpediente, Expediente, LineaCatalogo
 # este tipo a lo largo del proyecto). Comparado contra
 # `Expediente.version_logica_extraccion`; cualquier cadena sirve, no hace
 # falta que sea un número — una fecha de sesión es una convención razonable.
-VERSION_LOGICA_EXTRACCION = "2026-09-08.1"
+# Bloque 5, sesión de comparación documento-vs-listado interno: sube por dos
+# cambios reales en la cascada desde la última vez (2026-09-08.1) -- ninguno
+# de los dos toca ningún documento (misma huella), así que sin este bump
+# `debe_extraer` nunca los recogería solo: (1) `guardar_lineas_catalogo`
+# (bloque 2) ya no deja `motivo_revision` pegado entre pasadas -- líneas con
+# un motivo obsoleto de una sesión anterior necesitan una pasada nueva para
+# limpiarse; (2) `_priorizar_por_origen`/`_detectar_conflicto_origen`
+# (bloque 6) son nuevos en el orquestador, aunque hoy no cambien nada (0
+# documentos aportados a mano todavía).
+VERSION_LOGICA_EXTRACCION = "2026-09-11.1"
 
 
 def huella_documentos(documentos: Iterable[Documento]) -> str:
