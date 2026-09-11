@@ -1,11 +1,124 @@
 from app.extraccion.firma_cabecera import calcular_firma_cabecera
 from app.extraccion.mapeo_cabecera import (
+    corregir_confusion_matricula_codigo_precio,
+    derivar_mapeo_por_contenido,
     evaluar_coherencia_mapeo,
     intentar_mapeo_determinista,
     mapear_cabecera,
     obtener_mapeo_cacheado,
 )
 from tests.extraccion.dobles import ProveedorModeloFalso
+
+
+# --- derivar_mapeo_por_contenido (Bloque 3, sesión 2026-09-11) ---
+# Filas reales completas de `ANEJO_abd69efbdd39b552.pdf` p.35 (trío
+# 0042/0046/0047, 33 líneas): matrícula, descripción, plano, norma técnica,
+# precio -- sin ninguna columna de código de precio. Verificado en vivo que
+# el modelo devuelve una permutación de columnas distinta en cada llamada
+# sobre esta tabla exacta; estas son las filas reales que lo motivaron.
+_FILAS_TRIO_P35 = [
+    ["612260110", "SCV-C-60-ID-318", "P16.0785.02", "03.361.130.2", "15.377,63 €"],
+    ["612260115", "SCV-C-60-II-318", "P16.0785.24", "03.361.130.2", "15.468,40 €"],
+    ["615260093", "SCI-P-60-II-318", "P16.3589.05 SIMETRICO", "03.361.130.2", "15.561,96 €"],
+    ["619350615", "CZI-AG-3HD-B1-54-0,11-R", "P16.2316.00 (S)", "03.361.140.1", "15.571,69 €"],
+    ["612260101", "SCV-C-6O-DD-318", "P16.0784.24", "03.361.130.2", "15.584,23 €"],
+    ["612260105", "SCV-C-60-DI -318", "P16.0784.02", "03.361.130.2", "15.622,21 €"],
+    ["615260091", "SCI -P-60-ID-318", "P16.3589.02 SIMETRICO", "03.361.130.2", "15.741,46 €"],
+    ["619350645", "CZI-AG-3HI-B1-54-0,11-R", "P16.2316.00", "03.361.140.1", "16.060,87 €"],
+    ["612250101", "SCI-C-54-DD-318", "P16.0733.24", "03.361.130.2", "16.310,47 €"],
+    ["612250110", "SCI-C-54-ID-318", "P16.0734.02", "03.361.130.2", "16.310,47 €"],
+    ["612250115", "SCI-C-54-II-318", "P16.0734.24", "03.361.130.2", "16.310,47 €"],
+    ["612250105", "SCI-C-54-DI-318", "P16.0733.02", "03.361.130.2", "16.360,33 €"],
+    ["619350812", "SCI(DRMI)-B1-54-DD-320", "P16.4315.00", "03.361.130.2", "16.478,17 €"],
+    ["619350814", "SCI(DRMI)-B1-54-DI-320", "P16.4314.00", "03.361.130.2", "16.478,17 €"],
+    ["619350642", "SCI(DMRI)-B1-54-II-320", "P16.4312.00", "03.361.130.2", "16.567,94 €"],
+    ["619350644", "SCI(DMRI)-B1-54-ID-320", "P16.4311.00", "03.361.130.2", "16.567,94 €"],
+    ["612250102", "SCI-C(+10)-54-DD-318", "P16.5144.22", "03.361.130.2", "16.627,80 €"],
+    ["612250116", "SCI-C(+10)-54-II-318", "P16.5165.22", "03.361.130.2", "17.272,37 €"],
+    ["615260111", "SCI-P-60-AC-CAR-I.D.\nP/DSH-P-60-318-0,11", "", "", "17.315,61 €"],
+    ["612260145", "SCVH-C-60-DD-500", "P16.2913.22", "03.361.130.2", "17.674,63 €"],
+    ["612260155", "SCVH-C-60-ID-500", "P16.2913.02 SIMETRICO", "03.361.130.2", "17.674,63 €"],
+    ["612260150", "SCVH-C-60-II-500", "P16.2913.22 SIMETRICO", "03.361.130.2", "17.847,17 €"],
+    ["612260140", "SCVH-C-60-0I-500", "P16.2913.02", "03.361.130.2", "18.038,99 €"],
+    ["615250090", "SCI-P-54-DD-318 P/DS-P-\n54-318-0'09-CR-D", "", "", "18.268,00 €"],
+    ["615250091", "SCI-P-54-DI 318 P/DS-P-\n54-318-0'09-CR-D", "", "", "18.268,00 €"],
+    ["615260094", "SCI-P-60-AR-CAC-D.D.\nP/DSH-P-60-318-0,09", "", "", "18.268,00 €"],
+    ["614860200", "CONJ.100 TRAV.M/DCHA. DE\nE640156D A E640255D", "", "", "18.565,57 €"],
+    ["612250161", "SCI-C(+10)-54-II-500", "P16.5160.24", "03.360.130.2", "18.733,39 €"],
+    ["612260125", "SCV-C-60-DD-500", "P16.0862.24", "03.361.130.2", "18.759,77 €"],
+    ["612260130", "SCV-C-60-ID-500", "P16.0863.02", "03.361.130.2", "18.759,77 €"],
+    ["612260135", "SCV-C-60-II -500", "P16.0863.24", "03.361.130.2", "18.759,77 €"],
+    ["612850231", "PLACA NERVADA PN54-540I\nCON SOPORTE DE AGUJA", "P16.0764.09", "", "19.176,00 €"],
+    ["612250160", "SCI-C-54-II-500", "P16.0913.024", "03.361.130.2", "19.227,46 €"],
+]
+
+
+def test_derivar_mapeo_por_contenido_caso_real_trio_0042_0046_0047():
+    mapeo = derivar_mapeo_por_contenido(_FILAS_TRIO_P35)
+    assert mapeo == {
+        "codigo_precio": None, "matricula": 0, "descripcion": 1,
+        "unidad_medida": None, "cantidad": None, "precio_unitario": 4,
+    }
+    # Y el mapeo derivado pasa la validación de coherencia sin ningún aviso.
+    assert evaluar_coherencia_mapeo(mapeo, _FILAS_TRIO_P35) is None
+
+
+def test_derivar_mapeo_por_contenido_caso_real_p27_mismo_documento():
+    # Misma tabla sin cabecera, otra página del mismo documento (p.27):
+    # también resuelta hoy vía `evaluar_coherencia_mapeo` rechazando al
+    # modelo -- con la derivación por contenido, se resuelve sin llamarlo.
+    filas = [
+        ["610850108", "AC-9000 / SCI-A-54-DI-190", "311-31", "03.360.101.4", "1.620,46 €"],
+        ["601080026", "CUPON MIXTO 54/42'5 KGS.L:8 M. HILO IZQUIERDO", "", "", "1.665,72 €"],
+        ["601080025", "CUPON MIXTO 54/42'5 KGS. L:8 M.HILO DERECHO", "", "", "1.676,15 €"],
+        ["612860600", "JUEGO DE PLACAS PARA SUJECION BLOQUE CENTRAL", "", "", "1.692,08 €"],
+        ["601080022", "CUPON MIXTO 54/45 12 M.(6+ 6) lADO DERECHO", "", "03.360.101.4", "1.697,76 €"],
+    ]
+    mapeo = derivar_mapeo_por_contenido(filas)
+    assert mapeo == {
+        "codigo_precio": None, "matricula": 0, "descripcion": 1,
+        "unidad_medida": None, "cantidad": None, "precio_unitario": 4,
+    }
+
+
+def test_derivar_mapeo_por_contenido_detecta_codigo_precio_real():
+    filas = [
+        ["P-001", "BRIDA DE SUJECION TIPO A", "10", "3,50 €"],
+        ["P-002", "PLACA DE ASIENTO TIPO B", "5", "7,20 €"],
+        ["P-003", "TORNILLO M22X325 DE ALTA RESISTENCIA", "20", "1,10 €"],
+    ]
+    mapeo = derivar_mapeo_por_contenido(filas)
+    assert mapeo == {
+        "codigo_precio": 0, "matricula": None, "descripcion": 1,
+        "unidad_medida": None, "cantidad": None, "precio_unitario": 3,
+    }
+
+
+def test_derivar_mapeo_por_contenido_dos_columnas_de_texto_no_se_adivina():
+    # Dos columnas con el mismo perfil (texto libre, alta cardinalidad) sin
+    # ningún patrón que las distinga -- condición 1 del encargo: no se
+    # adivina cuál es la descripción, se devuelve None (la línea sigue el
+    # camino de siempre, que puede acabar en revisión).
+    filas = [
+        ["611150110", "Observación variable uno de la fila", "Designación libre variable uno", "3,50 €"],
+        ["611150111", "Observación variable dos de la fila", "Designación libre variable dos", "7,20 €"],
+        ["611150098", "Observación variable tres de la fila", "Designación libre variable tres", "1,10 €"],
+    ]
+    assert derivar_mapeo_por_contenido(filas) is None
+
+
+def test_derivar_mapeo_por_contenido_sin_identificador_no_se_adivina():
+    # Ni matrícula ni código de precio en ninguna columna: no hay nada que
+    # ancle la fila, mejor no derivar nada.
+    filas = [
+        ["Balasto sobre camión en cantera", "1", "0,142 €"],
+        ["Transporte de traviesas a obra", "2", "0,255 €"],
+    ]
+    assert derivar_mapeo_por_contenido(filas) is None
+
+
+def test_derivar_mapeo_por_contenido_sin_filas_no_opina():
+    assert derivar_mapeo_por_contenido([]) is None
 
 
 def test_mapeo_determinista_cabecera_completa():
@@ -193,6 +306,80 @@ def test_evaluar_coherencia_mapeo_detecta_mapeo_incoherente_sobre_cabecera_sin_s
         "unidad_medida": None, "cantidad": None, "precio_unitario": 4,
     }
     assert evaluar_coherencia_mapeo(mapeo_correcto, filas) is None
+
+
+def test_corregir_confusion_matricula_codigo_precio_caso_real_0042_0046_0047():
+    # Caso real, Bloque 3, sesión 2026-09-11: `ANEJO_abd69efbdd39b552.pdf`
+    # p.35 (trío 0042/0046/0047), tabla sin cabecera propia y SIN ninguna
+    # columna de código de precio real -- 5 columnas (matrícula,
+    # designación, plano, norma técnica, precio). El modelo asignó la
+    # columna 0 (matrícula real) a `codigo_precio` y dejó `matricula` sin
+    # columna.
+    filas = [
+        ["612260110", "SCV-C-60-ID-318", "P16.0785.02", "03.361.130.2", "15.377,63 €"],
+        ["615250090", "SCI-P-54-DD-318 P/DS-P-\n54-318-0'09-CR-D", "", "", "18.268,00 €"],
+        ["615250091", "SCI-P-54-DI 318 P/DS-P-\n54-318-0'09-CR-D", "", "", "18.268,00 €"],
+        ["615260094", "SCI-P-60-AR-CAC-D.D.\nP/DSH-P-60-318-0,09", "", "", "18.268,00 €"],
+    ]
+    mapeo_confundido = {
+        "codigo_precio": 0, "matricula": None, "descripcion": 1,
+        "unidad_medida": None, "cantidad": None, "precio_unitario": 4,
+    }
+    corregido = corregir_confusion_matricula_codigo_precio(mapeo_confundido, filas)
+    assert corregido == {
+        "codigo_precio": None, "matricula": 0, "descripcion": 1,
+        "unidad_medida": None, "cantidad": None, "precio_unitario": 4,
+    }
+
+
+def test_corregir_confusion_matricula_codigo_precio_no_toca_mapeo_correcto():
+    # `codigo_precio` con forma real de código ("P-001"...) nunca se toca,
+    # aunque `matricula` esté sin asignar (tabla legítima sin matrícula).
+    filas = [["P-001", "BRIDA", "10", "3,50 €"], ["P-002", "PLACA", "5", "7,20 €"]]
+    mapeo = {
+        "codigo_precio": 0, "matricula": None, "descripcion": 1,
+        "unidad_medida": None, "cantidad": 2, "precio_unitario": 3,
+    }
+    assert corregir_confusion_matricula_codigo_precio(mapeo, filas) == mapeo
+
+
+def test_corregir_confusion_matricula_codigo_precio_variante_misma_columna_para_los_dos_campos():
+    # Segunda variante real, verificada reprocesando el trío 0042/0046/0047
+    # contra el stack real (misma tabla, otra llamada al modelo sin
+    # cabecera): `matricula` Y `codigo_precio` apuntan a la MISMA columna 0
+    # en vez de quedar `matricula` sin asignar -- mismo defecto de fondo
+    # (columna 0 es la matrícula real, nunca un código de precio), forma
+    # distinta.
+    filas = [["612260110", "SCV-C-60-ID-318", "15.377,63 €"]]
+    mapeo = {
+        "codigo_precio": 0, "matricula": 0, "descripcion": 1,
+        "unidad_medida": None, "cantidad": None, "precio_unitario": 2,
+    }
+    corregido = corregir_confusion_matricula_codigo_precio(mapeo, filas)
+    assert corregido == {
+        "codigo_precio": None, "matricula": 0, "descripcion": 1,
+        "unidad_medida": None, "cantidad": None, "precio_unitario": 2,
+    }
+
+
+def test_corregir_confusion_matricula_codigo_precio_no_toca_si_matricula_en_otra_columna_distinta():
+    # `matricula` con su PROPIA columna, distinta de `codigo_precio`: no hay
+    # ninguna confusión que resolver, aunque la columna de `codigo_precio`
+    # tenga forma numérica de 9 dígitos por otro motivo.
+    filas = [["612260110", "612345678", "BRIDA", "3,50 €"]]
+    mapeo = {
+        "codigo_precio": 0, "matricula": 1, "descripcion": 2,
+        "unidad_medida": None, "cantidad": None, "precio_unitario": 3,
+    }
+    assert corregir_confusion_matricula_codigo_precio(mapeo, filas) == mapeo
+
+
+def test_corregir_confusion_matricula_codigo_precio_sin_codigo_precio_no_opina():
+    mapeo = {
+        "codigo_precio": None, "matricula": None, "descripcion": 1,
+        "unidad_medida": None, "cantidad": None, "precio_unitario": 2,
+    }
+    assert corregir_confusion_matricula_codigo_precio(mapeo, [["a", "b", "c"]]) == mapeo
 
 
 def test_evaluar_coherencia_mapeo_sin_filas_no_opina():

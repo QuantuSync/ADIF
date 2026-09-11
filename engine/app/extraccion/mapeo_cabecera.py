@@ -19,8 +19,9 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from app.catalogo import _MATRICULA_VALIDA_RE
+from app.catalogo import _CODIGO_PRECIO_VALIDO_RE, _MATRICULA_VALIDA_RE
 from app.extraccion.firma_cabecera import calcular_firma_cabecera
+from app.extraccion.firma_estructural import clasificar_columnas
 from app.extraccion.texto import normalizar
 from app.interfaces.model_provider import ModelProvider
 from app.models import MapeoCabeceraCache
@@ -256,6 +257,164 @@ def evaluar_coherencia_mapeo(
                     "modelo sobre cabecera sin señal -- probablemente apunta a otra columna"
                 )
     return None
+
+
+def _buscar_columna_codigo_precio(
+    filas: list[list[Optional[str]]], excluir: set[int]
+) -> Optional[int]:
+    """Entre las columnas no reclamadas por otro campo, la que tenga forma
+    real de código de precio (`_CODIGO_PRECIO_VALIDO_RE`, los mismos formatos
+    ya verificados contra el corpus en `app.catalogo`: "P-001", "COD0001",
+    "L9-T12"...) en casi todos sus valores no vacíos. Nunca el patrón laxo
+    "bare" (1-4 dígitos sueltos, válido solo bajo una cabecera real que diga
+    "PARTIDA"): sin cabecera, un número corto suelto es demasiado ambiguo
+    (podría ser una cantidad) para usarlo como señal de identidad. Devuelve
+    `None` si ninguna columna encaja, o si más de una lo hace (ambiguo -- no
+    se adivina cuál es la buena)."""
+    candidatas = []
+    for indice in range(max((len(f) for f in filas), default=0)):
+        if indice in excluir:
+            continue
+        valores = [
+            fila[indice].strip() for fila in filas if indice < len(fila) and fila[indice] and fila[indice].strip()
+        ]
+        if not valores:
+            continue
+        con_forma = sum(1 for v in valores if _CODIGO_PRECIO_VALIDO_RE.match(v.replace(" ", "")))
+        if con_forma / len(valores) >= _UMBRAL_COHERENCIA:
+            candidatas.append(indice)
+    if len(candidatas) == 1:
+        return candidatas[0]
+    return None
+
+
+def derivar_mapeo_por_contenido(filas: list[list[Optional[str]]]) -> Optional[dict[str, Optional[int]]]:
+    """Bloque 3, sesión 2026-09-11 (CONTEXTO.md, defecto de la tabla sin
+    cabecera de `6.20/28510.0042`/`0046`/`0047`): antes de preguntarle al
+    modelo la identidad de cada columna de una tabla sin cabecera, se intenta
+    derivarla del CONTENIDO -- verificado en vivo que el modelo, sobre esta
+    forma concreta de tabla (matrícula, descripción, referencia de plano,
+    referencia normativa, precio -- sin ninguna columna de código de precio),
+    devuelve una permutación de columnas DISTINTA en llamadas sucesivas con
+    las mismas filas de ejemplo: `codigo_precio`↔columna de matrícula en un
+    intento, `codigo_precio` y `matricula` a la misma columna en otro,
+    `matricula`↔`descripcion` desplazadas un puesto en un tercero. No hay un
+    único error que corregir -- parchear cada forma observada persigue un
+    objetivo que se mueve. `app.extraccion.firma_estructural.
+    clasificar_columnas` ya clasifica cada columna por su contenido de forma
+    determinista (mismo resultado siempre, sin llamar a nada): reutilizarla
+    aquí elimina la pregunta al modelo en el caso donde menos fiable es.
+
+    Encargo explícito de esta sesión -- nunca se adivina sobre una
+    clasificación ambigua, la línea va a revisión, no aquí: se exige
+    exactamente una columna `matricula` (o ninguna, una tabla puede no
+    traerla), exactamente una `precio`, y exactamente una `texto_unico` (la
+    descripción) -- si hay cero o más de una de cualquiera de ellas, o si no
+    hay ninguna columna de precio ni ningún identificador (ni matrícula ni
+    código de precio), se devuelve `None` y el llamador sigue con el camino
+    de siempre (modelo + `evaluar_coherencia_mapeo`, que en el peor caso
+    excluye la tabla del Excel en vez de contaminarlo)."""
+    if not filas:
+        return None
+    tipos = clasificar_columnas(filas)
+
+    indices_matricula = [i for i, t in enumerate(tipos) if t == "matricula"]
+    indices_precio = [i for i, t in enumerate(tipos) if t == "precio"]
+    indices_descripcion = [i for i, t in enumerate(tipos) if t == "texto_unico"]
+
+    if len(indices_matricula) > 1 or len(indices_precio) != 1 or len(indices_descripcion) != 1:
+        return None
+
+    matricula_idx = indices_matricula[0] if indices_matricula else None
+    descripcion_idx = indices_descripcion[0]
+    precio_idx = indices_precio[0]
+
+    codigo_precio_idx = _buscar_columna_codigo_precio(
+        filas, excluir={i for i in (matricula_idx, descripcion_idx, precio_idx) if i is not None}
+    )
+
+    if matricula_idx is None and codigo_precio_idx is None:
+        # Sin ningún identificador de línea (ni matrícula ni código de
+        # precio): mismo criterio que `intentar_mapeo_determinista`
+        # (CAMPOS_IDENTIFICADORES) -- sin esto no hay nada que ancle la fila,
+        # mejor no derivar nada que inventar una identidad.
+        return None
+
+    return {
+        "codigo_precio": codigo_precio_idx,
+        "matricula": matricula_idx,
+        "descripcion": descripcion_idx,
+        "unidad_medida": None,
+        "cantidad": None,
+        "precio_unitario": precio_idx,
+    }
+
+
+def _columna_parece_matricula(indice: int, filas: list[list[Optional[str]]]) -> bool:
+    valores = [
+        fila[indice].strip() for fila in filas if indice < len(fila) and fila[indice] and fila[indice].strip()
+    ]
+    if not valores:
+        return False
+    con_forma_matricula = sum(1 for v in valores if _MATRICULA_VALIDA_RE.match(v.replace(" ", "")))
+    return con_forma_matricula / len(valores) >= _UMBRAL_COHERENCIA
+
+
+def corregir_confusion_matricula_codigo_precio(
+    mapeo: dict[str, Optional[int]], filas: list[list[Optional[str]]]
+) -> dict[str, Optional[int]]:
+    """Bloque 3, sesión 2026-09-11 (CONTEXTO.md, defecto de la tabla sin
+    cabecera de `6.20/28510.0042`/`0046`/`0047`): sobre una tabla sin
+    cabecera propia sin NINGUNA columna real de código de precio, el
+    modelo, guiado solo por 2-3 filas de ejemplo, tiende a confundir la
+    primera columna (un identificador numérico de 9 dígitos) con
+    `codigo_precio` en vez de con `matricula` -- verificado contra
+    `ANEJO_abd69efbdd39b552.pdf` p.35 (33 líneas reales de ese trío) en DOS
+    variantes reales, ambas observadas reprocesando el documento real más de
+    una vez (sin cabecera, cada reproceso vuelve a llamar al modelo -- ver
+    `cabecera_sin_senal` -- así que puede tocar una variante distinta cada
+    vez, no siempre la misma):
+
+    1. `matricula` queda sin columna asignada y `codigo_precio` apunta a la
+       columna 0 (la matrícula real).
+    2. `matricula` Y `codigo_precio` apuntan a la MISMA columna 0 -- el
+       modelo identifica la columna dos veces, una vez con cada nombre.
+
+    En los dos casos la columna 0 es la matrícula real (`612260110`,
+    `615250090`...), nunca un código de precio (que en esta tabla, verificado
+    contra el PDF, no existe en absoluto) -- luego marcada "formato no
+    reconocido en el corpus" por `app.catalogo._normalizar_codigo_precio"
+    porque un número de 9 dígitos nunca encaja en `_CODIGO_PRECIO_VALIDO_RE`.
+    Corrección determinista sobre el MAPEO, no sobre los datos: si la
+    columna de `codigo_precio` tiene forma de matrícula
+    (`_MATRICULA_VALIDA_RE`, 9 dígitos) en la mayoría de sus valores no
+    vacíos -- mismo umbral que ya usa `evaluar_coherencia_mapeo` para el
+    caso simétrico -- y `matricula` no apunta a OTRA columna distinta,
+    `codigo_precio` queda `None` (esta tabla no trae identificador de línea
+    propio) y `matricula` queda asignada a esa columna. Nunca al revés, y
+    nunca si `matricula` ya tiene una columna PROPIA y distinta: ahí no hay
+    confusión que resolver.
+
+    Zona de riesgo conocida, sin cubrir aquí: el modelo puede producir
+    variantes distintas de estas dos (p.ej. `descripcion` sin columna en vez
+    de `matricula`) en otro reproceso -- ver CONTEXTO.md para la vía
+    estructural más robusta (derivar la columna de `matricula`/`precio_
+    unitario` de `app.extraccion.firma_estructural.calcular_firma_
+    estructural`, que ya las clasifica de forma determinista por contenido,
+    en vez de fiarse del modelo para esta forma de tabla) si esto vuelve a
+    aparecer con otra forma."""
+    indice_codigo_precio = mapeo.get("codigo_precio")
+    indice_matricula = mapeo.get("matricula")
+    if indice_codigo_precio is None:
+        return mapeo
+    if indice_matricula is not None and indice_matricula != indice_codigo_precio:
+        return mapeo
+    if not _columna_parece_matricula(indice_codigo_precio, filas):
+        return mapeo
+    corregido = dict(mapeo)
+    corregido["matricula"] = indice_codigo_precio
+    corregido["codigo_precio"] = None
+    return corregido
 
 
 # Bloque 5, cambios del cliente tras revisar el catálogo (sesión 2026-09-09):

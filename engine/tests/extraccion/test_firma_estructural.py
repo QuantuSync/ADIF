@@ -1,4 +1,4 @@
-from app.extraccion.firma_estructural import calcular_firma_estructural
+from app.extraccion.firma_estructural import calcular_firma_estructural, clasificar_columnas
 
 
 def test_firma_estructural_distingue_columna_fantasma_desplazada():
@@ -48,3 +48,29 @@ def test_firma_estructural_distinto_numero_columnas_nunca_coincide():
 
 def test_firma_estructural_vacia_sin_filas():
     assert calcular_firma_estructural([]) == (0, ())
+
+
+# --- Bloque 3, sesión 2026-09-11: dos categorías nuevas, verificadas contra
+# las 33 filas reales de `ANEJO_abd69efbdd39b552.pdf` p.35 (trío 0042/0046/
+# 0047) -- ver `app.extraccion.mapeo_cabecera.derivar_mapeo_por_contenido`.
+
+
+def test_clasificar_columnas_distingue_referencia_normativa_de_descripcion():
+    filas = [
+        ["612260110", "SCV-C-60-ID-318", "P16.0785.02", "03.361.130.2", "15.377,63 €"],
+        ["612260115", "SCV-C-60-II-318", "P16.0785.24", "03.361.130.2", "15.468,40 €"],
+        ["615260093", "SCI-P-60-II-318", "P16.3589.05 SIMETRICO", "03.361.130.2", "15.561,96 €"],
+        ["619350615", "CZI-AG-3HD-B1-54-0,11-R", "P16.2316.00 (S)", "03.361.140.1", "15.571,69 €"],
+    ]
+    tipos = clasificar_columnas(filas)
+    assert tipos == ["matricula", "texto_unico", "referencia_alfanumerica", "referencia_normativa", "precio"]
+
+
+def test_clasificar_columnas_no_confunde_codigo_precio_real_con_referencia():
+    # "P-001" (código de precio real, con guion) nunca debe clasificarse
+    # como "referencia_alfanumerica" (que exige el dígito pegado a la letra,
+    # sin guion) -- si lo hiciera, `derivar_mapeo_por_contenido` no podría
+    # distinguir un código de precio real de una referencia de plano.
+    filas = [["P-001", "BRIDA", "3,50 €"], ["P-002", "PLACA", "7,20 €"]]
+    tipos = clasificar_columnas(filas)
+    assert tipos[0] == "codigo_repetido"
