@@ -1,6 +1,6 @@
 """Bloque 1, ejecución incremental (CONTEXTO.md sección 23): decisiones de
 frescura sin abrir ningún documento ni tocar la cascada de extracción."""
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app.mantenimiento.frescura import (
     VERSION_LOGICA_EXTRACCION,
@@ -101,6 +101,51 @@ def test_debe_extraer_forzado_reextrae_aunque_todo_coincida():
         huella_documentos=huella_documentos(docs),
     )
     assert debe_extraer(exp, docs, forzar=True) is True
+
+
+# --- Resumibilidad del ciclo de mantenimiento (sesión 2026-09-11): un
+# `mantenimiento_ciclo` reclamado como huérfano y reintentado no debe volver
+# a extraer un expediente que un intento ANTERIOR de ese mismo ciclo ya
+# resolvió con éxito. ---
+
+
+def test_debe_extraer_ya_resuelto_por_este_mismo_ciclo_se_salta_incluso_forzado():
+    ciclo_creado_en = datetime.now(timezone.utc) - timedelta(minutes=90)
+    docs = [_documento("h1")]
+    exp = _expediente(
+        extraido_en=datetime.now(timezone.utc) - timedelta(minutes=5),
+        version_logica_extraccion=VERSION_LOGICA_EXTRACCION,
+        huella_documentos=huella_documentos(docs),
+    )
+    assert debe_extraer(exp, docs, forzar=True, ciclo_creado_en=ciclo_creado_en) is False
+
+
+def test_debe_extraer_obsoleto_desde_antes_del_ciclo_se_extrae_igual():
+    ciclo_creado_en = datetime.now(timezone.utc) - timedelta(minutes=5)
+    docs = [_documento("h1")]
+    exp = _expediente(
+        extraido_en=datetime.now(timezone.utc) - timedelta(days=30),
+        version_logica_extraccion=VERSION_LOGICA_EXTRACCION,
+        huella_documentos=huella_documentos(docs),
+    )
+    assert debe_extraer(exp, docs, forzar=True, ciclo_creado_en=ciclo_creado_en) is True
+
+
+def test_debe_extraer_nunca_extraido_con_ciclo_creado_en_se_extrae():
+    exp = _expediente(extraido_en=None)
+    ciclo_creado_en = datetime.now(timezone.utc) - timedelta(minutes=90)
+    assert debe_extraer(exp, [_documento("h1")], forzar=True, ciclo_creado_en=ciclo_creado_en) is True
+
+
+def test_debe_extraer_sin_ciclo_creado_en_se_comporta_como_antes():
+    docs = [_documento("h1")]
+    exp = _expediente(
+        extraido_en=datetime.now(timezone.utc),
+        version_logica_extraccion=VERSION_LOGICA_EXTRACCION,
+        huella_documentos=huella_documentos(docs),
+    )
+    assert debe_extraer(exp, docs, forzar=True) is True
+    assert debe_extraer(exp, docs, forzar=False) is False
 
 
 def test_debe_estampar_extraccion_estados_terminales():

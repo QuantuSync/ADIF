@@ -1,7 +1,7 @@
 """Bloque 1 (CONTEXTO.md sección 23): el ciclo de mantenimiento decide, encola
 y drena — con manejadores falsos, sin scraping real ni modelo real, igual
 que el resto de tests de esta cascada."""
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app.mantenimiento.auditoria import TIPO_TRABAJO as TIPO_TRABAJO_AUDITORIA
 from app.mantenimiento.auditoria import ejecutar_auditoria
@@ -121,7 +121,15 @@ def test_forzar_global_reprocesa_aunque_este_al_dia(db_session):
         .filter(DocumentoExpediente.expediente_id == exp.id)
         .all()
     )
-    exp.extraido_en = datetime.now(timezone.utc)
+    # Margen claro respecto a `trabajo.created_at` (más abajo): SQLite, el
+    # motor de estos tests, solo guarda `CURRENT_TIMESTAMP` con resolución
+    # de segundo -- sin este margen, un `extraido_en` con microsegundos
+    # capturado unos milisegundos antes puede leerse de vuelta como
+    # POSTERIOR al `created_at` truncado del trabajo, disparando por
+    # accidente la comprobación de resumibilidad del Bloque 2. PostgreSQL
+    # (producción) no trunca así, pero el margen no depende de esa
+    # diferencia de motor.
+    exp.extraido_en = datetime.now(timezone.utc) - timedelta(seconds=5)
     exp.version_logica_extraccion = VERSION_LOGICA_EXTRACCION
     exp.huella_documentos = huella_documentos(docs)
     db_session.commit()
@@ -143,6 +151,75 @@ def test_sin_publicar_se_excluye_del_ciclo(db_session):
     resumen = ejecutar_ciclo_mantenimiento(db_session, storage=None, model_provider=None, manejadores={}, trabajo=trabajo)
 
     assert resumen["expedientes_evaluados"] == 0
+
+
+def test_reintento_de_ciclo_huerfano_no_reextrae_lo_ya_hecho_en_este_ciclo(db_session):
+    """Resumibilidad (sesión 2026-09-11): un `mantenimiento_ciclo` reclamado
+    como huérfano y reintentado (mismo `TrabajoCola.created_at`, `intentos`
+    incrementado) no debe volver a lanzar la extracción de un expediente que
+    un intento ANTERIOR de este mismo ciclo ya completó -- aunque el payload
+    siga trayendo `forzar: true` (`forzar_global`, el mismo en cada
+    reintento). Simula el escenario real: el trabajo de ciclo ya existía
+    (creado antes) cuando el expediente terminó su extracción."""
+    exp = _crear_expediente(db_session)
+    _crear_documento(db_session, exp.id, "h1")
+
+    trabajo = _trabajo_ciclo(db_session, payload={"forzar": True})
+    # El expediente se extrajo DESPUÉS de que este ciclo se creara -- como lo
+    # habría dejado un primer intento de este mismo ciclo, antes de que el
+    # worker se reiniciara a mitad de camino.
+    exp.extraido_en = trabajo.created_at + timedelta(seconds=5)
+    exp.version_logica_extraccion = VERSION_LOGICA_EXTRACCION
+    docs = (
+        db_session.query(Documento)
+        .join(DocumentoExpediente, DocumentoExpediente.documento_id == Documento.id)
+        .filter(DocumentoExpediente.expediente_id == exp.id)
+        .all()
+    )
+    exp.huella_documentos = huella_documentos(docs)
+    db_session.commit()
+
+    ejecutados = []
+    manejadores = {"extraer_expediente": lambda db, t: ejecutados.append(t.expediente_id) or {}, **_AUDITORIA}
+
+    resumen = ejecutar_ciclo_mantenimiento(
+        db_session, storage=None, model_provider=None, manejadores=manejadores, trabajo=trabajo
+    )
+
+    assert resumen["extracciones_lanzadas"] == 0
+    assert resumen["saltados_extraccion"] == 1
+    assert ejecutados == []
+
+
+def test_ciclo_renueva_bloqueado_en_al_drenar_trabajos(db_session):
+    """Latido de resumibilidad: cada trabajo drenado dentro del ciclo debe
+    refrescar `bloqueado_en` del propio trabajo `mantenimiento_ciclo`, para
+    que `reclamar_trabajos_huerfanos` no lo marque huérfano mientras sigue
+    vivo y avanzando."""
+    exp = _crear_expediente(db_session)
+
+    def fake_descargar(db, trabajo):
+        _crear_documento(db, trabajo.expediente_id, "hash-nuevo")
+        encolar_trabajo(db, tipo="extraer_expediente", expediente_id=trabajo.expediente_id)
+        return {"ok": True}
+
+    manejadores = {
+        "descargar_expediente": fake_descargar,
+        "extraer_expediente": lambda db, t: {"ok": True},
+        **_AUDITORIA,
+    }
+    trabajo = _trabajo_ciclo(db_session)
+    bloqueado_en_inicial = datetime.now(timezone.utc) - timedelta(minutes=10)
+    trabajo.bloqueado_en = bloqueado_en_inicial
+    db_session.commit()
+
+    ejecutar_ciclo_mantenimiento(db_session, storage=None, model_provider=None, manejadores=manejadores, trabajo=trabajo)
+
+    db_session.refresh(trabajo)
+    # SQLite (motor de estos tests) devuelve el valor guardado sin
+    # información de zona horaria -- se compara en naive por los dos lados,
+    # el punto del test es el orden relativo, no el `tzinfo`.
+    assert trabajo.bloqueado_en.replace(tzinfo=None) > bloqueado_en_inicial.replace(tzinfo=None)
 
 
 def test_drenaje_no_recoge_otro_ciclo_pendiente(db_session):

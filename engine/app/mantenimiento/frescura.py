@@ -63,7 +63,12 @@ def debe_descargar(expediente: Expediente, documentos: list[Documento]) -> bool:
     return not documentos
 
 
-def debe_extraer(expediente: Expediente, documentos: list[Documento], forzar: bool) -> bool:
+def debe_extraer(
+    expediente: Expediente,
+    documentos: list[Documento],
+    forzar: bool,
+    ciclo_creado_en: Optional[datetime] = None,
+) -> bool:
     """CONTEXTO.md, bloque 1, punto 3: "si los documentos no han cambiado
     (mismo hash) y la lógica tampoco, no se reextrae". Deliberadamente NO
     mira si el expediente tiene documentos: un pedido derivado de acuerdo
@@ -76,7 +81,28 @@ def debe_extraer(expediente: Expediente, documentos: list[Documento], forzar: bo
     "se quedó `esperando_matriz`" — `app.worker` solo estampa `extraido_en`
     en un intento que de verdad corrió la cascada (ver su docstring), nunca
     en ese estado, así que un pedido derivado se reintenta en cada ciclo
-    hasta que su matriz esté lista, sin necesitar una regla aparte aquí."""
+    hasta que su matriz esté lista, sin necesitar una regla aparte aquí.
+
+    `ciclo_creado_en` (resumibilidad del ciclo de mantenimiento, sesión
+    2026-09-11, CONTEXTO.md "pendiente de resolver"): `TrabajoCola.created_at`
+    del propio `mantenimiento_ciclo` que está evaluando este expediente, fijo
+    entre reintentos de un mismo trabajo huérfano-y-recuperado. Si
+    `expediente.extraido_en` ya es posterior, un intento ANTERIOR de este
+    mismo ciclo ya extrajo este expediente con éxito -- se salta incluso con
+    `forzar=True`, para que un reinicio del worker a mitad de un ciclo largo
+    reanude por donde iba en vez de reprocesar los cientos de expedientes que
+    el intento interrumpido ya había resuelto. `forzar` pasa a significar
+    "ignora lo obsoleto de antes de pedir este ciclo", no "repite ciegamente
+    en cada reintento de este mismo ciclo". Esta comprobación va antes que
+    `forzar` a propósito: sin `ciclo_creado_en` (llamador que no participa de
+    un ciclo, p.ej. un test o un reproceso manual futuro) se comporta como
+    antes."""
+    if (
+        ciclo_creado_en is not None
+        and expediente.extraido_en is not None
+        and expediente.extraido_en > ciclo_creado_en
+    ):
+        return False
     if forzar:
         return True
     if expediente.extraido_en is None:
