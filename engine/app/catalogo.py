@@ -7,6 +7,7 @@ from typing import Callable, Optional
 from sqlalchemy.orm import Session
 
 from app.extraccion.codigo_material import derivar_codigo_material
+from app.extraccion.invalidado import INVALIDADO
 from app.extraccion.normalizacion import (
     limpiar_codigo_celda,
     limpiar_texto_celda,
@@ -1687,7 +1688,16 @@ def guardar_lineas_catalogo(
             existente = duplicados_por_firma.pop(0)
 
         if existente is None:
-            nueva = LineaCatalogo(lote_id=lote_id, **datos)
+            # `INVALIDADO` (app.extraccion.invalidado) solo importa para
+            # BORRAR un valor ya guardado -- en una fila nueva no hay nada
+            # que borrar, así que se guarda como el `None` que ya es en
+            # sustancia ("este campo no existe en esta tabla"). Nunca debe
+            # llegar tal cual a `LineaCatalogo(...)`: no es un valor de
+            # columna válido.
+            datos_insercion = {
+                campo: (None if valor is INVALIDADO else valor) for campo, valor in datos.items()
+            }
+            nueva = LineaCatalogo(lote_id=lote_id, **datos_insercion)
             db.add(nueva)
             creadas += 1
             objetos_tocados.append(nueva)
@@ -1721,6 +1731,23 @@ def guardar_lineas_catalogo(
                     # tenía el mismo hueco (seguía en 97,73 % pese a que
                     # `lote.baja_lote` ya estaba en blanco).
                     setattr(existente, campo, valor)
+                elif valor is INVALIDADO:
+                    # Bloque 3, sesión 2026-09-11 (mismo mecanismo ya
+                    # existente para `lotes.adjudicatario`/`importe_licitacion`,
+                    # `app.extraccion.invalidado`): la extracción SÍ miró esta
+                    # tabla y determinó con confianza que esta columna no
+                    # existe -- a diferencia de un `None` corriente (que solo
+                    # significa "esta pasada no lo trae", CONTEXTO.md: no
+                    # pisa un valor ya conocido), aquí SÍ hay que borrar lo
+                    # que hubiera, porque lo que hubiera es del defecto que
+                    # motivó este mecanismo, no un dato bueno de otra tabla
+                    # más pobre en columnas. Caso real que lo motiva:
+                    # `codigo_precio` de la tabla sin cabecera de
+                    # `6.20/28510.0042`/`0046`/`0047` p.35 -- guardado antes
+                    # de este arreglo con el valor de la matrícula por un
+                    # mapeo de modelo equivocado, un `None` corriente nunca
+                    # lo habría corregido.
+                    setattr(existente, campo, None)
                 elif valor is not None:
                     setattr(existente, campo, valor)
             for duplicado in duplicados_por_firma:

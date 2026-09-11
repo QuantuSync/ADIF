@@ -29,15 +29,35 @@ nunca comparten firma, y `procesar_anejo` nunca intenta heredar el mapeo de
 una a la otra."""
 from __future__ import annotations
 
+import re
 from typing import Optional
 
 from app.catalogo import _MATRICULA_VALIDA_RE
 
 _UMBRAL_MATRICULA = 0.5
 _UMBRAL_PRECIO = 0.5
+_UMBRAL_REFERENCIA = 0.5
 _UMBRAL_CARDINALIDAD_UNICA = 0.5
 _LONGITUD_TEXTO_LARGO = 6
 _UMBRAL_RELLENO_MINIMO = 0.2
+
+# Bloque 3, sesión 2026-09-11 (CONTEXTO.md, defecto de `6.20/28510.0042`/
+# `0046`/`0047`): dos formas de referencia real del corpus, distintas de una
+# descripción libre y distintas entre sí, verificadas contra las 33 filas
+# reales de `ANEJO_abd69efbdd39b552.pdf` p.35 -- ver el docstring de
+# `app.extraccion.mapeo_cabecera.derivar_mapeo_por_contenido` para el motivo
+# de por qué hace falta distinguirlas de "texto_unico".
+# - referencia_normativa: varios grupos numéricos separados por puntos, sin
+#   ninguna letra ("03.361.130.2", "03.360.101.4" -- 100% de esa columna en
+#   las 33 filas reales).
+# - referencia_alfanumerica: prefijo de 1-4 letras pegado a dígitos, luego
+#   al menos un grupo ".dígitos" ("P16.0785.02", "P16.3589.05 SIMETRICO" --
+#   100% de la columna de plano en las mismas 33 filas). Nunca coincide con
+#   un código de precio real (`P-001`, `COD0001`): esos formatos siempre
+#   llevan un guion entre la letra y el dígito
+#   (`app.catalogo._CODIGO_PRECIO_NUCLEO_RE`), nunca dígito pegado.
+_REFERENCIA_NORMATIVA_RE = re.compile(r"^\d+(?:\.\d+){2,}$")
+_REFERENCIA_ALFANUMERICA_RE = re.compile(r"^[A-Za-zÀ-ÿ]{1,4}\d{1,4}(?:[.,]\d{1,4}){1,}")
 
 
 def _parece_precio(valor: str) -> bool:
@@ -71,6 +91,14 @@ def _clasificar_columna(valores: list[str], total_filas: int) -> str:
     if con_forma_precio / len(valores) >= _UMBRAL_PRECIO:
         return "precio"
 
+    con_forma_normativa = sum(1 for v in valores if _REFERENCIA_NORMATIVA_RE.match(v))
+    if con_forma_normativa / len(valores) >= _UMBRAL_REFERENCIA:
+        return "referencia_normativa"
+
+    con_forma_alfanumerica = sum(1 for v in valores if _REFERENCIA_ALFANUMERICA_RE.match(v))
+    if con_forma_alfanumerica / len(valores) >= _UMBRAL_REFERENCIA:
+        return "referencia_alfanumerica"
+
     cardinalidad = len(set(valores)) / len(valores)
     longitud_media = sum(len(v) for v in valores) / len(valores)
     if cardinalidad >= _UMBRAL_CARDINALIDAD_UNICA and longitud_media > _LONGITUD_TEXTO_LARGO:
@@ -82,17 +110,13 @@ def _clasificar_columna(valores: list[str], total_filas: int) -> str:
     return "codigo_repetido"
 
 
-def calcular_firma_estructural(filas: list[list[Optional[str]]]) -> tuple:
-    """Firma estable para comparar DOS tablas sin cabecera del MISMO
-    documento (nunca entre documentos, CONTEXTO.md sección 6: el mapeo
-    aprendido de una firma de cabecera real sí vale entre documentos porque
-    la cabecera es una señal fuerte; el contenido de una tabla sin cabecera
-    no lo es lo bastante como para arriesgarse fuera del documento que la
-    vio). Incluye el número de columnas explícitamente: dos tablas con el
-    mismo patrón de tipos pero distinto número de columnas nunca son "la
-    misma forma"."""
+def clasificar_columnas(filas: list[list[Optional[str]]]) -> list[str]:
+    """El tipo de cada columna, en orden. Extraída de `calcular_firma_
+    estructural` (Bloque 3, sesión 2026-09-11) para que `app.extraccion.
+    mapeo_cabecera.derivar_mapeo_por_contenido` reutilice la misma
+    clasificación sin duplicar la lógica."""
     if not filas:
-        return (0, ())
+        return []
     num_columnas = max(len(fila) for fila in filas)
     tipos = []
     for columna in range(num_columnas):
@@ -102,4 +126,17 @@ def calcular_firma_estructural(filas: list[list[Optional[str]]]) -> tuple:
             if columna < len(fila) and fila[columna] and fila[columna].strip()
         ]
         tipos.append(_clasificar_columna(valores, len(filas)))
-    return (num_columnas, tuple(tipos))
+    return tipos
+
+
+def calcular_firma_estructural(filas: list[list[Optional[str]]]) -> tuple:
+    """Firma estable para comparar DOS tablas sin cabecera del MISMO
+    documento (nunca entre documentos, CONTEXTO.md sección 6: el mapeo
+    aprendido de una firma de cabecera real sí vale entre documentos porque
+    la cabecera es una señal fuerte; el contenido de una tabla sin cabecera
+    no lo es lo bastante como para arriesgarse fuera del documento que la
+    vio). Incluye el número de columnas explícitamente: dos tablas con el
+    mismo patrón de tipos pero distinto número de columnas nunca son "la
+    misma forma"."""
+    tipos = clasificar_columnas(filas)
+    return (len(tipos), tuple(tipos))

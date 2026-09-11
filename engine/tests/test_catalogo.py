@@ -10,6 +10,7 @@ from app.catalogo import (
     guardar_lineas_catalogo,
     podar_lineas_obsoletas_de_documento,
 )
+from app.extraccion.invalidado import INVALIDADO
 from app.extraccion.tabla import TablaExtraida
 from app.models import Expediente, Lote, LineaCatalogo
 
@@ -703,6 +704,58 @@ def test_guardar_lineas_catalogo_no_borra_campo_con_valor_nulo_entrante(db_sessi
     linea = db_session.query(LineaCatalogo).filter_by(lote_id=lote.id, clave_linea="P-003").one()
     assert linea.cantidad == Decimal("80000")
     assert linea.pagina == 23  # la traza sí se actualiza a la pasada más reciente
+
+
+def test_guardar_lineas_catalogo_invalidado_borra_codigo_precio_ya_guardado(db_session):
+    # Bloque 3, sesión 2026-09-11 -- caso real: `6.20/28510.0042`/`0046`/
+    # `0047` p.35, 33 líneas guardadas ANTES de `derivar_mapeo_por_contenido`
+    # con `codigo_precio` igual a su propia matrícula (mapeo de modelo
+    # equivocado sobre una tabla sin cabecera). Un `None` corriente nunca lo
+    # habría corregido ("no pisa un valor ya conocido",
+    # `test_guardar_lineas_catalogo_no_borra_campo_con_valor_nulo_entrante`
+    # de arriba) -- `INVALIDADO` sí, porque la extracción SÍ miró la tabla y
+    # determinó con confianza que no tiene columna de código de precio.
+    lote = _lote(db_session)
+    mapeo_viejo_equivocado = {
+        "codigo_precio": 0, "matricula": None, "descripcion": 1,
+        "unidad_medida": None, "cantidad": None, "precio_unitario": 2,
+    }
+    vieja = construir_linea_catalogo(
+        ["612260110", "SCV-C-60-ID-318", "15.377,63"], mapeo_viejo_equivocado, 35, None, lote.expediente_id, None, 0
+    )
+    guardar_lineas_catalogo(db_session, lote.id, [vieja])
+    linea = db_session.query(LineaCatalogo).filter_by(lote_id=lote.id, clave_linea="612260110").one()
+    assert linea.codigo_precio == "612260110"
+
+    nueva = construir_linea_catalogo(
+        ["612260110", "SCV-C-60-ID-318", "15.377,63"],
+        {"codigo_precio": None, "matricula": 0, "descripcion": 1, "unidad_medida": None, "cantidad": None, "precio_unitario": 2},
+        35, None, lote.expediente_id, None, 0,
+    )
+    nueva["codigo_precio"] = INVALIDADO
+    guardar_lineas_catalogo(db_session, lote.id, [nueva])
+
+    db_session.refresh(linea)
+    assert linea.codigo_precio is None
+    assert linea.matricula == "612260110"
+
+
+def test_guardar_lineas_catalogo_invalidado_en_fila_nueva_se_guarda_como_none(db_session):
+    lote = _lote(db_session)
+    mapeo = {
+        "codigo_precio": None, "matricula": 0, "descripcion": 1,
+        "unidad_medida": None, "cantidad": None, "precio_unitario": 2,
+    }
+    linea = construir_linea_catalogo(
+        ["612260110", "SCV-C-60-ID-318", "15.377,63"], mapeo, 35, None, lote.expediente_id, None, 0
+    )
+    linea["codigo_precio"] = INVALIDADO
+
+    guardar_lineas_catalogo(db_session, lote.id, [linea])
+
+    guardada = db_session.query(LineaCatalogo).filter_by(lote_id=lote.id, clave_linea="612260110").one()
+    assert guardada.codigo_precio is None
+    assert guardada.matricula == "612260110"
 
 
 def test_guardar_lineas_catalogo_borra_precio_adjudicado_cuando_la_baja_deja_de_conocerse(db_session):

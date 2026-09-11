@@ -23,9 +23,16 @@ from sqlalchemy.orm import Session
 from app.catalogo import MOTIVO_MAPEO_INCOHERENTE, _acumular_motivo, construir_lineas_desde_tabla
 from app.extraccion.codigo_material import derivar_codigo_material_con_modelo
 from app.extraccion.firma_estructural import calcular_firma_estructural
+from app.extraccion.invalidado import INVALIDADO
 from app.extraccion.localizador import ResultadoLocalizacion, localizar_paginas_candidatas
 from app.extraccion.lote_tabla import asociar_lote_tabla
-from app.extraccion.mapeo_cabecera import cabecera_sin_senal, evaluar_coherencia_mapeo, mapear_cabecera
+from app.extraccion.mapeo_cabecera import (
+    cabecera_sin_senal,
+    corregir_confusion_matricula_codigo_precio,
+    derivar_mapeo_por_contenido,
+    evaluar_coherencia_mapeo,
+    mapear_cabecera,
+)
 from app.extraccion.tabla import extraer_tablas_pagina
 from app.extraccion.texto import PaginaTexto
 from app.interfaces.model_provider import ModelProvider
@@ -182,7 +189,23 @@ def procesar_anejo(
                 # `6.22/28510.0126`), pero esta segunda comprobación es la
                 # red de seguridad si dos formas distintas coincidieran en
                 # firma por algún caso no visto todavía.
-                if mapeo_heredado is not None and evaluar_coherencia_mapeo(mapeo_heredado, tabla.filas) is None:
+                # Bloque 3, sesión 2026-09-11: antes de mirar la caché de
+                # firma estructural (que guarda un mapeo aprendido del
+                # MODELO) o de llamar al modelo, se intenta derivar el mapeo
+                # del CONTENIDO -- determinista, sin llamar a nada. Solo
+                # tiene efecto cuando la clasificación por contenido es
+                # inequívoca (ver docstring de `derivar_mapeo_por_contenido`);
+                # si no lo es, devuelve `None` y el camino sigue igual que
+                # siempre. Se prueba antes que `mapeo_heredado` a propósito:
+                # es estrictamente más fiable que un mapeo de modelo cacheado
+                # de otra tabla del mismo documento, y evita ensuciar la
+                # caché estructural con nada (esta vía no escribe en ella).
+                mapeo_por_contenido = derivar_mapeo_por_contenido(tabla.filas) if sin_cabecera_propia else None
+
+                if mapeo_por_contenido is not None:
+                    mapeo = mapeo_por_contenido
+                    motivo_mapeo_incoherente = evaluar_coherencia_mapeo(mapeo, tabla.filas)
+                elif mapeo_heredado is not None and evaluar_coherencia_mapeo(mapeo_heredado, tabla.filas) is None:
                     mapeo = mapeo_heredado
                     motivo_mapeo_incoherente = None
                 else:
@@ -191,6 +214,15 @@ def procesar_anejo(
                     if resultado_mapeo.llamada_modelo:
                         llamadas_modelo += 1
                     mapeo = resultado_mapeo.mapeo
+                    if sin_cabecera_propia:
+                        # Bloque 3, sesión 2026-09-11: antes de validar
+                        # coherencia, corrige la confusión determinista más
+                        # frecuente de este camino (columna de matrícula
+                        # tomada por `codigo_precio`) -- ver el docstring de
+                        # `corregir_confusion_matricula_codigo_precio`. Un
+                        # mapeo que no tiene esa confusión concreta sale
+                        # intacto.
+                        mapeo = corregir_confusion_matricula_codigo_precio(mapeo, tabla.filas)
                     # Bloque 2 (auditoría 6.20/28510.0042/0046/0047): una tabla
                     # sin cabecera propia siempre resuelve su mapeo con el
                     # modelo, a ciegas de 2-3 filas de ejemplo
@@ -212,6 +244,28 @@ def procesar_anejo(
                     tabla, mapeo, documento_origen_id, expediente_id, baja_lote,
                     orden_inicial=len(lineas),
                 )
+                # Bloque 3, sesión 2026-09-11: cuando el mapeo viene de
+                # `derivar_mapeo_por_contenido`, la ausencia de `codigo_precio`
+                # no es "esta pasada no lo capturó" (el `None` corriente que
+                # `guardar_lineas_catalogo` nunca pisa) -- es una
+                # determinación confiada por contenido: esta tabla no tiene
+                # columna de código de precio. `app.extraccion.invalidado.
+                # INVALIDADO` lo distingue para que SÍ borre un valor ya
+                # guardado (caso real que lo motiva: `6.20/28510.0042`/`0046`/
+                # `0047` p.35 -- 33 líneas con `codigo_precio` igual a su
+                # propia matrícula, guardado por un mapeo de modelo equivocado
+                # de antes de este arreglo, que un `None` corriente nunca
+                # habría corregido). Nunca se hace para `matricula` aunque el
+                # mismo razonamiento aplicaría: `_firma_material` compara
+                # `matricula` por igualdad para fundir ecos entre tablas
+                # (docstring de esa función) y `INVALIDADO is not None`
+                # rompería esa comparación contra una línea de otra tabla que
+                # trajera `matricula=None` corriente -- alcance deliberadamente
+                # acotado a `codigo_precio`, que no participa en esa firma.
+                if mapeo_por_contenido is not None and mapeo_por_contenido.get("codigo_precio") is None:
+                    for linea in lineas_tabla:
+                        if linea.get("codigo_precio") is None:
+                            linea["codigo_precio"] = INVALIDADO
                 for linea in lineas_tabla:
                     if motivo_mapeo_incoherente is not None:
                         linea["motivo_revision"] = _acumular_motivo(
