@@ -1,7 +1,12 @@
 """Lista de exclusión de expedientes (bloque 5, cambios del cliente tras
 revisar el catálogo): pruebas del módulo puro, sin base de datos. La
 integración con `/catalogo` y el Excel vive en test_api_catalogo.py."""
-from app.exclusion import ExclusionExpedientes, cargar_exclusiones
+from app.exclusion import (
+    ExclusionExpedientes,
+    ExclusionPalabrasTitulo,
+    cargar_exclusion_palabras_titulo,
+    cargar_exclusiones,
+)
 
 
 def test_sin_ruta_no_excluye_nada():
@@ -79,3 +84,53 @@ def test_codigo_interno_no_se_confunde_con_departamento(tmp_path):
     exclusiones = cargar_exclusiones(str(fichero))
     assert exclusiones.departamentos == frozenset({"28510"})
     assert exclusiones.codigos_internos == frozenset()
+
+
+# Bloque 3, sesión de comparación documento-vs-listado interno: filtro por
+# palabras del título del contrato, mismo mecanismo que la exclusión de
+# expedientes de arriba, pero por texto libre en vez de por código.
+def test_palabras_titulo_sin_ruta_no_excluye_nada():
+    exclusion = cargar_exclusion_palabras_titulo(None)
+    assert exclusion.vacia()
+    assert not exclusion.excluye("ARRENDAMIENTO DE MAQUINARIA")
+
+
+def test_palabras_titulo_fichero_ausente_no_excluye_nada(tmp_path):
+    exclusion = cargar_exclusion_palabras_titulo(str(tmp_path / "no_existe.txt"))
+    assert exclusion.vacia()
+
+
+def test_palabras_titulo_coincidencia_por_subcadena_sin_distinguir_mayusculas(tmp_path):
+    fichero = tmp_path / "palabras.txt"
+    fichero.write_text("arrendamiento\n")
+    exclusion = cargar_exclusion_palabras_titulo(str(fichero))
+    assert exclusion.palabras == frozenset({"arrendamiento"})
+    assert exclusion.excluye("ARRENDAMIENTO DE MAQUINARIA PESADA")
+    assert exclusion.excluye("Arrendamiento de vehículos")
+    assert not exclusion.excluye("SUMINISTRO DE BALASTO")
+
+
+def test_palabras_titulo_ignora_acentos_al_comparar(tmp_path):
+    # El fichero y el título del documento pueden no coincidir en
+    # acentuación -- `excluye()` normaliza los dos lados al comparar
+    # (a diferencia de la exclusión aplicada en SQL, `app.catalogo_consulta`,
+    # que compara tal cual).
+    fichero = tmp_path / "palabras.txt"
+    fichero.write_text("gestion de residuos\n")
+    exclusion = cargar_exclusion_palabras_titulo(str(fichero))
+    assert exclusion.excluye("Contrato de GESTIÓN DE RESIDUOS peligrosos")
+
+
+def test_palabras_titulo_sin_titulo_no_excluye():
+    exclusion = ExclusionPalabrasTitulo(palabras=frozenset({"arrendamiento"}))
+    assert not exclusion.excluye(None)
+    assert not exclusion.excluye("")
+
+
+def test_palabras_titulo_comentarios_y_lineas_vacias_se_ignoran(tmp_path):
+    fichero = tmp_path / "palabras.txt"
+    fichero.write_text(
+        "# no es material\narrendamiento\n\n# otra nota\ngestión de residuos\n", encoding="utf-8"
+    )
+    exclusion = cargar_exclusion_palabras_titulo(str(fichero))
+    assert exclusion.palabras == frozenset({"arrendamiento", "gestión de residuos"})

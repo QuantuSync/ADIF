@@ -659,6 +659,52 @@ def test_catalogo_no_oculta_expediente_sin_codigo_interno_por_lista_de_codigo_in
     assert resp.json()["total"] == 1
 
 
+# Bloque 3, sesión de comparación documento-vs-listado interno: filtro por
+# palabras del título del contrato (app/exclusion.py,
+# ExclusionPalabrasTitulo) -- "SUMINISTRO DE GUANTES CONTRA RIESGO
+# ELECTRICO." es el título que siembra _sembrar_catalogo.
+def test_catalogo_oculta_por_palabra_del_titulo(cliente, db_session, tmp_path, monkeypatch):
+    fichero = tmp_path / "palabras.txt"
+    fichero.write_text("# no es material\nguantes\n")
+    monkeypatch.setattr(settings, "exclusion_palabras_titulo_path", str(fichero))
+    _sembrar_catalogo(db_session)
+
+    resp = cliente.get("/catalogo")
+
+    assert resp.json()["total"] == 0
+
+
+def test_catalogo_no_oculta_por_palabra_ajena_al_titulo(cliente, db_session, tmp_path, monkeypatch):
+    fichero = tmp_path / "palabras.txt"
+    fichero.write_text("arrendamiento\n")
+    monkeypatch.setattr(settings, "exclusion_palabras_titulo_path", str(fichero))
+    _sembrar_catalogo(db_session)
+
+    resp = cliente.get("/catalogo")
+
+    assert resp.json()["total"] == 1
+
+
+def test_exportar_catalogo_excluye_por_palabra_del_titulo_pero_no_lo_borra(
+    cliente, db_session, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(settings, "codigos_proyecto_path", None)
+    fichero = tmp_path / "palabras.txt"
+    fichero.write_text("guantes\n")
+    monkeypatch.setattr(settings, "exclusion_palabras_titulo_path", str(fichero))
+    expediente, *_ = _sembrar_catalogo(db_session)
+
+    resp = cliente.get("/catalogo/exportar.xlsx")
+
+    libro = openpyxl.load_workbook(io.BytesIO(resp.content))
+    hoja = libro.active
+    assert hoja.max_row == 1  # solo la cabecera: el único expediente está excluido
+    # Se conserva en base de datos, igual que la exclusión por expediente/
+    # departamento/código interno de arriba -- la exclusión es solo de la
+    # vista (CONTEXTO.md sección 7).
+    assert db_session.query(Expediente).filter_by(codigo_expediente=expediente.codigo_expediente).count() == 1
+
+
 def test_exportar_catalogo_excluye_expediente_de_la_lista_pero_no_lo_borra(
     cliente, db_session, tmp_path, monkeypatch
 ):

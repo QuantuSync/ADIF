@@ -13,7 +13,7 @@ from sqlalchemy import Select, and_, case, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.exclusion import cargar_exclusiones
+from app.exclusion import cargar_exclusion_palabras_titulo, cargar_exclusiones
 from app.models import Documento, DocumentoExpediente, EstadoRevisionLinea, Expediente, LineaCatalogo, Lote
 
 # Órdenes disponibles para `/catalogo` (encargo de esta sesión, 2026-09-07):
@@ -88,7 +88,28 @@ def _aplicar_filtros(
             )
         )
     stmt = _excluir_expedientes_de_la_lista(stmt)
+    stmt = _excluir_por_palabras_titulo(stmt)
     return stmt
+
+
+def _excluir_por_palabras_titulo(stmt: Select) -> Select:
+    """Bloque 3, sesión de comparación documento-vs-listado interno
+    (`app.exclusion.ExclusionPalabrasTitulo`): mismo criterio que
+    `_excluir_expedientes_de_la_lista` de abajo -- siempre activo, nunca un
+    parámetro que el llamador pueda desactivar, y solo esconde de
+    `/catalogo`/el Excel (los dos pasan por `consultar_catalogo`), nunca de
+    la base de datos ni de las pantallas de gestión/revisión. `ilike` por
+    cada palabra configurada (mismo criterio de coincidencia por subcadena,
+    sin acentuar, que ya usa el filtro de texto `q` de esta función) --
+    sin normalización de acentos a nivel SQL (a diferencia de
+    `ExclusionPalabrasTitulo.excluye()`, pensado para comparar en Python):
+    el título real de un documento y la palabra configurada por el cliente
+    para excluirlo se escriben normalmente con la misma acentuación."""
+    exclusion = cargar_exclusion_palabras_titulo(settings.exclusion_palabras_titulo_path)
+    if exclusion.vacia():
+        return stmt
+    condiciones = [Expediente.nombre_proyecto.ilike(f"%{palabra}%") for palabra in exclusion.palabras]
+    return stmt.where(~or_(*condiciones))
 
 
 def _excluir_expedientes_de_la_lista(stmt: Select) -> Select:

@@ -42,6 +42,7 @@ from pathlib import Path
 from typing import Optional
 
 from app.extraccion.cruce_codigos import normalizar_codigo_expediente
+from app.extraccion.texto import normalizar
 
 # Mismo patrón que `app.sindicacion.atom_parser._DEPARTAMENTO_RE`
 # (CONTEXTO.md sección 20): "N.NN/DDDDD.NNNN" -> "DDDDD".
@@ -110,3 +111,59 @@ def cargar_exclusiones(ruta: Optional[str]) -> ExclusionExpedientes:
         departamentos=frozenset(departamentos),
         codigos_internos=frozenset(codigos_internos),
     )
+
+
+@dataclass(frozen=True)
+class ExclusionPalabrasTitulo:
+    """Bloque 3, sesión de comparación documento-vs-listado interno: el
+    cliente quiere excluir de la vista contratos que no son material
+    (arrendamientos, gestión de residuos...) por una palabra o frase del
+    título (`Expediente.nombre_proyecto`, CONTEXTO.md sección 7 -- el
+    objeto del contrato tal como lo declara el propio documento, siempre
+    presente con independencia del cruce con el Excel de códigos), sin
+    dejar de descargarlos ni de guardarlos -- mismo criterio que
+    `ExclusionExpedientes`: nunca en base de datos, nunca en las pantallas
+    de gestión/revisión, solo en `/catalogo` y el Excel.
+
+    `palabras` guarda el texto tal como está en el fichero (solo `strip()`),
+    no ya normalizado -- lo necesita también `app.catalogo_consulta` para
+    construir la condición SQL (`ilike` por cada palabra, mismo criterio de
+    coincidencia por subcadena que el resto de filtros de texto de ese
+    módulo). `excluye()` normaliza en el momento de comparar (sin acentos,
+    minúsculas, `app.extraccion.texto.normalizar`) para el caso en que el
+    fichero y el título del documento no coincidan en acentuación."""
+
+    palabras: frozenset[str] = field(default_factory=frozenset)
+
+    def excluye(self, nombre_proyecto: Optional[str]) -> bool:
+        if not nombre_proyecto or not self.palabras:
+            return False
+        titulo_normalizado = normalizar(nombre_proyecto)
+        return any(normalizar(palabra) in titulo_normalizado for palabra in self.palabras)
+
+    def vacia(self) -> bool:
+        return not self.palabras
+
+
+_SIN_PALABRAS_TITULO = ExclusionPalabrasTitulo()
+
+
+def cargar_exclusion_palabras_titulo(ruta: Optional[str]) -> ExclusionPalabrasTitulo:
+    """Mismo formato y mismo criterio de lectura que `cargar_exclusiones`
+    (sin caché, para que un cambio del cliente se vea en la siguiente
+    exportación o la siguiente carga de `/catalogo` sin reiniciar nada):
+    una palabra o frase por línea, líneas vacías y las que empiezan por "#"
+    se ignoran. Sin ruta configurada, o con el fichero ausente/vacío, no
+    excluye nada -- nunca lanza (mismo criterio que `cargar_exclusiones`)."""
+    if not ruta:
+        return _SIN_PALABRAS_TITULO
+    camino = Path(ruta)
+    if not camino.is_file():
+        return _SIN_PALABRAS_TITULO
+    palabras: set[str] = set()
+    for linea in camino.read_text(encoding="utf-8").splitlines():
+        valor = linea.strip()
+        if not valor or valor.startswith("#"):
+            continue
+        palabras.add(valor)
+    return ExclusionPalabrasTitulo(palabras=frozenset(palabras))

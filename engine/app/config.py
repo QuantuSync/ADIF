@@ -176,5 +176,15 @@ class Settings(BaseSettings):
     # ningún expediente.
     exclusion_expedientes_path: Optional[str] = None
 
+    # Bloque 3, sesión de comparación documento-vs-listado interno: filtro
+    # por palabras del título del contrato -- el cliente quiere poder
+    # excluir de la vista (Excel + web) contratos que no son material
+    # (arrendamientos, gestión de residuos...) sin dejar de descargarlos ni
+    # de guardarlos. Mismo mecanismo que `exclusion_expedientes_path`
+    # (`app.exclusion`, fichero de texto plano montado por bind-mount,
+    # una palabra o frase por línea): mantenible sin tocar código. Vacío
+    # por defecto: sin esta variable, no se excluye ningún título.
+    exclusion_palabras_titulo_path: Optional[str] = None
+
 
 settings = Settings()
