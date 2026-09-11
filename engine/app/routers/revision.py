@@ -1,7 +1,8 @@
 from decimal import Decimal
+from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
-from sqlalchemy import func, select
+from sqlalchemy import Integer, cast, func, select
 from sqlalchemy.orm import Session
 
 from app.auth import Usuario, get_current_user
@@ -10,6 +11,7 @@ from app.catalogo_consulta import fila_a_dict
 from app.db import get_db
 from app.extraccion.cruce_codigos import AutoreferenciaMatrizError, asignar_matriz
 from app.models import (
+    CandidatoMatricula,
     Documento,
     DocumentoExpediente,
     EstadoExpediente,
@@ -19,10 +21,13 @@ from app.models import (
     Lote,
 )
 from app.schemas import (
+    CandidatoMatriculaAceptar,
+    ColaCandidatosMatriculaRespuesta,
     ColaRevisionRespuesta,
     ExpedienteCorreccion,
     ExpedienteOut,
     ExpedienteRevisionOut,
+    LineaCandidatosMatriculaOut,
     LineaCatalogoCorreccion,
     LineaCatalogoDescartar,
     LineaCatalogoOut,
@@ -273,6 +278,149 @@ def descartar_linea_catalogo(
     linea = _linea_o_404(db, linea_id)
     linea.estado_revision = EstadoRevisionLinea.descartado
     linea.comentarios = _acumular_comentario(linea.comentarios, f"Descartada: {cuerpo.motivo}")
+    db.commit()
+    return _fila_linea(db, linea_id)
+
+
+@router.get("/revision/candidatos-matricula", response_model=ColaCandidatosMatriculaRespuesta)
+def listar_cola_candidatos_matricula(
+    pagina: int = Query(default=1, ge=1),
+    tamano_pagina: int = Query(default=50, ge=1, le=_TAMANO_PAGINA_MAX),
+    codigo_expediente: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    """Bloque 1, sesión 2026-09-11: cola de líneas sin matrícula con al
+    menos un candidato (`app.extraccion.candidatos_matricula`), ordenada por
+    confianza -- las que traen un candidato con coincidencia exacta de texto
+    primero, luego por similitud descendente. Nunca incluye una línea que ya
+    tiene matrícula (de documento o confirmada aquí) ni una cuyos candidatos
+    ya se rechazaron todos (`matricula_candidatos_rechazados`) -- esa
+    decisión saca la línea de la cola sin borrar el rastro de qué se le
+    ofreció."""
+    mejor_candidato = (
+        select(
+            CandidatoMatricula.linea_catalogo_id.label("linea_catalogo_id"),
+            # `func.max` sobre un booleano no es portable entre motores
+            # (SQLite lo trata como entero 0/1 sin más; PostgreSQL exige
+            # `bool_or`) -- el `cast` a entero funciona igual en los dos, y
+            # esta consulta corre contra SQLite en los tests de esta sesión
+            # (`tests/conftest.py`) y PostgreSQL en producción.
+            func.max(cast(CandidatoMatricula.exacto, Integer)).label("tiene_exacto"),
+            func.max(CandidatoMatricula.similitud).label("mejor_similitud"),
+        )
+        .group_by(CandidatoMatricula.linea_catalogo_id)
+        .subquery()
+    )
+    base = (
+        select(LineaCatalogo, Expediente, Lote)
+        .join(Expediente, LineaCatalogo.expediente_id == Expediente.id)
+        .outerjoin(Lote, LineaCatalogo.lote_id == Lote.id)
+        .join(mejor_candidato, mejor_candidato.c.linea_catalogo_id == LineaCatalogo.id)
+        .where(
+            LineaCatalogo.matricula.is_(None),
+            LineaCatalogo.matricula_candidatos_rechazados.isnot(True),
+        )
+    )
+    if codigo_expediente:
+        # Encargo de esta sesión: "que se pueda filtrar por expediente, para
+        # que alguien pueda revisar de golpe todo lo de un contrato" --
+        # coincidencia parcial, no exacta, porque el código completo
+        # ("6.24/28510.0088") es largo de teclear entero.
+        base = base.where(Expediente.codigo_expediente.ilike(f"%{codigo_expediente.strip()}%"))
+    total = db.execute(select(func.count()).select_from(base.subquery())).scalar_one()
+    filas = db.execute(
+        base.order_by(mejor_candidato.c.tiene_exacto.desc(), mejor_candidato.c.mejor_similitud.desc(), LineaCatalogo.id)
+        .offset((pagina - 1) * tamano_pagina)
+        .limit(tamano_pagina)
+    ).all()
+
+    lineas_out = []
+    for linea, expediente, lote in filas:
+        candidatos = db.execute(
+            select(CandidatoMatricula)
+            .where(CandidatoMatricula.linea_catalogo_id == linea.id)
+            .order_by(CandidatoMatricula.exacto.desc(), CandidatoMatricula.similitud.desc())
+        ).scalars().all()
+        lineas_out.append(
+            LineaCandidatosMatriculaOut(
+                linea_id=linea.id,
+                expediente_id=expediente.id,
+                codigo_expediente=expediente.codigo_expediente,
+                identificador_lote=lote.identificador_lote if lote else None,
+                codigo_precio=linea.codigo_precio,
+                descripcion=linea.descripcion,
+                candidatos=list(candidatos),
+            )
+        )
+    return ColaCandidatosMatriculaRespuesta(
+        total=total, pagina=pagina, tamano_pagina=tamano_pagina, lineas=lineas_out
+    )
+
+
+@router.post("/revision/candidatos-matricula/{linea_id}/aceptar", response_model=LineaCatalogoOut)
+def aceptar_candidato_matricula(
+    linea_id: int,
+    cuerpo: CandidatoMatriculaAceptar,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    """Bloque 1, sesión 2026-09-11: la única vía por la que una línea sin
+    matrícula en el documento puede acabar con una -- nunca automático
+    (CONTEXTO.md, análisis previo: "el sistema nunca inventa una matrícula").
+    `matricula_candidata` tiene que ser una de las opciones VIGENTES de esta
+    línea (recalculadas por última vez, no una de una pasada anterior que ya
+    no aplique) -- si la cola cambió entre cargar la pantalla y aceptar, se
+    rechaza con 400 en vez de asignar una matrícula que ya no está entre las
+    opciones ofrecidas."""
+    linea = _linea_o_404(db, linea_id)
+    candidato = db.execute(
+        select(CandidatoMatricula).where(
+            CandidatoMatricula.linea_catalogo_id == linea_id,
+            CandidatoMatricula.matricula_candidata == cuerpo.matricula_candidata,
+        )
+    ).scalar_one_or_none()
+    if candidato is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{cuerpo.matricula_candidata}' no es un candidato vigente de esta línea",
+        )
+    linea.matricula = candidato.matricula_candidata
+    linea.matricula_confirmada_manualmente = True
+    linea.matricula_candidatos_rechazados = None
+    db.commit()
+    return _fila_linea(db, linea_id)
+
+
+@router.post("/revision/candidatos-matricula/{linea_id}/rechazar", response_model=LineaCatalogoOut)
+def rechazar_candidatos_matricula(
+    linea_id: int,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    """Ninguno de los candidatos ofrecidos es el material correcto -- saca
+    la línea de la cola sin tocar `matricula` (sigue sin ella, como antes)
+    ni borrar sus `candidatos_matricula` (siguen contando para "líneas con
+    al menos un candidato" en el resumen de `app.extraccion.
+    candidatos_matricula`)."""
+    linea = _linea_o_404(db, linea_id)
+    linea.matricula_candidatos_rechazados = True
+    db.commit()
+    return _fila_linea(db, linea_id)
+
+
+@router.post("/revision/candidatos-matricula/{linea_id}/pendiente", response_model=LineaCatalogoOut)
+def marcar_candidatos_matricula_pendiente(
+    linea_id: int,
+    cuerpo: LineaCatalogoPendiente,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    """Ni se acepta ni se rechaza todavía -- deja una nota (p.ej. "consultar
+    con almacén") y la línea sigue en la cola tal cual, para retomarla más
+    tarde."""
+    linea = _linea_o_404(db, linea_id)
+    linea.comentarios = _acumular_comentario(linea.comentarios, f"Candidatos de matrícula pendientes: {cuerpo.nota}")
     db.commit()
     return _fila_linea(db, linea_id)
 

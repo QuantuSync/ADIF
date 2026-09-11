@@ -165,6 +165,11 @@ class LineaCatalogoOut(BaseModel):
     # la línea (del documento real) -- `unidad_medida` nunca se pisa, esto
     # solo señala la discrepancia para revisión.
     unidad_medida_discrepancia_maestro: Optional[str] = None
+    # Bloque 1, sesión 2026-09-11: `True` cuando la matrícula se aceptó
+    # desde la cola de candidatos (`GET /revision/candidatos-matricula`),
+    # no se extrajo del documento -- distinción explícita pedida en el
+    # encargo de este bloque.
+    matricula_confirmada_manualmente: Optional[bool] = None
     estado_revision: str
     # Trazabilidad (CONTEXTO.md sección 9.10 y encargo de esta sesión, punto 2):
     # de qué documento, página y fragmento salió esta línea.
@@ -198,6 +203,64 @@ class ColaRevisionRespuesta(BaseModel):
     pagina: int
     tamano_pagina: int
     expedientes: list[ExpedienteOut]
+
+
+class CandidatoMatriculaOut(BaseModel):
+    """Bloque 1, sesión 2026-09-11: una opción de matrícula para una línea
+    sin ella, con su denominación en el maestro de SAP al lado de la
+    descripción del pliego para comparar de un vistazo. `exacto` destaca la
+    coincidencia de texto perfecta, pero sigue sin ser una decisión --
+    2.388 denominaciones del maestro (8,3%) identifican más de una
+    matrícula (análisis de la sesión del maestro de materiales, 2026-09-10),
+    así que ni un `exacto=True` basta por sí solo."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    matricula_candidata: str
+    denominacion_maestro: Optional[str] = None
+    similitud: Decimal
+    exacto: bool
+
+
+class LineaCandidatosMatriculaOut(BaseModel):
+    """Una línea de catálogo sin matrícula, con sus candidatos ordenados por
+    confianza (exactos primero, luego por similitud descendente) -- la
+    descripción del pliego (`descripcion`) va al lado de cada
+    `denominacion_maestro` para que la comparación no exija abrir nada
+    más."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    linea_id: int
+    expediente_id: int
+    codigo_expediente: str
+    identificador_lote: Optional[str] = None
+    codigo_precio: Optional[str] = None
+    descripcion: str
+    candidatos: list[CandidatoMatriculaOut]
+
+
+class ColaCandidatosMatriculaRespuesta(BaseModel):
+    total: int
+    pagina: int
+    tamano_pagina: int
+    lineas: list[LineaCandidatosMatriculaOut]
+
+
+class CandidatoMatriculaAceptar(BaseModel):
+    # La propia matrícula candidata, no un índice de lista: evita aceptar el
+    # candidato equivocado si la cola se recalculó entre que se cargó la
+    # pantalla y se pulsó "aceptar" (CONTEXTO.md: el sistema nunca inventa
+    # una matrícula, así que tampoco debe asignar una que ya no está entre
+    # las opciones vigentes de esta línea).
+    matricula_candidata: str = Field(min_length=1)
+
+
+class ResumenCandidatosMatriculaOut(BaseModel):
+    lineas_sin_matricula: int
+    lineas_con_candidato: int
+    lineas_sin_candidato: int
+    candidatos_generados: int
 
 
 class LineaCatalogoCorreccion(BaseModel):

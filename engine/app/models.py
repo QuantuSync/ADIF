@@ -420,6 +420,17 @@ class LineaCatalogo(Base):
     # humana (encargo explícito del cliente: "es información útil").
     # `None` en el caso normal (sin matrícula, sin maestro, o coincide).
     unidad_medida_discrepancia_maestro = Column(String(32), nullable=True)
+    # Bloque 1, sesión 2026-09-11 (migración 0027): `True` únicamente cuando
+    # la matrícula se aceptó desde la cola de candidatos
+    # (`app.extraccion.candidatos_matricula`), no se extrajo del documento
+    # -- mismo patrón que `unidad_medida_completada_desde_maestro`.
+    matricula_confirmada_manualmente = Column(Boolean, nullable=True)
+    # `True` cuando un humano revisó los candidatos de esta línea (cola de
+    # `GET /revision/candidatos-matricula`) y determinó que ninguno es
+    # correcto -- saca la línea de la cola sin borrar sus `candidatos_
+    # matricula`, que siguen contando para la estadística de "líneas con al
+    # menos un candidato" (encargo de esta sesión).
+    matricula_candidatos_rechazados = Column(Boolean, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),
@@ -431,6 +442,9 @@ class LineaCatalogo(Base):
     expediente = relationship("Expediente")
     lote = relationship("Lote", back_populates="lineas_catalogo")
     documento_origen = relationship("Documento")
+    candidatos_matricula = relationship(
+        "CandidatoMatricula", back_populates="linea_catalogo", cascade="all, delete-orphan"
+    )
 
 
 class TrazaOrigen(Base):
@@ -672,3 +686,37 @@ class MaestroMaterial(Base):
         onupdate=func.now(),
         nullable=False,
     )
+
+
+class CandidatoMatricula(Base):
+    """Bloque 1, sesión 2026-09-11 (migración 0027) -- caché recomputable
+    (mismo patrón que `MapeoCabeceraCache`/`CandidatoAcuerdoMarco`), NUNCA
+    fuente de verdad: `app.extraccion.candidatos_matricula.calcular_
+    candidatos` la vacía y la vuelve a llenar entera en cada ejecución.
+    Nunca asigna matrícula por sí sola (CONTEXTO.md, análisis de la sesión
+    del maestro de materiales, bloque 2: "tiene que ser una cola de
+    candidatos para confirmación humana... nunca una asignación
+    automática") -- un humano acepta uno desde `POST /revision/candidatos-
+    matricula/{linea_id}/aceptar`, que sí escribe `LineaCatalogo.matricula`.
+
+    `exacto=True` cuando la descripción normalizada de la línea coincide
+    letra a letra con la denominación normalizada del maestro -- destacado
+    en la cola por ordenarse primero, pero sigue exigiendo confirmación
+    humana igual que cualquier otro candidato: el propio análisis midió que
+    2.388 de las 28.782 denominaciones distintas del maestro (8,3%) mapean
+    a más de una matrícula, así que ni una coincidencia exacta de texto es
+    prueba suficiente por sí sola."""
+
+    __tablename__ = "candidatos_matricula"
+
+    id = Column(Integer, primary_key=True)
+    linea_catalogo_id = Column(
+        Integer, ForeignKey("lineas_catalogo.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    matricula_candidata = Column(String(10), nullable=False)
+    denominacion_maestro = Column(String(255), nullable=True)
+    similitud = Column(Numeric(5, 4), nullable=False)
+    exacto = Column(Boolean, nullable=False, default=False)
+    calculado_en = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    linea_catalogo = relationship("LineaCatalogo", back_populates="candidatos_matricula")

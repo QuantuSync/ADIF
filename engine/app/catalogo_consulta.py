@@ -218,6 +218,7 @@ def fila_a_dict(
         "heredado_de_matriz": linea.heredado_de_matriz,
         "unidad_medida_completada_desde_maestro": linea.unidad_medida_completada_desde_maestro,
         "unidad_medida_discrepancia_maestro": linea.unidad_medida_discrepancia_maestro,
+        "matricula_confirmada_manualmente": linea.matricula_confirmada_manualmente,
         "estado_revision": linea.estado_revision.value,
         "documento_origen_id": linea.documento_origen_id,
         "documento_origen_nombre": nombre_archivo,
