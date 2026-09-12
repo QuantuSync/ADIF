@@ -74,3 +74,45 @@ def test_clasificar_columnas_no_confunde_codigo_precio_real_con_referencia():
     filas = [["P-001", "BRIDA", "3,50 €"], ["P-002", "PLACA", "7,20 €"]]
     tipos = clasificar_columnas(filas)
     assert tipos[0] == "codigo_repetido"
+
+
+# --- Bloque 7, sesión 2026-09-13: confusión matrícula/código de precio en
+# tablas cuyo precio no lleva `€` (771 líneas reales en 8 expedientes, ver
+# `docs/sesion-2026-09-12-defecto-mapeo-calidad-interfaz-rendimiento.md`
+# bloque 2). Filas reales de `6.22_28510.0058/ANEJO_a9e7c95651661aad.pdf`
+# p.15 (tornillería, sin cabecera, sin columna de código de precio).
+
+
+def test_clasificar_columnas_reconoce_precio_sin_simbolo_euro():
+    filas = [
+        ["603250020", "TIRAFONDO ESPECIAL E3, 22X235 MM. P/ENCARRIL", "ud", "1.200", "7,40"],
+        ["605300020", "TORNILLO PARA TRAVIESA HORMIGON TIPO RS", "ud", "70.000", "4,22"],
+        ["607300010", "TORNILLO T-2 PARA SUJECION VM", "ud", "12.000", "2,89"],
+    ]
+    tipos = clasificar_columnas(filas)
+    assert tipos == ["matricula", "texto_unico", "codigo_repetido", "codigo_repetido", "precio"]
+
+
+def test_parece_precio_sin_simbolo_no_confunde_designacion_tecnica():
+    # Mismo caso ya conocido que motivó que `_parece_precio` fuera solo-€ en
+    # su día (`6.22/28510.0126`): una designación técnica con coma decimal
+    # dentro nunca debe colar como precio -- le sobran caracteres tras los
+    # dos decimales, la gramática monetaria exige la celda ENTERA.
+    filas = [
+        ["P-001", "611150110", "DS-B1-54-320/230-0,11-CR-D", "122.624,14 €"],
+        ["P-002", "611150111", "DS-B1-54-320/230-0,11-CR-I", "107.297,32 €"],
+    ]
+    tipos = clasificar_columnas(filas)
+    assert tipos[2] == "texto_unico"  # la designación, no "precio"
+
+
+def test_parece_precio_sin_simbolo_no_confunde_cantidad_con_separador_de_miles():
+    # "1.200"/"70.000" (cantidad real de la tabla de tornillería): sin coma
+    # decimal, nunca deben clasificarse como precio solo por llevar puntos de
+    # miles.
+    filas = [
+        ["603250020", "TIRAFONDO", "ud", "1.200", "7,40"],
+        ["605300020", "TORNILLO", "ud", "70.000", "4,22"],
+    ]
+    tipos = clasificar_columnas(filas)
+    assert tipos[3] == "codigo_repetido"  # la cantidad, no "precio"

@@ -81,6 +81,41 @@ def test_derivar_mapeo_por_contenido_caso_real_p27_mismo_documento():
     }
 
 
+# --- Bloque 7, sesión 2026-09-13: 771 líneas reales en 8 expedientes con
+# `codigo_precio` igual a la matrícula, en tablas cuyo precio no lleva `€`
+# (`docs/sesion-2026-09-12-defecto-mapeo-calidad-interfaz-rendimiento.md`
+# bloque 2). Filas reales completas de `6.22_28510.0058/ANEJO_
+# a9e7c95651661aad.pdf` p.15 (tornillería, sin cabecera, sin código de
+# precio -- solo matrícula, precio con coma decimal sin símbolo de moneda).
+_FILAS_TORNILLERIA_P15 = [
+    ["603250020", "TIRAFONDO ESPECIAL E3, 22X235 MM. P/ENCARRIL", "ud", "1.200", "7,40"],
+    ["603250025", "TIRAFONDO ESPECIAL E4, 22X170 MM. P/ENCARRIL", "ud", "1.200", "5,03"],
+    ["603250027", "TIRAFONDO ESPECIAL, 22X290 MM.UIC-54, BICROMAT", "ud", "1.200", "6,20"],
+    ["605300020", "TORNILLO PARA TRAVIESA HORMIGON TIPO RS", "ud", "70.000", "4,22"],
+    ["605300021", "TUERCA P/TORNILLO TRAVIESA HORMIGON TIPO RS", "ud", "1.200", "1,37"],
+    ["605300030", "TORNILLO PARA TOPE, SUJECION STEDEF, VSB", "ud", "1.200", "2,34"],
+    ["605300200", "TORNILLO TIPO 5, DE PLASTIRAIL, 22-115", "ud", "1.200", "2,31"],
+    ["605300210", "TIRAFONDO GS PARA BLOQUE POLIVALENTE EXTRAIBL", "ud", "1.200", "2,26"],
+    ["605300270", "ARANDELA PLANA 50X24X4, STEDEF, A.V. -60, 1'435", "ud", "1.200", "0,36"],
+    ["607300000", "TIRAFONDO DE VIA, TIPO NUMERO 6, GALV. /CROMAT", "ud", "7.000", "1,72"],
+    ["607300010", "TORNILLO T-2 PARA SUJECION VM", "ud", "12.000", "2,89"],
+]
+
+
+def test_derivar_mapeo_por_contenido_caso_real_tornilleria_sin_simbolo_euro():
+    # Antes del bloque 7, `_clasificar_columna` no reconocía esta columna de
+    # precio (sin `€`) y `derivar_mapeo_por_contenido` se rendía sin más
+    # (`indices_precio == []`) -- la tabla caía al modelo, que en la
+    # sesión anterior devolvió `codigo_precio` apuntando a la propia
+    # columna de matrícula en al menos una llamada real.
+    mapeo = derivar_mapeo_por_contenido(_FILAS_TORNILLERIA_P15)
+    assert mapeo == {
+        "codigo_precio": None, "matricula": 0, "descripcion": 1,
+        "unidad_medida": None, "cantidad": None, "precio_unitario": 4,
+    }
+    assert evaluar_coherencia_mapeo(mapeo, _FILAS_TORNILLERIA_P15) is None
+
+
 def test_derivar_mapeo_por_contenido_detecta_codigo_precio_real():
     filas = [
         ["P-001", "BRIDA DE SUJECION TIPO A", "10", "3,50 €"],

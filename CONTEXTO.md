@@ -1372,38 +1372,50 @@ suficientes, no ahora.
   `_recuperar_descripcion_columna_fantasma_anterior` con guarda de
   ambigüedad. Verificado en el stack real: 0 líneas sin descripción, 0
   grupos duplicados, auditoría automática a 0 errores.
-- **Barrido de calidad del catálogo a 22.363 líneas: medido, un hallazgo
-  cerrado, dos anotados para decisión (sesión 2026-09-12, bloque 2).**
+- **Barrido de calidad del catálogo a 22.363 líneas: medido, dos hallazgos
+  cerrados, dos anotados para decisión (sesión 2026-09-12, bloques 2 y 7).**
   Confirmado sin defecto: descripciones-cabecera (0), precios repetidos
   dentro de expediente (590 grupos, todos legítimos -- balasto/carril con
   precios de referencia compartidos), cantidades extremas (47, ya conocidas
-  o plausibles), descuadre precio adjudicado/baja (0). Sin cerrar: **771
-  líneas en 8 expedientes** con `codigo_precio` igual a la matrícula --
-  causa parcial (`_parece_precio` solo reconoce el símbolo `€`, ciego a
-  tablas cuyo precio no lo lleva, como `6.22/28510.0058` p.15) sin
-  confirmar la corrección exacta; **57 líneas de `6.24/28510.0184`**
-  (equipamiento de telecomunicaciones sin precio real en el origen, 7
-  variantes de cabecera cacheadas de forma inconsistente) necesita decisión
-  de producto antes de tocar código; heurística de "descripción truncada"
-  probada y descartada por poco fiable (2.362 falsos positivos sobre texto
-  español legítimo).
+  o plausibles), descuadre precio adjudicado/baja (0). **Cerrado, bloque 7:**
+  de las 771 líneas en 8 expedientes con `codigo_precio` igual a la
+  matrícula, 651 (91%, 3 expedientes) resueltas del todo -- causa real,
+  `_clasificar_columna` solo reconocía el símbolo `€` como precio, ciego a
+  tablas cuyo precio no lo lleva (`6.22/28510.0058` p.15); arreglado con un
+  criterio estructural (`_PRECIO_SIN_SIMBOLO_RE`, gramática monetaria
+  española estricta), sin depender del modelo. Sin cerrar: **61 líneas
+  residuales** repartidas en dos causas distintas -- 41 de
+  `6.24/28510.0184` (equipamiento de telecomunicaciones sin precio real en
+  el origen, decisión de producto pendiente) y 20 en 4 expedientes pequeños
+  (`6.21/28510.0097`/`0148`/`0149`, `6.24/28510.0173`) con un patrón NUEVO
+  encontrado esta sesión: el precio del catálogo viene de una tabla
+  distinta de la que trae la matrícula, sin diagnosticar del todo. Heurística
+  de "descripción truncada" probada y descartada por poco fiable (2.362
+  falsos positivos sobre texto español legítimo).
 - **Repaso de interfaz con datos reales: cerrado (sesión 2026-09-12, bloque
   3).** Catálogo a 1280px, cola de candidatos de matrícula (62ms, 1.387
   pendientes) y coherencia entre paneles ya estaban bien. Corregido:
   `aviso_sindicacion` y `aviso_conflicto_documento_manual` (junto con
   `aviso_ingesta_manual`, sección 16 más abajo) se muestran ahora en
   `/expedientes`, mismo patrón que `aviso_descubrimiento_pedidos`.
-- **Rendimiento de un reproceso completo (3-4h, 358 expedientes): perfilado
-  con datos reales, nada implementado por encargo explícito (sesión
-  2026-09-12, bloque 4).** Hallazgo contrario a la intuición: **~99% del
-  tiempo es texto plano** (`page.extract_text()` de `pdfplumber`, etapa 1
-  de la cascada, sobre TODAS las páginas de TODOS los documentos), no
-  extracción de tablas (0,4%), ni modelo (0,02%, ya llama poquísimo por
-  diseño), ni base de datos (0,3%). Un expediente sin ninguna tabla puede
-  tardar 30s solo en esta etapa si sus documentos son grandes. Propuesta de
-  mejor relación impacto/riesgo: cachear el texto extraído por hash de
-  documento (mismo principio que `cache_mapeo_cabecera`), para que un
-  reproceso no vuelva a pagar este coste en documentos sin cambios.
+- **Rendimiento de un reproceso completo: perfilado y arreglado, 10,4×
+  más rápido (sesión 2026-09-12, bloques 4 y 6,
+  `docs/sesion-2026-09-12-defecto-mapeo-calidad-interfaz-rendimiento.md`).**
+  Hallazgo del bloque 4, contrario a la intuición: **~99% del tiempo era
+  texto plano** (`page.extract_text()` de `pdfplumber`, etapa 1 de la
+  cascada, sobre TODAS las páginas de TODOS los documentos, además
+  extraído POR DUPLICADO -- una vez para clasificar, otra dentro de
+  `procesar_anejo` para localizar tablas), no extracción de tablas ni
+  modelo ni base de datos. **Bloque 6:** `CacheTextoDocumento` (migración
+  0029, clave `Documento.hash`, invalidable subiendo `VERSION_LOGICA_TEXTO`
+  sin borrar filas a mano) más la eliminación de la doble extracción
+  (`procesar_anejo` reutiliza el texto ya extraído del llamador). Medido
+  con un reproceso real (misma muestra de 20 expedientes antes/después):
+  308s en frío → **29,6s en caliente** (10,4×); extrapolado a los 358
+  expedientes activos, de 3-4 horas a **~9 minutos** con la caché ya
+  poblada. Verificado por el camino real de la cola y con la auditoría
+  automática (0 errores, catálogo estable sin duplicar nada tras varios
+  reprocesos repetidos).
 
 ---
 
