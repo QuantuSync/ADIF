@@ -221,6 +221,24 @@ _RESOLUCION_OTRO_MOTIVO = "Revisión manual del documento correspondiente."
 _EXPLICACION_SIN_MOTIVO = "No se guardó una explicación concreta para esta fila."
 _RESOLUCION_SIN_MOTIVO = "Revisión manual del documento correspondiente."
 
+# Bloque de medición del hallazgo de sesión (6.22/28510.0033/0057/0058, ANEJO
+# de criterios técnicos): parte de las líneas pendientes no son un hueco real
+# -- son la copia exacta (misma matrícula, descripción y precio) de un
+# material que otro documento del mismo expediente ya declaró con su lote,
+# típico de un anejo de referencia que repite el mismo cuadro sin volver a
+# indicar el lote. Se cuentan aparte, nunca se funden ni se les asigna lote
+# aquí (CONTEXTO.md sección 12 y el caso del balasto: comparar contenido
+# entre filas para decidir un lote es precisamente el riesgo ya descartado) --
+# esto es solo una categoría más legible en el Resumen, para separar "hueco
+# real" de "ruido sin pérdida de información".
+_CATEGORIA_DUPLICADO_SIN_PERDIDA = "duplicado de material ya incluido"
+_EXPLICACION_DUPLICADO_SIN_PERDIDA = (
+    "Este material (misma matrícula, descripción y precio) ya aparece en la hoja \"Materiales\" con su "
+    "lote asignado, procedente de otro documento del mismo expediente -- esta copia es una repetición "
+    "exacta, no un material distinto ni un hueco real."
+)
+_RESOLUCION_DUPLICADO_SIN_PERDIDA = "Ninguna: el material y su precio ya están en el catálogo entregado."
+
 
 def _categoria_motivo(motivo: str | None) -> str:
     if not motivo:
@@ -237,6 +255,9 @@ _EXPLICACIONES_MOTIVO = {
 }
 _EXPLICACIONES_MOTIVO[_OTRO_MOTIVO] = (_EXPLICACION_OTRO_MOTIVO, _RESOLUCION_OTRO_MOTIVO)
 _EXPLICACIONES_MOTIVO[_SIN_MOTIVO] = (_EXPLICACION_SIN_MOTIVO, _RESOLUCION_SIN_MOTIVO)
+_EXPLICACIONES_MOTIVO[_CATEGORIA_DUPLICADO_SIN_PERDIDA] = (
+    _EXPLICACION_DUPLICADO_SIN_PERDIDA, _RESOLUCION_DUPLICADO_SIN_PERDIDA
+)
 
 # CONTEXTO.md sección 6/7: "Código del material" solo se rellena cuando el
 # sustantivo principal de la descripción casa contra un vocabulario todavía
@@ -268,13 +289,25 @@ def _escribir_resumen(
         hoja.append(["Exportado con las líneas pendientes de revisión incluidas en \"Materiales\".", None])
     elif total_excluidas:
         hoja.append(["Por qué hay líneas pendientes de revisión", None])
-        hoja.append([
-            "Son materiales de los que no se sabe con seguridad a qué lote pertenecen, así que se han "
-            "dejado fuera de la hoja \"Materiales\" para no mostrar el mismo material varias veces sin "
-            "poder distinguir una repetición real de un error de lectura del documento. Siguen guardados, "
-            "no se han perdido.",
-            None,
-        ])
+        if excluidas_por_categoria.get(_CATEGORIA_DUPLICADO_SIN_PERDIDA):
+            hoja.append([
+                "La mayoría son materiales de los que no se sabe con seguridad a qué lote pertenecen, así "
+                "que se han dejado fuera de la hoja \"Materiales\" para no mostrar el mismo material varias "
+                "veces sin poder distinguir una repetición real de un error de lectura del documento. Otra "
+                "parte, señalada aparte más abajo (\"duplicado de material ya incluido\"), no es un hueco "
+                "real: es la misma matrícula, descripción y precio que ya aparece en \"Materiales\" desde "
+                "otro documento del mismo expediente, así que ese material concreto no falta en el catálogo "
+                "entregado. Ninguna de las dos se ha perdido -- ambas siguen guardadas.",
+                None,
+            ])
+        else:
+            hoja.append([
+                "Son materiales de los que no se sabe con seguridad a qué lote pertenecen, así que se han "
+                "dejado fuera de la hoja \"Materiales\" para no mostrar el mismo material varias veces sin "
+                "poder distinguir una repetición real de un error de lectura del documento. Siguen "
+                "guardados, no se han perdido.",
+                None,
+            ])
         hoja.append([])
         hoja.append(["Qué ha pasado", "Líneas", "Qué haría falta para resolverlo"])
         for categoria, cantidad in sorted(excluidas_por_categoria.items(), key=lambda kv: -kv[1]):
@@ -303,6 +336,16 @@ def generar_excel_catalogo(db: Session, incluir_pendientes_sin_lote: bool = Fals
     incluidas = 0
     excluidas_por_categoria: Counter[str] = Counter()
 
+    # Bloque de medición del hallazgo de sesión (ver comentario de
+    # `_CATEGORIA_DUPLICADO_SIN_PERDIDA` más arriba): antes de decidir qué
+    # línea excluida es un hueco real, hace falta conocer TODAS las que sí
+    # se van a incluir -- de ahí las dos pasadas. Se bufferea la página
+    # completa en memoria (unas pocas decenas de miles de filas, ligero)
+    # en vez de hacer una segunda vuelta a la base de datos: paginar dos
+    # veces duplicaría el tiempo de exportación sin necesidad.
+    todas_las_filas: list[tuple[LineaCatalogo, object, object]] = []
+    claves_incluidas: set[tuple[int, str, str, Optional[Decimal]]] = set()
+
     pagina = 1
     while True:
         # CONTEXTO.md bloque 2: una línea descartada en la cola de revisión no
@@ -310,6 +353,7 @@ def generar_excel_catalogo(db: Session, incluir_pendientes_sin_lote: bool = Fals
         # datos con su motivo.
         resultado = consultar_catalogo(db, pagina=pagina, tamano_pagina=_TAMANO_LOTE, excluir_descartadas=True)
         for linea, lote, expediente, _documento, _nombre_archivo in resultado.filas:
+            todas_las_filas.append((linea, lote, expediente))
             # Bloque 2 (auditoría 6.20/28510.0042/0046/0047): a diferencia de
             # una huérfana sin lote, aquí SÍ hay lote conocido -- se excluye
             # siempre, sin que `incluir_pendientes_sin_lote` la reincluya,
@@ -317,47 +361,70 @@ def generar_excel_catalogo(db: Session, incluir_pendientes_sin_lote: bool = Fals
             # confía en cómo se leyeron las columnas de esta tabla" (ver
             # `MOTIVO_MAPEO_INCOHERENTE`).
             mapeo_incoherente = bool(linea.motivo_revision) and MOTIVO_MAPEO_INCOHERENTE in linea.motivo_revision
-            if (lote is None and not incluir_pendientes_sin_lote) or mapeo_incoherente:
-                excluidas_por_categoria[_categoria_motivo(linea.motivo_revision)] += 1
-                continue
-            incluidas += 1
-            # "El sistema nunca inventa una matriz. Si no cruza, se deja
-            # vacío" (CONTEXTO.md sección 7): código interno y código de
-            # proyecto solo se rellenan cuando el cruce con el Excel de
-            # códigos confirmó la fila.
-            cruzado = bool(expediente.codigos_cruzados)
-            fila = hoja.max_row + 1
-            hoja.append([
-                _celda_texto_o_espacio(expediente.codigo_interno if cruzado else None),
-                _celda_texto_o_espacio(expediente.codigo_expediente if cruzado else None),
-                _celda_texto_o_espacio(expediente.codigo_matriz),
-                _celda_texto_o_espacio(expediente.nombre_proyecto),
-                _celda_texto_o_espacio(_celda_matricula(linea)),
-                _celda_texto_o_espacio(linea.descripcion),
-                _celda_texto_o_espacio(_celda_texto(linea.codigo_material)),
-                _celda_numero(linea.cantidad),
-                _celda_numero(linea.precio_unitario),
-                _celda_texto_o_espacio(lote.identificador_lote if lote else None),
-                _celda_numero(linea.precio_adjudicado),
-                _celda_numero(linea.baja_lote),
-                _celda_texto_o_espacio(linea.unidad_medida),
-                _celda_texto_o_espacio(expediente.estado_contrato_sap),
-                # Siempre el dato del documento, nunca gated por `cruzado`
-                # (ver comentario de `COLUMNAS` arriba) -- `codigo_expediente`
-                # no es nullable (CONTEXTO.md sección 20: se corrige en el
-                # sitio con el "Número de Expediente" propio del Anuncio
-                # PCSP en cuanto se lee, `app.extraccion.identidad_expediente`).
-                _celda_texto_o_espacio(expediente.codigo_expediente),
-                _celda_texto_o_espacio(expediente.nombre_proyecto),
-                _celda_texto_o_espacio(linea.comentarios),
-            ])
-            hoja.cell(row=fila, column=_COLUMNA_CANTIDAD).number_format = _formato_cantidad(linea.cantidad)
-            for columna in _COLUMNAS_IMPORTE:
-                hoja.cell(row=fila, column=columna).number_format = _FORMATO_IMPORTE
-            hoja.cell(row=fila, column=_COLUMNA_PORCENTAJE).number_format = _FORMATO_PORCENTAJE
+            se_incluye = not ((lote is None and not incluir_pendientes_sin_lote) or mapeo_incoherente)
+            if se_incluye and linea.matricula is not None:
+                claves_incluidas.add(
+                    (expediente.id, linea.matricula, linea.descripcion, linea.precio_unitario)
+                )
         if pagina * _TAMANO_LOTE >= resultado.total:
             break
         pagina += 1
+
+    for linea, lote, expediente in todas_las_filas:
+        mapeo_incoherente = bool(linea.motivo_revision) and MOTIVO_MAPEO_INCOHERENTE in linea.motivo_revision
+        if (lote is None and not incluir_pendientes_sin_lote) or mapeo_incoherente:
+            # Encargo de esta sesión (hallazgo real, `6.22/28510.0033`/`0057`/
+            # `0058`: un anejo de "criterios técnicos" repite íntegro el mismo
+            # cuadro de precios que ya trae, con lote asignado, otro
+            # documento del expediente): antes de contar esta línea bajo su
+            # motivo técnico, comprobar si es una copia exacta -- misma
+            # matrícula, descripción y precio -- de un material que YA va a
+            # salir en "Materiales". Nunca se funde ni se le asigna lote
+            # aquí (CONTEXTO.md sección 12: comparar contenido entre filas
+            # para decidir un lote es el riesgo ya descartado con el
+            # balasto) -- esto es solo una categoría más honesta en el
+            # Resumen, "hueco real" vs "ruido sin pérdida de información".
+            clave = (expediente.id, linea.matricula, linea.descripcion, linea.precio_unitario)
+            if linea.matricula is not None and clave in claves_incluidas:
+                excluidas_por_categoria[_CATEGORIA_DUPLICADO_SIN_PERDIDA] += 1
+            else:
+                excluidas_por_categoria[_categoria_motivo(linea.motivo_revision)] += 1
+            continue
+        incluidas += 1
+        # "El sistema nunca inventa una matriz. Si no cruza, se deja
+        # vacío" (CONTEXTO.md sección 7): código interno y código de
+        # proyecto solo se rellenan cuando el cruce con el Excel de
+        # códigos confirmó la fila.
+        cruzado = bool(expediente.codigos_cruzados)
+        fila = hoja.max_row + 1
+        hoja.append([
+            _celda_texto_o_espacio(expediente.codigo_interno if cruzado else None),
+            _celda_texto_o_espacio(expediente.codigo_expediente if cruzado else None),
+            _celda_texto_o_espacio(expediente.codigo_matriz),
+            _celda_texto_o_espacio(expediente.nombre_proyecto),
+            _celda_texto_o_espacio(_celda_matricula(linea)),
+            _celda_texto_o_espacio(linea.descripcion),
+            _celda_texto_o_espacio(_celda_texto(linea.codigo_material)),
+            _celda_numero(linea.cantidad),
+            _celda_numero(linea.precio_unitario),
+            _celda_texto_o_espacio(lote.identificador_lote if lote else None),
+            _celda_numero(linea.precio_adjudicado),
+            _celda_numero(linea.baja_lote),
+            _celda_texto_o_espacio(linea.unidad_medida),
+            _celda_texto_o_espacio(expediente.estado_contrato_sap),
+            # Siempre el dato del documento, nunca gated por `cruzado`
+            # (ver comentario de `COLUMNAS` arriba) -- `codigo_expediente`
+            # no es nullable (CONTEXTO.md sección 20: se corrige en el
+            # sitio con el "Número de Expediente" propio del Anuncio
+            # PCSP en cuanto se lee, `app.extraccion.identidad_expediente`).
+            _celda_texto_o_espacio(expediente.codigo_expediente),
+            _celda_texto_o_espacio(expediente.nombre_proyecto),
+            _celda_texto_o_espacio(linea.comentarios),
+        ])
+        hoja.cell(row=fila, column=_COLUMNA_CANTIDAD).number_format = _formato_cantidad(linea.cantidad)
+        for columna in _COLUMNAS_IMPORTE:
+            hoja.cell(row=fila, column=columna).number_format = _FORMATO_IMPORTE
+        hoja.cell(row=fila, column=_COLUMNA_PORCENTAJE).number_format = _FORMATO_PORCENTAJE
 
     _escribir_resumen(libro, incluidas, excluidas_por_categoria, incluir_pendientes_sin_lote)
 
