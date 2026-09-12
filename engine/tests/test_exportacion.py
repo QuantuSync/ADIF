@@ -1,9 +1,11 @@
 """CONTEXTO.md, encargo de esta sesión (Excel al cliente), punto 1: ninguna
 convención de marcador de texto de la web viaja al Excel -- celda vacía en
 su lugar, para no convertir una columna numérica en texto mixto."""
+import io
 from decimal import Decimal
 
 from app.exportacion import (
+    _CATEGORIA_DUPLICADO_SIN_PERDIDA,
     _CATEGORIAS_MOTIVO,
     _EXPLICACIONES_MOTIVO,
     _categoria_motivo,
@@ -13,10 +15,12 @@ from app.exportacion import (
     _celda_texto_o_espacio,
     _escribir_resumen,
     _formato_cantidad,
+    generar_excel_catalogo,
 )
-from app.models import LineaCatalogo
+from app.models import Expediente, Lote, LineaCatalogo
 from collections import Counter
 
+import openpyxl
 from openpyxl import Workbook
 
 
@@ -170,3 +174,84 @@ def test_escribir_resumen_sin_pendientes_incluye_nota_codigo_material():
     hoja = libro["Resumen"]
     textos = [str(celda.value) for fila in hoja.iter_rows() for celda in fila if celda.value is not None]
     assert any("Código del material" in texto for texto in textos)
+
+
+# --- Categoría "duplicado de material ya incluido" (encargo de sesión,
+# hallazgo real `6.22/28510.0033`/`0057`/`0058`: un anejo de "criterios
+# técnicos" repite íntegro el mismo cuadro de precios que otro documento del
+# expediente ya trae, con lote asignado -- 603 líneas reales del corpus en
+# este caso, verificadas antes de escribir el código). Nunca funde las dos
+# líneas ni le asigna lote a la huérfana: solo cambia bajo qué categoría del
+# Resumen se cuenta.
+
+
+def _expediente_con_lote(db_session, codigo_expediente: str = "6.24/28510.9999"):
+    expediente = Expediente(codigo_expediente=codigo_expediente)
+    db_session.add(expediente)
+    db_session.commit()
+    lote = Lote(expediente_id=expediente.id, identificador_lote="1")
+    db_session.add(lote)
+    db_session.commit()
+    return expediente, lote
+
+
+def test_generar_excel_cuenta_huerfana_identica_como_duplicado_sin_perdida(db_session):
+    expediente, lote = _expediente_con_lote(db_session)
+    incluida = LineaCatalogo(
+        expediente_id=expediente.id, lote_id=lote.id, clave_linea="601200010",
+        orden_aparicion=0, matricula="601200010",
+        descripcion="TORNILLO BRIDA Nº 1, C/T Y ARANDELA PLANA", precio_unitario=Decimal("4.29"),
+    )
+    huerfana_identica = LineaCatalogo(
+        expediente_id=expediente.id, lote_id=None, clave_linea="hash-huerfana-1",
+        orden_aparicion=1, matricula="601200010",
+        descripcion="TORNILLO BRIDA Nº 1, C/T Y ARANDELA PLANA", precio_unitario=Decimal("4.29"),
+        motivo_revision="ninguna cabecera LOTE N encontrada en la franja que precede a esta tabla",
+    )
+    db_session.add_all([incluida, huerfana_identica])
+    db_session.commit()
+
+    contenido = generar_excel_catalogo(db_session)
+    libro = openpyxl.load_workbook(io.BytesIO(contenido))
+
+    materiales = libro["Materiales"]
+    assert materiales.max_row == 2  # cabecera + la única línea incluida
+
+    resumen = libro["Resumen"]
+    textos = [str(c.value) for fila in resumen.iter_rows() for c in fila if c.value is not None]
+    contenido_resumen = "\n".join(textos)
+    assert "duplicado" in contenido_resumen.lower()
+    assert "ya aparece en la hoja" in contenido_resumen
+
+    # La huérfana sigue exactamente igual en base de datos: sin lote, sin
+    # fundir con la otra línea -- solo cambia cómo se cuenta en el Resumen.
+    db_session.refresh(huerfana_identica)
+    assert huerfana_identica.lote_id is None
+
+
+def test_generar_excel_no_confunde_huerfana_distinta_con_duplicado(db_session):
+    expediente, lote = _expediente_con_lote(db_session)
+    incluida = LineaCatalogo(
+        expediente_id=expediente.id, lote_id=lote.id, clave_linea="601200010",
+        orden_aparicion=0, matricula="601200010",
+        descripcion="TORNILLO BRIDA Nº 1, C/T Y ARANDELA PLANA", precio_unitario=Decimal("4.29"),
+    )
+    # Misma matrícula y descripción, precio distinto -- un material real que
+    # cambió de precio no es "la misma línea otra vez", así que no debe
+    # contarse como duplicado sin pérdida.
+    huerfana_precio_distinto = LineaCatalogo(
+        expediente_id=expediente.id, lote_id=None, clave_linea="hash-huerfana-2",
+        orden_aparicion=1, matricula="601200010",
+        descripcion="TORNILLO BRIDA Nº 1, C/T Y ARANDELA PLANA", precio_unitario=Decimal("9.99"),
+        motivo_revision="ninguna cabecera LOTE N encontrada en la franja que precede a esta tabla",
+    )
+    db_session.add_all([incluida, huerfana_precio_distinto])
+    db_session.commit()
+
+    contenido = generar_excel_catalogo(db_session)
+    libro = openpyxl.load_workbook(io.BytesIO(contenido))
+    resumen = libro["Resumen"]
+    textos = [str(c.value) for fila in resumen.iter_rows() for c in fila if c.value is not None]
+    contenido_resumen = "\n".join(textos)
+    assert "duplicado" not in contenido_resumen.lower()
+    assert "no indica en ningún sitio cercano a qué lote pertenece" in contenido_resumen
