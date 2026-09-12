@@ -154,6 +154,37 @@ def test_documento_declara_el_mismo_codigo_de_su_carpeta_se_enlaza(db_session, t
     assert expediente.aviso_ingesta_manual is None
 
 
+def test_mismo_documento_ya_conocido_por_otra_carpeta_sigue_sin_enlazar_si_no_coincide(db_session, tmp_path):
+    # Bloque 5, sesión 2026-09-12 (continuación, prueba real de la ingesta):
+    # caso real encontrado probando con documentos reales -- el mismo PDF
+    # (mismo hash) copiado primero bajo su carpeta correcta (se registra) y
+    # DESPUÉS bajo una carpeta que no coincide con su código declarado no
+    # debe enlazarse solo porque el documento ya es `existente` en base de
+    # datos -- antes de este arreglo, la comprobación de código solo corría
+    # para contenido genuinamente nuevo, así que un documento ya conocido
+    # se enlazaba a ciegas a cualquier carpeta que lo contuviera, sin volver
+    # a mirar si de verdad le corresponde.
+    raiz = tmp_path / "entrada"
+    carpeta_correcta = raiz / "6.24_28510.0103"
+    carpeta_correcta.mkdir(parents=True)
+    shutil.copy(fx.ANUNCIO_PCSP_CON_MATRIZ, carpeta_correcta / "anuncio.pdf")
+    storage = _storage(tmp_path)
+    ingerir_carpeta_local(db_session, storage, str(raiz))
+    assert db_session.query(Documento).count() == 1
+
+    carpeta_equivocada = raiz / "2.18_04703.0019"
+    carpeta_equivocada.mkdir(parents=True)
+    shutil.copy(fx.ANUNCIO_PCSP_CON_MATRIZ, carpeta_equivocada / "anuncio.pdf")
+
+    resumen = ingerir_carpeta_local(db_session, storage, str(raiz))
+
+    assert resumen.enlaces_nuevos == 0
+    assert resumen.documentos_codigo_declarado_distinto == 1
+    expediente_equivocado = db_session.query(Expediente).filter_by(codigo_expediente="2.18/04703.0019").one()
+    assert expediente_equivocado.aviso_ingesta_manual is not None
+    assert db_session.query(DocumentoExpediente).filter_by(expediente_id=expediente_equivocado.id).count() == 0
+
+
 def test_aviso_de_ingesta_se_limpia_si_la_pasada_siguiente_ya_no_encuentra_nada(db_session, tmp_path):
     # Mismo criterio que motivó el bloque 2 de esta sesión (motivo_revision):
     # un aviso calculado en una pasada no debe quedarse pegado si la

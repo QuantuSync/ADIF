@@ -53,7 +53,7 @@ from app.extraccion.baja import extraer_codigo_propio_documento
 from app.extraccion.campos_pcsp import extraer_campos_anuncio_pcsp
 from app.extraccion.clasificador import clasificar
 from app.extraccion.cruce_codigos import normalizar_codigo_expediente
-from app.extraccion.texto import PaginaTexto, extraer_texto
+from app.extraccion.texto import PaginaTexto, extraer_texto_cacheado
 from app.interfaces.document_storage import DocumentStorage
 from app.models import Documento, DocumentoExpediente, Expediente, OrigenDocumento, TipoDocumento
 from app.queue import encolar_trabajo
@@ -142,28 +142,41 @@ def _ingerir_documento(
     """Un fichero de la carpeta -> (hay_enlace_nuevo, es_documento_nuevo,
     aviso_si_no_se_enlaza). El aviso, cuando existe, es la única señal de
     que este fichero concreto se dejó fuera -- nunca se enlaza a ciegas
-    cuando el propio documento discrepa de su carpeta."""
+    cuando el propio documento discrepa de su carpeta.
+
+    Bloque 5, sesión 2026-09-12 (continuación, prueba real de la ingesta):
+    la comprobación cruzada tiene que hacerse para CUALQUIER fichero, no
+    solo para contenido genuinamente nuevo -- verificado en vivo con un
+    caso real: el mismo PDF (mismo hash) copiado primero en una carpeta que
+    no coincide con su código declarado (se descarta, correcto, sin
+    enlazar) y después en la carpeta correcta (se registra bien) dejaba,
+    en una TERCERA pasada sobre la carpeta original ya conocida por hash,
+    enlazarlo sin ningún aviso -- `existente is not None` saltaba
+    directamente a crear el enlace sin repetir la comprobación de código,
+    coincidencia que la documentación (`docs/ingesta-manual-convencion-
+    carpetas.md`, "Comprobación automática") promete que nunca ocurre.
+    `extraer_texto_cacheado` (misma caché por hash de documento del bloque
+    de rendimiento, migración 0029) hace que repetir la comprobación sobre
+    un documento ya conocido sea casi gratis -- no reintroduce el coste que
+    `extraer_texto` sin caché evitaba a propósito aquí."""
     contenido = fichero.read_bytes()
     hash_doc = hashlib.sha256(contenido).hexdigest()
 
     existente = db.execute(select(Documento).where(Documento.hash == hash_doc)).scalar_one_or_none()
-    if existente is None:
-        # Solo se lee el PDF de verdad (coste real de `pdfplumber`) para
-        # contenido genuinamente nuevo -- releer una carpeta sin cambios no
-        # vuelve a pagar esto por cada fichero ya conocido.
-        paginas = extraer_texto(fichero)
-        codigo_declarado = _codigo_declarado_por_documento(paginas)
-        if (
-            codigo_declarado is not None
-            and normalizar_codigo_expediente(codigo_declarado) != normalizar_codigo_expediente(codigo_carpeta)
-        ):
-            aviso = (
-                f"el fichero {fichero.name!r} de la carpeta {codigo_carpeta} declara su propio código "
-                f"como {codigo_declarado!r} -- no coincide, no se enlaza sin revisión"
-            )
-            logger.warning("ingesta_local: %s", aviso)
-            return False, False, aviso
+    paginas = extraer_texto_cacheado(db, hash_doc, lambda: fichero)
+    codigo_declarado = _codigo_declarado_por_documento(paginas)
+    if (
+        codigo_declarado is not None
+        and normalizar_codigo_expediente(codigo_declarado) != normalizar_codigo_expediente(codigo_carpeta)
+    ):
+        aviso = (
+            f"el fichero {fichero.name!r} de la carpeta {codigo_carpeta} declara su propio código "
+            f"como {codigo_declarado!r} -- no coincide, no se enlaza sin revisión"
+        )
+        logger.warning("ingesta_local: %s", aviso)
+        return False, False, aviso
 
+    if existente is None:
         clasificacion = clasificar(paginas) if paginas else None
         tipo = clasificacion.tipo if clasificacion is not None else TipoDocumento.otro
         carpeta_almacenamiento = safe(codigo_carpeta.replace("/", "_"))
