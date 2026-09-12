@@ -33,6 +33,21 @@ function ResumenMotivo({ error }: { error: string | null }) {
   );
 }
 
+// Bloque 3, sesión 2026-09-12: los tres avisos informativos de más abajo
+// (nunca bloqueantes, CONTEXTO.md sección 12 "un contraste externo... no
+// tiene autoridad para cambiar el estado") comparten el mismo aspecto que
+// `aviso_descubrimiento_pedidos` ya usaba -- un único componente evita
+// repetir el mismo `<span>` tres veces.
+function AvisoInformativo({ texto }: { texto: string | null }) {
+  if (!texto) return null;
+  const recortado = texto.length > LARGO_MOTIVO_LISTA ? `${texto.slice(0, LARGO_MOTIVO_LISTA)}…` : texto;
+  return (
+    <span className="status-note status-note-tight" title={texto}>
+      {recortado}
+    </span>
+  );
+}
+
 export type Lote = {
   id: number;
   identificador_lote: string;
@@ -93,6 +108,16 @@ export type Expediente = {
   // arriba (estado de PROCESAMIENTO de este sistema) -- un expediente puede
   // estar `completado` aquí y seguir "En ejecución" para ADIF, o al revés.
   estado_contrato_sap: string | null;
+  // Bloque 3, sesión 2026-09-12 (repaso de interfaz): estos tres avisos ya
+  // existían en la API (`engine/app/schemas.py`) desde sesiones anteriores
+  // -- CONTEXTO.md sección 16 solo pedía sacar `aviso_sindicacion`, pero
+  // `aviso_ingesta_manual` y `aviso_conflicto_documento_manual` (Bloque 6,
+  // ingesta manual desde carpeta local) seguían igual de invisibles en la
+  // web -- nunca se habían mostrado en ninguna pantalla. Mismo patrón
+  // informativo que `aviso_descubrimiento_pedidos`, que sí se muestra.
+  aviso_sindicacion: string | null;
+  aviso_ingesta_manual: string | null;
+  aviso_conflicto_documento_manual: string | null;
 };
 
 const INTERVALO_SONDEO_MS = 3000;
@@ -610,6 +635,9 @@ export default function ExpedientesPanel({
                         SAP: {exp.estado_contrato_sap}
                       </span>
                     )}
+                    <AvisoInformativo texto={exp.aviso_sindicacion} />
+                    <AvisoInformativo texto={exp.aviso_ingesta_manual} />
+                    <AvisoInformativo texto={exp.aviso_conflicto_documento_manual} />
                   </td>
                   <td className="num">{celdaImporte(exp, exp.importe_licitacion)}</td>
                   <td className="num">{celdaImporte(exp, exp.importe_adjudicacion)}</td>
