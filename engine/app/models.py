@@ -527,6 +527,30 @@ class MapeoCabeceraCache(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
+class CacheTextoDocumento(Base):
+    """Bloque 6, sesión de rendimiento (`docs/sesion-2026-09-12-defecto-
+    mapeo-calidad-interfaz-rendimiento.md` bloque 4): caché del texto plano
+    de cada página de un documento (`app.extraccion.texto.extraer_texto`),
+    responsable de ~99% del tiempo de un reproceso real -- clave por
+    `Documento.hash` (el contenido, no el id ni la ruta: dos expedientes
+    hermanos pueden compartir el mismo documento físico bajo dos filas de
+    `documentos` distintas si llegara a duplicarse, aunque hoy no ocurre
+    -- `documento_expedientes` ya resuelve eso por relación, no por fila
+    duplicada). Invalidable subiendo `VERSION_LOGICA_TEXTO`
+    (`app.extraccion.texto`) sin borrar ninguna fila a mano: una versión
+    distinta a la guardada se trata como caché ausente y se sobrescribe.
+    `JSON` genérico, mismo motivo que `MapeoCabeceraCache`: consultable en
+    SQLite para tests sin Postgres levantado."""
+
+    __tablename__ = "cache_texto_documento"
+
+    documento_hash = Column(String(64), primary_key=True)
+    version_logica_texto = Column(String(32), nullable=False)
+    num_paginas = Column(Integer, nullable=False)
+    paginas = Column(JSON, nullable=False)  # [{"numero": int, "texto": str}, ...]
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class CacheCodigoMaterial(Base):
     """Caché del `Código del material` (CONTEXTO.md sección 6, bloque 5 de la
     sesión de vocabulario): una llamada al modelo por término candidato
