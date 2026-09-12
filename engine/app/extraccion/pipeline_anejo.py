@@ -29,6 +29,7 @@ from app.extraccion.lote_tabla import asociar_lote_tabla
 from app.extraccion.mapeo_cabecera import (
     cabecera_sin_senal,
     corregir_confusion_matricula_codigo_precio,
+    corregir_confusion_precio_cantidad,
     derivar_mapeo_por_contenido,
     evaluar_coherencia_mapeo,
     mapear_cabecera,
@@ -214,6 +215,8 @@ def procesar_anejo(
                 # de otra tabla del mismo documento, y evita ensuciar la
                 # caché estructural con nada (esta vía no escribe en ella).
                 mapeo_por_contenido = derivar_mapeo_por_contenido(tabla.filas) if sin_cabecera_propia else None
+                matricula_codigo_corregido = False
+                precio_cantidad_corregido = False
 
                 if mapeo_por_contenido is not None:
                     mapeo = mapeo_por_contenido
@@ -227,15 +230,46 @@ def procesar_anejo(
                     if resultado_mapeo.llamada_modelo:
                         llamadas_modelo += 1
                     mapeo = resultado_mapeo.mapeo
+                    # Bloque 3, sesión 2026-09-11 (ampliado bloque 2, sesión
+                    # 2026-09-12 continuación): la confusión de columna de
+                    # matrícula tomada por `codigo_precio` no es exclusiva de
+                    # las tablas sin cabecera propia -- caso real,
+                    # `6.21/28510.0149_ANEJO_bd79fa987e814be3.pdf` p.6/9
+                    # (tabla de "CRITERIOS TÉCNICOS", cabecera real
+                    # `[None, "Nº MATRÍCULA", None, "DESCRIPCIÓN", "CRITERIOS
+                    # TECNICOS"]`, sin ninguna columna de precio): el
+                    # determinista no la resuelve (le falta `precio_unitario`,
+                    # CAMPOS_OBLIGATORIOS) y el modelo, sin la red de
+                    # seguridad de `evaluar_coherencia_mapeo` (que solo se
+                    # aplica a tablas sin cabecera propia), puede mapear
+                    # `codigo_precio` a la misma columna que `matricula` sin
+                    # que nada lo detecte -- se cachea así para siempre bajo
+                    # `origen="modelo"`. Aplicarla aquí, siempre, es un no-op
+                    # seguro sobre un mapeo ya correcto (determinista/caché
+                    # nunca reutilizan una columna para dos campos, ver
+                    # `intentar_mapeo_determinista`) y corrige el caso real
+                    # de arriba en el camino con cabecera.
+                    indice_codigo_antes = mapeo.get("codigo_precio")
+                    mapeo = corregir_confusion_matricula_codigo_precio(mapeo, tabla.filas)
+                    matricula_codigo_corregido = (
+                        indice_codigo_antes is not None and mapeo.get("codigo_precio") is None
+                    )
                     if sin_cabecera_propia:
-                        # Bloque 3, sesión 2026-09-11: antes de validar
-                        # coherencia, corrige la confusión determinista más
-                        # frecuente de este camino (columna de matrícula
-                        # tomada por `codigo_precio`) -- ver el docstring de
-                        # `corregir_confusion_matricula_codigo_precio`. Un
-                        # mapeo que no tiene esa confusión concreta sale
-                        # intacto.
-                        mapeo = corregir_confusion_matricula_codigo_precio(mapeo, tabla.filas)
+                        # Bloque 2, sesión 2026-09-12 (continuación): misma
+                        # idea, para la confusión precio_unitario/cantidad --
+                        # ver el docstring de `corregir_confusion_precio_
+                        # cantidad`. Acotada a `sin_cabecera_propia` porque
+                        # solo ahí existe la red de seguridad
+                        # (`evaluar_coherencia_mapeo`) que distingue "esta
+                        # tabla de verdad no tiene precio" de "el mapeo
+                        # falló" -- fuera de ese camino, nulificar
+                        # `precio_unitario` sin esa comprobación se
+                        # arriesgaría a esconder un fallo de mapeo real.
+                        indice_precio_antes = mapeo.get("precio_unitario")
+                        mapeo = corregir_confusion_precio_cantidad(mapeo, tabla.filas)
+                        precio_cantidad_corregido = (
+                            indice_precio_antes is not None and mapeo.get("precio_unitario") is None
+                        )
                     # Bloque 2 (auditoría 6.20/28510.0042/0046/0047): una tabla
                     # sin cabecera propia siempre resuelve su mapeo con el
                     # modelo, a ciegas de 2-3 filas de ejemplo
@@ -279,6 +313,53 @@ def procesar_anejo(
                     for linea in lineas_tabla:
                         if linea.get("codigo_precio") is None:
                             linea["codigo_precio"] = INVALIDADO
+                # Bloque 2, sesión 2026-09-12 (continuación): mismo mecanismo,
+                # para cuando `corregir_confusion_matricula_codigo_precio`
+                # (arriba, aplicada siempre, no solo sin cabecera propia)
+                # determina que `codigo_precio` apuntaba de verdad a la
+                # columna de `matricula` -- caso real que lo motiva:
+                # `6.21/28510.0149_ANEJO_bd79fa987e814be3.pdf`, 5 líneas
+                # guardadas con `codigo_precio` igual a su propia matrícula
+                # por un mapeo de modelo de antes de este arreglo, que un
+                # `None` corriente nunca habría corregido (la fila ya existe,
+                # `guardar_lineas_catalogo` no pisa un campo con `None`).
+                if matricula_codigo_corregido:
+                    for linea in lineas_tabla:
+                        if linea.get("codigo_precio") is None:
+                            linea["codigo_precio"] = INVALIDADO
+                # Bloque 2, sesión 2026-09-12 (continuación): mismo
+                # razonamiento que el bloque de arriba para `codigo_precio`,
+                # aplicado a `precio_unitario` -- `corregir_confusion_precio_
+                # cantidad` determinó por CONTENIDO que la columna que el
+                # modelo eligió no es un precio real, así que un `None`
+                # corriente aquí también debe borrar un valor ya guardado en
+                # un reproceso anterior (antes de este arreglo). Motivo claro
+                # y estable (CONTEXTO.md, encargo de esta sesión): distingue
+                # "el documento no declara precio para este material" de
+                # cualquier otro motivo_revision, sin mandar la línea a
+                # revisión -- no hay nada que un humano pueda confirmar contra
+                # el documento que este análisis no haya confirmado ya.
+                if precio_cantidad_corregido:
+                    for linea in lineas_tabla:
+                        if linea.get("precio_unitario") is None:
+                            linea["precio_unitario"] = INVALIDADO
+                            # `precio_adjudicado` ya se calculó (más arriba,
+                            # dentro de `construir_lineas_desde_tabla`) con el
+                            # `precio_unitario` todavía equivocado -- sin
+                            # este borrado quedaría un importe derivado de un
+                            # precio que se acaba de descartar por no ser
+                            # real. `None` corriente basta aquí (siempre se
+                            # recalcula entero en cada pasada, ver el
+                            # comentario de `guardar_lineas_catalogo`).
+                            linea["precio_adjudicado"] = None
+                            linea["motivo_revision"] = _acumular_motivo(
+                                linea.get("motivo_revision"),
+                                "sin precio de referencia declarado en el documento origen: la columna que "
+                                "el mapeo de esta tabla sin cabecera propia identificaba como precio no "
+                                "tiene forma de precio real (coincide con la de cantidad), descartada para "
+                                "no guardar un valor inventado -- no es un fallo de extracción, el documento "
+                                "no declara precio para este material",
+                            )
                 for linea in lineas_tabla:
                     if motivo_mapeo_incoherente is not None:
                         linea["motivo_revision"] = _acumular_motivo(

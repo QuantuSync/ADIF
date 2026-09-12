@@ -48,6 +48,39 @@ _CODIGO_PRECIO_LONGITUD_MAXIMA = LineaCatalogo.codigo_precio.type.length
 _MATRICULA_LONGITUD = LineaCatalogo.matricula.type.length
 _MATRICULA_VALIDA_RE = re.compile(rf"^\d{{{_MATRICULA_LONGITUD}}}$")
 
+
+_MATRICULA_INCRUSTADA_RE = re.compile(rf"\d{{{_MATRICULA_LONGITUD}}}")
+
+
+def _matricula_recuperable_de_celda_multilinea(matricula_bruta: str) -> Optional[str]:
+    """Bloque 2, sesión 2026-09-12 (continuación): en `6.24/28510.0184_
+    CONTRATO_b15b77d1fff4f23f.pdf` p.96-98, un texto ajeno a la tabla (un pie
+    de verificación de firma electrónica, invertido y con cada carácter
+    duplicado por cómo `pdfplumber` lo superpone en esas páginas) cae dentro
+    de la misma celda de matrícula que la fila real, unas veces en su propia
+    línea (`"iirreeVV\\n664410216"`), otras pegado sin salto de línea porque
+    el solape vertical de los dos textos varía de fila a fila
+    (`"ppssjj..aaddiill664410404"`, `"664410433pp"`, `"nnee664410410ee"` --
+    el ruido puede caer antes, después, o a los dos lados de la matrícula
+    real). `limpiar_codigo_celda` colapsa cualquier salto de línea antes de
+    esta comprobación (CONTEXTO.md sección 8: "P-\\n001" -> "P-001" es el
+    caso que justifica colapsarlo), así que buscar solo por línea no basta --
+    la matrícula real queda pegada al ruido de cualquier forma y la fila
+    entera se descartaba como "no reconocible" aunque el dato bueno siguiera
+    ahí dentro.
+
+    Se busca el patrón de matrícula (9 dígitos seguidos) en cualquier
+    posición de la celda cruda, sin exigir un separador -- solo se acepta si
+    aparece EXACTAMENTE una vez. Dos o más apariciones (el caso real de una
+    fila fusionada por `pdfplumber` con dos matrículas reales pegadas,
+    "611150110611150111") son ambiguas -- dos números de 9 dígitos válidos a
+    la vez, ninguno con más derecho que el otro a ser "la" matrícula de esta
+    fila -- y se descartan sin adivinar, igual que ninguna aparición."""
+    candidatas = _MATRICULA_INCRUSTADA_RE.findall(matricula_bruta)
+    if len(candidatas) == 1:
+        return candidatas[0]
+    return None
+
 # Hallazgo real (aviso del cliente, sesión 2026-09-07): el modelo, cuando
 # una tabla no trae ninguna columna de unidad de medida de verdad, tiende a
 # mapear "unidad_medida" a una columna en blanco o ajena en vez de devolver
@@ -797,6 +830,16 @@ def _construir_campos(
             if not descripcion:
                 descripcion = limpiar_texto_celda(matricula_bruta) or matricula
             matricula = None
+        elif matricula_bruta and (
+            _recuperada := _matricula_recuperable_de_celda_multilinea(matricula_bruta)
+        ) is not None:
+            motivo_revision = _acumular_motivo(
+                motivo_revision,
+                f"matrícula recuperada de una celda con más de una línea de texto (la otra línea es "
+                f"ruido ajeno a la tabla, descartado: {matricula!r}) -- confirmar contra el documento "
+                f"original antes de dar por buena",
+            )
+            matricula = _recuperada
         else:
             motivo_revision = _acumular_motivo(
                 motivo_revision, f"valor de matrícula no reconocible, descartado: {matricula!r}"

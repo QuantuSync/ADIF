@@ -164,6 +164,59 @@ def test_construir_linea_catalogo_matricula_no_reconocible_se_vacia_y_marca_revi
     assert linea["motivo_revision"] is not None
 
 
+def test_construir_linea_catalogo_recupera_matricula_de_celda_con_ruido_en_otra_linea():
+    # Caso real, bloque 2, sesión 2026-09-12 (continuación):
+    # `6.24/28510.0184_CONTRATO_b15b77d1fff4f23f.pdf` p.96 -- un pie de
+    # verificación de firma electrónica ajeno a la tabla (invertido y con
+    # cada carácter duplicado por cómo pdfplumber lo superpone en esa
+    # página) cae en su propia línea dentro de la misma celda de matrícula
+    # que la fila siguiente.
+    mapeo = {"codigo_precio": None, "matricula": 0, "descripcion": 1, "unidad_medida": None, "cantidad": None, "precio_unitario": 2}
+    fila = ["iirreeVV\n664410216", "DIUT2", ""]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=96, documento_origen_id=None, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea is not None
+    assert linea["matricula"] == "664410216"
+    assert linea["motivo_revision"] is not None
+    assert "recuperada de una celda" in linea["motivo_revision"]
+
+
+def test_construir_linea_catalogo_recupera_matricula_de_celda_con_ruido_sin_salto_de_linea():
+    # Misma familia de defecto que el test de arriba, pero el ruido queda
+    # pegado a la matrícula real SIN salto de línea (el solape vertical de
+    # los dos textos varía de fila a fila) -- verificado contra el mismo
+    # documento real, p.97-98.
+    mapeo = {"codigo_precio": None, "matricula": 0, "descripcion": 1, "unidad_medida": None, "cantidad": None, "precio_unitario": 2}
+    fila = ["664410433pp", "Cargador JABRA 920", ""]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=10, documento_origen_id=None, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea is not None
+    assert linea["matricula"] == "664410433"
+
+
+def test_construir_linea_catalogo_no_recupera_matricula_si_hay_dos_candidatas():
+    # Fila fusionada por pdfplumber con dos matrículas reales pegadas
+    # (CONTEXTO.md sección 8) -- dos números de 9 dígitos válidos a la vez,
+    # ninguno con más derecho a ser "la" matrícula de esta fila: se
+    # descarta sin adivinar, como antes de este arreglo.
+    mapeo = {"codigo_precio": None, "matricula": 0, "descripcion": 1, "unidad_medida": None, "cantidad": None, "precio_unitario": 2}
+    fila = ["611150110611150111", "BRIDA", "3,50 €"]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=10, documento_origen_id=None, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea is not None
+    assert linea["matricula"] is None
+    assert "no reconocible" in linea["motivo_revision"]
+
+
 def test_construir_linea_catalogo_guion_suelto_en_matricula_no_marca_revision():
     # CONTEXTO.md sección 26 (arreglo de los 3 que seguían en revisión tras el
     # criterio de lote laxo): expediente real 6.24/28510.0117, 39 filas

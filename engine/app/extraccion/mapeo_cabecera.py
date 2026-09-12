@@ -229,6 +229,22 @@ def evaluar_coherencia_mapeo(
     for campo in CAMPOS_OBLIGATORIOS:
         indice = mapeo.get(campo)
         if indice is None:
+            if campo == "precio_unitario" and "precio" not in clasificar_columnas(filas):
+                # Bloque 2, sesión 2026-09-12 (continuación,
+                # `corregir_confusion_precio_cantidad`): ninguna columna de
+                # esta tabla tiene forma de precio real -- confirmado por
+                # contenido, no solo "el modelo no encontró ninguna" -- así
+                # que la ausencia de `precio_unitario` es un hecho del
+                # documento (esta tabla no declara precio para su material,
+                # verificado contra `6.24/28510.0184_CONTRATO_
+                # b15b77d1fff4f23f.pdf`, tabla de equipamiento con "Precio
+                # Referencia Adquisición/Reparación" siempre en blanco), no
+                # un fallo de mapeo que deba descartar la tabla entera. Si
+                # SÍ existiera una columna con forma de precio en algún
+                # sitio, `clasificar_columnas` la habría encontrado y este
+                # atajo no se toma -- la comprobación de abajo sigue
+                # protegiendo ese caso real (`6.20/28510.0042`/`0046`/`0047`).
+                continue
             return f"{campo} sin columna asignada por el modelo en una tabla sin cabecera propia"
         con_valor = sum(
             1 for fila in filas if indice < len(fila) and fila[indice] and fila[indice].strip()
@@ -350,6 +366,45 @@ def derivar_mapeo_por_contenido(filas: list[list[Optional[str]]]) -> Optional[di
     }
 
 
+# Bloque 2, sesión 2026-09-12 (continuación): sobre una tabla sin cabecera
+# propia, el modelo puede asignar `precio_unitario` a una columna que no
+# tiene forma de precio real -- verificado contra `6.24/28510.0184_CONTRATO_
+# b15b77d1fff4f23f.pdf` p.97-98 (equipamiento de telecomunicaciones,
+# "REFERENCIAS PARA SUMINISTRAR Y/O REPARAR..."): la tabla trae dos columnas
+# de precio de referencia (adquisición/reparación) que el documento deja
+# SIEMPRE en blanco, y una columna "Cantidad Estimada" con el mismo valor
+# repetido ("1") en cada fila -- sin más pista que 2-3 filas de ejemplo, el
+# modelo mapeó `precio_unitario` a esa columna de cantidad, produciendo un
+# "precio" de 1,00 € idéntico en las 57 líneas de esta tabla, en vez de
+# reconocer que el documento no declara ningún precio para este material.
+# `evaluar_coherencia_mapeo` no lo detectaba porque solo comprueba que la
+# columna tenga ALGÚN valor no vacío en la mayoría de las filas -- una
+# columna de cantidad rellena al 100% pasa esa comprobación con la misma
+# facilidad que un precio real.
+#
+# Corrección determinista sobre el MAPEO, mismo patrón que
+# `corregir_confusion_matricula_codigo_precio`: si la columna que el mapeo
+# cree que es `precio_unitario` no tiene forma de precio real según
+# `clasificar_columnas` (que ya usa la gramática monetaria estricta de
+# `_parece_precio`, bloque 7), se descarta esa asignación -- `precio_unitario`
+# queda `None` (esta fila no trae un precio interpretable en esa columna) en
+# vez de dejar pasar un valor que con certeza no es un precio. Nunca al
+# revés: una columna que SÍ tiene forma de precio nunca se toca aquí, aunque
+# `evaluar_coherencia_mapeo` la acabe rechazando por otro motivo.
+def corregir_confusion_precio_cantidad(
+    mapeo: dict[str, Optional[int]], filas: list[list[Optional[str]]]
+) -> dict[str, Optional[int]]:
+    indice_precio = mapeo.get("precio_unitario")
+    if indice_precio is None:
+        return mapeo
+    tipos = clasificar_columnas(filas)
+    if indice_precio < len(tipos) and tipos[indice_precio] == "precio":
+        return mapeo
+    corregido = dict(mapeo)
+    corregido["precio_unitario"] = None
+    return corregido
+
+
 def _columna_parece_matricula(indice: int, filas: list[list[Optional[str]]]) -> bool:
     valores = [
         fila[indice].strip() for fila in filas if indice < len(fila) and fila[indice] and fila[indice].strip()
@@ -358,6 +413,14 @@ def _columna_parece_matricula(indice: int, filas: list[list[Optional[str]]]) -> 
         return False
     con_forma_matricula = sum(1 for v in valores if _MATRICULA_VALIDA_RE.match(v.replace(" ", "")))
     return con_forma_matricula / len(valores) >= _UMBRAL_COHERENCIA
+
+
+def _columna_vacia(indice: int, filas: list[list[Optional[str]]]) -> bool:
+    """Ninguna fila trae valor real en esta columna -- distinto de "la
+    matrícula falta en muchas filas" (legítimo, CONTEXTO.md sección 2): aquí
+    es CERO, la huella de un nombre de cabecera desalineado con sus propios
+    datos, no de una columna que a veces trae dato y a veces no."""
+    return not any(indice < len(fila) and fila[indice] and fila[indice].strip() for fila in filas)
 
 
 def corregir_confusion_matricula_codigo_precio(
@@ -395,6 +458,22 @@ def corregir_confusion_matricula_codigo_precio(
     nunca si `matricula` ya tiene una columna PROPIA y distinta: ahí no hay
     confusión que resolver.
 
+    Tercera variante, bloque 2, sesión 2026-09-12 (continuación) -- esta vez
+    con cabecera real, no sin cabecera: `6.21/28510.0149_ANEJO_
+    bd79fa987e814be3.pdf` p.6/9 (cabecera `[None, "Nº MATRÍCULA", None,
+    "DESCRIPCIÓN", "CRITERIOS TECNICOS"]`). El nombre de columna "Nº
+    MATRÍCULA" no está alineado con sus propios datos -- la matrícula real
+    (`697100100`...) cae en la columna ANTERIOR, sin nombre, y la que el
+    modelo/determinista etiquetan "matricula" por el texto de la cabecera
+    está vacía en el 100% de las filas reales. `matricula` SÍ tiene "su
+    propia columna, distinta de `codigo_precio`" en la forma del mapeo --
+    la comprobación original de abajo la habría dejado intacta -- pero esa
+    columna propia no trae ningún dato real: no es una matrícula legítima
+    que de verdad falte en la mayoría de las filas (CONTEXTO.md sección 2),
+    es la misma desalineación de cabecera-vs-datos ya conocida para otros
+    campos (`_recuperar_descripcion_columna_fantasma` y compañía), aquí sin
+    cubrir para `matricula`.
+
     Zona de riesgo conocida, sin cubrir aquí: el modelo puede producir
     variantes distintas de estas dos (p.ej. `descripcion` sin columna en vez
     de `matricula`) en otro reproceso -- ver CONTEXTO.md para la vía
@@ -407,7 +486,11 @@ def corregir_confusion_matricula_codigo_precio(
     indice_matricula = mapeo.get("matricula")
     if indice_codigo_precio is None:
         return mapeo
-    if indice_matricula is not None and indice_matricula != indice_codigo_precio:
+    if (
+        indice_matricula is not None
+        and indice_matricula != indice_codigo_precio
+        and not _columna_vacia(indice_matricula, filas)
+    ):
         return mapeo
     if not _columna_parece_matricula(indice_codigo_precio, filas):
         return mapeo
