@@ -1416,6 +1416,41 @@ suficientes, no ahora.
   poblada. Verificado por el camino real de la cola y con la auditoría
   automática (0 errores, catálogo estable sin duplicar nada tras varios
   reprocesos repetidos).
+- **Huecos reales, confusión matrícula/precio, determinismo e ingesta
+  local: seis bloques cerrados, sesión 2026-09-12 (continuación),
+  `docs/sesion-2026-09-12-huecos-determinismo-ingesta.md`.** (1) Análisis
+  de las 1.886 líneas con hueco real (sin arreglar nada): concentradas en
+  32 expedientes, el 72,4% en dos tríos de expedientes hermanos que
+  comparten documento — verificado que gran parte no es hueco de
+  extracción sino contenido de OTROS lotes del mismo acuerdo marco,
+  adjuntado íntegro a un pedido que solo cubre su propio lote (familia
+  `6.24/28510.0130`/`0152`/`0153`, y el mismo patrón confirmado en la
+  familia del balasto). (2) Confusión matrícula/precio y precio/cantidad:
+  tres causas reales cerradas en `6.24/28510.0184` y otros 3 expedientes
+  (precio mapeado a la columna de cantidad en tablas sin precio real;
+  confusión matrícula/código también con cabecera real y desalineada de
+  sus propios datos; un pie de verificación de firma electrónica colado en
+  la celda de matrícula). (3) **Determinismo: dos causas reales
+  encontradas y corregidas** — una consulta de documentos sin `order_by`
+  (Postgres no garantiza el orden; cuando el mismo `codigo_precio` existe
+  de verdad en dos documentos del mismo expediente, cuál ganaba dependía
+  del orden arbitrario) y `_eliminar_lote_sentinela_obsoleto` confundiendo
+  un lote REAL declarado "1" con el sentinela de migración del mismo
+  nombre (lo borraba y recreaba en cada reproceso, para siempre, en 11
+  expedientes reales). Verificado con dos reprocesos completos
+  consecutivos: resultado idéntico byte a byte. (4) **Ingesta local
+  probada de verdad por primera vez** contra el stack real: registra,
+  clasifica, extrae y marca el origen correctamente; hallazgo real
+  corregido — un documento ya conocido por OTRA carpeta se enlazaba sin
+  repetir la comprobación de código declarado, saltándose la protección
+  contra carpetas mal puestas. Pendiente: el determinismo de tablas sin
+  cabecera propia no cierra al 100% sin una caché persistente de firma
+  estructural entre reprocesos (hoy solo dura una pasada); `6.24/28510.0173`
+  con una variante de confusión matrícula/precio sin cubrir;
+  `6.22/28510.0094`/`0125`/`0126` y `0033`/`0057`/`0058` con residuo de
+  mapeo incoherente sin auditar a fondo; decisión de producto pendiente
+  sobre si dar una categoría de Resumen propia a "pertenece a otro lote
+  del acuerdo marco" en vez de pedir revisión humana repetida.
 
 ---
 
@@ -1439,4 +1474,5 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `sesion-2026-09-09-reproceso-completo-y-bloques-2-3-4.md`,
 `sesion-2026-09-10-maestro-materiales-real.md`,
 `sesion-2026-09-12-defecto-mapeo-calidad-interfaz-rendimiento.md`,
+`sesion-2026-09-12-huecos-determinismo-ingesta.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.
