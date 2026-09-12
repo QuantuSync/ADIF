@@ -24,8 +24,10 @@ import re
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
+from typing import BinaryIO, Callable
 
 import pdfplumber
+from sqlalchemy.orm import Session
 
 
 @dataclass(frozen=True)
@@ -38,12 +40,73 @@ class PaginaTexto:
     texto: str
 
 
-def extraer_texto(ruta_pdf: str | Path) -> list[PaginaTexto]:
-    """Extrae el texto de cada página de un PDF con capa de texto."""
+def extraer_texto(ruta_pdf: str | Path | BinaryIO) -> list[PaginaTexto]:
+    """Extrae el texto de cada página de un PDF con capa de texto. Sin
+    caché: perfil real de la sesión de rendimiento (bloque 4, `docs/sesion-
+    2026-09-12-defecto-mapeo-calidad-interfaz-rendimiento.md`) midió que esto
+    es ~99% del tiempo de un reproceso -- para un documento ya visto antes,
+    usa `extraer_texto_cacheado`, que envuelve esta misma función."""
     paginas: list[PaginaTexto] = []
     with pdfplumber.open(ruta_pdf) as pdf:
         for indice, pagina in enumerate(pdf.pages, start=1):
             paginas.append(PaginaTexto(numero=indice, texto=pagina.extract_text() or ""))
+    return paginas
+
+
+# Bloque 6, sesión de rendimiento: sube este valor cuando un cambio en
+# `extraer_texto` (o en cómo se llama a `pdfplumber`) deba invalidar todo el
+# texto ya cacheado -- una fila con una versión distinta a esta se trata
+# como caché ausente y se recalcula, sin necesidad de borrar nada a mano
+# (mismo mecanismo que `app.mantenimiento.frescura.VERSION_LOGICA_EXTRACCION`,
+# pero para esta caché concreta: cambiar cómo se clasifica un documento o
+# cómo se arma una línea de catálogo no debería invalidar texto ya extraído
+# correctamente, y viceversa).
+VERSION_LOGICA_TEXTO = "2026-09-13.1"
+
+
+def extraer_texto_cacheado(
+    db: Session, documento_hash: str, obtener_pdf: Callable[[], str | Path | BinaryIO]
+) -> list[PaginaTexto]:
+    """Envuelve `extraer_texto` con una caché persistente por hash de
+    documento (`CacheTextoDocumento`, migración 0029): un documento ya
+    descargado y sin cambios no vuelve a pagar el coste de `pdfplumber`
+    en cada reproceso -- solo el primero. Clave por CONTENIDO
+    (`Documento.hash`), no por id ni por ruta: el mismo documento físico
+    puede vivir bajo más de un `Documento` si algún día se rompe la
+    deduplicación por hash, y esta caché no debe depender de que eso nunca
+    pase para seguir siendo correcta.
+
+    `obtener_pdf` es una función, no el PDF ya en mano: en un acierto de
+    caché no hace falta ni siquiera leer el fichero del almacenamiento
+    (`DocumentStorage.recuperar`), así que el llamador no paga esa lectura
+    tampoco -- solo se invoca en un fallo de caché.
+
+    Importa `app.models` aquí dentro (no al nivel del módulo) para no
+    introducir una dependencia de `app.extraccion.texto` -> `app.models`
+    en el camino de import de todo el paquete `app.extraccion`, que hoy no
+    la necesita para nada más."""
+    from app.models import CacheTextoDocumento
+
+    cacheado = db.get(CacheTextoDocumento, documento_hash)
+    if cacheado is not None and cacheado.version_logica_texto == VERSION_LOGICA_TEXTO:
+        return [PaginaTexto(numero=p["numero"], texto=p["texto"]) for p in cacheado.paginas]
+
+    paginas = extraer_texto(obtener_pdf())
+    payload = [{"numero": p.numero, "texto": p.texto} for p in paginas]
+    if cacheado is not None:
+        cacheado.version_logica_texto = VERSION_LOGICA_TEXTO
+        cacheado.num_paginas = len(paginas)
+        cacheado.paginas = payload
+    else:
+        db.add(
+            CacheTextoDocumento(
+                documento_hash=documento_hash,
+                version_logica_texto=VERSION_LOGICA_TEXTO,
+                num_paginas=len(paginas),
+                paginas=payload,
+            )
+        )
+    db.commit()
     return paginas
 
 

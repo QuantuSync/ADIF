@@ -8,6 +8,7 @@ from decimal import Decimal
 
 from app.catalogo import guardar_lineas_catalogo
 from app.extraccion.pipeline_anejo import procesar_anejo
+from app.extraccion.texto import extraer_texto
 from app.models import Documento, DocumentoExpediente, Expediente, Lote, TipoDocumento
 from tests import fixtures as fx
 from tests.extraccion.dobles import ProveedorModeloFalso
@@ -65,7 +66,7 @@ def test_cascada_completa_sobre_los_dos_anejos_de_fixture(db_session, capsys):
         expediente, lote, documento = _crear_lote(db_session, codigo_expediente, ruta)
 
         resultado = procesar_anejo(
-            ruta, documento_origen_id=documento.id, expediente_id=expediente.id,
+            ruta, extraer_texto(ruta), documento_origen_id=documento.id, expediente_id=expediente.id,
             lotes={"1": baja}, db=db_session, model_provider=modelo,
         )
         guardado = guardar_lineas_catalogo(db_session, lote.id, _sin_identificador_lote(resultado.lineas))
@@ -103,6 +104,7 @@ def test_documento_0008_guantes_produce_13_lineas_con_baja_aplicada(db_session):
 
     resultado = procesar_anejo(
         fx.ANEJO_PRECIOS_GUANTES,
+        extraer_texto(fx.ANEJO_PRECIOS_GUANTES),
         documento_origen_id=documento.id,
         expediente_id=expediente.id,
         lotes={"1": Decimal("0.5400")},
@@ -132,6 +134,7 @@ def test_documento_0088_traviesas_colapsa_a_14_lineas_unicas_en_catalogo(db_sess
 
     resultado = procesar_anejo(
         fx.ANEJO_PRECIOS_TRAVIESAS,
+        extraer_texto(fx.ANEJO_PRECIOS_TRAVIESAS),
         documento_origen_id=documento.id,
         expediente_id=expediente.id,
         lotes={"1": Decimal("0.0050")},
@@ -180,6 +183,7 @@ def test_documento_0156_hereda_lote_entre_paginas_de_continuacion(db_session):
 
     resultado = procesar_anejo(
         fx.ANEJO_HERENCIA_LOTE_0156,
+        extraer_texto(fx.ANEJO_HERENCIA_LOTE_0156),
         documento_origen_id=documento.id,
         expediente_id=expediente.id,
         lotes={"1": Decimal("0.10"), "2": Decimal("0.20")},
@@ -254,13 +258,14 @@ def test_documento_0156_hereda_lote_entre_paginas_de_continuacion(db_session):
 def test_reprocesar_el_mismo_documento_no_duplica_lineas_ni_repite_llamadas(db_session):
     expediente, lote, documento = _crear_lote(db_session, "6.24/28510.0088", fx.ANEJO_PRECIOS_TRAVIESAS)
 
+    paginas = extraer_texto(fx.ANEJO_PRECIOS_TRAVIESAS)
     r1 = procesar_anejo(
-        fx.ANEJO_PRECIOS_TRAVIESAS, documento.id, expediente.id, {"1": Decimal("0.0050")}, db_session, None
+        fx.ANEJO_PRECIOS_TRAVIESAS, paginas, documento.id, expediente.id, {"1": Decimal("0.0050")}, db_session, None
     )
     guardar_lineas_catalogo(db_session, lote.id, _sin_identificador_lote(r1.lineas))
 
     r2 = procesar_anejo(
-        fx.ANEJO_PRECIOS_TRAVIESAS, documento.id, expediente.id, {"1": Decimal("0.0050")}, db_session, None
+        fx.ANEJO_PRECIOS_TRAVIESAS, paginas, documento.id, expediente.id, {"1": Decimal("0.0050")}, db_session, None
     )
     guardado2 = guardar_lineas_catalogo(db_session, lote.id, _sin_identificador_lote(r2.lineas))
 

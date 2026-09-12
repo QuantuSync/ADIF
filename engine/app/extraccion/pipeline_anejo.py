@@ -62,13 +62,29 @@ class ResultadoProcesamientoAnejo:
 
 def procesar_anejo(
     ruta_pdf,
+    paginas_texto: list[PaginaTexto],
     documento_origen_id: Optional[int],
     expediente_id: int,
     lotes: dict[str, Optional[Decimal]],
     db: Session,
     model_provider: Optional[ModelProvider] = None,
 ) -> ResultadoProcesamientoAnejo:
-    """`lotes`: identificador de lote -> su baja (None si aún no se conoce).
+    """`paginas_texto`: el texto plano de cada página, ya extraído por el
+    llamador (etapa 1 de la cascada, `app.extraccion.texto.
+    extraer_texto_cacheado`) -- bloque 6, sesión de rendimiento (`docs/
+    sesion-2026-09-12-defecto-mapeo-calidad-interfaz-rendimiento.md` bloque
+    4): antes de este cambio, esta función volvía a extraer el texto de
+    CADA página con `pdfplumber` (`p.extract_text()`) por su cuenta, para
+    localizar páginas candidatas (etapa 3) -- exactamente el mismo trabajo
+    que `_clasificar_documentos` ya había hecho segundos antes para
+    clasificar la plantilla del documento, sin reutilizarlo. Perfilado real:
+    esta segunda pasada explicaba la otra mitad del tiempo que la caché de
+    texto (migración 0029) por sí sola no llegaba a eliminar. `ruta_pdf`
+    sigue haciendo falta para `pdf.pages[...]` (la extracción de TABLAS,
+    etapas 3.5-4, necesita el objeto página real de `pdfplumber` por su
+    geometría, no solo su texto).
+
+    `lotes`: identificador de lote -> su baja (None si aún no se conoce).
     Con un solo lote (el caso de siempre hasta esta sesión: `{LOTE_UNICO:
     baja}`), todas las líneas se etiquetan con ese único identificador, sin
     pasar por la búsqueda de banda. Con varios, cada tabla localizada se
@@ -110,9 +126,6 @@ def procesar_anejo(
     cache_estructural: dict[tuple, dict[str, Optional[int]]] = {}
 
     with pdfplumber.open(ruta_pdf) as pdf:
-        paginas_texto = [
-            PaginaTexto(numero=i, texto=p.extract_text() or "") for i, p in enumerate(pdf.pages, start=1)
-        ]
         localizacion = localizar_paginas_candidatas(paginas_texto)
 
         for candidata in localizacion.candidatas:

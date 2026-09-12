@@ -65,7 +65,7 @@ from app.extraccion.modelo_precio_indexado import detectar_modelo_precio_indexad
 from app.extraccion.normalizacion import parsear_importe_es
 from app.extraccion.pipeline_anejo import procesar_anejo
 from app.extraccion.precios_unitarios import calcular_baja_efectiva
-from app.extraccion.texto import es_documento_escaneado, extraer_texto
+from app.extraccion.texto import es_documento_escaneado, extraer_texto_cacheado
 from app.interfaces.document_storage import DocumentStorage
 from app.interfaces.model_provider import ModelProvider
 from app.models import (
@@ -247,8 +247,9 @@ def _eliminar_lote_sentinela_obsoleto(db: Session, expediente_id: int) -> None:
 def _clasificar_documentos(db: Session, storage: DocumentStorage, documentos: list[Documento]) -> list[_Documento]:
     resultado = []
     for doc in documentos:
-        contenido = storage.recuperar(doc.ruta_almacenamiento)
-        paginas = extraer_texto(io.BytesIO(contenido))
+        paginas = extraer_texto_cacheado(
+            db, doc.hash, lambda: io.BytesIO(storage.recuperar(doc.ruta_almacenamiento))
+        )
         escaneado = es_documento_escaneado(paginas)
         # Un documento escaneado no tiene marcadores de texto que buscar —
         # clasificarlo igual lo mandaría a `otro` de forma indistinguible de
@@ -1165,7 +1166,7 @@ def ejecutar_extraccion_expediente(
                 lineas_creadas_doc = lineas_actualizadas_doc = 0
                 try:
                     resultado = procesar_anejo(
-                        io.BytesIO(contenido), item.documento.id, expediente.id,
+                        io.BytesIO(contenido), item.paginas, item.documento.id, expediente.id,
                         bajas_por_identificador, db, model_provider,
                     )
                     if resultado.lineas:
