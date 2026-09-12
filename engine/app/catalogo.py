@@ -420,6 +420,75 @@ def _recuperar_descripcion_columna_fantasma(
     return limpiar_texto_celda(candidata)
 
 
+# Bloque 1, sesión 2026-09-12 (auditoría, defecto de mapeo sin cabecera en
+# `6.22/28510.0094`/`0126`): imagen especular de `_recuperar_descripcion_
+# columna_fantasma` de arriba -- ahí la columna vacía de más está DESPUÉS de
+# la de descripción; aquí está ANTES, para un subconjunto de filas de la
+# MISMA tabla sin cabecera. Caso real verificado contra el PDF
+# (`ANEJO_53d9b3928f16babb.pdf` p.5, P-095 a P-102 de un total de 44 filas):
+# la inmensa mayoría de las filas de esa tabla trae
+# `[codigo, matricula, '', descripcion, '', unidad, ...]`, pero en esas
+# concretas `pdfplumber` fusiona la celda vacía intermedia con la de
+# descripción para esa fila en particular -- `[codigo, matricula,
+# descripcion, None, None, unidad, ...]`, con la columna que el mapeo señala
+# para descripción (y la siguiente) en `None` en vez de cadena vacía.
+# Como la tabla no tiene cabecera propia, el mapeo se deriva del CONTENIDO
+# de las 44 filas a la vez (`derivar_mapeo_por_contenido`): con solo 7/44
+# filas (16%, bajo `_UMBRAL_RELLENO_MINIMO`) en la columna 2, esa columna se
+# clasifica como "vacía" y la mayoritaria (3) como la de descripción -- el
+# mapeo resultante es correcto para el 84% de las filas y dejaba las 7
+# restantes sin descripción, indistinguible de una fila realmente sin
+# datos. Al traer `codigo_precio`, `matricula` (cuando la tiene) y
+# `precio_unitario` intactos en su columna de siempre, ninguna otra
+# recuperación existente se disparaba: la de columna fantasma "siguiente"
+# ya se prueba primero (misma llamada en `_construir_campos`) y falla
+# porque esa columna sale `None`; `_recuperar_descripcion_ultimo_recurso`
+# solo entra si TAMPOCO hay matrícula, y aquí P-101/P-102 sí la traen.
+#
+# Guard de ambigüedad, encontrado verificando esto contra los tests
+# existentes (no solo contra el caso real que lo motiva): mirar solo la
+# columna anterior, sin más, recupera de más -- dos columnas sin mapear
+# ADYACENTES entre sí, ambas con pinta de descripción (p.ej. un mapeo con
+# huecos amplios donde ninguna columna vecina está reclamada), son
+# ambiguas y no deben resolverse a ciegas por posición, mismo criterio de
+# `_recuperar_descripcion_ultimo_recurso`. La firma real de esta tabla
+# (arriba) tiene una marca más específica y verificable sin escanear toda
+# la fila: el colapso deja en `None` DOS columnas seguidas -- la de
+# descripción Y la siguiente, que en esta forma de tabla es un hueco sin
+# reclamar por ningún campo (la unidad de medida cae más lejos). Se exige
+# esa misma huella (columna siguiente también vacía y sin reclamar) antes
+# de mirar la anterior: sin ella, un mapeo donde la columna siguiente SÍ
+# está reclamada por otro campo (p.ej. unidad de medida justo al lado) no
+# es este fenómeno, y se deja para `_recuperar_descripcion_ultimo_recurso`,
+# que sí escanea la fila entera para decidir si hay una única candidata.
+def _recuperar_descripcion_columna_fantasma_anterior(
+    fila: list[Optional[str]], mapeo: dict[str, Optional[int]]
+) -> Optional[str]:
+    """Solo prueba la columna INMEDIATAMENTE anterior a la de descripción --
+    nunca más lejos, sin garantía de que el colapso sea de una sola columna
+    en otra fila -- y nunca si esa columna ya la usa otro campo del mapeo,
+    mismo criterio que la variante "siguiente". Exige además que la columna
+    siguiente a la de descripción esté vacía y sin reclamar (ver el
+    comentario de arriba): la huella del colapso real, no solo "esta fila
+    no trajo descripción"."""
+    indice_descripcion = mapeo.get("descripcion")
+    if indice_descripcion is None:
+        return None
+    otros_indices = {indice for campo, indice in mapeo.items() if campo != "descripcion"}
+
+    indice_siguiente = indice_descripcion + 1
+    if indice_siguiente in otros_indices or _parece_descripcion_recuperable(_valor_en(fila, indice_siguiente)):
+        return None
+
+    indice_anterior = indice_descripcion - 1
+    if indice_anterior < 0 or indice_anterior in otros_indices:
+        return None
+    candidata = _valor_en(fila, indice_anterior)
+    if not _parece_descripcion_recuperable(candidata):
+        return None
+    return limpiar_texto_celda(candidata)
+
+
 # Sesión de verificación del Excel exportado (2026-09-08): último recurso
 # antes de dar una fila por "sin descripción ni matrícula" -- verificado
 # contra dos documentos reales (`6.22/28510.0039` p.14, `6.25/28510.0213`
@@ -778,6 +847,24 @@ def _construir_campos(
             # saber que esta línea puede seguir envuelta en las filas
             # siguientes -- ver `_MOTIVO_DESCRIPCION_COLUMNA_FANTASMA`.
             motivo_revision = _acumular_motivo(motivo_revision, _MOTIVO_DESCRIPCION_COLUMNA_FANTASMA)
+        else:
+            # Bloque 1, sesión 2026-09-12: si la columna siguiente no trajo
+            # nada recuperable, prueba la anterior (ver docstring de
+            # `_recuperar_descripcion_columna_fantasma_anterior`). Sin motivo
+            # de encadenamiento propio -- a diferencia del caso "siguiente",
+            # no hay evidencia en el corpus de una descripción envuelta en
+            # varias filas desplazada hacia atrás, así que no se activa la
+            # lógica de `construir_lineas_desde_tabla` que busca fragmentos
+            # de continuación en la columna siguiente.
+            recuperada_anterior = _recuperar_descripcion_columna_fantasma_anterior(fila, mapeo)
+            if recuperada_anterior:
+                descripcion = recuperada_anterior
+                motivo_revision = _acumular_motivo(
+                    motivo_revision,
+                    "descripción recuperada de la columna anterior: esta fila concreta de la tabla "
+                    "fusiona una columna en blanco intermedia con la de descripción, confirmar antes "
+                    "de dar por buena",
+                )
 
     cantidad_bruta = _valor("cantidad")
     cantidad = None

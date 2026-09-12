@@ -1502,6 +1502,30 @@ def test_construir_linea_catalogo_recupera_descripcion_de_columna_fantasma_con_m
     assert linea["motivo_revision"] is not None
 
 
+def test_construir_linea_catalogo_recupera_descripcion_de_columna_fantasma_anterior():
+    # Bloque 1, sesión 2026-09-12 (auditoría del defecto de mapeo sin
+    # cabecera en `6.22/28510.0094`/`0126`): fila real de
+    # `ANEJO_53d9b3928f16babb.pdf` p.5 (P-101, matrícula 618050300). El
+    # mapeo derivado del contenido de la tabla (mayoritario en sus 44 filas)
+    # sitúa descripción en el índice 3, pero en esta fila concreta
+    # `pdfplumber` fusiona la columna vacía intermedia con la de descripción
+    # -- el texto real cae en el índice 2 y los índices 3 y 4 salen `None`
+    # en vez de cadena vacía. La recuperación "columna siguiente" (índice 4)
+    # no encuentra nada; esta prueba que la "columna anterior" sí.
+    mapeo = {"codigo_precio": 0, "matricula": 1, "descripcion": 3, "unidad_medida": 5, "cantidad": None, "precio_unitario": 9}
+    fila = ["P-101", "618050300", "EN-54", None, None, "UD.", "P16.5000.00", "ALTO", "", "91.314,71 €", ""]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=5, documento_origen_id=672, expediente_id=1, baja_lote=None, orden_aparicion=40
+    )
+
+    assert linea is not None
+    assert linea["matricula"] == "618050300"
+    assert linea["descripcion"] == "EN-54"
+    assert linea["precio_unitario"] == Decimal("91314.71")
+    assert linea["motivo_revision"] is not None
+
+
 def test_construir_lineas_desde_tabla_encadena_fragmentos_de_descripcion_envuelta():
     # Mismo hallazgo real, generalizado: el resto de la frase envuelta
     # ("SECCIÓN CIRCULAR DE", "120 MM2 DE", "ALEACIÓN COBRE-", "MAGNESIO
