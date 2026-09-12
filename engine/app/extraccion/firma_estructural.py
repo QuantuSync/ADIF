@@ -59,15 +59,34 @@ _UMBRAL_RELLENO_MINIMO = 0.2
 _REFERENCIA_NORMATIVA_RE = re.compile(r"^\d+(?:\.\d+){2,}$")
 _REFERENCIA_ALFANUMERICA_RE = re.compile(r"^[A-Za-zÀ-ÿ]{1,4}\d{1,4}(?:[.,]\d{1,4}){1,}")
 
+# Bloque 7, sesión 2026-09-13 (confusión matrícula/código de precio en
+# tablas cuyo precio no lleva `€`): a diferencia de "contiene una coma
+# decimal" (que sí confunde una descripción real tipo
+# "DS-B1-54-320/230-0,11-CR-D" con un precio, motivo por el que `_parece_
+# precio` seguía sin cubrir esto), esta forma exige que la celda ENTERA
+# (ancla `^...$`, nunca solo una parte) sea un número con la gramática
+# monetaria española: grupos de miles de exactamente 3 dígitos separados
+# por puntos, y EXACTAMENTE dos decimales tras una coma -- verificado
+# contra `6.22_28510.0058/ANEJO_a9e7c95651661aad.pdf` p.15 (tabla real de
+# tornillería sin cabecera ni columna de código de precio, precio sin `€`:
+# "7,40", "5,03"...). "DS-B1-54-320/230-0,11-CR-D" no cuadra (le sobran
+# caracteres tras el "11"); una cantidad con separador de miles pero sin
+# decimales ("1.200", "70.000", vistas en la misma tabla real) tampoco
+# (falta la coma). Si una columna de cantidad real usara alguna vez decimales
+# con coma, quedaría ambigua entre "precio" y "cantidad" -- `derivar_mapeo_
+# por_contenido` ya exige exactamente una columna de tipo "precio" y
+# devuelve `None` ante dos, así que una ambigüedad así cae a revisión sin
+# adivinar, nunca a una asignación equivocada.
+_PRECIO_SIN_SIMBOLO_RE = re.compile(r"^\d{1,3}(?:\.\d{3})*,\d{2}$")
+
 
 def _parece_precio(valor: str) -> bool:
-    # Solo el símbolo € -- CONTEXTO.md sección 8: "El símbolo € viene dentro
-    # de la celda". Un patrón más laxo (p.ej. "contiene una coma decimal")
-    # confunde una descripción real con forma "DS-B1-54-320/230-0,11-CR-D"
-    # (verificado contra `6.22/28510.0126`) con una columna de precio de
-    # verdad: la coma decimal aparece dentro del código de material, no solo
-    # en importes.
-    return "€" in valor
+    # CONTEXTO.md sección 8: "El símbolo € viene dentro de la celda" cubre
+    # la mayoría de las tablas del corpus; `_PRECIO_SIN_SIMBOLO_RE` cubre las
+    # que no lo llevan, con una gramática lo bastante estricta como para no
+    # confundir un código o una designación técnica con un precio real (ver
+    # comentario de arriba).
+    return "€" in valor or bool(_PRECIO_SIN_SIMBOLO_RE.match(valor))
 
 
 def _clasificar_columna(valores: list[str], total_filas: int) -> str:

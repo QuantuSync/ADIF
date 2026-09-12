@@ -1,7 +1,9 @@
 # Sesión 2026-09-12 — defecto de mapeo sin cabecera, barrido de calidad, repaso de interfaz, rendimiento
 
-Sesión larga con encargo en cinco bloques. Resumen ejecutivo en `CONTEXTO.md`
-sección 16 (pendientes); aquí el detalle completo, cifras y verificación.
+Sesión larga con encargo en cinco bloques, continuada el mismo día con dos
+bloques más (6 y 7) sobre dos de los hallazgos que el bloque 4 y el bloque 2
+habían dejado sin implementar. Resumen ejecutivo en `CONTEXTO.md` sección 16
+(pendientes); aquí el detalle completo, cifras y verificación.
 
 ---
 
@@ -292,22 +294,161 @@ frecuencia.
   solo por expedientes nuevos); 358 expedientes activos, sin cambio (mismo
   corpus, sin nuevos descubrimientos de sindicación en el intervalo).
 
-### Pendiente al cerrar esta sesión
+### Pendiente al cerrar el bloque 5 (resuelto más abajo, bloques 6 y 7)
 
 - Bloque 2, punto 4: confusión matrícula/código-de-precio en tablas sin
   cabecera cuyo precio no lleva `€` (8 expedientes, 771 líneas) — causa
   parcialmente localizada (`_parece_precio` ciego a precios sin símbolo de
-  moneda), corrección exacta sin confirmar. Ver detalle arriba.
-- Bloque 2, punto 4 (segundo caso): familia de cabeceras de equipamiento de
-  telecomunicaciones (`6.24/28510.0184` y variantes, 7 firmas cacheadas
-  inconsistentes) con precio unitario mal derivado cuando el documento no
-  declara ningún precio real — decisión de producto pendiente (¿precio
-  `None` y fuera del Excel, o a revisión?).
-- Bloque 2, punto 5: heurística de "descripción truncada" descartada por
-  poco fiable — sin recuento de confianza, decisión pendiente sobre si
-  vale la pena una señal mejor.
-- Bloque 3, punto 2: subcabecera visual opcional para distinguir columnas
-  de cruce — pulido menor, no urgente.
+  moneda), corrección exacta sin confirmar. **Cerrado, bloque 7.**
 - Bloque 4: cuatro propuestas de rendimiento analizadas y priorizadas
   (caché de texto por hash de documento es la de mejor relación
   impacto/riesgo), ninguna implementada por encargo explícito de la sesión.
+  **Implementada, bloque 6.**
+
+---
+
+## Bloque 6 — Caché de texto extraído por hash de documento (cerrado)
+
+Implementa la propuesta 1 del bloque 4. `CacheTextoDocumento` (migración
+0029), clave `Documento.hash` (contenido, no id ni ruta), invalidable
+subiendo `VERSION_LOGICA_TEXTO` (`app.extraccion.texto`) sin borrar
+filas a mano -- una fila con versión distinta a la actual se trata como
+caché ausente y se recalcula. `extraer_texto_cacheado` recibe una función
+(`obtener_pdf`), no el PDF ya en mano: en un acierto de caché ni siquiera
+se lee el fichero del almacenamiento.
+
+**Segunda causa encontrada verificando el efecto real, que la caché sola no
+bastaba para arreglar:** `procesar_anejo` (etapas 3-6, mapeo y extracción de
+tablas) volvía a extraer el texto de cada página con `pdfplumber` por su
+cuenta, para localizar páginas candidatas (etapa 3) -- exactamente el mismo
+trabajo que `_clasificar_documentos` (etapa 1) ya había hecho segundos antes
+para clasificar la plantilla, sin reutilizarlo. Confirmado con `cProfile`
+sobre un expediente aislado ya con la caché caliente: `page.extract_text()`
+seguía apareciendo 101 veces, 55,2s de 55,6s totales (99%), llamado desde
+`pipeline_anejo.py`, no desde la caché. Corregido: `procesar_anejo` recibe
+ahora el texto ya extraído del llamador (`item.paginas`) en vez de
+recalcularlo -- sigue abriendo el PDF con `pdfplumber` (`ruta_pdf`), pero
+solo para la geometría real de las tablas, nunca para su texto.
+
+**Medido con un reproceso real** (perfil directo sobre los mismos 20
+expedientes estratificados del bloque 4, sin red, `IDS_MUESTRA` idéntico
+antes y después):
+
+| Pasada | Tiempo total (20 expedientes) | Tiempo medio/expediente |
+|---|---|---|
+| Antes (bloque 4, doble extracción, sin caché) | 497-519s | ~25s |
+| Después, caché en frío (recién poblada, ya sin doble extracción) | 308,2s | 15,4s |
+| Después, caché en caliente (segundo reproceso, mismos documentos) | **29,6s** | **1,5s** |
+
+**10,4× más rápido** en caliente frente al "antes". Extrapolado a los 358
+expedientes activos (98,7 páginas/expediente de media): de las 3-4 horas
+reportadas a **~9 minutos** con la caché ya poblada -- el primer reproceso
+tras desplegar esto sigue costando lo de siempre menos la mitad (~1,5h,
+al eliminar solo la extracción duplicada), pero cada reproceso posterior
+sobre los mismos documentos es casi gratis en esta etapa. En la pasada
+caliente, `find_tables()` (localizar tablas dentro de las páginas
+candidatas, trabajo real que sigue haciendo falta) pasa a ser el coste
+dominante (71,7%, 21,2s) -- ya no hay ningún "otros" sin explicar.
+
+**Verificado:**
+- 665 tests (661 + 4 nuevos), todos verdes.
+- Camino real de la cola (`POST /expedientes/{id}/extraer`, recogido por
+  el worker): completa correctamente con la caché activa.
+- Auditoría automática tras varios reprocesos repetidos de la misma
+  muestra: 0 errores, mismos 4 avisos de siempre.
+- Catálogo estable en 22.363 líneas pese a reprocesar la misma muestra de
+  20 expedientes cuatro veces seguidas (dos en el bloque 4, dos aquí) --
+  sin duplicar nada (CONTEXTO.md sección 9.9).
+- `6.22/28510.0094` (bloque 1) sigue con 0 líneas sin descripción tras
+  este cambio: la caché de texto no altera ningún resultado, solo evita
+  recalcularlo.
+
+Commit `afb11af`.
+
+---
+
+## Bloque 7 — Confusión matrícula/código de precio sin símbolo `€` (cerrado)
+
+**Diagnóstico terminado.** `_clasificar_columna`
+(`app.extraccion.firma_estructural`) solo reconocía una columna como
+"precio" si sus valores contenían el símbolo `€`. Verificado contra el PDF
+real (`6.22_28510.0058/ANEJO_a9e7c95651661aad.pdf` p.15, tornillería: precio
+"7,40", "5,03"... sin `€`): `clasificar_columnas` etiquetaba esa columna
+como "codigo_repetido" en vez de "precio", así que `derivar_mapeo_por_
+contenido` nunca encontraba ninguna columna de precio
+(`indices_precio == []`) y se rendía sin más -- la tabla caía siempre al
+modelo. Trazado en vivo (llamada real al modelo sobre esta tabla exacta):
+el modelo devolvió `codigo_precio` apuntando a la propia columna de
+matrícula, y aunque `corregir_confusion_matricula_codigo_precio` sí lo
+arregla cuando se dispara, la vía de fondo seguía siendo no determinista
+-- exactamente el riesgo que el propio código ya documentaba ("el modelo
+puede producir variantes distintas... en otro reproceso").
+
+**Arreglo, criterio estructural sin símbolo de moneda:** `_PRECIO_SIN_
+SIMBOLO_RE` (`^\d{1,3}(?:\.\d{3})*,\d{2}$`) exige que la celda ENTERA sea
+un número con la gramática monetaria española -- grupos de miles de
+exactamente 3 dígitos y EXACTAMENTE dos decimales tras una coma. Verificado
+que no confunde los dos casos reales ya conocidos que motivaron dejar
+`_parece_precio` en solo-€: una designación técnica con coma decimal
+embebida ("DS-B1-54-320/230-0,11-CR-D", el ancla `^...$` exige que no
+sobre nada tras los decimales) y una cantidad con separador de miles pero
+sin decimales ("1.200", "70.000", sin coma). Con esto,
+`derivar_mapeo_por_contenido` resuelve la tabla de tornillería entera de
+forma determinista, sin llamar al modelo en absoluto. Si una columna de
+cantidad real usara alguna vez decimales con coma, quedaría ambigua entre
+"precio" y "cantidad" -- `derivar_mapeo_por_contenido` ya exige exactamente
+una columna de tipo "precio" y se rinde ante dos, así que esa ambigüedad
+cae a revisión sin adivinar, nunca a una asignación equivocada (mismo
+principio pedido: "donde no se pueda distinguir con certeza, a revisión").
+
+**Reprocesados los 8 expedientes afectados, efecto medido:**
+
+| Expediente | Líneas con `codigo_precio = matrícula` antes | Después |
+|---|---|---|
+| `6.22/28510.0033` | 217 | **0** |
+| `6.22/28510.0057` | 217 | **0** |
+| `6.22/28510.0058` | 217 | **0** |
+| `6.24/28510.0184` | 41 | 41 (sin cambio, ver nota) |
+| `6.21/28510.0097` | 5 | 5 (sin cambio, ver nota) |
+| `6.21/28510.0148` | 5 | 5 (sin cambio, ver nota) |
+| `6.21/28510.0149` | 5 | 5 (sin cambio, ver nota) |
+| `6.24/28510.0173` | 5 | 5 (sin cambio, ver nota) |
+| **Total** | **712** | **61** (-651, -91%) |
+
+Los 3 expedientes principales (651 de las 712 líneas, 91%) quedan resueltos
+del todo, sin ninguna línea de mapeo incoherente restante y sin depender del
+modelo. Verificado también que las 392 líneas de cada uno de esos tres
+expedientes (comparten el mismo documento, mismo patrón que el bloque 1)
+salen ahora idénticas entre sí, con `codigo_precio` propio y `matricula`
+propia, cada una en su columna real.
+
+**Las 61 líneas restantes NO son el mismo defecto, sin tocar en esta
+sesión:**
+- `6.24/28510.0184` (41 líneas): la familia de cabeceras de equipamiento de
+  telecomunicaciones sin precio real en el origen (ver bloque 2 arriba) --
+  causa distinta (el documento no declara ningún precio en absoluto), fuera
+  del alcance de este arreglo por diseño, sigue pendiente de decisión de
+  producto.
+- Los 4 expedientes de 5 líneas cada uno (`6.21/28510.0097`/`0148`/`0149`,
+  `6.24/28510.0173`): **hallazgo nuevo de esta sesión**, verificado contra
+  el PDF real (`6.21_28510.0149/CONTRATO_7e00edb20395e753.pdf` p.124/127):
+  la tabla que trae la matrícula y la descripción es una de
+  "características técnicas" sin ninguna columna de precio
+  (`[matrícula, "", "", descripción, criterios_técnicos]`) -- el precio que
+  aparece en el catálogo para esas matrículas viene de OTRA tabla del
+  documento, no de esta. Patrón distinto de "precio sin símbolo", sin
+  diagnosticar del todo en el tiempo de esta sesión: anotado para una
+  sesión futura, no forzado aquí.
+
+**Verificado:**
+- 669 tests (665 + 4 nuevos), todos verdes.
+- Auditoría automática tras el reproceso: 0 "error" nuevos de sustancia --
+  el único hallazgo nuevo (`lineas_cambian_sin_cambiar_documentos`, 3
+  expedientes) es la propia auditoría detectando, correctamente, que estos
+  3 expedientes cambiaron de contenido sin cambiar de documento: es
+  exactamente el efecto esperado de este arreglo (líneas antes descartadas
+  por "mapeo incoherente" ahora se resuelven bien), no un defecto nuevo --
+  confirmado revisando que ya no queda ninguna línea con ese motivo en los
+  tres expedientes.
+- Catálogo: 22.363 → 22.438 líneas (+75, coherente con líneas antes
+  excluidas por mapeo incoherente que ahora se incluyen correctamente).
