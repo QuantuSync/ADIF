@@ -1359,6 +1359,51 @@ suficientes, no ahora.
   Detalle completo, la tabla de relleno antes/después por columna y el
   cierre de los seis bloques del encargo en
   `docs/sesion-2026-09-10-maestro-materiales-real.md`.
+- **Defecto de mapeo sin cabecera de la auditoría (`6.22/28510.0094`/`0126`):
+  cerrado (sesión 2026-09-12, bloque 1,
+  `docs/sesion-2026-09-12-defecto-mapeo-calidad-interfaz-rendimiento.md`).**
+  Causa real: en un subconjunto de filas de una tabla sin cabecera,
+  `pdfplumber` fusiona la columna en blanco intermedia con la de
+  descripción para esa fila concreta, desplazando el texto una columna a la
+  izquierda -- `derivar_mapeo_por_contenido` mapea bien la mayoría de la
+  tabla (84% de las filas) pero ninguna recuperación existente cubría las
+  filas desplazadas (la de columna fantasma solo miraba la columna
+  siguiente, no la anterior). Añadida
+  `_recuperar_descripcion_columna_fantasma_anterior` con guarda de
+  ambigüedad. Verificado en el stack real: 0 líneas sin descripción, 0
+  grupos duplicados, auditoría automática a 0 errores.
+- **Barrido de calidad del catálogo a 22.363 líneas: medido, un hallazgo
+  cerrado, dos anotados para decisión (sesión 2026-09-12, bloque 2).**
+  Confirmado sin defecto: descripciones-cabecera (0), precios repetidos
+  dentro de expediente (590 grupos, todos legítimos -- balasto/carril con
+  precios de referencia compartidos), cantidades extremas (47, ya conocidas
+  o plausibles), descuadre precio adjudicado/baja (0). Sin cerrar: **771
+  líneas en 8 expedientes** con `codigo_precio` igual a la matrícula --
+  causa parcial (`_parece_precio` solo reconoce el símbolo `€`, ciego a
+  tablas cuyo precio no lo lleva, como `6.22/28510.0058` p.15) sin
+  confirmar la corrección exacta; **57 líneas de `6.24/28510.0184`**
+  (equipamiento de telecomunicaciones sin precio real en el origen, 7
+  variantes de cabecera cacheadas de forma inconsistente) necesita decisión
+  de producto antes de tocar código; heurística de "descripción truncada"
+  probada y descartada por poco fiable (2.362 falsos positivos sobre texto
+  español legítimo).
+- **Repaso de interfaz con datos reales: cerrado (sesión 2026-09-12, bloque
+  3).** Catálogo a 1280px, cola de candidatos de matrícula (62ms, 1.387
+  pendientes) y coherencia entre paneles ya estaban bien. Corregido:
+  `aviso_sindicacion` y `aviso_conflicto_documento_manual` (junto con
+  `aviso_ingesta_manual`, sección 16 más abajo) se muestran ahora en
+  `/expedientes`, mismo patrón que `aviso_descubrimiento_pedidos`.
+- **Rendimiento de un reproceso completo (3-4h, 358 expedientes): perfilado
+  con datos reales, nada implementado por encargo explícito (sesión
+  2026-09-12, bloque 4).** Hallazgo contrario a la intuición: **~99% del
+  tiempo es texto plano** (`page.extract_text()` de `pdfplumber`, etapa 1
+  de la cascada, sobre TODAS las páginas de TODOS los documentos), no
+  extracción de tablas (0,4%), ni modelo (0,02%, ya llama poquísimo por
+  diseño), ni base de datos (0,3%). Un expediente sin ninguna tabla puede
+  tardar 30s solo en esta etapa si sus documentos son grandes. Propuesta de
+  mejor relación impacto/riesgo: cachear el texto extraído por hash de
+  documento (mismo principio que `cache_mapeo_cabecera`), para que un
+  reproceso no vuelva a pagar este coste en documentos sin cambios.
 
 ---
 
@@ -1381,4 +1426,5 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `sesion-2026-09-09-auditoria-mapeo-documentos.md`,
 `sesion-2026-09-09-reproceso-completo-y-bloques-2-3-4.md`,
 `sesion-2026-09-10-maestro-materiales-real.md`,
+`sesion-2026-09-12-defecto-mapeo-calidad-interfaz-rendimiento.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.
