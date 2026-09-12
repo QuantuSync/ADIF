@@ -222,7 +222,9 @@ def _obtener_o_crear_lote(db: Session, expediente_id: int, identificador: str) -
     return lote
 
 
-def _eliminar_lote_sentinela_obsoleto(db: Session, expediente_id: int) -> None:
+def _eliminar_lote_sentinela_obsoleto(
+    db: Session, expediente_id: int, lotes_declarados: list[LoteDeclarado]
+) -> None:
     """Idempotencia (CONTEXTO.md sección 9.9) al migrar al arreglo de
     identidad de lote (sección 27): un expediente reprocesado con el
     generalizador nuevo puede pasar de "un único lote implícito"
@@ -234,7 +236,25 @@ def _eliminar_lote_sentinela_obsoleto(db: Session, expediente_id: int) -> None:
     conviviendo con las nuevas. Solo actúa cuando el expediente tiene
     EXACTAMENTE un lote existente y es el sentinela: un expediente que ya
     tenía lotes reales de una ejecución anterior correcta no se toca aquí,
-    lo actualiza `_obtener_o_crear_lote` como siempre."""
+    lo actualiza `_obtener_o_crear_lote` como siempre.
+
+    Bloque 4, sesión 2026-09-12 (continuación, verificación de determinismo):
+    `LOTE_UNICO = "1"` -- el mismo texto que un lote REAL declarado "Lote 1"
+    en un documento real (verificado contra 11 expedientes reales del
+    corpus, `6.23/28510.0051` entre ellos: título "2 LOTES", su único lote
+    real se llama "1"). Sin distinguir los dos casos, esta función borraba y
+    `_obtener_o_crear_lote` recreaba el mismo lote -- con un `id` nuevo cada
+    vez -- en CADA reproceso, para siempre, no solo la primera vez que
+    migraba de sentinela a real: verificado en vivo reprocesando el corpus
+    completo dos veces seguidas, el `id` de `Lote` y de cada `LineaCatalogo`
+    que cuelga de él cambiaba entre pasadas sin que ningún dato cambiara
+    (1.071 líneas solo en `6.23/28510.0051`). La comprobación de más:
+    `lotes_declarados` es el resultado de ESTA MISMA pasada -- si alguno de
+    ellos declara justo el identificador "1", el lote existente con ese
+    identificador no es un sentinela obsoleto, es el mismo lote real
+    reconfirmándose, y `_obtener_o_crear_lote` ya lo reutiliza sin tocarlo."""
+    if any(declarado.identificador == LOTE_UNICO for declarado in lotes_declarados):
+        return
     lotes_existentes = db.execute(select(Lote).where(Lote.expediente_id == expediente_id)).scalars().all()
     if len(lotes_existentes) != 1 or lotes_existentes[0].identificador_lote != LOTE_UNICO:
         return
@@ -818,10 +838,30 @@ def ejecutar_extraccion_expediente(
         # `nombre_archivo` como atributo de instancia (no una columna
         # mapeada, nunca se persiste) para que el resto de esta función siga
         # leyendo `item.documento.nombre_archivo` sin cambios.
+        # Bloque 4, sesión 2026-09-12 (continuación, verificación de
+        # determinismo): sin `order_by`, Postgres no garantiza el orden de
+        # las filas devueltas -- puede variar entre dos ejecuciones idénticas
+        # de esta misma consulta sin que cambie ningún dato. Verificado en
+        # vivo reprocesando el corpus completo dos veces seguidas: el mismo
+        # `codigo_precio` presente en dos documentos reales del mismo
+        # expediente (`6.23/28510.0042`, ANEJO_1 y CONTRATO comparten una
+        # fila "P-001" real) terminaba con `documento_origen_id`/`pagina`/
+        # `precio_unitario` distintos entre pasadas -- toda la cascada
+        # posterior asume "el primero de `documentos` que declara algo gana"
+        # (`_priorizar_por_origen` usa `sorted`, que es estable, pero solo
+        # preserva un orden de partida que ya tiene que ser estable) sin que
+        # nada garantizara ese orden de partida. `Documento.id` (autonumérico,
+        # asignado en el momento en que cada documento se registró por
+        # primera vez) es estable entre ejecuciones aunque no codifique
+        # ninguna prioridad semántica -- esa prioridad ya la deciden los
+        # mecanismos existentes (`_priorizar_por_origen`, `elegir_baja_
+        # preferida`, `_nivel_campo`), que solo necesitan un punto de partida
+        # estable para desempatar siempre igual.
         filas_documentos = db.execute(
             select(Documento, DocumentoExpediente.nombre_archivo)
             .join(DocumentoExpediente, DocumentoExpediente.documento_id == Documento.id)
             .where(DocumentoExpediente.expediente_id == expediente.id)
+            .order_by(Documento.id)
         ).all()
         documentos = []
         for doc, nombre_archivo in filas_documentos:
@@ -940,7 +980,7 @@ def ejecutar_extraccion_expediente(
                         f"expediente bajo el que están archivados sus documentos ({expediente.codigo_expediente})",
                     )
 
-                _eliminar_lote_sentinela_obsoleto(db, expediente.id)
+                _eliminar_lote_sentinela_obsoleto(db, expediente.id, lotes_declarados)
                 lotes, motivo_lotes = _procesar_lotes_declarados(
                     db, expediente, lotes_declarados, resultado_lotes.documento_id
                 )

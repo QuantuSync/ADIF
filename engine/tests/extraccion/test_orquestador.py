@@ -641,16 +641,30 @@ def test_reprocesar_expediente_con_sentinela_previo_lo_sustituye(db_session):
     identidad de lote: un expediente que ya tenía el lote implícito único
     (de antes de esta sesión) con líneas de catálogo colgando de él no debe
     dejarlas conviviendo con los datos correctos una vez que se reprocesa y
-    se detecta que en realidad es multi-lote."""
+    se detecta que en realidad es multi-lote.
+
+    Bloque 4, sesión 2026-09-12 (continuación): desde que
+    `_eliminar_lote_sentinela_obsoleto` deja de borrar el lote cuando esta
+    pasada vuelve a declarar el identificador "1" de verdad (mismo texto que
+    `LOTE_UNICO`, verificado contra 11 expedientes reales donde borraba y
+    recreaba el mismo lote -- con un `id` nuevo -- en cada reproceso sin que
+    ningún dato cambiara), la línea de basura ya no se limpia por ahí: la
+    limpia `podar_lineas_obsoletas_de_documento` (mecanismo general, sesión
+    2026-09-10), acotado a `(expediente_id, documento_id)` -- por eso la
+    línea de basura de este test necesita un `documento_origen_id` real
+    (antes no hacía falta, la borraba el camino del sentinela)."""
     expediente = _crear_expediente_con_documentos(
         db_session, "6.24/28510.0088",
         [("ADJUDICACION", fx.PROPUESTA_LC27_UTE), ("ANEJO", fx.ANEJO_PRECIOS_TRAVIESAS)],
+    )
+    documento_anejo = (
+        db_session.query(Documento).filter_by(hash="hash-6.24/28510.0088-ANEJO").one()
     )
     lote_sentinela = Lote(expediente_id=expediente.id, identificador_lote=LOTE_UNICO, baja_lote=Decimal("0.9999"))
     db_session.add(lote_sentinela)
     db_session.commit()
     db_session.add(LineaCatalogo(
-        expediente_id=expediente.id, lote_id=lote_sentinela.id,
+        expediente_id=expediente.id, lote_id=lote_sentinela.id, documento_origen_id=documento_anejo.id,
         clave_linea="basura", orden_aparicion=0, codigo_precio="P-999", descripcion="basura del sentinela",
     ))
     db_session.commit()
@@ -666,6 +680,39 @@ def test_reprocesar_expediente_con_sentinela_previo_lo_sustituye(db_session):
     assert lotes[0].baja_lote == Decimal("0.0050")
     assert lotes[0].codigo_expediente_lote == "6.24/28510.0113"
     assert db_session.query(LineaCatalogo).filter_by(codigo_precio="P-999").first() is None
+
+
+def test_reprocesar_dos_veces_un_lote_real_llamado_uno_no_cambia_su_id(db_session):
+    """Bloque 4, sesión 2026-09-12 (continuación, verificación de
+    determinismo): caso real, `6.23/28510.0051` (título "2 LOTES", su único
+    lote real declarado se llama "1", el mismo texto que `LOTE_UNICO`) --
+    verificado reprocesando el corpus completo dos veces seguidas que el
+    `id` de `Lote` y de cada `LineaCatalogo` que cuelga de él cambiaba entre
+    pasadas sin que ningún dato cambiara, porque `_eliminar_lote_sentinela_
+    obsoleto` confundía el lote real "1" con el sentinela de migración del
+    mismo nombre y lo borraba y recreaba en cada pasada. Reprocesar dos
+    veces seguidas el mismo expediente (sin ningún sentinela previo, el
+    caso normal) debe conservar el mismo `Lote.id`."""
+    expediente = _crear_expediente_con_documentos(
+        db_session, "6.24/28510.0088",
+        [("ADJUDICACION", fx.PROPUESTA_LC27_UTE), ("ANEJO", fx.ANEJO_PRECIOS_TRAVIESAS)],
+    )
+    trabajo = SimpleNamespace(expediente_id=expediente.id)
+
+    ejecutar_extraccion_expediente(db_session, _StorageDirecta(), trabajo, model_provider=None)
+    lote_id_primera_pasada = db_session.query(Lote).filter_by(expediente_id=expediente.id).one().id
+    linea_ids_primera_pasada = sorted(
+        l.id for l in db_session.query(LineaCatalogo).filter_by(expediente_id=expediente.id).all()
+    )
+
+    ejecutar_extraccion_expediente(db_session, _StorageDirecta(), trabajo, model_provider=None)
+    lote_id_segunda_pasada = db_session.query(Lote).filter_by(expediente_id=expediente.id).one().id
+    linea_ids_segunda_pasada = sorted(
+        l.id for l in db_session.query(LineaCatalogo).filter_by(expediente_id=expediente.id).all()
+    )
+
+    assert lote_id_primera_pasada == lote_id_segunda_pasada
+    assert linea_ids_primera_pasada == linea_ids_segunda_pasada
 
 
 def test_codigo_principal_declarado_nunca_se_confunde_con_matriz(db_session):
