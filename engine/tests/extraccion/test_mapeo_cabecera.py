@@ -1,6 +1,7 @@
 from app.extraccion.firma_cabecera import calcular_firma_cabecera
 from app.extraccion.mapeo_cabecera import (
     corregir_confusion_matricula_codigo_precio,
+    corregir_confusion_precio_cantidad,
     derivar_mapeo_por_contenido,
     evaluar_coherencia_mapeo,
     intentar_mapeo_determinista,
@@ -397,6 +398,28 @@ def test_corregir_confusion_matricula_codigo_precio_variante_misma_columna_para_
     }
 
 
+def test_corregir_confusion_matricula_codigo_precio_cabecera_desalineada_con_sus_propios_datos():
+    # Caso real, bloque 2, sesión 2026-09-12 (continuación):
+    # `6.21/28510.0149_ANEJO_bd79fa987e814be3.pdf` p.6 -- cabecera real
+    # "Nº MATRÍCULA" en la columna 1, pero la matrícula real cae en la
+    # columna 0 (sin nombre) en el 100% de las filas; la columna 1 está
+    # vacía siempre. `matricula` SÍ tiene "su propia columna" en la forma
+    # del mapeo, pero esa columna no trae ningún dato real.
+    filas = [
+        ["697100100", None, None, "Arnés anticaída", "..."],
+        ["697100105", None, None, "Cuerda de conexión", "..."],
+    ]
+    mapeo = {
+        "codigo_precio": 0, "matricula": 1, "descripcion": 3,
+        "unidad_medida": None, "cantidad": None, "precio_unitario": None,
+    }
+    corregido = corregir_confusion_matricula_codigo_precio(mapeo, filas)
+    assert corregido == {
+        "codigo_precio": None, "matricula": 0, "descripcion": 3,
+        "unidad_medida": None, "cantidad": None, "precio_unitario": None,
+    }
+
+
 def test_corregir_confusion_matricula_codigo_precio_no_toca_si_matricula_en_otra_columna_distinta():
     # `matricula` con su PROPIA columna, distinta de `codigo_precio`: no hay
     # ninguna confusión que resolver, aunque la columna de `codigo_precio`
@@ -419,6 +442,80 @@ def test_corregir_confusion_matricula_codigo_precio_sin_codigo_precio_no_opina()
 
 def test_evaluar_coherencia_mapeo_sin_filas_no_opina():
     assert evaluar_coherencia_mapeo({"descripcion": 1, "precio_unitario": 2}, []) is None
+
+
+# --- corregir_confusion_precio_cantidad / evaluar_coherencia_mapeo sin
+# columna de precio (Bloque 2, sesión 2026-09-12, continuación) ---
+# Caso real: `6.24/28510.0184_CONTRATO_b15b77d1fff4f23f.pdf` p.97-98,
+# equipamiento de telecomunicaciones. La tabla trae Matrícula, Designación,
+# Referencia del fabricante, Precio Referencia Adquisición (siempre en
+# blanco), Precio Referencia Reparación (siempre en blanco), Cantidad
+# Estimada (siempre "1") -- el documento no declara ningún precio para este
+# material. Sin más pista que 2-3 filas de ejemplo, el modelo mapeó
+# `precio_unitario` a la columna de cantidad, produciendo un "precio" de
+# 1,00 € idéntico en cada fila.
+_FILAS_EQUIPAMIENTO_SIN_PRECIO = [
+    ["664410420", "OpenScapeBranch 550HA DP14", "L30220-D600-B149", "", "", "1"],
+    ["664410421", "OpenScape Branch 550HA DP24", "L30220-D600-B150", "", "", "1"],
+    ["664410422", "OpenScape Branch 550HA NC", "L30220-D600-B151", "", "", "1"],
+    ["664410423", "OpenScape Branch 550HA DP4", "L30220-D600-B152", "", "", "1"],
+]
+
+
+def test_corregir_confusion_precio_cantidad_caso_real_0184():
+    mapeo_confundido = {
+        "codigo_precio": None, "matricula": 0, "descripcion": 1,
+        "unidad_medida": None, "cantidad": None, "precio_unitario": 5,
+    }
+    corregido = corregir_confusion_precio_cantidad(mapeo_confundido, _FILAS_EQUIPAMIENTO_SIN_PRECIO)
+    assert corregido == {
+        "codigo_precio": None, "matricula": 0, "descripcion": 1,
+        "unidad_medida": None, "cantidad": None, "precio_unitario": None,
+    }
+
+
+def test_corregir_confusion_precio_cantidad_no_toca_una_columna_de_precio_real():
+    filas = [["612260110", "SCV-C-60-ID-318", "15.377,63 €"]]
+    mapeo = {
+        "codigo_precio": None, "matricula": 0, "descripcion": 1,
+        "unidad_medida": None, "cantidad": None, "precio_unitario": 2,
+    }
+    assert corregir_confusion_precio_cantidad(mapeo, filas) == mapeo
+
+
+def test_corregir_confusion_precio_cantidad_sin_precio_asignado_no_opina():
+    mapeo = {
+        "codigo_precio": None, "matricula": 0, "descripcion": 1,
+        "unidad_medida": None, "cantidad": None, "precio_unitario": None,
+    }
+    assert corregir_confusion_precio_cantidad(mapeo, _FILAS_EQUIPAMIENTO_SIN_PRECIO) == mapeo
+
+
+def test_evaluar_coherencia_mapeo_acepta_tabla_sin_ninguna_columna_de_precio_real():
+    # Tras `corregir_confusion_precio_cantidad`, precio_unitario queda sin
+    # columna -- confirmado por contenido (ninguna columna de la tabla tiene
+    # forma de precio real), no un fallo de mapeo: la tabla debe seguir
+    # coherente (matrícula y descripción sí están bien), no descartarse
+    # entera del Excel entregable.
+    mapeo = {
+        "codigo_precio": None, "matricula": 0, "descripcion": 1,
+        "unidad_medida": None, "cantidad": None, "precio_unitario": None,
+    }
+    assert evaluar_coherencia_mapeo(mapeo, _FILAS_EQUIPAMIENTO_SIN_PRECIO) is None
+
+
+def test_evaluar_coherencia_mapeo_sigue_exigiendo_precio_si_alguna_columna_sí_tiene_forma() :
+    # Red de seguridad: si de verdad existe una columna con forma de precio
+    # en la tabla (`6.20/28510.0042`/`0046`/`0047`, caso ya cubierto arriba)
+    # y el mapeo no la encontró, sigue siendo incoherente -- el atajo de
+    # "sin ninguna columna de precio" no debe tapar un fallo de mapeo real.
+    motivo = evaluar_coherencia_mapeo(
+        {"codigo_precio": None, "matricula": 0, "descripcion": 1,
+         "unidad_medida": None, "cantidad": None, "precio_unitario": None},
+        _FILAS_TRIO_P35,
+    )
+    assert motivo is not None
+    assert "precio_unitario" in motivo
 
 
 def test_evaluar_coherencia_mapeo_detecta_desplazamiento_aunque_descripcion_pase_el_umbral_de_vacio():
