@@ -175,7 +175,10 @@ Cada documento cae por la primera etapa que lo resuelva. **No saltes etapas.**
 2. **Campos de etiqueta fija.** Todo lo que sea formulario PCSP se extrae por etiqueta.
    Aquí sale la baja global de la familia PCSP entera, sin tablas y sin modelo.
 3. **Localizar páginas candidatas.** Por presencia de cabecera de matrícula y densidad
-   numérica. Reduce el trabajo antes de gastar nada.
+   numérica. Reduce el trabajo antes de gastar nada. Una página que continúa una
+   tabla ya abierta entra por traer identificadores de fila (código de precio o
+   matrícula), no por densidad: con descripciones largas, una continuación tiene
+   la densidad de un párrafo (sesión 2026-09-14).
 4. **Extraer la tabla** con `pdfplumber` sobre esas páginas.
 5. **Mapear cabecera → esquema.** Única etapa donde interviene el modelo. Ver sección 6.
 6. **Normalizar y derivar.** Ver secciones 7 y 8.
@@ -209,7 +212,11 @@ Para nada más.**
 - **El `Código del material` no usa modelo.** Es el sustantivo principal de la
   descripción (`BRIDA`, `PLACA`, `JUNTA`, `SUPLEMENTO`) más un vocabulario controlado
   que crece con el uso. El modelo solo se invoca si no casa nada, y su respuesta
-  amplía el vocabulario.
+  amplía el vocabulario. **Excepción, decisión del cliente (sesión
+  2026-09-14):** si la tabla trae su propia columna de tipo de pieza
+  ("REPUESTO": "Semicambio", "Aguja", "Cruzamiento obtuso"...), su valor
+  literal manda sobre la derivación. Hoy solo existe en la familia
+  `6.21/28510.0108` (`docs/sesion-2026-09-14-revision-cliente-pliegos.md`).
 - **El cruce con el Excel de códigos no usa modelo.** Es búsqueda por clave exacta.
 - **Caché por hash de documento.** Nunca se reprocesa lo mismo dos veces.
 
@@ -246,7 +253,7 @@ precio por tonelada-kilómetro).
 | Título expediente | *Objeto del Contrato* del anuncio | No, etiqueta fija |
 | Matrícula del material | Cuadro de precios | No |
 | Descripción del material | Cuadro de precios | No |
-| Código del material | Derivado de la descripción | Solo si no casa |
+| Código del material | Columna "REPUESTO" del cuadro si existe; si no, derivado de la descripción | Solo si no casa |
 | Cantidad | Cuadro de precios | No |
 | Precio unitario | Cuadro de precios | No |
 | Lote | Cabecera de tabla o anuncio | No |
@@ -1451,6 +1458,46 @@ suficientes, no ahora.
   mapeo incoherente sin auditar a fondo; decisión de producto pendiente
   sobre si dar una categoría de Resumen propia a "pertenece a otro lote
   del acuerdo marco" en vez de pedir revisión humana repetida.
+- **Revisión del cliente sobre el Excel — código del material y matrículas:
+  cerrado (sesión 2026-09-14,
+  `docs/sesion-2026-09-14-revision-cliente-pliegos.md`).** Los tres pliegos
+  del cliente son dos documentos: `Adif 1` = anejo de criterios técnicos de
+  la familia `6.21/28510.0108`/`0109`-`0113` (doc 588); `Adif 2` y `Adif 3`
+  = el mismo pliego de tornillería de `6.21/28510.0015`/`0016`/
+  `6.20/28510.0115` (doc 495; `Adif 3` es una copia escaneada). (1) Código
+  del material: el sistema no leía ninguna columna, lo derivaba de la
+  descripción y por eso coincidía con "REPUESTO"; decisión del cliente:
+  REPUESTO manda (secciones 6 y 7). Solo esa familia tiene la columna. (2)
+  Matrículas: el doc 495 trae 103; el catálogo tenía **0** en su campo (34
+  metidas en `codigo_precio`, 69 sin leer). No era límite de origen: cabecera
+  en fuente sin mapa Unicode ("(cid:NN)") → el localizador no abría la
+  tabla y el modelo intercambió matrícula y código; ahora 103/103. (3)
+  Hallazgo de paso, el más grande: **el localizador no abría páginas de
+  continuación con descripciones largas** (densidad < 0,20) — 246 páginas
+  con filas reales en 30 documentos, 46 expedientes. Arreglado (basta un
+  identificador de fila si la página anterior es candidata), junto con
+  códigos con sufijo de variante ("P-39B"), herencia del mapeo por geometría
+  de columnas, cabeceras ilegibles tratadas como "sin cabecera" (nunca al
+  modelo ni a la caché; 2 entradas de caché así borradas) y una guarda nueva:
+  mismo código de precio con precios distintos en el mismo documento y lote
+  (cuadros de varios lotes en un documento compartido) → valor vacío con
+  motivo, nunca "el último gana". Unidad de medida con 3+ dígitos (planos,
+  normas, precios: 1.273 líneas) descartada. Revisando el reproceso salieron
+  tres fallos más de captura de matrícula, también arreglados: sello CSV
+  colado en la columna de matrícula (`6.24/28510.0209`), columna llamada
+  "CÓDIGO ADIF" (`6.25/28510.0251`/`0213`) y matrícula en la columna fantasma
+  de al lado (`6.24/28510.0173`, el pendiente del 12-09). Y una excepción a la
+  guarda de choques: las notas de subsanación ("donde aparece / debiendo
+  ser") se quedan con la corrección. **Resultado, corpus completo:**
+  22.445 → 24.339 líneas; líneas con matrícula 12.720 → 13.244 (+524, 486
+  pares expediente-matrícula nuevos, 0 perdidos; las 199 matrículas que
+  estaban en `codigo_precio` pasan a su campo); con código de material
+  14.248 → 16.074. Excel: 19.898 → 21.384 filas, matrícula 11.386 → 11.924,
+  expedientes con líneas 215 → 232; huérfanas (cola de revisión) 2.175 →
+  2.694. La guarda de choques deja vacíos 285 cantidades y 49 precios que
+  antes se mostraban con "el último gana" (368 líneas marcadas, 74
+  expedientes) — decisión revisable. Dos reprocesos seguidos con el mismo
+  código dan resultado idéntico; auditoría a 0 errores. 718 tests.
 
 ---
 
@@ -1475,4 +1522,5 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `sesion-2026-09-10-maestro-materiales-real.md`,
 `sesion-2026-09-12-defecto-mapeo-calidad-interfaz-rendimiento.md`,
 `sesion-2026-09-12-huecos-determinismo-ingesta.md`,
+`sesion-2026-09-14-revision-cliente-pliegos.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.

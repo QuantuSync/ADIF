@@ -155,3 +155,42 @@ def test_matricula_de_9_digitos_se_reconoce_como_fila_de_datos_sin_codigo_precio
     matriculas = [fila[0] for fila in tablas[0].filas]
     assert "642910100" in matriculas
     assert "642910360" in matriculas
+
+
+# --- Sesión 2026-09-14 ---
+
+
+def test_codigo_con_sufijo_de_variante_en_mayuscula_es_fila_de_datos():
+    # `6.21/28510.0109_ANEJO_7bfc92005f43e68e.pdf` p.15-22: páginas enteras
+    # de filas "P-39B", "P-41 A" (aguja/contraaguja del mismo desvío), sin
+    # ninguna fila "P-NN" pelada -- antes la tabla se descartaba como espuria.
+    from app.extraccion.tabla import _es_fila_de_datos
+
+    assert _es_fila_de_datos(["GAV 1500", "P-39B", "Contraaguja", "...", "1,4", "4.292,05"])
+    assert _es_fila_de_datos(["PAV 1500", "P-41 A", "Aguja", "...", "1,7", "8.783,64"])
+    # Minúscula pegada: el sello CSV invertido ("P-13\np", de "psj.adilav..."),
+    # nunca una variante real.
+    assert not _es_fila_de_datos(["P-13\np", "Semicambio", "91.537,95"])
+
+
+def test_cabecera_con_glifos_sin_decodificar_se_trata_como_sin_cabecera():
+    # `6.21/28510.0016_ANEJO_e40fc4e4546ec90b.pdf` p.13: "Nº MATRÍCULA", "REF.
+    # ADIF"... en una fuente sin mapa Unicode.
+    from app.extraccion.mapeo_cabecera import cabecera_sin_senal
+    from app.extraccion.tabla import _combinar_filas_cabecera
+
+    cabecera = _combinar_filas_cabecera([
+        ["(cid:69)(cid:465)(cid:3)(cid:68)(cid:4)(cid:100)(cid:90)", "(cid:90)(cid:28)(cid:38)(cid:856)(cid:3)",
+         "(cid:24)(cid:28)(cid:94)(cid:18)", "(cid:87)(cid:62)(cid:4)(cid:69)(cid:75)(cid:3) 015-05"],
+    ])
+    assert cabecera == [None, None, None, None]
+    assert cabecera_sin_senal(cabecera)
+
+
+def test_cabecera_legible_con_un_glifo_suelto_se_conserva():
+    # Cabecera real cacheada (`cache_mapeo_cabecera` 81/82): "(€)" en glifos
+    # dentro de una celda perfectamente legible -- no se toca.
+    from app.extraccion.tabla import _combinar_filas_cabecera
+
+    celda = "PRECIO UNITARIO DE\nREFERENCIA (cid:11)(cid:227)(cid:12)"
+    assert _combinar_filas_cabecera([["Nº MATRÍCULA", celda]]) == ["Nº MATRÍCULA", celda]

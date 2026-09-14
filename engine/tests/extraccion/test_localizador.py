@@ -117,6 +117,88 @@ def test_cadena_de_continuacion_se_corta_al_llegar_a_densidad_baja():
     assert [c.numero for c in resultado.candidatas] == [1, 2]
 
 
+# Sesión 2026-09-14: continuación con descripciones largas en prosa técnica
+# (forma real de `6.21/28510.0109_ANEJO_7bfc92005f43e68e.pdf` p.24: dos filas
+# por página, 30 líneas de descripción cada una) -- densidad de párrafo, muy
+# por debajo de `UMBRAL_DENSIDAD_CONTINUACION`, pero con identificadores de
+# fila.
+_PAGINA_CONTINUACION_PROSA = (
+    "Corazón de punta móvil para desvío o semiescape de radio a izquierdas o derechas con\n"
+    "inclinación de rodadura, dotado de punta y contrapunta de perfil bajo asimétrico con talón\n"
+    "forjado, prolongaciones en el lado anterior y acero de grado soldable. Incluye cuna de acero\n"
+    "17.000 P-71 Cruzamiento al manganeso con patas de liebre de perfil simétrico 11 190.772,\n"
+    "de alma gruesa y antenas anteriores con prolongaciones y acero de grado soldable.\n"
+) * 2 + "17.000 P-72 Cruzamiento taladros, tornillería y todos los elementos necesarios 11 161.096,\n"
+
+
+def test_continuacion_con_prosa_tecnica_entra_por_identificadores_de_fila():
+    from app.extraccion.localizador import UMBRAL_DENSIDAD_CONTINUACION, _densidad_numerica
+
+    assert _densidad_numerica(_PAGINA_CONTINUACION_PROSA) < UMBRAL_DENSIDAD_CONTINUACION
+    paginas = [
+        PaginaTexto(numero=1, texto=_PAGINA_CON_TABLA),
+        PaginaTexto(numero=2, texto=_PAGINA_CONTINUACION_PROSA),
+        PaginaTexto(numero=3, texto=_PAGINA_CONTINUACION_PROSA),
+    ]
+    resultado = localizar_paginas_candidatas(paginas)
+    assert [c.numero for c in resultado.candidatas] == [1, 2, 3]
+    assert all(c.continuacion for c in resultado.candidatas[1:])
+
+
+def test_prosa_sin_identificadores_tras_una_tabla_no_es_continuacion():
+    prosa_con_cifras = (
+        "El plazo de garantía de los suministros será de 24 meses, a contar desde la fecha de\n"
+        "recepción, y el importe máximo de 1.250,00 € por pedido se revisará cada 12 meses.\n"
+    ) * 4
+    paginas = [
+        PaginaTexto(numero=1, texto=_PAGINA_CON_TABLA),
+        PaginaTexto(numero=2, texto=prosa_con_cifras),
+    ]
+    assert [c.numero for c in localizar_paginas_candidatas(paginas).candidatas] == [1]
+
+
+# Forma real de `6.21/28510.0016_ANEJO_e40fc4e4546ec90b.pdf` p.13: cabecera
+# en fuente sin mapa Unicode (ningún marcador legible), filas con matrícula e
+# importe.
+_PAGINA_CABECERA_ILEGIBLE = (
+    "(cid:69)(cid:465)(cid:3)(cid:68)(cid:4)(cid:100) (cid:90)(cid:28)(cid:38)(cid:856)\n"
+    "03PAI-\n642190360 RT58 ALMOHADILLA PARA AISLADORES 100 1,53 €\n032-01\n"
+    "03PAI-\n642190370 RT70 ALMOHADILLA PARA AISLADORES 30 18,29 €\n033-01\n"
+    "01PAT-\n642530150 L5a PASADOR PARA MORDAZA DE ATIRANTADO 200 0,86 €\n023-01\n"
+)
+
+
+def test_arranque_de_tabla_sin_cabecera_legible_entra_por_filas_de_datos():
+    paginas = [
+        PaginaTexto(numero=1, texto=_PAGINA_PROSA),
+        PaginaTexto(numero=2, texto=_PAGINA_CABECERA_ILEGIBLE),
+        PaginaTexto(numero=3, texto=_PAGINA_CONTINUACION_PROSA),
+    ]
+    resultado = localizar_paginas_candidatas(paginas)
+    assert [c.numero for c in resultado.candidatas] == [2, 3]
+    assert resultado.candidatas[0].sin_cabecera_legible is True
+    assert resultado.candidatas[1].continuacion is True
+
+
+def test_menos_de_tres_filas_de_datos_sin_cabecera_no_bastan():
+    dos_filas = "642190360 RT58 ALMOHADILLA 100 1,53 €\n642190370 RT70 ALMOHADILLA 30 18,29 €\n" + _PAGINA_PROSA
+    resultado = localizar_paginas_candidatas([PaginaTexto(numero=1, texto=dos_filas)])
+    assert resultado.candidatas == []
+
+
+def test_identificador_de_fila_admite_sufijo_en_mayuscula_y_matricula_con_puntos():
+    from app.extraccion.localizador import _identificadores_fila
+
+    assert _identificadores_fila("GAV 1500 P-39B Contraaguja 1,4 4.292,05") == 1
+    assert _identificadores_fila("PAV 1500 P-41 A Aguja 1,7 8.783,64") == 1
+    assert _identificadores_fila("643.910.630 G51 GUARDACABOS 1000 0,40 €") == 1
+    # `4.26/28510.0020_ANEJO_8f2a33dd634a5454.pdf` p.40: "Cod0013".
+    assert _identificadores_fila("Cod0013 Ud. JUEGO DE TIMONERÍA DE MANDO Y 1262,94") == 1
+    # "P1" suelto (sin guion) aparece en prosa ("tipo P o P1 de radio 1500"):
+    # no cuenta como prueba de fila.
+    assert _identificadores_fila("desvío polivalente tipo P o P1 de radio 1500") == 0
+
+
 def test_pagina_sin_marcadores_no_candidata_si_la_anterior_tampoco_lo_era():
     # Contraste: sin ninguna página candidata antes, la densidad sola no
     # basta -- evita que un documento sin ningún cuadro de precios real

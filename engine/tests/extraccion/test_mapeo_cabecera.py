@@ -4,6 +4,7 @@ from app.extraccion.mapeo_cabecera import (
     corregir_confusion_precio_cantidad,
     derivar_mapeo_por_contenido,
     evaluar_coherencia_mapeo,
+    heredar_mapeo_por_geometria,
     intentar_mapeo_determinista,
     mapear_cabecera,
     obtener_mapeo_cacheado,
@@ -430,6 +431,142 @@ def test_corregir_confusion_matricula_codigo_precio_no_toca_si_matricula_en_otra
         "unidad_medida": None, "cantidad": None, "precio_unitario": 3,
     }
     assert corregir_confusion_matricula_codigo_precio(mapeo, filas) == mapeo
+
+
+def test_corregir_confusion_matricula_codigo_precio_matricula_en_columna_sin_forma_de_matricula():
+    # Sesión 2026-09-14, filas reales de `6.21/28510.0016_ANEJO_
+    # e40fc4e4546ec90b.pdf` p.13 (cabecera ilegible, fuente sin mapa
+    # Unicode): el modelo puso `codigo_precio` en la matrícula real y
+    # `matricula` en "REF. ADIF" -- columna llena, pero sin ningún valor con
+    # forma de matrícula.
+    filas = [
+        ["642190360", "RT58", "ALMOHADILLA PARA AISLADORES", "03PAI-\n032-01", "100", "1,53 €"],
+        ["642530150", "L5a", "PASADOR PARA MORDAZA DE ATIRANTADO", "01PAT-\n023-01", "200", "0,86 €"],
+        ["643130300", "T4", "TORNILLO DE CORREDERA DE\nTRIANGULACIÓN", "01PET-\n003-01", "200", "0,98 €"],
+    ]
+    mapeo = {
+        "codigo_precio": 0, "matricula": 1, "descripcion": 2,
+        "unidad_medida": 3, "cantidad": 4, "precio_unitario": 5,
+    }
+    corregido = corregir_confusion_matricula_codigo_precio(mapeo, filas)
+    assert corregido["matricula"] == 0
+    assert corregido["codigo_precio"] is None
+
+
+def test_columna_de_matricula_con_sello_csv_colado_se_reconoce_como_matricula():
+    # `6.24/28510.0209_CONTRATO_12d53d58eda5a9e6.pdf` p.95, valores reales de
+    # la columna de matrícula: el sello de verificación invertido se cuela en
+    # 11 de 18 celdas. Sin contar esas celdas, la columna no llegaba al 50% y
+    # nadie la reconocía como matrícula.
+    from app.extraccion.firma_estructural import clasificar_columnas
+
+    matriculas = [
+        "664510005", "664510010", "664510015", "664510020", "664510025", "664510030\nps",
+        "j.adil\n664510035", "av/vs\n664510040", "c/se.b\n664510045", "og.fi\n664510050",
+        "da.ed\n664510055", "es//:spt\n664510060", "66 th\nn", "e\n664510070 elb",
+        "acif\n664510075", "ireV\n664510080", "664510085", "664510090",
+    ]
+    filas = [[m, None, f"Material {i}", "1.631,70€", "325,50 €", f"FA-60{i}", "1"] for i, m in enumerate(matriculas)]
+    assert clasificar_columnas(filas)[0] == "matricula"
+    mapeo = {
+        "codigo_precio": 0, "matricula": None, "descripcion": 2,
+        "unidad_medida": None, "cantidad": 6, "precio_unitario": 4,
+    }
+    corregido = corregir_confusion_matricula_codigo_precio(mapeo, filas)
+    assert corregido["matricula"] == 0 and corregido["codigo_precio"] is None
+
+
+def test_completar_matricula_por_contenido_columna_codigo_adif():
+    # `6.25/28510.0251_ANEJO_1f2691ba90da3138.pdf` p.23: "CÓDIGO ADIF" es la
+    # matrícula, pero ningún alias la reconoce.
+    from app.extraccion.mapeo_cabecera import completar_matricula_por_contenido
+
+    filas = [
+        ["P-01", "594200000", "PLETINA DE COBRE 10 MM X 5 MM", "UNE 13.605", "NORMAL", None, None, "4,70 €", "M"],
+        ["P-02", "594200001", "PLETINA DE COBRE 30 MM X 5 MM", "UNE 13.605", "NORMAL", None, None, "14,00 €", "M"],
+        ["P-03", "594200002", "PLETINA DE COBRE 30 MM X 10 MM", "UNE 13.605", "NORMAL", None, None, "28,00 €", "M"],
+    ]
+    mapeo = {"codigo_precio": 0, "matricula": None, "descripcion": 2, "unidad_medida": 8, "cantidad": None, "precio_unitario": 7}
+    assert completar_matricula_por_contenido(mapeo, filas)["matricula"] == 1
+    # Ya asignada: no se toca.
+    con_matricula = dict(mapeo, matricula=1)
+    assert completar_matricula_por_contenido(con_matricula, filas) == con_matricula
+
+
+def test_completar_matricula_por_contenido_dos_columnas_candidatas_no_adivina():
+    from app.extraccion.mapeo_cabecera import completar_matricula_por_contenido
+
+    filas = [["P-01", "594200000", "594200100", "PLETINA", "4,70 €"], ["P-02", "594200001", "594200101", "PLETINA", "5,70 €"]]
+    mapeo = {"codigo_precio": 0, "matricula": None, "descripcion": 3, "unidad_medida": None, "cantidad": None, "precio_unitario": 4}
+    assert completar_matricula_por_contenido(mapeo, filas)["matricula"] is None
+
+
+def test_mapeo_determinista_columna_repuesto_es_codigo_material():
+    # Sesión 2026-09-14, cabecera real de `6.21/28510.0109_ANEJO_
+    # 7bfc92005f43e68e.pdf` p.3 (decisión del cliente: REPUESTO es el
+    # "Código del material").
+    cabecera = [
+        "TIPOLOGÍ\nA\nAPARATO", "CÓDIGO\nDEL\nELEMENT\nO", "REPUESTO", "DESCRIPCIÓN", "PESO en\ntoneladas",
+        "PRECIO\nDEL\nELEMENTO", "UNIDAD\nDE\nMEDIDA", None, "IMPACTO DEL FALLO DEL ELEMENTO", None,
+    ]
+    mapeo = intentar_mapeo_determinista(cabecera)
+    assert mapeo["codigo_material"] == 2
+    assert mapeo["codigo_precio"] == 1
+    assert mapeo["descripcion"] == 3
+    assert mapeo["precio_unitario"] == 5
+
+
+def test_mapeo_determinista_repuesto_dentro_de_otro_nombre_no_es_codigo_material():
+    cabecera = ["CÓDIGO DE PRECIO", "DESCRIPCIÓN", "PRECIO DEL REPUESTO"]
+    mapeo = intentar_mapeo_determinista(cabecera)
+    assert "codigo_material" not in mapeo
+    assert mapeo["precio_unitario"] == 2
+
+
+def test_mapeo_determinista_sin_columna_repuesto_no_trae_codigo_material():
+    mapeo = intentar_mapeo_determinista(["CÓDIGO DE PRECIO", "DESCRIPCIÓN", "PRECIO UNITARIO"])
+    assert "codigo_material" not in mapeo
+
+
+# Geometría real de `6.21/28510.0109_ANEJO_7bfc92005f43e68e.pdf`: p.3 (tabla
+# con cabecera, 10 columnas -- las dos últimas son artefactos de la celda de
+# "IMPACTO") y p.4 (continuación sin cabecera, 8 columnas).
+_COLUMNAS_P3 = (
+    (38.0, 82.0), (82.0, 125.0), (125.0, 178.0), (178.0, 359.0), (359.0, 408.0),
+    (408.0, 458.0), (458.0, 508.0), (508.0, 557.0), (511.0, 554.0), (554.0, 557.0),
+)
+_COLUMNAS_P4 = (
+    (38.0, 82.0), (82.0, 125.0), (125.0, 177.0), (177.0, 359.0), (359.0, 408.0),
+    (408.0, 458.0), (458.0, 508.0), (508.0, 557.0),
+)
+_MAPEO_P3 = {
+    "codigo_precio": 1, "matricula": None, "descripcion": 3, "unidad_medida": 6,
+    "cantidad": None, "precio_unitario": 5, "codigo_material": 2,
+}
+
+
+def test_heredar_mapeo_por_geometria_caso_real_continuacion():
+    assert heredar_mapeo_por_geometria(_MAPEO_P3, _COLUMNAS_P3, _COLUMNAS_P4) == _MAPEO_P3
+
+
+def test_heredar_mapeo_por_geometria_columnas_desplazadas_no_hereda():
+    desplazadas = tuple((x0 + 20, x1 + 20) for x0, x1 in _COLUMNAS_P4)
+    assert heredar_mapeo_por_geometria(_MAPEO_P3, _COLUMNAS_P3, desplazadas) is None
+
+
+def test_heredar_mapeo_por_geometria_reindexa_por_posicion_no_por_indice():
+    # Una columna fantasma de más al principio de la continuación: los
+    # campos caen un índice más allá, pero en la MISMA posición horizontal.
+    con_fantasma = ((20.0, 38.0),) + _COLUMNAS_P4
+    heredado = heredar_mapeo_por_geometria(_MAPEO_P3, _COLUMNAS_P3, con_fantasma)
+    assert heredado["codigo_precio"] == 2
+    assert heredado["descripcion"] == 4
+    assert heredado["codigo_material"] == 3
+
+
+def test_heredar_mapeo_por_geometria_sin_geometria_no_opina():
+    assert heredar_mapeo_por_geometria(_MAPEO_P3, (), _COLUMNAS_P4) is None
+    assert heredar_mapeo_por_geometria(_MAPEO_P3, _COLUMNAS_P3, ()) is None
 
 
 def test_corregir_confusion_matricula_codigo_precio_sin_codigo_precio_no_opina():

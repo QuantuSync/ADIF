@@ -50,6 +50,7 @@ _MATRICULA_VALIDA_RE = re.compile(rf"^\d{{{_MATRICULA_LONGITUD}}}$")
 
 
 _MATRICULA_INCRUSTADA_RE = re.compile(rf"\d{{{_MATRICULA_LONGITUD}}}")
+_MATRICULA_CON_PUNTOS_RE = re.compile(r"^\d{3}\.\d{3}\.\d{3}$")
 
 
 def _matricula_recuperable_de_celda_multilinea(matricula_bruta: str) -> Optional[str]:
@@ -106,6 +107,29 @@ def _matricula_recuperable_de_celda_multilinea(matricula_bruta: str) -> Optional
 # es, sin importar de dónde vino el mapeo (modelo o determinista) ni
 # cuántas variantes de cabecera existan sin descubrir todavía.
 _UNIDAD_MEDIDA_IMPLAUSIBLE_RE = re.compile(r"^[\d.]+$")
+
+# Sesión 2026-09-14 (tabla de tornillería de `6.21/28510.0016_ANEJO_
+# e40fc4e4546ec90b.pdf`): la columna "PLANO DE REFERENCIA" ("03PAI-
+# 032-01") acababa en `unidad_medida` -- con letras, así que el patrón de
+# arriba no la veía. Medido contra el catálogo real antes de ampliarlo:
+# 1.273 líneas de 8 expedientes guardaban en `unidad_medida` un valor con
+# tres o más dígitos, 366 valores distintos, y NINGUNO es una unidad: planos
+# ("P16.2180.00", "213-14 BIS 2T-1236", "L30250-F600-C510"), normas ("DIN
+# 934", "03.361.101.3"), esquemas de vía y hasta precios ("1.000,00 €").
+# Ninguna unidad real del corpus lleva más de un dígito ("m3", "dm3"), ni
+# empieza por un dígito -- el trozo de plano cortado a final de página
+# ("03PME-", la otra mitad "015-05" cae en la página siguiente) tiene solo
+# dos, pero empieza por ellos.
+_UNIDAD_MEDIDA_CON_TRES_DIGITOS_RE = re.compile(r"(?:\d\D*){3}")
+_UNIDAD_MEDIDA_EMPIEZA_POR_DIGITO_RE = re.compile(r"^\d")
+
+
+def _unidad_medida_implausible(unidad_medida: str) -> bool:
+    return bool(
+        _UNIDAD_MEDIDA_IMPLAUSIBLE_RE.match(unidad_medida)
+        or _UNIDAD_MEDIDA_CON_TRES_DIGITOS_RE.search(unidad_medida)
+        or _UNIDAD_MEDIDA_EMPIEZA_POR_DIGITO_RE.match(unidad_medida)
+    )
 
 # Bloque 3, segunda tanda de cambios del cliente tras revisar el catálogo
 # (sesión 2026-09-09): verificado contra el corpus real que el 7,3% que
@@ -255,7 +279,16 @@ def _es_celda_vacia(valor: Optional[str]) -> bool:
 # validación. Un codigo_precio que no encaje aquí no se guarda en silencio
 # (encargo de esta sesión, punto 1): ver `_normalizar_codigo_precio`.
 _CODIGO_PRECIO_NUCLEO_RE = re.compile(r"(?:P|PN|PA|COD)-?\d{1,4}|L\d{1,2}-T\d{1,2}", re.IGNORECASE)
-_CODIGO_PRECIO_VALIDO_RE = re.compile(rf"^(?:{_CODIGO_PRECIO_NUCLEO_RE.pattern})$", re.IGNORECASE)
+# Sesión 2026-09-14: sufijo de variante en MAYÚSCULA ("P-39B", "P-41 A" ->
+# "P-41A" tras `limpiar_codigo_celda`), ver `app.extraccion.tabla.
+# _CODIGO_PRECIO_RE`. Solo en la forma válida completa, nunca en
+# `_CODIGO_PRECIO_NUCLEO_RE`: ese patrón aísla el código real dentro del
+# ruido del pie de página, y aceptar ahí una letra de cola se tragaría la
+# primera letra del ruido como si fuera parte del código. Una minúscula
+# ("P-13p", "P-001b") sigue sin ser válida -- "p" es ruido del sello CSV
+# invertido, y "P-001b" sigue su camino de siempre (formato no reconocido,
+# conservado con motivo, ver `_normalizar_codigo_precio`).
+_CODIGO_PRECIO_VALIDO_RE = re.compile(rf"^(?:{_CODIGO_PRECIO_NUCLEO_RE.pattern})(?-i:[A-Z])?$", re.IGNORECASE)
 
 # Quinto formato, sesión de expedientes en revisión (2026-09-05),
 # `6.26/28510.0016`: la cabecera real de esa tabla dice literalmente
@@ -280,6 +313,40 @@ _CODIGO_PRECIO_BARE_RE = re.compile(r"^\d{1,4}$")
 # así que el código real siempre se puede aislar como el único fragmento que
 # encaja en `_CODIGO_PRECIO_NUCLEO_RE` dentro de la cadena corrupta.
 _RUIDO_PIE_PAGINA_RE = re.compile(r"^[A-Za-zÀ-ÿ/.:]+$")
+
+
+# Sesión 2026-09-14 (`6.21/28510.0109_ANEJO_ce1df15b39efdb8c.pdf` p.24-25):
+# el sello CSV invertido comparte celda con un código CON sufijo de variante
+# ("P-43 A\npsj", ".adilav/v\nP-43 B", "fireV\nP-46 A", "ne\nP-45 B elbaci").
+# La recuperación de siempre trabaja sobre la celda ya sin espacios
+# ("P-43Apsj") y `_CODIGO_PRECIO_NUCLEO_RE` (sin sufijo, a propósito) se
+# quedaba con "P-43" y tiraba la "A" como parte del ruido -- P-43 A, P-43 B y
+# P-43 (tres precios distintos del documento) acababan fundidos en una sola
+# línea. En la celda CRUDA el código y el ruido van separados por un salto de
+# línea o un espacio: ahí sí se puede ver dónde acaba el código. El sufijo
+# solo cuenta si es una mayúscula suelta, seguida de fin de celda, espacio o
+# salto de línea -- nunca de otra letra ("P-13\np" es ruido, no "P-13P").
+_CODIGO_CON_SUFIJO_EN_CELDA_RE = re.compile(
+    r"(?<![A-Za-z0-9])((?i:P|PN|PA)-?\d{1,4})[ ]?([A-Z])(?![A-Za-z0-9])"
+)
+
+
+def _recuperar_codigo_con_sufijo_de_celda_cruda(bruto: Optional[str]) -> Optional[str]:
+    if not bruto:
+        return None
+    texto = normalizar_guiones(bruto)
+    coincidencias = list(_CODIGO_CON_SUFIJO_EN_CELDA_RE.finditer(texto))
+    if len(coincidencias) != 1:
+        return None
+    coincidencia = coincidencias[0]
+    resto = re.sub(r"\s+", "", texto[: coincidencia.start()] + texto[coincidencia.end() :])
+    # Aquí basta UN carácter de ruido (a diferencia del mínimo de 2 de
+    # `_normalizar_codigo_precio`): el código ya está delimitado en la celda
+    # cruda, así que una letra suelta en otra línea ("V\nP-55 A", el final
+    # de "elbacifireV" partido entre dos celdas) no puede ser parte de él.
+    if not resto or not _RUIDO_PIE_PAGINA_RE.match(resto):
+        return None
+    return f"{coincidencia.group(1)}{coincidencia.group(2)}"
 
 
 def _normalizar_codigo_precio(bruto: Optional[str]) -> tuple[Optional[str], Optional[str]]:
@@ -309,6 +376,13 @@ def _normalizar_codigo_precio(bruto: Optional[str]) -> tuple[Optional[str], Opti
         return None, None
     if _CODIGO_PRECIO_VALIDO_RE.match(limpio) or _CODIGO_PRECIO_BARE_RE.match(limpio):
         return limpio, None
+
+    recuperado_con_sufijo = _recuperar_codigo_con_sufijo_de_celda_cruda(bruto)
+    if recuperado_con_sufijo is not None:
+        return recuperado_con_sufijo, (
+            "codigo_precio recuperado tras descartar ruido de pie de página colado en la celda "
+            f"({limpio!r} -> {recuperado_con_sufijo!r})"
+        )
 
     coincidencias = list(_CODIGO_PRECIO_NUCLEO_RE.finditer(limpio))
     if len(coincidencias) == 1:
@@ -591,6 +665,10 @@ def _parece_cantidad_recuperable(texto: Optional[str]) -> bool:
     return True
 
 
+def _parece_matricula_recuperable(texto: Optional[str]) -> bool:
+    return bool(texto) and bool(_MATRICULA_VALIDA_RE.match(re.sub(r"\s+", "", texto)))
+
+
 def _parece_precio_recuperable(texto: Optional[str]) -> bool:
     if not texto or _es_celda_vacia(texto):
         return False
@@ -793,23 +871,49 @@ def _construir_campos(
     matricula_bruta = _valor("matricula")
     codigo_precio, motivo_codigo_precio = _normalizar_codigo_precio(_valor("codigo_precio"))
     matricula = limpiar_codigo_celda(matricula_bruta)
+    if matricula is not None and _MATRICULA_CON_PUNTOS_RE.match(matricula):
+        # Sesión 2026-09-14 (`6.21/28510.0016_ANEJO_e40fc4e4546ec90b.pdf`
+        # p.16, "643.910.630"): la misma matrícula de 9 dígitos, escrita con
+        # puntos de miles en una sola fila de la tabla. Mismo número, otra
+        # forma de escribirlo -- nunca un valor ambiguo.
+        matricula = matricula.replace(".", "")
     descripcion = limpiar_texto_celda(_valor("descripcion")) or ""
     unidad_medida = limpiar_texto_celda(_valor("unidad_medida"))
 
     motivo_revision: Optional[str] = motivo_codigo_precio
 
-    if unidad_medida and _UNIDAD_MEDIDA_IMPLAUSIBLE_RE.match(unidad_medida):
-        # Ver docstring de `_UNIDAD_MEDIDA_IMPLAUSIBLE_RE`: esto es solo
-        # dígitos y puntos -- una referencia normativa (p.ej.
-        # "03.360.571.8") o un valor de otra columna desplazado a esta
-        # (p.ej. "956"), nunca una unidad de medida real. La columna que el
-        # mapeo cree que es "unidad_medida" no lo es de verdad -- se
+    if matricula is None and mapeo.get("matricula") is not None:
+        # Sesión 2026-09-14 (`6.24/28510.0173_ANEJO_5b5c1a3f82caef4c.pdf`
+        # p.9-10): `pdfplumber` parte la fila de forma distinta según la
+        # fila -- en unas la matrícula cae en la columna "MATRÍCULA" y en
+        # otras en la columna sin nombre de al lado (`['1', '', '663500010',
+        # 'Ventilador SUNON...']` frente a `['2', '662240600', None,
+        # 'Microinterruptor...']`). Mismo fenómeno de columna fantasma que ya
+        # se recupera para cantidad y precio, aquí con la forma estricta de
+        # matrícula (9 dígitos) como prueba de que la celda de al lado es la
+        # matrícula de esta fila y no otro dato.
+        recuperada = _recuperar_columna_fantasma(fila, mapeo, "matricula", _parece_matricula_recuperable)
+        if recuperada is not None:
+            matricula = limpiar_codigo_celda(recuperada)
+            motivo_revision = _acumular_motivo(
+                motivo_revision,
+                "matrícula recuperada de una columna sin etiquetar junto a la de matrícula (la fila "
+                "está desplazada una columna respecto a su cabecera), confirmar antes de dar por buena",
+            )
+
+    if unidad_medida and _unidad_medida_implausible(unidad_medida):
+        # Ver docstring de `_UNIDAD_MEDIDA_IMPLAUSIBLE_RE` y de
+        # `_UNIDAD_MEDIDA_CON_TRES_DIGITOS_RE`: solo dígitos y puntos, o tres
+        # o más dígitos -- una referencia normativa (p.ej. "03.360.571.8"),
+        # un plano ("03PAI-032-01") o un valor de otra columna desplazado a
+        # esta (p.ej. "956"), nunca una unidad de medida real. La columna que
+        # el mapeo cree que es "unidad_medida" no lo es de verdad -- se
         # descarta en vez de guardarse como si fuera una unidad real.
         motivo_revision = _acumular_motivo(
             motivo_revision,
-            f"unidad de medida descartada por ser solo numérica, no una unidad real (p.ej. \"ud\", "
-            f"\"m\", \"t\"): {unidad_medida!r} — puede ser una referencia normativa o un valor "
-            f"desplazado de otra columna, revisar el mapeo de esta cabecera",
+            f"unidad de medida descartada por ser solo numérica, traer tres o más dígitos o empezar por "
+            f"un dígito, no una unidad real (p.ej. \"ud\", \"m\", \"t\"): {unidad_medida!r} — puede ser una referencia "
+            f"normativa, un plano o un valor desplazado de otra columna, revisar el mapeo de esta cabecera",
         )
         unidad_medida = None
 
@@ -911,6 +1015,29 @@ def _construir_campos(
 
     cantidad_bruta = _valor("cantidad")
     cantidad = None
+    if (
+        cantidad_bruta
+        and "€" in cantidad_bruta
+        and precio_unitario is None
+        and _parece_precio_recuperable(cantidad_bruta)
+    ):
+        # Sesión 2026-09-14 (`6.21/28510.0016_ANEJO_e40fc4e4546ec90b.pdf`
+        # p.18/p.20): la fila "Partida alzada a justificar para imprevistos"
+        # ocupa menos columnas que el resto de la tabla -- su texto cae en la
+        # columna de matrícula (ya recuperado como descripción más arriba,
+        # `_es_partida_alzada`) y su importe, "3.457,00 €", en la de
+        # cantidad, con la de precio vacía. Una cantidad nunca lleva el
+        # símbolo de euro: sin precio en su columna, ese importe ES el
+        # precio de la fila, desplazado -- nunca una cantidad de 3.457.
+        precio_unitario = parsear_importe_es(cantidad_bruta)
+        precio_bruto = cantidad_bruta
+        cantidad_bruta = None
+        motivo_revision = _acumular_motivo(
+            motivo_revision,
+            "precio unitario recuperado de la columna de cantidad (la celda trae el símbolo €, una "
+            "cantidad nunca lo lleva, y la columna de precio de esta fila está vacía), confirmar antes "
+            "de dar por buena",
+        )
     if cantidad_bruta and not _es_celda_vacia(cantidad_bruta):
         try:
             cantidad = parsear_numero_es(cantidad_bruta)
@@ -987,6 +1114,21 @@ def _construir_campos(
         "precio_unitario": precio_unitario,
         "motivo_revision": motivo_revision,
     }
+
+
+def _codigo_material_de_columna(fila: list[Optional[str]], mapeo: dict[str, Optional[int]]) -> Optional[str]:
+    """Sesión 2026-09-14, decisión del cliente: si la tabla trae su propia
+    columna de tipo de pieza (hoy solo "REPUESTO", ver `app.extraccion.
+    mapeo_cabecera.CAMPO_CODIGO_MATERIAL`), su valor literal es el Código del
+    material de la línea -- en mayúsculas, como el resto del catálogo
+    ("SEMICAMBIO", "CRUZAMIENTO OBTUSO"), sin singularizar ni pasar por el
+    vocabulario: es el término del propio documento, no uno derivado. Celda
+    vacía -> `None`, y el llamador cae a la derivación por descripción de
+    siempre (hay filas reales así: "Aparatos de dilatación" sin repuesto)."""
+    valor = limpiar_texto_celda(_valor_en(fila, mapeo.get("codigo_material")))
+    if not valor or _es_celda_vacia(valor) or len(valor) > LineaCatalogo.codigo_material.type.length:
+        return None
+    return valor.upper()
 
 
 def construir_linea_catalogo(
@@ -1125,7 +1267,7 @@ def construir_linea_catalogo(
         "codigo_precio": campos["codigo_precio"],
         "matricula": campos["matricula"],
         "descripcion": descripcion,
-        "codigo_material": derivar_codigo_material(descripcion),
+        "codigo_material": _codigo_material_de_columna(fila, mapeo) or derivar_codigo_material(descripcion),
         "unidad_medida": campos["unidad_medida"],
         "cantidad": campos["cantidad"],
         "precio_unitario": precio_unitario,
@@ -1480,7 +1622,11 @@ def _firma_material(datos: dict) -> Optional[tuple]:
     matricula = datos.get("matricula")
     descripcion = datos.get("descripcion")
     precio_unitario = datos.get("precio_unitario")
-    if not descripcion or precio_unitario is None:
+    # `INVALIDADO` (precio descartado a propósito, p.ej. un choque de
+    # precios de la misma clave en `_combinar_por_clave`) no es un precio:
+    # sin él no hay firma, igual que con `None` -- y nunca debe llegar como
+    # valor a la consulta por firma de `guardar_lineas_catalogo`.
+    if not descripcion or precio_unitario is None or precio_unitario is INVALIDADO:
         return None
     return (matricula, descripcion, precio_unitario)
 
@@ -1617,6 +1763,7 @@ def _combinar_por_clave(lineas: list[dict], permitir_fusion_material: bool = Tru
     }
 
     combinadas: dict[str, dict] = {}
+    conflictos: dict[str, set[str]] = {}
     for datos in lineas:
         firma = _firma_material(datos) if permitir_fusion_material else None
         tiene_codigo = bool(datos.get("codigo_precio"))
@@ -1639,11 +1786,55 @@ def _combinar_por_clave(lineas: list[dict], permitir_fusion_material: bool = Tru
                 existente["motivo_revision"] = _acumular_motivo_unico(
                     existente.get("motivo_revision"), _MOTIVO_FUSION_SIN_MATRICULA
                 )
+            if tiene_codigo and existente.get("codigo_precio") == datos.get("codigo_precio"):
+                for campo in _CAMPOS_CONFLICTO_MISMA_CLAVE:
+                    anterior, nuevo_valor = existente.get(campo), datos.get(campo)
+                    if (
+                        anterior is not None
+                        and anterior is not INVALIDADO
+                        and nuevo_valor is not None
+                        and nuevo_valor is not INVALIDADO
+                        and anterior != nuevo_valor
+                    ):
+                        conflictos.setdefault(clave, set()).add(campo)
             for campo, valor in datos.items():
                 if valor is not None:
                     existente[campo] = valor
             existente["clave_linea"] = clave
+    for clave, campos in conflictos.items():
+        linea = combinadas[clave]
+        for campo in sorted(campos):
+            linea[campo] = INVALIDADO
+        if "precio_unitario" in campos:
+            linea["precio_adjudicado"] = None
+        linea["motivo_revision"] = _acumular_motivo_unico(
+            linea.get("motivo_revision"),
+            f"el mismo codigo_precio aparece varias veces en el documento, dentro del mismo lote, con "
+            f"{' y '.join(_NOMBRE_CAMPO_CONFLICTO[c] for c in sorted(campos))} distintos: probablemente "
+            f"cuadros de lotes distintos adjuntos al mismo documento -- no se puede atribuir un valor a "
+            f"este lote con certeza, se deja vacío en vez de quedarse con el último visto",
+        )
     return list(combinadas.values())
+
+
+# Sesión 2026-09-14 (`6.19/28510.0025_ANEJO_02234c396aba465d.pdf`, balasto,
+# documento compartido por 14 expedientes de un solo lote cada uno): el
+# documento trae un "PRESUPUESTO ... LOTE N" por lote, ~40 tablas con los
+# mismos códigos P-1..P-4 -- "P-2 M3 de balasto transportado" cuesta 1,80 €
+# en un lote, 6,60 € en otro, y la medición cambia de un lote a otro. Un
+# expediente de un solo lote asigna todas esas tablas a su único lote (no
+# hay nada que desambiguar, `app.extraccion.pipeline_anejo`), así que las 40
+# filas "P-2" comparten clave y la fusión de arriba se quedaba con el valor
+# de la ÚLTIMA tabla vista, sin avisar: un precio de otro lote presentado
+# como si fuera el de este. Esas páginas no se abrían hasta que el
+# localizador aceptó las páginas de continuación (misma sesión); con ellas
+# abiertas el choque salía a la luz. Con la MISMA clave y el MISMO código de
+# precio, un valor distinto no es un dato que completar -- es la prueba de
+# que el documento declara varios, y ninguno es atribuible con certeza.
+# `INVALIDADO` (no `None`) a propósito: el valor guardado por una pasada
+# anterior salió de este mismo choque ("el último gana"), y debe borrarse.
+_CAMPOS_CONFLICTO_MISMA_CLAVE = ("precio_unitario", "cantidad")
+_NOMBRE_CAMPO_CONFLICTO = {"precio_unitario": "precios unitarios", "cantidad": "cantidades"}
 
 
 def _limpiar_huerfana_superada(db: Session, expediente_id: int, clave_huerfana_hipotetica: Optional[str]) -> None:

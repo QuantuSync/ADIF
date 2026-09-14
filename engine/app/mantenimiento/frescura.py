@@ -37,7 +37,11 @@ from app.models import Documento, EstadoExpediente, Expediente, LineaCatalogo
 # limpiarse; (2) `_priorizar_por_origen`/`_detectar_conflicto_origen`
 # (bloque 6) son nuevos en el orquestador, aunque hoy no cambien nada (0
 # documentos aportados a mano todavía).
-VERSION_LOGICA_EXTRACCION = "2026-09-11.1"
+# Sesión 2026-09-14: páginas de continuación que el localizador no abría,
+# cabeceras ilegibles (fuente sin mapa Unicode), códigos con sufijo de
+# variante, herencia de mapeo por geometría de columnas y código de material
+# de la columna REPUESTO -- todo sin tocar ningún documento.
+VERSION_LOGICA_EXTRACCION = "2026-09-14.1"
 
 
 def huella_documentos(documentos: Iterable[Documento]) -> str:

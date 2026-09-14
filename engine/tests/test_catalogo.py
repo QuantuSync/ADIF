@@ -2277,3 +2277,189 @@ def test_podar_lineas_obsoletas_de_documento_sin_nada_que_podar(db_session):
     db_session.commit()
 
     assert podar_lineas_obsoletas_de_documento(db_session, expediente.id, 50, frozenset()) == 0
+
+
+# --- Sesión 2026-09-14 (revisión del cliente sobre el Excel) ---
+
+
+def test_normalizar_codigo_precio_sufijo_de_variante_en_mayuscula_es_valido():
+    # `6.21/28510.0109_ANEJO_7bfc92005f43e68e.pdf`: "P-39B", "P-41 A".
+    assert _normalizar_codigo_precio("P-39B") == ("P-39B", None)
+    assert _normalizar_codigo_precio("P-41 A") == ("P-41A", None)
+
+
+def test_normalizar_codigo_precio_minuscula_pegada_sigue_sin_ser_valida():
+    # "P-13\np": la "p" es el sello CSV invertido ("psj.adilav..."), no una
+    # variante -- sigue su camino de siempre (conservado, con motivo).
+    codigo, motivo = _normalizar_codigo_precio("P-13\np")
+    assert motivo is not None
+    assert codigo == "P-13p"
+
+
+def test_normalizar_codigo_precio_conserva_el_sufijo_al_quitar_ruido_de_pie_de_pagina():
+    # `6.21/28510.0109_ANEJO_ce1df15b39efdb8c.pdf` p.24-25, celdas reales: el
+    # ruido comparte celda con el código; antes se perdía el sufijo y P-43 A,
+    # P-43 B y P-43 acababan fundidos en una sola línea.
+    assert _normalizar_codigo_precio("P-43 A\npsj")[0] == "P-43A"
+    assert _normalizar_codigo_precio(".adilav/v\nP-43 B")[0] == "P-43B"
+    assert _normalizar_codigo_precio("ne\nP-45 B elbaci")[0] == "P-45B"
+    assert _normalizar_codigo_precio("fireV\nP-46 A")[0] == "P-46A"
+    assert _normalizar_codigo_precio("V\nP-55 A")[0] == "P-55A"
+    # Sin sufijo, la recuperación de siempre no cambia.
+    assert _normalizar_codigo_precio("lbacifireV\nP-17")[0] == "P-17"
+    assert _normalizar_codigo_precio("ptth\nP-16\nne\ne")[0] == "P-16"
+
+
+def test_construir_linea_catalogo_codigo_material_de_la_columna_repuesto():
+    # Decisión del cliente (sesión 2026-09-14): con columna REPUESTO, el
+    # Código del material es su valor literal, no el derivado de la
+    # descripción ("Corazón de punta móvil..." daría "CORAZÓN").
+    mapeo = {
+        "codigo_precio": 1, "matricula": None, "descripcion": 3, "unidad_medida": 6,
+        "cantidad": None, "precio_unitario": 5, "codigo_material": 2,
+    }
+    fila = ["17.000", "P-69", "Cruzamiento", "Corazón de punta móvil para desvío", "11", "190.772,\n40", "€/UD"]
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=23, documento_origen_id=588, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+    assert linea["codigo_material"] == "CRUZAMIENTO"
+    assert linea["precio_unitario"] == Decimal("190772.40")
+
+
+def test_construir_linea_catalogo_repuesto_vacio_cae_a_la_descripcion():
+    mapeo = {
+        "codigo_precio": 1, "matricula": None, "descripcion": 3, "unidad_medida": 6,
+        "cantidad": None, "precio_unitario": 5, "codigo_material": 2,
+    }
+    fila = ["Aparatos de dilatación", "P-35", "", "Conjunto aguja -contra-aguja para ADIH", "2,9", "62.186,25", "€/UD"]
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=8, documento_origen_id=588, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+    assert linea["codigo_material"] == "CONJUNTO"
+
+
+def test_construir_linea_catalogo_descarta_plano_de_referencia_como_unidad():
+    # `6.21/28510.0016_ANEJO_e40fc4e4546ec90b.pdf`: la columna "PLANO DE
+    # REFERENCIA" acababa en unidad_medida.
+    mapeo = {"codigo_precio": None, "matricula": 0, "descripcion": 2, "unidad_medida": 3, "cantidad": 4, "precio_unitario": 5}
+    fila = ["642190360", "RT58", "ALMOHADILLA PARA AISLADORES", "03PAI-\n032-01", "100", "1,53 €"]
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=13, documento_origen_id=495, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+    assert linea["unidad_medida"] is None
+    assert linea["matricula"] == "642190360"
+    assert linea["cantidad"] == Decimal("100")
+    assert "tres o más dígitos" in linea["motivo_revision"]
+
+
+def test_construir_linea_catalogo_descarta_trozo_de_plano_cortado_como_unidad():
+    # Misma tabla, fila partida a final de página: "03PME-" (la otra mitad,
+    # "015-05", cae en la página siguiente) -- solo dos dígitos.
+    mapeo = {"codigo_precio": None, "matricula": 0, "descripcion": 2, "unidad_medida": 3, "cantidad": 4, "precio_unitario": 5}
+    fila = ["643550621", "RT62a", "ARANDELA", "03PME-", "200", "2,17 €"]
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=13, documento_origen_id=495, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+    assert linea["unidad_medida"] is None
+
+
+def test_construir_linea_catalogo_unidad_real_con_un_digito_se_conserva():
+    mapeo = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": 2, "cantidad": 3, "precio_unitario": 4}
+    fila = ["P-8", "Acopio de material en fábrica", "€/Ton*mes", "500", "12,00"]
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=49, documento_origen_id=586, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+    assert linea["unidad_medida"] == "€/Ton*mes"
+    fila_m3 = ["P-1", "Balasto sobre camión", "m3", "22.780,516", "12,40"]
+    linea_m3 = construir_linea_catalogo(
+        fila_m3, mapeo, pagina=30, documento_origen_id=319, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+    assert linea_m3["unidad_medida"] == "m3"
+
+
+def test_construir_linea_catalogo_matricula_escrita_con_puntos():
+    # `6.21/28510.0016_ANEJO_e40fc4e4546ec90b.pdf` p.16: "643.910.630".
+    mapeo = {"codigo_precio": None, "matricula": 0, "descripcion": 2, "unidad_medida": None, "cantidad": 4, "precio_unitario": 5}
+    fila = ["643.910.630", "G51", "G51 GUARDACABOS P/PÉNDOLA EQUIPOT.", "03PPE-002", "1000", "0,40 €"]
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=16, documento_origen_id=495, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+    assert linea["matricula"] == "643910630"
+
+
+def test_construir_linea_catalogo_matricula_en_la_columna_fantasma_de_al_lado():
+    # `6.24/28510.0173_ANEJO_5b5c1a3f82caef4c.pdf` p.9, fila real: la matrícula
+    # cae en la columna sin nombre junto a "MATRÍCULA".
+    mapeo = {"codigo_precio": 0, "matricula": 1, "descripcion": 3, "unidad_medida": None, "cantidad": 8, "precio_unitario": 6}
+    fila = ["1", "", "663500010", "Ventilador SUNON DP200, 220-240V para puerta", None, "19,12 €", None, "1", None]
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=9, documento_origen_id=817, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+    assert linea["matricula"] == "663500010"
+    assert "columna sin etiquetar junto a la de matrícula" in linea["motivo_revision"]
+
+
+def test_construir_linea_catalogo_partida_alzada_con_importe_en_la_columna_de_cantidad():
+    # `6.21/28510.0016_ANEJO_e40fc4e4546ec90b.pdf` p.18, fila real: la
+    # partida alzada ocupa menos columnas -- texto en la de matrícula,
+    # importe en la de cantidad, precio vacío.
+    mapeo = {"codigo_precio": None, "matricula": 0, "descripcion": 2, "unidad_medida": None, "cantidad": 4, "precio_unitario": 5}
+    fila = ["Partida alzada a justificar para imprevistos", None, None, None, "3.457,00 €", None]
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=18, documento_origen_id=495, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+    assert linea["descripcion"] == "Partida alzada a justificar para imprevistos"
+    assert linea["precio_unitario"] == Decimal("3457.00")
+    assert linea["cantidad"] is None
+
+
+def test_combinar_por_clave_mismo_codigo_con_precios_distintos_no_se_atribuye():
+    # `6.19/28510.0025_ANEJO_02234c396aba465d.pdf`: un "PRESUPUESTO ... LOTE N"
+    # por lote en el mismo documento; en un expediente de un solo lote todas
+    # las tablas caen en el mismo lote y "P-2" choca consigo mismo.
+    base = {"expediente_id": 1, "matricula": None, "descripcion": "M3 de balasto transportado", "motivo_revision": None}
+    lineas = [
+        {**base, "clave_linea": "P-2", "codigo_precio": "P-2", "precio_unitario": Decimal("1.80"),
+         "cantidad": Decimal("22780.516"), "precio_adjudicado": Decimal("1.70"), "pagina": 30},
+        {**base, "clave_linea": "P-2", "codigo_precio": "P-2", "precio_unitario": Decimal("6.60"),
+         "cantidad": Decimal("22780.516"), "precio_adjudicado": Decimal("6.20"), "pagina": 30},
+    ]
+    combinadas = _combinar_por_clave(lineas)
+    assert len(combinadas) == 1
+    assert combinadas[0]["precio_unitario"] is INVALIDADO
+    assert combinadas[0]["precio_adjudicado"] is None
+    assert combinadas[0]["cantidad"] == Decimal("22780.516")  # igual en las dos: no hay choque
+    assert "precios unitarios distintos" in combinadas[0]["motivo_revision"]
+
+
+def test_combinar_por_clave_mismo_codigo_con_mismo_precio_se_funde_sin_aviso():
+    base = {"expediente_id": 1, "clave_linea": "P-1", "codigo_precio": "P-1", "matricula": None,
+            "descripcion": "Balasto sobre camión a cantera", "motivo_revision": None, "pagina": 30}
+    lineas = [
+        {**base, "precio_unitario": Decimal("12.40"), "cantidad": None},
+        {**base, "precio_unitario": Decimal("12.40"), "cantidad": Decimal("5")},
+    ]
+    combinadas = _combinar_por_clave(lineas)
+    assert len(combinadas) == 1
+    assert combinadas[0]["precio_unitario"] == Decimal("12.40")
+    assert combinadas[0]["cantidad"] == Decimal("5")
+    # Solo el aviso de siempre de fusión sin matrícula, nunca el de choque.
+    assert "varias veces en el documento" not in (combinadas[0]["motivo_revision"] or "")
+
+
+def test_guardar_lineas_catalogo_con_choque_de_precio_borra_el_valor_anterior(db_session):
+    lote = _lote(db_session)
+    base = {"expediente_id": lote.expediente_id, "clave_linea": "P-2", "codigo_precio": "P-2", "matricula": None,
+            "descripcion": "M3 de balasto transportado", "orden_aparicion": 0, "motivo_revision": None}
+    guardar_lineas_catalogo(db_session, lote.id, [{**base, "precio_unitario": Decimal("6.60")}])
+    db_session.commit()
+
+    guardar_lineas_catalogo(db_session, lote.id, [
+        {**base, "precio_unitario": Decimal("1.80"), "pagina": 30},
+        {**base, "precio_unitario": Decimal("6.60"), "pagina": 30},
+    ])
+    db_session.commit()
+
+    fila = db_session.query(LineaCatalogo).filter_by(lote_id=lote.id, clave_linea="P-2").one()
+    assert fila.precio_unitario is None
+    assert "precios unitarios distintos" in fila.motivo_revision
