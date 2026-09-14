@@ -48,7 +48,12 @@ from app.models import Documento, EstadoExpediente, Expediente, LineaCatalogo
 # una unidad que no caben en su columna descartados en vez de tumbar el
 # documento entero al guardar, las filas de solo importes descartadas como
 # relleno y la matrícula partida por el ancho de columna reconocida como tal.
-VERSION_LOGICA_EXTRACCION = "2026-09-14.2"
+# 2026-09-14.3 (tercera parte): el lote que solo nombra un Contrato también
+# se registra, un expediente de lote se queda con las tablas que no declaran
+# lote (salvo el anejo de criterios del conjunto de los lotes, que ya no se
+# atribuye a ninguno) y la fusión por firma no cruza entre dos códigos
+# propios distintos.
+VERSION_LOGICA_EXTRACCION = "2026-09-14.3"
 
 
 def huella_documentos(documentos: Iterable[Documento]) -> str:

@@ -451,6 +451,12 @@ class LineaCatalogo(Base):
     # el mecanismo, no solo una). Nunca se pone a partir de una franja
     # ambigua (varias cabeceras, o una no declarada): solo ausencia total.
     lote_heredado_de_pagina_anterior = Column(Boolean, nullable=True)
+    # Sesión 2026-09-14, tercera parte (migración 0030): `True` cuando
+    # `lote_id` es el lote del propio expediente porque la tabla no declara
+    # ninguno y el expediente es uno de los lotes de la licitación y sabe
+    # cuál (decisión del cliente, `app.extraccion.pipeline_anejo`,
+    # `lote_propio`). Mismo convenio que `lote_heredado_de_pagina_anterior`.
+    lote_del_expediente = Column(Boolean, nullable=True)
     # Bloque 4, sesión 2026-09-09 (migración 0025): `True` únicamente cuando
     # `unidad_medida` se rellenó desde `maestro_materiales` (app.extraccion.
     # maestro_materiales.completar_unidades_desde_maestro) porque el

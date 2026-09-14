@@ -389,6 +389,29 @@ def test_exportar_catalogo_excluye_huerfanas_por_defecto_y_las_resume(cliente, d
     assert any("Código del material" in (fila[0] or "") for fila in filas_resumen)
 
 
+def test_exportar_catalogo_cuenta_aparte_el_anejo_de_criterios(cliente, db_session, tmp_path, monkeypatch):
+    # Sesión 2026-09-14, tercera parte: una línea del anejo de criterios del
+    # conjunto de los lotes no está pendiente de nada -- fila propia en el
+    # Resumen, fuera de "pendientes de revisión".
+    from app.extraccion.lote_tabla import MOTIVO_TABLA_DEL_CONJUNTO
+
+    monkeypatch.setattr(settings, "codigos_proyecto_path", None)
+    expediente, _lote, documento, _linea = _sembrar_catalogo(db_session)
+    _agregar_linea_huerfana(db_session, expediente, documento, motivo=MOTIVO_TABLA_DEL_CONJUNTO)
+
+    resp = cliente.get("/catalogo/exportar.xlsx")
+
+    ruta = tmp_path / "salida.xlsx"
+    ruta.write_bytes(resp.content)
+    libro = openpyxl.load_workbook(ruta)
+    assert libro["Materiales"].max_row == 2
+    filas_resumen = [[c.value for c in fila] for fila in libro["Resumen"].iter_rows()]
+    assert ["Líneas pendientes de revisión (no incluidas arriba)", 0] in [fila[:2] for fila in filas_resumen]
+    assert any(
+        (fila[0] or "").startswith("Líneas del anejo de criterios técnicos") and fila[1] == 1 for fila in filas_resumen
+    )
+
+
 def test_exportar_catalogo_incluir_pendientes_las_devuelve_en_materiales(cliente, db_session, monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "codigos_proyecto_path", None)
     expediente, _lote, documento, _linea = _sembrar_catalogo(db_session)
