@@ -229,3 +229,45 @@ ANEJO_REPUESTO_CONTINUACION_0109 = FIXTURES_DIR / "6.21_28510.0109_ANEJO_repuest
 # anclajes con matrícula (13 + 12) más una partida alzada al final de la
 # p.20.
 ANEJO_CABECERA_ILEGIBLE_0016 = FIXTURES_DIR / "6.21_28510.0016_ANEJO_cabecera_ilegible_p19-20.pdf"
+
+# Misma sesión, continuación (identidad de lote en expedientes hermanos):
+# recortes a la página 1 de documentos reales. La página 1 de cada Contrato
+# trae "Contrato nº", el "LOTE N" que es y la baja; la de cada adjudicación,
+# la cabecera del lote y el RESUELVE.
+#
+# Tornillería (`6.20/28510.0115`, 2 lotes; `0015` es el LOTE 1 y `0016` el
+# LOTE 2): la única Resolución es la del LOTE 2 ("LOTE 2 - ANCLAJES DE
+# SEGURIDAD. EXPEDIENTE Nº: 6.21/28510.0016" en la cabecera) y su RESUELVE
+# lo llama "LOTE 1: ANCLAJES DE SEGURIDAD. EXPEDIENTE Nº: 6.21/28510.0016"
+# -- errata del documento. Los recortes de sus dos Contratos pesan 220-280
+# KB; los tests usan el texto literal de su cabecera en su lugar.
+RESOLUCION_LOTE2_ERRATA_LOTE1_0016 = FIXTURES_DIR / "6.21_28510.0016_ADJUDICACION_1_p1.pdf"
+
+# Tornillos y tirafondos (`6.22/28510.0033`, 2 lotes; `0057` LOTE 1 NORTE,
+# `0058` LOTE 2 SUR). La descripción de cada lote nombra al otro ("... POR
+# EL ADJUDICATARIO DEL LOTE1, NORTE"), y la Resolución del LOTE 2 copia en
+# su RESUELVE "LOTE 1 ... EXPEDIENTE Nº 6.22/28510.0057" con la empresa y la
+# baja del LOTE 2 (TECNOLOGÍA SEÑALÉTICA, 0,50 %). CONTRATO_1: 0058, LOTE 2,
+# 0,50 %; CONTRATO_2: 0057, LOTE 1, INDUSTRIAS LANEKO, 10,50 %.
+RESOLUCION_REFERENCIA_CRUZADA_0058 = FIXTURES_DIR / "6.22_28510.0058_ADJUDICACION_1_p1.pdf"
+CONTRATO_LOTE2_0058 = FIXTURES_DIR / "6.22_28510.0058_CONTRATO_1_p1.pdf"
+CONTRATO_LOTE1_0057 = FIXTURES_DIR / "6.22_28510.0058_CONTRATO_2_p1.pdf"
+
+# Repuestos de vía (`6.22/28510.0122`, 2 lotes; `0155` LOTE 1, `0156` LOTE
+# 2): la Propuesta del LOTE 2 es el único documento de lotes, y el LOTE 1
+# solo aparece en la referencia cruzada de la descripción del LOTE 2.
+# CONTRATO_1: 0156, LOTE 2, 24,99 %; CONTRATO_2: 0155, LOTE 1, 24,90 %.
+PROPUESTA_REFERENCIA_CRUZADA_0156 = FIXTURES_DIR / "6.22_28510.0156_ADJUDICACION_1_p1.pdf"
+
+# Auditoría de las huérfanas recuperadas (misma sesión): 6 páginas reales de
+# `4.26/28510.0020_ANEJO_8f2a33dd634a5454.pdf` (2 lotes) -- p.14, 15, 16,
+# 17, 18 y 39 del original, en ese orden. p.14: "LOTE 1: SUBDIRECCIÓN DE
+# OPERACIONES ESTE" dentro de la caja de la tabla (filas de título). p.15:
+# continuación del LOTE 1; debajo de la tabla, "LOTE 2: SUBDIRECCIÓN DE
+# OPERACIONES NORESTE", que abre la tabla de la p.16. p.17: continuación
+# del LOTE 2, y debajo "TOTAL DE AMBOS LOTES: LOTE 1 ... LOTE 2 ...". p.18:
+# prosa, sin tabla. p.39: cuadro de precios de la partida alzada, común a
+# los dos lotes, sin ningún rastro de "LOTE" en su página.
+ANEJO_LOTE_EN_TITULO_Y_COLA_0020 = FIXTURES_DIR / "4.26_28510.0020_ANEJO_1_lote_en_titulo_y_cola_p14-18_39.pdf"
+CONTRATO_LOTE2_0156 = FIXTURES_DIR / "6.22_28510.0156_CONTRATO_1_p1.pdf"
+CONTRATO_LOTE1_0155 = FIXTURES_DIR / "6.22_28510.0156_CONTRATO_2_p1.pdf"

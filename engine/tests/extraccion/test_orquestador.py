@@ -19,10 +19,11 @@ from app.extraccion.orquestador import (
     _detectar_documento_adjudicacion_no_relacionado,
     _detectar_numero_lotes_pcsp,
     _extraer_campos_expediente,
+    _extraer_lotes_declarados_del_expediente,
     ejecutar_extraccion_expediente,
 )
 from app.extraccion.invalidado import INVALIDADO
-from app.extraccion.texto import PaginaTexto
+from app.extraccion.texto import PaginaTexto, extraer_texto
 from app.interfaces.document_storage import DocumentStorage
 from app.models import (
     Documento,
@@ -735,6 +736,142 @@ def test_codigo_principal_declarado_nunca_se_confunde_con_matriz(db_session):
     assert set(lotes) == {"1", "2", "3"}
     assert lotes["1"].codigo_expediente_lote == "6.24/28510.0175"
     assert expediente.lotes_totales_declarados == 3
+
+
+# --- Sesión 2026-09-14 (continuación): identidad de lote en expedientes hermanos
+
+
+def _item(documento_id: int, tipo: TipoDocumento, paginas: list[PaginaTexto]) -> _Documento:
+    return _Documento(documento=SimpleNamespace(id=documento_id), tipo=tipo, paginas=paginas)
+
+
+def test_contratos_de_tornilleria_corrigen_la_identidad_de_los_dos_lotes():
+    """Caso del cliente: la única Resolución de tornillería es la del LOTE 2,
+    con la errata "LOTE 1: ... 6.21/28510.0016" en el RESUELVE. Antes, los
+    dos lotes quedaban ligados a 0016 y el LOTE 1 se llevaba la baja y el
+    importe del LOTE 2. Con los Contratos: LOTE 1 = 0015 (su baja, 0,00 %,
+    sale de su Contrato), LOTE 2 = 0016 con los datos de la Resolución."""
+    from tests.extraccion.test_lotes import (
+        _CABECERA_CONTRATO_TORNILLERIA_LOTE1, _CABECERA_CONTRATO_TORNILLERIA_LOTE2,
+    )
+    resultado = _extraer_lotes_declarados_del_expediente([
+        _item(1, TipoDocumento.resolucion_adjudicacion, extraer_texto(fx.RESOLUCION_LOTE2_ERRATA_LOTE1_0016)),
+        _item(2, TipoDocumento.contrato, [PaginaTexto(numero=1, texto=_CABECERA_CONTRATO_TORNILLERIA_LOTE2)]),
+        _item(3, TipoDocumento.contrato, [PaginaTexto(numero=1, texto=_CABECERA_CONTRATO_TORNILLERIA_LOTE1)]),
+    ])
+    lotes = {l.identificador: l for l in resultado.lotes}
+    assert set(lotes) == {"1", "2"}
+    assert lotes["1"].codigo_expediente_lote == "6.21/28510.0015"
+    assert lotes["1"].baja == Decimal("0.0000")
+    assert lotes["1"].documento_id == 3  # la baja la declara su Contrato
+    assert lotes["1"].importe_adjudicacion is None
+    assert lotes["2"].codigo_expediente_lote == "6.21/28510.0016"
+    assert lotes["2"].importe_adjudicacion == Decimal("15000.00")
+    assert not resultado.motivos_por_lote
+
+
+def test_contrato_contradice_la_baja_que_la_adjudicacion_da_a_su_lote():
+    """6.22/28510.0033: la Resolución del LOTE 2 copia en su RESUELVE "LOTE
+    1 ... 6.22/28510.0057" con la empresa y la baja del LOTE 2 (0,50 %). El
+    Contrato de 0057 (LOTE 1) declara 10,50 %: gana el Contrato, el
+    adjudicatario de ese bloque no se atribuye al LOTE 1, y queda motivo."""
+    resultado = _extraer_lotes_declarados_del_expediente([
+        _item(1, TipoDocumento.resolucion_adjudicacion, extraer_texto(fx.RESOLUCION_REFERENCIA_CRUZADA_0058)),
+        _item(2, TipoDocumento.contrato, extraer_texto(fx.CONTRATO_LOTE2_0058)),
+        _item(3, TipoDocumento.contrato, extraer_texto(fx.CONTRATO_LOTE1_0057)),
+    ])
+    lotes = {l.identificador: l for l in resultado.lotes}
+    assert lotes["1"].codigo_expediente_lote == "6.22/28510.0057"
+    assert lotes["1"].baja == Decimal("0.1050")
+    assert lotes["1"].adjudicatario is None
+    assert lotes["2"].codigo_expediente_lote == "6.22/28510.0058"
+    assert lotes["2"].baja == Decimal("0.0050")
+    assert set(resultado.motivos_por_lote) == {"1"}
+    assert "baja del 0,50 % y su Contrato (6.22/28510.0057) declara 10,50 %" in resultado.motivos_por_lote["1"]
+
+
+def _crear_familia_0122(db_session, codigo_expediente: str):
+    return _crear_expediente_con_documentos(
+        db_session, codigo_expediente,
+        [
+            ("ADJUDICACION", fx.PROPUESTA_REFERENCIA_CRUZADA_0156),
+            ("CONTRATO_1", fx.CONTRATO_LOTE2_0156),
+            ("CONTRATO_2", fx.CONTRATO_LOTE1_0155),
+            ("ANEJO", fx.ANEJO_HERENCIA_LOTE_0156),
+        ],
+    )
+
+
+def test_expediente_de_lote_solo_guarda_su_propio_lote(db_session):
+    """6.22/28510.0155 es el LOTE 1 de la licitación 6.22/28510.0122 (lo dice
+    su Contrato) y comparte todos los documentos con el LOTE 2 (0156): antes
+    mostraba los dos lotes, con sus líneas, y el LOTE 1 con el código y la
+    baja del LOTE 2. Ahora solo su lote, con su código y su baja (24,90 %,
+    de su Contrato), y solo las líneas de las tablas del LOTE 1 del anejo
+    (p.1-3 del fixture)."""
+    expediente = _crear_familia_0122(db_session, "6.22/28510.0155")
+    trabajo = SimpleNamespace(expediente_id=expediente.id)
+
+    resultado = ejecutar_extraccion_expediente(db_session, _StorageDirecta(), trabajo, model_provider=None)
+
+    db_session.refresh(expediente)
+    lotes = db_session.query(Lote).filter_by(expediente_id=expediente.id).all()
+    assert [(l.identificador_lote, l.codigo_expediente_lote, l.baja_lote) for l in lotes] == [
+        ("1", "6.22/28510.0155", Decimal("0.2490")),
+    ]
+    lineas = db_session.query(LineaCatalogo).filter_by(expediente_id=expediente.id).all()
+    assert lineas
+    assert {l.lote_id for l in lineas} == {lotes[0].id}
+    assert {l.pagina for l in lineas} <= {1, 2, 3}
+    assert resultado["lineas_de_lotes_hermanos"] > 0
+    assert expediente.baja_global == Decimal("0.2490")
+    assert "cobertura parcial" not in (expediente.error or "")
+
+
+def test_expediente_principal_conserva_todos_los_lotes(db_session):
+    # El expediente que agrupa la licitación (su código no es el de ningún
+    # lote) sigue guardando los dos lotes, ya con la identidad corregida.
+    expediente = _crear_familia_0122(db_session, "6.22/28510.0122")
+    trabajo = SimpleNamespace(expediente_id=expediente.id)
+
+    resultado = ejecutar_extraccion_expediente(db_session, _StorageDirecta(), trabajo, model_provider=None)
+
+    lotes = {l.identificador_lote: l for l in db_session.query(Lote).filter_by(expediente_id=expediente.id)}
+    assert set(lotes) == {"1", "2"}
+    assert lotes["1"].codigo_expediente_lote == "6.22/28510.0155"
+    assert lotes["2"].codigo_expediente_lote == "6.22/28510.0156"
+    assert resultado["lineas_de_lotes_hermanos"] == 0
+    paginas_por_lote = {
+        identificador: {
+            l.pagina for l in db_session.query(LineaCatalogo).filter_by(lote_id=lote.id)
+        }
+        for identificador, lote in lotes.items()
+    }
+    assert paginas_por_lote["1"] <= {1, 2, 3} and paginas_por_lote["1"]
+    assert paginas_por_lote["2"] <= {4, 5} and paginas_por_lote["2"]
+
+
+def test_reprocesar_expediente_de_lote_borra_los_lotes_de_hermanos_de_antes(db_session):
+    """Idempotencia: lo que una pasada anterior guardó en el expediente como
+    lote del hermano (con sus líneas) desaparece al reprocesar."""
+    expediente = _crear_familia_0122(db_session, "6.22/28510.0156")
+    lote_viejo = Lote(expediente_id=expediente.id, identificador_lote="1", codigo_expediente_lote="6.22/28510.0156")
+    db_session.add(lote_viejo)
+    db_session.commit()
+    db_session.add(LineaCatalogo(
+        expediente_id=expediente.id, lote_id=lote_viejo.id, clave_linea="vieja", orden_aparicion=0,
+        codigo_precio="P-999", descripcion="línea del lote hermano guardada por una pasada anterior",
+    ))
+    db_session.commit()
+    trabajo = SimpleNamespace(expediente_id=expediente.id)
+
+    ejecutar_extraccion_expediente(db_session, _StorageDirecta(), trabajo, model_provider=None)
+
+    lotes = db_session.query(Lote).filter_by(expediente_id=expediente.id).all()
+    assert [(l.identificador_lote, l.codigo_expediente_lote) for l in lotes] == [("2", "6.22/28510.0156")]
+    assert db_session.query(LineaCatalogo).filter_by(codigo_precio="P-999").first() is None
+    paginas = {l.pagina for l in db_session.query(LineaCatalogo).filter_by(expediente_id=expediente.id)}
+    assert paginas and paginas <= {4, 5}
 
 
 # --- CONTEXTO.md sección 26: criterios de alcance del cliente ----------------

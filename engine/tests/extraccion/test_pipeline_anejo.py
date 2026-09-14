@@ -11,7 +11,7 @@ from app.extraccion.pipeline_anejo import procesar_anejo
 from app.extraccion.texto import extraer_texto
 from app.models import Documento, DocumentoExpediente, Expediente, Lote, TipoDocumento
 from tests import fixtures as fx
-from tests.extraccion.dobles import ProveedorModeloFalso
+from tests.extraccion.dobles import ProveedorModeloCabeceraPorContenido, ProveedorModeloFalso
 
 
 def _sin_identificador_lote(lineas: list[dict]) -> list[dict]:
@@ -152,6 +152,48 @@ def test_documento_0088_traviesas_colapsa_a_14_lineas_unicas_en_catalogo(db_sess
     guardado = guardar_lineas_catalogo(db_session, lote.id, _sin_identificador_lote(resultado.lineas))
     assert guardado.creadas == 14
     assert guardado.actualizadas == 0
+
+
+def test_lote_en_el_titulo_de_la_tabla_o_al_final_de_la_pagina_anterior(db_session):
+    """Sesión 2026-09-14 (continuación, auditoría de las huérfanas):
+    `4.26/28510.0020`. La cabecera "LOTE N" de cada presupuesto no está en
+    la franja sobre la tabla: la del LOTE 1 va dentro de la caja de la tabla
+    (sus filas de título) y la del LOTE 2 al final de la página anterior.
+    Antes, las cuatro páginas quedaban sin lote. Y el cuadro de la partida
+    alzada (p.39 del original, común a los dos lotes) no hereda el LOTE 2
+    de la p.17: hay páginas sin tabla por medio, no es su continuación."""
+    expediente = Expediente(codigo_expediente="4.26/28510.0020")
+    db_session.add(expediente)
+    db_session.commit()
+    documento = Documento(
+        tipo_documento=TipoDocumento.anejo, hash="hash-0020-lote-titulo-cola",
+        ruta_almacenamiento=str(fx.ANEJO_LOTE_EN_TITULO_Y_COLA_0020),
+    )
+    db_session.add(documento)
+    db_session.commit()
+
+    resultado = procesar_anejo(
+        fx.ANEJO_LOTE_EN_TITULO_Y_COLA_0020,
+        extraer_texto(fx.ANEJO_LOTE_EN_TITULO_Y_COLA_0020),
+        documento_origen_id=documento.id,
+        expediente_id=expediente.id,
+        lotes={"1": None, "2": None},
+        db=db_session,
+        model_provider=ProveedorModeloCabeceraPorContenido(),
+    )
+
+    por_pagina: dict[int, set] = {}
+    for linea in resultado.lineas:
+        por_pagina.setdefault(linea["pagina"], set()).add(
+            (linea["identificador_lote"], linea["lote_heredado_de_pagina_anterior"])
+        )
+    # Las continuaciones sin cabecera (p.2 y p.4 del fixture) no dan líneas
+    # aquí: su mapeo sale en producción de la caché de cabeceras, que este
+    # test no tiene. La herencia en sí ya la cubre el test de `0156`.
+    assert por_pagina[1] == {("1", None)}   # título de la tabla
+    assert por_pagina[3] == {("2", None)}   # cola de la página anterior
+    assert por_pagina[6] == {(None, None)}  # partida alzada, común
+    assert any("página 6: tabla separada de la anterior por páginas sin tabla" in m for m in resultado.tablas_sin_lote)
 
 
 def test_documento_0156_hereda_lote_entre_paginas_de_continuacion(db_session):

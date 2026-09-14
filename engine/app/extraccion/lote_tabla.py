@@ -57,7 +57,15 @@ antes de implementar, donde un lote cambie sin dejar ningún rastro
 textual — pero si apareciera, sigue siendo el mismo riesgo que ya asumía
 esta sesión de diseño original (docstring previo: "una regla así puede
 fallar de formas silenciosas"), nunca el riesgo del balasto (aquí no se
-compara nunca el contenido de una fila con otra)."""
+compara nunca el contenido de una fila con otra).
+
+Sesión 2026-09-14 (continuación): "continuación" quiere decir página
+contigua. Una tabla separada de la anterior por páginas sin tabla ya no
+hereda (`separada_por_paginas`): heredaba el último lote a páginas de
+distancia en tablas comunes a todos los lotes (criterios técnicos, precios
+de la partida alzada). Y la cabecera "LOTE N" de una tabla también se busca
+en sus filas de título y al pie de la página anterior, cuando la franja no
+trae nada (ver `asociar_lote_tabla`)."""
 from __future__ import annotations
 
 import re
@@ -122,16 +130,69 @@ def asociar_lote_tabla(
     banda_top: float,
     tabla_bbox: tuple[float, float, float, float],
     identificadores_validos: Optional[set[str]] = None,
+    texto_titulo_tabla: str = "",
+    texto_cola_pagina_anterior: str = "",
+    separada_por_paginas: bool = False,
 ) -> ResultadoAsociacionLote:
     """`banda_top`: fondo (en coordenadas de página) de la tabla anterior en
     esta misma página, o 0 si `tabla_bbox` es la primera tabla de la
     página — la llama el orquestador de la búsqueda de banda (ver
     `app.extraccion.pipeline_anejo`), que es quien recorre las tablas de una
-    página en orden y sabe cuál es "la anterior"."""
+    página en orden y sabe cuál es "la anterior".
+
+    Sesión 2026-09-14 (continuación, auditoría de las huérfanas recuperadas):
+    si la franja no trae ningún rastro de "LOTE", la cabecera de sección
+    puede estar en otros dos sitios que también son solo de esta tabla,
+    verificados en `4.26/28510.0020` (en su CONTRATO y en su ANEJO, el
+    presupuesto de cada lote quedaba sin lote):
+
+    - `texto_titulo_tabla`: dentro de la propia caja de la tabla, en sus
+      filas de título -- `pdfplumber` las devuelve como cabecera ("...
+      LOTE 1: SUBDIRECCIÓN DE OPERACIONES ESTE Ref. CAPITULO I: MEDIOS
+      HUMANOS").
+    - `texto_cola_pagina_anterior`: al final de la página anterior, debajo
+      de su última tabla, cuando esta es la primera tabla de su página ("El
+      Presupuesto Base de Licitación del Lote 1 asciende a ... LOTE 2:
+      SUBDIRECCIÓN DE OPERACIONES NORESTE", y la tabla del LOTE 2 empieza
+      en la página siguiente).
+
+    Se consultan en ese orden, con las mismas reglas que la franja, y solo
+    si la franja está limpia: una franja con rastro manda como siempre.
+    Cualquier rastro en ellos cuenta igual que en la franja -- deja la tabla
+    fuera de la herencia aunque no se pueda resolver.
+
+    `separada_por_paginas`: la tabla anterior del documento no está en esta
+    página ni en la contigua -- hay páginas sin tabla por medio. Entonces
+    esta no es la continuación de aquella, aunque su franja esté limpia: no
+    es elegible para heredar (y corta la cadena de herencia). El criterio
+    aprobado de la herencia son las páginas de continuación, y verificando
+    esta sesión salieron dos tablas comunes a todos los lotes que heredaban
+    el último lote a páginas de distancia: el cuadro de precios de la
+    partida alzada del ANEJO de `4.26/28510.0020` (p.39, 22 páginas después
+    del presupuesto del LOTE 2) y la tabla de criterios técnicos del ANEJO
+    de `6.25/28510.0214` (p.30, cinco páginas después de la del LOTE 8)."""
     _x0, techo_tabla, _x1, _bottom = tabla_bbox
     banda = pagina_pdfplumber.crop((0, banda_top, pagina_pdfplumber.width, techo_tabla))
     texto_banda = banda.extract_text() or ""
 
+    resultado = _asociar_por_texto(texto_banda, identificadores_validos)
+    if resultado.elegible_para_herencia:
+        for texto in (texto_titulo_tabla, texto_cola_pagina_anterior):
+            if _LOTE_CABECERA_RE.search(texto):
+                return _asociar_por_texto(texto, identificadores_validos)
+        if separada_por_paginas:
+            return ResultadoAsociacionLote(
+                identificador_lote=None,
+                motivo_ambiguo=(
+                    "tabla separada de la anterior por páginas sin tabla: no es continuación de ninguna, "
+                    "no se hereda el lote"
+                ),
+                elegible_para_herencia=False,
+            )
+    return resultado
+
+
+def _asociar_por_texto(texto_banda: str, identificadores_validos: Optional[set[str]]) -> ResultadoAsociacionLote:
     identificadores = sorted(set(_LOTE_CABECERA_RE.findall(texto_banda)))
 
     if len(identificadores) == 1:

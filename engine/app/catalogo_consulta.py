@@ -12,6 +12,7 @@ from typing import Optional
 from sqlalchemy import Select, and_, case, func, or_, select
 from sqlalchemy.orm import Session
 
+from app.celdas_vacias import celdas_vacias
 from app.config import settings
 from app.exclusion import cargar_exclusion_palabras_titulo, cargar_exclusiones
 from app.models import Documento, DocumentoExpediente, EstadoRevisionLinea, Expediente, LineaCatalogo, Lote
@@ -245,4 +246,11 @@ def fila_a_dict(
         "documento_origen_nombre": nombre_archivo,
         "pagina": linea.pagina,
         "fragmento": linea.fragmento,
+        # Sesión 2026-09-14 (continuación): por qué está vacía cada celda de
+        # datos, decidido en el motor para que la web y el Excel digan lo
+        # mismo (`app.celdas_vacias`).
+        "celdas_vacias": {
+            c.campo: {"motivo": c.motivo, "detalle": c.detalle}
+            for c in celdas_vacias(linea, lote.identificador_lote if lote else None)
+        },
     }

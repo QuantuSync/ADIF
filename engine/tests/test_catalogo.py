@@ -4,6 +4,7 @@ from app.catalogo import (
     _combinar_por_clave,
     _normalizar_codigo_precio,
     buscar_posible_duplicado_huerfana,
+    campos_vacios_por_valor_de_otro_lote,
     calcular_clave_linea,
     construir_linea_catalogo,
     construir_lineas_desde_tabla,
@@ -2413,6 +2414,45 @@ def test_construir_linea_catalogo_partida_alzada_con_importe_en_la_columna_de_ca
     assert linea["cantidad"] is None
 
 
+def test_construir_linea_catalogo_cantidad_imposible_se_descarta_sin_tumbar_el_documento():
+    # `6.22/28510.0156` CONTRATO_1 (doc 702) p.123, fila real: una tabla de
+    # aplicabilidad con un "1" en cada casilla, leída como una sola cantidad
+    # de 15 dígitos -- no cabe en `lineas_catalogo.cantidad` y al guardar
+    # tumbaba el documento entero.
+    mapeo = {"codigo_precio": None, "matricula": 0, "descripcion": 1, "unidad_medida": None, "cantidad": 2, "precio_unitario": 3}
+    fila = ["617050011", "SCV-V-60-II-1500 HORM", "111111111111111", None]
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=123, documento_origen_id=702, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+    assert linea["cantidad"] is None
+    assert "cantidad descartada ('111111111111111')" in linea["motivo_revision"]
+
+
+def test_construir_linea_catalogo_fila_de_solo_importes_es_relleno():
+    # Misma tabla real (p.123): filas con el mismo importe repetido por
+    # columnas, sin código, sin matrícula y sin ninguna letra -- no dicen qué
+    # material son. Antes nunca llegaban a guardarse porque el documento
+    # entero reventaba; con el documento ya guardándose, aparecían como
+    # líneas sin descripción (error de la auditoría).
+    mapeo = {"codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": None, "cantidad": None, "precio_unitario": 7}
+    fila = [None, None, None, None, None, None, None, "21.206,61 €", "21.206,61 €", "21.206,61 €"]
+    assert construir_linea_catalogo(
+        fila, mapeo, pagina=123, documento_origen_id=702, expediente_id=1, baja_lote=None, orden_aparicion=0
+    ) is None
+
+
+def test_construir_linea_catalogo_unidad_que_no_cabe_en_la_columna_se_descarta():
+    # Misma fila real: la columna de unidad trae "UD." repetido una vez por
+    # casilla (111 caracteres) -- no cabe en `unidad_medida` (32).
+    mapeo = {"codigo_precio": None, "matricula": 0, "descripcion": 1, "unidad_medida": 2, "cantidad": None, "precio_unitario": 3}
+    fila = ["617050011", "SCV-V-60-II-1500 HORM", " ".join(["UD."] * 28), "21.206,61 €"]
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=123, documento_origen_id=702, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+    assert linea["unidad_medida"] is None
+    assert "unidad de medida descartada por larga (111 caracteres" in linea["motivo_revision"]
+
+
 def test_combinar_por_clave_mismo_codigo_con_precios_distintos_no_se_atribuye():
     # `6.19/28510.0025_ANEJO_02234c396aba465d.pdf`: un "PRESUPUESTO ... LOTE N"
     # por lote en el mismo documento; en un expediente de un solo lote todas
@@ -2463,3 +2503,18 @@ def test_guardar_lineas_catalogo_con_choque_de_precio_borra_el_valor_anterior(db
     fila = db_session.query(LineaCatalogo).filter_by(lote_id=lote.id, clave_linea="P-2").one()
     assert fila.precio_unitario is None
     assert "precios unitarios distintos" in fila.motivo_revision
+    # Sesión 2026-09-14 (continuación): el motivo guardado dice qué campo
+    # quedó vacío por la guarda -- es lo que usa `app.celdas_vacias`.
+    assert campos_vacios_por_valor_de_otro_lote(fila.motivo_revision) == {"precio_unitario"}
+
+
+def test_campos_vacios_por_valor_de_otro_lote_lee_el_motivo_de_la_guarda():
+    base = {"expediente_id": 1, "clave_linea": "P-8", "codigo_precio": "P-8", "matricula": None,
+            "descripcion": "Traviesa", "motivo_revision": None, "pagina": 4}
+    combinadas = _combinar_por_clave([
+        {**base, "precio_unitario": Decimal("80"), "cantidad": Decimal("700")},
+        {**base, "precio_unitario": Decimal("95"), "cantidad": Decimal("650")},
+    ])
+    assert campos_vacios_por_valor_de_otro_lote(combinadas[0]["motivo_revision"]) == {"cantidad", "precio_unitario"}
+    assert campos_vacios_por_valor_de_otro_lote("banda vacía: posible continuación") == frozenset()
+    assert campos_vacios_por_valor_de_otro_lote(None) == frozenset()

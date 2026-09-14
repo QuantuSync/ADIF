@@ -666,6 +666,26 @@ cobertura cero sin desglose, sustitución del lote sentinela obsoleto al
 migrar, guarda de vocabulario "matriz"). 257 tests en verde, ninguno nuevo
 de más de 210 KB.
 
+### Seguimiento (sesión 2026-09-14, revisión del cliente): el expediente de lote
+
+Esta sección daba a cada lote su código propio, pero ningún expediente se
+restringía a su lote: un expediente que ES el LOTE N (su código es el
+"EXPEDIENTE Nº" de ese lote) guardaba las líneas, la baja y el importe de
+todos los lotes de la licitación, porque comparte los documentos con sus
+hermanos. Desde esa sesión (detalle en
+`docs/sesion-2026-09-14-revision-cliente-pliegos.md`, bloque C1):
+
+- Si exactamente uno de los lotes declarados trae el código del propio
+  expediente, el expediente solo guarda ese lote; el principal (su código no
+  es el de ningún lote) sigue con todos.
+- El Contrato firmado ("Contrato nº: X" + "LOTE N") tiene la última palabra
+  sobre la identidad de cada lote: corrige erratas de número en la
+  adjudicación, completa código y baja, y su baja gana si contradice la que
+  la adjudicación atribuye a ese lote. Nunca añade un lote que la
+  adjudicación no nombra.
+- "… POR EL ADJUDICATARIO DEL LOTE N" dentro de la descripción de otro lote
+  es una referencia cruzada, no el arranque de un bloque.
+
 ---
 
 ## Seguimiento urgente: autoridad del PDF sobre la sindicación, y los 3 últimos en revisión (parte de la sesión de criterios del cliente, sección 26 de `docs/decisiones-cliente.md`)

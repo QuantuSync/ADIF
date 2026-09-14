@@ -41,7 +41,14 @@ from app.models import Documento, EstadoExpediente, Expediente, LineaCatalogo
 # cabeceras ilegibles (fuente sin mapa Unicode), códigos con sufijo de
 # variante, herencia de mapeo por geometría de columnas y código de material
 # de la columna REPUESTO -- todo sin tocar ningún documento.
-VERSION_LOGICA_EXTRACCION = "2026-09-14.1"
+# 2026-09-14.2 (misma sesión, continuación): identidad de lote corregida con
+# los Contratos, cada expediente de lote guarda solo su lote, la cabecera
+# "LOTE N" en el título de la tabla o al final de la página anterior, la
+# herencia de lote solo entre páginas contiguas, una cantidad, un precio o
+# una unidad que no caben en su columna descartados en vez de tumbar el
+# documento entero al guardar, las filas de solo importes descartadas como
+# relleno y la matrícula partida por el ancho de columna reconocida como tal.
+VERSION_LOGICA_EXTRACCION = "2026-09-14.2"
 
 
 def huella_documentos(documentos: Iterable[Documento]) -> str:

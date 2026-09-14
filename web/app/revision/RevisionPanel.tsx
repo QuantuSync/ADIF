@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { DatoVacio, DescripcionCelda, esPartidaAlzada, formatearNumero } from "../ui";
+import { DatoVacio, DescripcionCelda, esPartidaAlzada, formatearNumero, type MotivoVacio } from "../ui";
 import { interpretarMotivoLinea, interpretarMotivos } from "../motivos";
 import { useReintentoConexion } from "../useReintentoConexion";
 
@@ -56,6 +56,7 @@ type LineaCatalogo = {
   documento_origen_nombre: string | null;
   pagina: number | null;
   posible_duplicado_de: PosibleDuplicado | null;
+  celdas_vacias?: Record<string, { motivo: MotivoVacio; detalle: string | null }>;
 };
 
 // Las tres salidas de una línea que hoy solo se podía confirmar (CONTEXTO.md
@@ -92,6 +93,18 @@ function celdaCodigoPrecio(linea: LineaCatalogo) {
 function celdaPrecioUnitario(linea: LineaCatalogo) {
   const texto = formatearNumero(linea.precio_unitario);
   if (texto) return texto;
+  // Mismo criterio que CatalogoPanel y el Excel (`app.celdas_vacias`): un
+  // precio que el documento da distinto para cada lote está pendiente de
+  // saber qué lote es este, no "no consta".
+  const vacia = linea.celdas_vacias?.precio_unitario;
+  if (vacia?.motivo === "pendiente") {
+    return (
+      <DatoVacio
+        motivo="pendiente"
+        titulo={`${vacia.detalle ?? "El documento da un precio distinto para cada lote"}. Se deja vacío en vez de mostrar el de otro lote.`}
+      />
+    );
+  }
   return (
     <DatoVacio
       motivo="no-consta"
