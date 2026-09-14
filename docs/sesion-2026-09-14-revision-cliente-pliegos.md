@@ -300,26 +300,21 @@ conocidas).
 
 ---
 
-## Pendiente, sin resolver en esta sesión
+## Pendiente al cerrar la primera parte
 
-- **Probable resto de "cosas que no me cuadran" en el pliego de
-  tornillería:** `6.21/28510.0015` es solo el Lote 1 y `0016` solo el Lote
-  2, pero cada uno muestra los dos lotes (79 + 26 líneas), con el lote 1
-  ligado a `0016` y baja 0 %. Es el pendiente conocido de separar
-  expedientes de lote reales (CONTEXTO.md sección 16), no algo de esta
-  sesión.
+Los cuatro primeros puntos de esta lista se trataron en la continuación
+(abajo); los dos últimos siguen abiertos.
+
+- **Tornillería:** `6.21/28510.0015` es solo el Lote 1 y `0016` solo el
+  Lote 2, pero cada uno muestra los dos lotes (79 + 26 líneas), con el lote 1
+  ligado a `0016` y baja 0 %. → Continuación, bloque C1.
 - **Identidad de lote en documentos compartidos.** La guarda de choques deja
   vacío (y marcado) lo que antes era un valor de otro lote presentado en
-  silencio, pero el valor correcto para cada expediente solo se podrá dar
-  cuando se sepa qué "LOTE N" del documento es cada expediente (pendiente
-  conocido, CONTEXTO.md sección 16).
-- **El Excel no explica el precio vacío** de una línea con choque: el motivo
-  solo se ve en la cola de revisión. Decisión de producto: ¿nota en la hoja
-  Resumen, o marcador en la celda?
-- **Huérfanas nuevas**: parte de lo recuperado cae en expedientes
-  multi-lote cuyas tablas no dicen a qué lote pertenecen ("banda vacía",
-  "ninguna cabecera LOTE N") — están en la cola de revisión, fuera de la
-  hoja Materiales, por la regla de no adivinar el lote.
+  silencio. → Se mantiene así por decisión del cliente (continuación).
+- **El Excel no explica el precio vacío** de una línea con choque. →
+  Continuación, bloque C3.
+- **Huérfanas nuevas** en expedientes multi-lote cuyas tablas no dicen a
+  qué lote pertenecen. → Continuación, bloque C2.
 - **Residuo del localizador:** 10 páginas en 8 documentos con 2-4 líneas de
   filas de datos que siguen sin abrirse (colas cortas tras una página que no
   es candidata, por debajo del umbral de 3 filas del arranque sin cabecera).
@@ -327,3 +322,311 @@ conocidas).
   p.21 y p.36 (el código de cada fila cae una fila por debajo de sus datos):
   la validación de coherencia las rechaza y quedan fuera del Excel; los
   mismos materiales entran bien desde el anejo 588.
+
+---
+
+# Continuación — respuesta del cliente al reproceso
+
+Decisiones y encargos:
+
+- **Precios y cantidades con choque: se quedan vacíos y marcados.** En los
+  cuatro casos revisados contra el PDF el valor era de otro lote; un hueco
+  explicado es mejor que un número falso.
+- **Pero el Excel tiene que explicar ese hueco**, con el mismo criterio de
+  los tres motivos (no aplica / no consta / pendiente): una cantidad vacía
+  porque el valor era de otro lote no puede leerse igual que una que el
+  documento no trae (bloque C3).
+- **Revisar las 519 huérfanas nuevas contra el criterio de herencia entre
+  páginas** (bloque C2).
+- **Tornillería:** que `0015` y `0016` dejen de mostrar los dos lotes,
+  "el mismo problema que ya se resolvió para otros expedientes" (bloque C1).
+- El BOM del asunto del commit anterior se deja como está.
+
+## C1 — Identidad de lote en expedientes hermanos
+
+**Lo que había de verdad, antes de tocar nada.** Lo resuelto para otras
+familias (CONTEXTO.md sección 27) es el código propio de cada lote
+(`lotes.codigo_expediente_lote`): en casi todas estaba bien. Pero **ningún
+expediente del corpus se restringía a su propio lote**: un expediente que
+es el LOTE N de una licitación (su código es el "EXPEDIENTE Nº" de ese
+lote) comparte los documentos con sus hermanos y guardaba las líneas, la
+baja y el importe de todos los lotes — medido tras el arreglo: 39
+expedientes de 12 familias mostraban 4.955 líneas de lotes ajenos (los 7
+expedientes de lote de `6.25/28510.0019` con catálogo, de `0039` a `0047`,
+llevaban cada uno las ~460 líneas de los nueve lotes). Tornillería tenía
+además la identidad mal.
+
+**La fuente con autoridad: el Contrato.** "Contrato nº: X" en la cabecera
+y, justo debajo del título, "LOTE N: <descripción>" — la relación "Contrato
+⟷ lote" de la sección 27. De 170 documentos con "Contrato nº", 104 declaran
+así su lote (83 con baja). Contrastados con lo que guardaba el motor, tres
+familias discrepan, las tres por el documento, no por azar:
+
+| Familia | Qué dice el documento | Qué guardaba el motor |
+|---|---|---|
+| Tornillería (`6.20/28510.0115`: `0015` LOTE 1, `0016` LOTE 2) | La única Resolución es la del LOTE 2; su RESUELVE lo llama "LOTE 1: ANCLAJES DE SEGURIDAD. EXPEDIENTE Nº: 6.21/28510.0016" (errata) | Los dos lotes ligados a `0016`; el LOTE 1 con la baja (0 %) y el importe (15.000 €) del LOTE 2 |
+| `6.22/28510.0033` (`0057` LOTE 1 Norte, `0058` LOTE 2 Sur) | "LOTE 2: SUR Y, EN CASO DE URGENCIA QUE NO PUEDA SER TENDIDA POR EL ADJUDICATARIO DEL LOTE1, NORTE · EXPEDIENTE Nº 0058"; y la Resolución del LOTE 2 copia en su RESUELVE "LOTE 1 … 0057" con la empresa y la baja del LOTE 2 (TECNOLOGÍA SEÑALÉTICA, 0,50 %). Contratos: `0057` INDUSTRIAS LANEKO 10,50 %, `0058` TECNOLOGÍA SEÑALÉTICA 0,50 % | LOTE 1 → `0058` sin baja, LOTE 2 → `0057` con 0,50 %: identidades cruzadas, y las líneas del LOTE 1 sin precio adjudicado |
+| `6.22/28510.0122` (`0155` LOTE 1, `0156` LOTE 2) | La misma referencia cruzada en la Propuesta del LOTE 2, único documento de lotes. Contratos: `0155` 24,90 %, `0156` 24,99 % | LOTE 1 → `0156` con la baja del LOTE 2 (24,99 %); LOTE 2 sin código ni baja |
+
+**Arreglos** (`app/extraccion/lotes.py`, `orquestador.py`, `baja.py`):
+
+1. La referencia cruzada "adjudicatario del LOTE N" ya no abre ventana de
+   lote (se llevaba el código y la baja del lote que describe), pero sí
+   cuenta como lote nombrado, sin datos. Mismo criterio que ya aplicaba la
+   asociación de tablas a la cláusula de "urgencia mutua" (sesión del 08-09).
+2. `extraer_identidad_contrato` y `_identidades_de_contratos`: lo que cada
+   Contrato del expediente dice de sí mismo; si dos Contratos se contradicen
+   no se usa ninguno. Con ello: una ventana de la adjudicación cuyo código
+   propio un Contrato ata a otro número es una errata de número y va al lote
+   del Contrato (tornillería); un lote nombrado sin código ni baja los toma
+   de su Contrato; si el Contrato de un lote declara una baja distinta de la
+   que le da la adjudicación, **gana el Contrato** — el único documento que
+   habla solo de ese lote — y el adjudicatario y el importe de ese bloque
+   dejan de atribuirse, con motivo de revisión (`0033` lote 1: único caso en
+   el corpus). **Nunca añaden un lote que la adjudicación no nombra**:
+   probado en seco, habría convertido `6.23/28510.0051` en multi-lote y su
+   cuadro común de 1.080 líneas, sin ningún "LOTE N", se habría quedado
+   entero sin lote.
+3. "La baja ofertada **de** 0,00 %" (sin "del"): 8 Contratos del corpus con
+   esa redacción, en ninguno se encontraba la baja (el del LOTE 1 de
+   tornillería entre ellos).
+4. **Un expediente de lote guarda solo su lote.** Si exactamente uno de los
+   lotes declarados trae como código el del propio expediente, los demás
+   son de sus hermanos: no se guardan en él (ni sus líneas, ni su baja, ni
+   su importe; lo que guardó una pasada anterior se borra). Las tablas de
+   los otros lotes siguen sirviendo para asociar cada tabla a su "LOTE N"
+   (si no, se leerían como de un lote no declarado); sus líneas solo se
+   descartan al guardar. La cobertura se mide sobre su lote, y deja de
+   pedir revisión por "EXPEDIENTE PRINCIPAL distinto": es lo esperado en un
+   lote. El expediente principal (su código no es el de ningún lote) sigue
+   con todos. Ninguna línea se pierde: todas siguen en el principal y en el
+   hermano correspondiente (comprobado abajo).
+
+**Resultado** (corpus completo, contrastado con los documentos):
+
+- **Tornillería:** `0015` guarda solo el LOTE 1 (código `0015`, baja 0,00 %
+  de su Contrato, 79 líneas: 78 matrículas y la partida alzada); `0016`
+  solo el LOTE 2 (`0016`, 0,00 %, 15.000 €, 26 líneas: los 25 anclajes y la
+  partida alzada); `6.20/28510.0115`, el principal, los dos con sus códigos
+  correctos. 78 + 25 = las 103 matrículas del pliego.
+- **`6.22/28510.0033`:** `0057` es el LOTE 1 con el 10,50 % de su Contrato
+  (136 líneas, que antes no tenían precio adjudicado: 4,29 € × (1 − 0,105)
+  = 3,8396 €) y un motivo que explica la contradicción con la Resolución;
+  `0058` el LOTE 2 con 0,50 % (135 líneas).
+- **`6.22/28510.0122`:** `0155` LOTE 1 con 24,90 %, `0156` LOTE 2 con 24,99 %
+  (407 líneas cada uno), ya no cruzados.
+- 19 lotes con el código corregido o completado desde su Contrato, y 2.190
+  líneas con la baja corregida o completada (bajas contrastadas con el texto
+  de cada Contrato: `0238` 9,67 %, `0002` 30,00 %, `0176` 0,00 %, `0057`
+  10,50 %, `0155` 24,90 %, y el 1 % de `6.20/28510.0080`, una de las 8
+  redacciones "baja ofertada de").
+- **39 expedientes de lote de 12 familias dejan de mostrar 4.955 líneas de
+  lotes ajenos.** Ningún contenido se pierde: comprobado clave a clave que
+  todo lo que desaparece sigue en el catálogo del principal o del hermano
+  (las únicas "ausencias" son líneas que ahora se funden con la misma línea
+  de otro documento del mismo expediente).
+
+## C2 — Las 519 huérfanas nuevas, contra el criterio de herencia
+
+Recorridas tabla a tabla en el mismo orden que el motor, anotando qué
+asocia la franja, qué habría para heredar y qué texto hay entre la tabla
+anterior y cada una (script de auditoría de la sesión, fuera del
+repositorio):
+
+| Familia | Huérfanas nuevas | Qué son | ¿Legítimas? |
+|---|---:|---|---|
+| `4.26/28510.0020` (CONTRATO y ANEJO, 2 lotes) | 267 (de 291 sin lote en total) | El presupuesto de cada lote (83) y el cuadro de precios para la partida alzada, común a los dos lotes (208) | **Las 83 del presupuesto, no**: el "LOTE N" que abre cada presupuesto no está en la franja sobre la tabla. El cuadro común, sí |
+| `6.24/28510.0130`/`0152`/`0153` | 213 (71 × 3) | Tablas de los lotes 1-3 y 7-13 del acuerdo marco (el expediente declara 4-6) y sus continuaciones; y el anejo de criterios técnicos común a los 13 | Sí |
+| `6.22/28510.0122`/`0155`/`0156` | 33 | Anejo de criterios técnicos, común a los dos lotes: ningún "LOTE N" en todo el documento antes de la tabla | Sí |
+| `6.22/28510.0033`/`0057`/`0058` | 33 | Ídem | Sí |
+| Tornillería | −27 | — | — |
+
+En `4.26/28510.0020` la cabecera de sección está en dos sitios que la
+franja no mira, los dos igual de exclusivos de la tabla:
+
+- **Dentro de la caja de la tabla**, en sus filas de título:
+  `pdfplumber` devuelve "… LOTE 1: SUBDIRECCIÓN DE OPERACIONES ESTE Ref.
+  CAPITULO I: MEDIOS HUMANOS" como cabecera.
+- **Al final de la página anterior**, debajo de su última tabla: "El
+  Presupuesto Base de Licitación del Lote 1 asciende a … LOTE 2:
+  SUBDIRECCIÓN DE OPERACIONES NORESTE", y la tabla del LOTE 2 empieza en la
+  página siguiente (la regla de "urgencia mutua" ya distingue la cabecera
+  "LOTE 2:" de la referencia "del Lote 1").
+
+`asociar_lote_tabla` los consulta, en ese orden y solo con la franja limpia
+(la franja con rastro manda como siempre); la cola de la página anterior,
+solo si es la contigua.
+
+**Hallazgo verificando el arreglo:** una vez resuelto el LOTE 2 en la p.17
+del ANEJO, el cuadro de precios de la partida alzada (p.39-46, común a los
+dos lotes) **heredaba el LOTE 2 a 22 páginas de distancia**. La herencia
+solo miraba la franja de la página actual, así que saltaba cualquier
+número de páginas sin tabla. Revisando el reproceso salió otro caso igual
+en `6.25/28510.0214`: la tabla de criterios técnicos (p.30, común a los 8
+lotes) heredaba el LOTE 8 de la p.24 — cinco páginas por medio y ningún
+"LOTE N" con número entre ellas, así que tampoco lo cortaba un rastro de
+lote. El criterio aprobado son las **páginas de continuación**: ahora solo
+se hereda si la tabla anterior está en la misma página o en la contigua;
+con páginas sin tabla por medio, la tabla queda sin lote (motivo propio,
+explicado en la hoja Resumen) y la cadena se corta.
+
+El mismo documento de `0214` confirma que el "LOTE N" al pie de página es
+la cabecera de la primera tabla de la página siguiente (el "LOTE 1" está
+encima de la primera tabla de la p.20, y cada "LOTE N" siguiente encima de
+la suya o al pie de la página anterior): la p.23 heredaba el LOTE 5 cuando
+es el 6, y la p.24 el 7 cuando es el 8. Con la cola de la página anterior
+quedan bien.
+
+**Resultado.** `4.26/28510.0020` recupera el presupuesto de sus dos lotes
+(17 líneas cada uno, antes 0; 291 → 208 sin lote, que son el cuadro común
+de la partida alzada). Y la regla de contigüidad saca de los lotes, en toda
+la base, tablas comunes que se venían heredando desde siempre: el anejo de
+criterios técnicos que sigue al cuadro de precios en
+`6.25/28510.0019` (229 líneas que `0047` y el principal mostraban como
+LOTE 9, cuyo cuadro real son 4 líneas), en la familia `6.25/28510.0088`
+(28, como LOTE 5), en la familia `6.24/28510.0203` (27, que además pisaban
+las líneas reales del LOTE 6 — el "CANTIDAD 50" que la primera parte de la
+sesión dejó en blanco con la guarda de choques: ahora el LOTE 6 vuelve a
+tener sus cantidades reales, hasta 2.500, sin ningún choque —) y en
+`6.25/28510.0214` (10, que dejaban sin precio P-01 y P-02 del LOTE 8).
+Todas pasan a la cola de revisión como lo que son, tablas sin lote, con el
+motivo nuevo explicado en el Resumen.
+
+## C3 — El Excel explica cada celda vacía
+
+`app/celdas_vacias.py` decide, en el motor y en un solo sitio, por qué está
+vacía cada celda de datos de una línea, con los tres motivos de la web:
+
+- **No aplica**: partida alzada (matrícula, código de material, unidad).
+- **No consta**: el documento no trae el dato.
+- **Pendiente**: depende de otro dato. En Cantidad o Precio unitario, el
+  documento da un valor distinto para cada lote bajo el mismo código de
+  precio (el motivo de la guarda de choques, `MOTIVO_VALOR_DE_OTRO_LOTE`); en
+  Precio adjudicado, falta la baja del lote o el precio unitario.
+
+En el Excel las celdas siguen vacías — un marcador de texto rompería las
+columnas numéricas, decisión anterior del cliente —, y el motivo va en una
+columna nueva, **"Motivo de las celdas vacías"**, justo antes de
+"Comentarios" (que sigue la última): p.ej. "Matrícula del material: no
+consta; Cantidad: pendiente (el documento da una cantidad distinta para
+cada lote y falta saber cuál es la de este)". La hoja Resumen explica los
+tres motivos y cuenta las líneas con Cantidad o Precio unitario pendiente.
+La API devuelve lo mismo por línea (`celdas_vacias`) y la web lo usa en
+Cantidad y Precio unitario (catálogo y revisión); Precio adjudicado sin
+precio unitario pasa de celda en blanco a "Pendiente", igual que en el
+Excel.
+
+## Reproceso y verificación
+
+Copia de seguridad previa: `adif_20260914_104029.dump`. Instantánea del
+catálogo antes de tocar nada. Seis pasadas completas forzadas (358
+expedientes, sin descargas), cada una verificada contra los documentos
+antes de la siguiente:
+
+- **E1** — identidad de lote, expediente de lote, título/cola de página y
+  "baja ofertada de".
+- **E2** — con la guarda de la cifra imposible: **idéntica a E1 línea a
+  línea** (determinismo). El doc 702 seguía sin guardarse: además de la
+  cantidad, la unidad ("UD. UD. …", 111 caracteres) tampoco cabía.
+- **E3** — herencia solo entre páginas contiguas y unidad que no cabe.
+  Revisándola salieron dos cosas: 48 filas de solo importes de esa misma
+  tabla, ya guardándose, como líneas sin descripción (error de la
+  auditoría), y 10 líneas duplicadas en `6.25/28510.0251` — ver abajo.
+- **E4** — mismo código que E3: **idéntica a E3 línea a línea**.
+- **E5** — versión final (filas de solo importes y matrícula partida).
+- **E6** — mismo código que E5: **idéntica a E5 línea a línea**, y la
+  auditoría automática a **0 errores** (4 avisos de categorías ya
+  conocidas).
+
+**Las 10 líneas de `6.25/28510.0251`, un defecto de la primera parte de la
+sesión, no de esta.** La p.18 del ANEJO trae dos columnas de código
+("CODIFICACIÓN DEL PRECIO" con P-01… y "CÓDIGO ADIF" con la matrícula), y
+el mapeo cacheado desde el 08-09 manda `codigo_precio` a la de la
+matrícula. La corrección matrícula/código no lo detectaba porque
+`pdfplumber` parte la matrícula en dos líneas ("59420000\n0"): sin un
+número de 9 dígitos seguidos, la columna no "tenía forma de matrícula". Las
+10 filas se guardaban con la matrícula en `codigo_precio`, duplicando las
+P-01…P-10 de la p.23. Comprobado restaurando la copia de antes de esta
+continuación en una base aparte y extrayendo `0251` con el código del
+commit anterior: ya salían esas 24 líneas (el catálogo guardado de `0251`
+era de una pasada anterior a ese código, por eso no se había visto). Ahora
+`tiene_forma_de_matricula` limpia la celda igual que la construcción de la
+línea (`limpiar_codigo_celda`, sin espacios ni saltos de línea) y `0251`
+vuelve a sus 14 líneas.
+
+**Resultado final (E5) frente al estado de partida de esta continuación,
+corpus completo:**
+
+| | Antes | Después | |
+|---|---:|---:|---|
+| Líneas de catálogo | 24.339 | 22.115 | −4.955 de lotes ajenos; +34 del presupuesto de `4.26/28510.0020`; +24 de los LOTES 6 y 8 de `0214`, que antes se fundían en el 5 y el 7; y las tablas comunes (−508 que se mostraban como de un lote) y los dos anexos de `0122` (+936) pasan a la cola |
+| Sin lote (cola de revisión) | 2.694 | 5.875 | +2.328 tablas comunes a todos los lotes que se heredaban como de un lote; +936 anexos de precios de los Contratos de `0122` que antes no se guardaban; −83 presupuesto de `4.26/28510.0020` |
+| Excel: filas en Materiales | 21.384 | 15.979 | casi todo, el mismo material repetido en cada expediente hermano |
+| Excel: con matrícula | 11.924 | 10.190 | |
+| Excel: con código de material | 14.563 | 10.243 | |
+| Excel: expedientes con líneas | 232 | 233 | `4.26/28510.0020` entra |
+| Excel: Cantidad o Precio unitario "pendiente" por valor de otro lote | — | 274 líneas | explicado en su celda de motivo |
+| Resumen: líneas pendientes de revisión | 2.955 | 6.136 | |
+
+**Determinismo:** E1 = E2, E3 = E4 y E5 = E6 línea a línea (mismos ids y
+valores); E5 frente a E4 solo cambia lo esperado (`0251` −10 duplicadas,
+familia `0122` −48 filas de solo importes). **Auditoría automática:** tras
+E4 quedaban solo las 48 líneas sin descripción (error), resueltas en E5;
+tras E6, 0 errores.
+
+**Tests:** 718 → 743, todos pasan: identidad de contrato y errata de número
+(tornillería), referencia cruzada (`0033`, `0122`), baja del Contrato
+contra la de la adjudicación (`0033`), expediente de lote de punta a punta
+con el anejo real de `0156` (solo su lote, principal con los dos,
+idempotencia), título/cola de página y tabla separada por páginas
+(`4.26/28510.0020`, recorte nuevo de 6 páginas), celdas vacías (motor,
+Excel y API), cifra/unidad imposibles y filas de solo importes, matrícula
+partida. Ocho recortes de página reales nuevos en `engine/tests/fixtures`
+(el mayor, 296 KB).
+
+## Pendiente al cerrar la continuación
+
+- **Expedientes de lote cuyo documento de lotes es el de un hermano (decisión
+  del cliente).** 36 expedientes cuyo propio Contrato dice "soy el LOTE N"
+  no tienen guardado ningún lote con su código: el único documento de lotes
+  archivado con ellos es la adjudicación de OTRO lote (p.ej.
+  `6.21/28510.0003`, LOTE 2, guarda el LOTE 1 de `0002`; `6.23/28510.0060`,
+  LOTE 1, guarda las 1.069 líneas bajo el LOTE 2 de `0061` y su baja del
+  25,10 % en vez del 25,31 % de su Contrato), o no hay ninguno y todas las
+  tablas del anejo compartido caen en su lote implícito (familia
+  `6.21/28510.0108`, anejo 588: `0112` y `0113` con 221 líneas cada uno).
+  2.713 líneas en total, todos ya en `pendiente_revision`. Resolverlo como
+  C1 (guardar solo su lote) exige decidir antes qué hacer con las tablas
+  que no dicen de qué lote son en un expediente de lote: si el cuadro es
+  común a todos los lotes (`0060`) son suyas; si es de otro lote sin
+  cabecera, no. Sin esa decisión, aplicar C1 aquí dejaría sin catálogo a
+  `0060`.
+- **Huérfanas de lotes no declarados en un expediente de lote**
+  (`6.24/28510.0151`/`0152`/`0153`: las tablas de los lotes 1-3 y 7-13 del
+  acuerdo marco, 221 por expediente): ya se sabe que no son suyas, pero
+  siguen en la cola de revisión. Es la decisión de producto que ya dejó
+  abierta la sesión del 12-09 ("pertenece a otro lote del acuerdo marco").
+- **`6.22/28510.0058`** (LOTE 2) se queda sin importe de adjudicación: el
+  único bloque que lo traía es el RESUELVE con la errata, que ya no se
+  atribuye a ningún lote.
+- **`6.23/28510.0051` y `6.23/28510.0060` no refrescan tres documentos**
+  (ANEJO_1, CONTRATO_1, CONTRATO_2): al guardar, una línea encontrada por
+  firma de material se re-etiqueta a "P-0996", que ya tiene otra línea del
+  mismo lote (`uq_linea_lote_clave`) — el desfase de filas conocido de ese
+  anejo. El código lo deja reventar a propósito ("un problema de datos
+  real que conviene que reviente aquí"), pero el efecto es que el documento
+  entero se deshace y el catálogo de esos dos expedientes se queda con los
+  valores de una pasada anterior. Ya ocurría en el estado de partida de esta
+  continuación; no se ha tocado.
+- **Anexos de precios de los dos Contratos de la familia `6.22/28510.0122`**
+  (doc 702 del LOTE 2 y doc 703 del LOTE 1, 150 líneas cada uno, más unas
+  pocas filas de su tabla de aplicabilidad): ahora se guardan (antes una
+  cifra imposible tumbaba cada documento entero), pero sin lote — la tabla
+  no dice de qué lote es, aunque el documento entero sea el Contrato de uno
+  —, así que van a la cola de revisión en los tres expedientes. Atribuirlas
+  al lote del Contrato sería otra regla (identidad de documento → lote) con
+  un riesgo propio, sin verificar todavía: si los precios del anexo no son
+  los del cuadro de precios del anejo, al fundirse pisarían los de
+  referencia.
+- Siguen abiertos los dos últimos puntos de la primera parte (residuo del
+  localizador y filas desalineadas de `ANEJO_ce1df15b39efdb8c.pdf`).

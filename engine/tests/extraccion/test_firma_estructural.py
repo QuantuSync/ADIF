@@ -1,4 +1,13 @@
-from app.extraccion.firma_estructural import calcular_firma_estructural, clasificar_columnas
+from app.extraccion.firma_estructural import calcular_firma_estructural, clasificar_columnas, tiene_forma_de_matricula
+
+
+def test_matricula_partida_por_el_ancho_de_columna_tiene_forma_de_matricula():
+    # `6.25/28510.0251` ANEJO p.18, columna "CÓDIGO ADIF": pdfplumber parte la
+    # matrícula en dos líneas. Se limpia igual que al construir la línea.
+    assert tiene_forma_de_matricula("59420000\n0")
+    assert tiene_forma_de_matricula("594200000")
+    assert not tiene_forma_de_matricula("P-01")
+    assert not tiene_forma_de_matricula("5942000\n0")  # 8 dígitos
 
 
 def test_firma_estructural_distingue_columna_fantasma_desplazada():

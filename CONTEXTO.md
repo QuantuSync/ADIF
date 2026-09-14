@@ -261,6 +261,14 @@ precio por tonelada-kilómetro).
 | Precio adjudicado | Derivado (precio unitario × (1 − baja de lote)) | No |
 | Baja del lote | Declarada en texto en la propuesta/contrato | No |
 | Unidad de medida | Cuadro de precios | No |
+| Motivo de las celdas vacías | Derivado (`app.celdas_vacias`): por qué falta cada dato de la fila — no aplica / no consta / pendiente | No |
+
+**Celdas vacías en el Excel (sesión 2026-09-14):** la celda se deja vacía
+— un marcador de texto rompería las columnas numéricas — y su motivo va en
+la columna "Motivo de las celdas vacías" (justo antes de "Comentarios", que
+sigue la última), con el mismo criterio de tres motivos que la web. En
+particular, una cantidad o un precio que el documento da distinto para cada
+lote bajo el mismo código de precio es "pendiente", nunca "no consta".
 
 `unidad_medida` se guarda desde el principio del proyecto (etapa 6 de la
 cascada, junto a cantidad y precio) — lo nuevo en la sesión 2026-09-07 es
@@ -605,7 +613,14 @@ suficientes, no ahora.
   modelo de datos mayor (crear filas de `Expediente` nuevas para cada
   lote), fuera de alcance de un arreglo urgente. Ver
   `docs/identidad-expediente.md`, sección "autoridad del PDF sobre la
-  sindicación".
+  sindicación". **Sesión 2026-09-14:** cuando el expediente de lote SÍ
+  existe y la adjudicación lo nombra, ya guarda solo su lote. Queda el caso
+  inverso, que necesita decisión del cliente: 36 expedientes cuyo propio
+  Contrato dice "soy el LOTE N" pero cuyo único documento de lotes es la
+  adjudicación de otro lote (o ninguno, con el anejo de todos los lotes en
+  su lote implícito) — 2.713 líneas; detalle y la pregunta concreta en
+  `docs/sesion-2026-09-14-revision-cliente-pliegos.md`, "Pendiente al cerrar
+  la continuación".
 - **`expedientes.aviso_sindicacion` existe en la API pero no se muestra
   todavía en la web** — pendiente menor de la sesión de criterios del
   cliente (`docs/decisiones-cliente.md` sección 26).
@@ -1498,6 +1513,48 @@ suficientes, no ahora.
   antes se mostraban con "el último gana" (368 líneas marcadas, 74
   expedientes) — decisión revisable. Dos reprocesos seguidos con el mismo
   código dan resultado idéntico; auditoría a 0 errores. 718 tests.
+- **Continuación de la misma sesión, respuesta del cliente al reproceso
+  (`docs/sesion-2026-09-14-revision-cliente-pliegos.md`, bloques C1-C3).**
+  Los precios y cantidades con choque se quedan vacíos (decisión del
+  cliente), pero **el Excel explica ahora cada celda vacía**: columna nueva
+  "Motivo de las celdas vacías" (antes de "Comentarios"), con los tres
+  motivos de la web — no aplica / no consta / **pendiente** (valor distinto
+  para cada lote en el documento; falta la baja o el precio) —, decidido en
+  el motor (`app.celdas_vacias`) y servido igual a la web; leyenda y
+  recuento en la hoja Resumen. **Identidad de lote**: lo "ya resuelto" para
+  otras familias era el código de cada lote, pero **ningún expediente de
+  lote se restringía a su lote** — 39 expedientes de 12 familias mostraban
+  4.955 líneas (y la baja y el importe) de lotes ajenos; ahora un expediente
+  que es uno de los lotes (su código es el de uno de los lotes declarados)
+  guarda solo el suyo, y el principal sigue con todos. El Contrato ("Contrato
+  nº" + "LOTE N") manda sobre la identidad de cada lote: corrige la errata
+  de la Resolución de tornillería (el LOTE 2 llamado "LOTE 1"), las
+  referencias cruzadas "adjudicatario del LOTE N" ya no roban el código de
+  otro lote (`0033`, `0122`), y su baja gana si contradice la de la
+  adjudicación (`0057`: 10,50 %, no el 0,50 % del LOTE 2); nunca añade un
+  lote que la adjudicación no nombra. **Huérfanas nuevas** (519): 83 eran
+  legítimas sin aplicar — el "LOTE N" en las filas de título de la tabla o
+  al final de la página anterior (`4.26/28510.0020`) —, el resto son
+  criterios técnicos comunes a todos los lotes o lotes no declarados; y la
+  herencia de lote solo se aplica entre páginas contiguas (heredaba el
+  último lote a 5 y a 22 páginas de distancia en cuadros comunes a todos
+  los lotes), mientras que el "LOTE N" al pie de la página anterior corrige
+  tablas que antes heredaban el lote equivocado (`6.25/28510.0214`). De
+  paso: una cantidad y una unidad imposibles (una fila de casillas leída
+  como 111.111.111.111.111) tumbaban al guardar dos Contratos enteros de
+  `0122`/`0155`/`0156` — ahora se descartan con motivo —, y una matrícula
+  partida por el ancho de columna ("59420000\n0") duplicaba 10 líneas de
+  `6.25/28510.0251` con la matrícula en `codigo_precio` (defecto de la
+  primera parte de la sesión, que el estado guardado ocultaba). **Resultado,
+  corpus completo:** 24.339 → 22.115 líneas; sin lote 2.694 → 5.875 (tablas
+  comunes que se heredaban como de un lote y anexos que antes no se
+  guardaban); Excel 21.384 → 15.979 filas (casi todo, el mismo material
+  repetido en cada hermano), 274 con Cantidad o Precio "pendiente". Seis
+  reprocesos completos; E1 = E2, E3 = E4 y E5 = E6 línea a línea;
+  auditoría a 0 errores. 743 tests.
+  Pendiente de decisión del cliente: 36 expedientes cuyo Contrato dice que
+  son el LOTE N pero muestran otro lote (2.713 líneas), ver "Pendiente de
+  resolver".
 
 ---
 

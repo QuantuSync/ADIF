@@ -145,10 +145,15 @@ def procesar_anejo(
     # `asociar_lote_tabla` marca la tabla actual como `elegible_para_herencia`
     # (franja sin NINGÚN rastro de "LOTE", nunca sobre una ambigua) — esa es
     # la única condición, la misma tanto si la franja está vacía como si
-    # trae boilerplate sin la palabra "LOTE". Se reinicia a `None` en cada
+    # trae boilerplate sin la palabra "LOTE" -- y, desde la sesión del
+    # 2026-09-14, que la tabla anterior esté en la misma página o en la
+    # contigua (con páginas sin tabla por medio no es una continuación,
+    # `asociar_lote_tabla(separada_por_paginas=...)`). Se reinicia a `None` en cada
     # documento (esta función procesa uno solo): heredar de un documento a
     # otro no tendría ninguna base textual.
     ultimo_lote_resuelto: Optional[str] = None
+    # (página, fondo) de la última tabla procesada de este documento.
+    ultima_tabla: Optional[tuple[int, float]] = None
     # Bloque 3 (caché de tablas sin cabecera, sesión de auditoría
     # 2026-09-09): mapeo ya validado de una tabla sin cabecera anterior de
     # ESTE MISMO documento, indexado por `calcular_firma_estructural` (nunca
@@ -183,8 +188,27 @@ def procesar_anejo(
             for tabla in tablas_pagina:
                 heredado_de_pagina_anterior = False
                 if multi_lote:
+                    # Sesión 2026-09-14 (continuación, ver
+                    # `asociar_lote_tabla`): si esta es la primera tabla de su
+                    # página, lo que queda debajo de la última tabla de la
+                    # página contigua puede traer su cabecera; si la tabla
+                    # anterior está más atrás, con páginas sin tabla por
+                    # medio, esta no es su continuación.
+                    cola_anterior = ""
+                    separada = False
+                    if banda_top == 0.0 and ultima_tabla is not None:
+                        if ultima_tabla[0] == candidata.numero - 1:
+                            pagina_anterior = pdf.pages[ultima_tabla[0] - 1]
+                            cola_anterior = pagina_anterior.crop(
+                                (0, ultima_tabla[1], pagina_anterior.width, pagina_anterior.height)
+                            ).extract_text() or ""
+                        elif ultima_tabla[0] < candidata.numero - 1:
+                            separada = True
                     resultado_asociacion = asociar_lote_tabla(
-                        pagina, banda_top, tabla.bbox, identificadores_validos=set(lotes)
+                        pagina, banda_top, tabla.bbox, identificadores_validos=set(lotes),
+                        texto_titulo_tabla=" ".join(c for c in tabla.cabecera if c),
+                        texto_cola_pagina_anterior=cola_anterior,
+                        separada_por_paginas=separada,
                     )
                     identificador_lote = resultado_asociacion.identificador_lote
                     motivo_ambiguo = resultado_asociacion.motivo_ambiguo
@@ -233,6 +257,7 @@ def procesar_anejo(
                     identificador_lote = identificador_unico
                     motivo_ambiguo = None
                 banda_top = tabla.bbox[3]
+                ultima_tabla = (candidata.numero, tabla.bbox[3])
 
                 baja_lote = lotes.get(identificador_lote) if identificador_lote is not None else None
 

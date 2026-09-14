@@ -22,7 +22,7 @@ trabaja por lote, nunca por expediente.
 from __future__ import annotations
 
 import io
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional
@@ -60,7 +60,13 @@ from app.extraccion.herencia_matriz import (
 )
 from app.extraccion.identidad_expediente import corregir_identidad_expediente
 from app.extraccion.invalidado import INVALIDADO
-from app.extraccion.lotes import LoteDeclarado, ResultadoLotes, extraer_lotes_declarados
+from app.extraccion.lotes import (
+    IdentidadContrato,
+    LoteDeclarado,
+    ResultadoLotes,
+    extraer_identidad_contrato,
+    extraer_lotes_declarados,
+)
 from app.extraccion.modelo_precio_indexado import detectar_modelo_precio_indexado
 from app.extraccion.normalizacion import parsear_importe_es
 from app.extraccion.pipeline_anejo import procesar_anejo
@@ -105,8 +111,9 @@ _TIPOS_CON_BAJA_DECLARADA = (
 # preferir la Resolución sobre la Propuesta cuando existan las dos, por ser
 # el acto posterior y definitivo). `propuesta_dt` es al mismo tipo de hecho
 # que `propuesta_lc27` (docs/analisis-corpus.md hallazgo 4), misma
-# prioridad. El contrato no declara lotes por nombre en el corpus visto
-# hasta ahora, así que no entra en esta prioridad.
+# prioridad. El Contrato no entra en esta prioridad: declara un único lote
+# (el suyo), no el desglose de la licitación -- lo que dice de su propio lote
+# se usa aparte, ver `_identidades_de_contratos`.
 _PRIORIDAD_LOTES = {
     TipoDocumento.resolucion_adjudicacion: 0,
     TipoDocumento.propuesta_lc27: 1,
@@ -264,6 +271,48 @@ def _eliminar_lote_sentinela_obsoleto(
     db.commit()
 
 
+def _lotes_de_expedientes_hermanos(
+    expediente: Expediente, lotes_declarados: list[LoteDeclarado]
+) -> dict[str, Optional[str]]:
+    """Sesión 2026-09-14 (continuación, revisión del cliente): cuando uno de
+    los lotes declarados trae como código propio el de ESTE expediente, este
+    expediente es ese lote -- un contrato de la licitación, no la licitación
+    entera (CONTEXTO.md sección 27, "Contrato ⟷ lote"). Los demás lotes son
+    de sus expedientes hermanos, aunque los documentos se compartan: se
+    devuelven (identificador -> su código, si se conoce) para que no se
+    guarden aquí. Vacío si el expediente no se reconoce en ningún lote (el
+    expediente principal de la licitación, que sí los agrupa todos) o si se
+    reconoce en más de uno (identidad contradictoria: no se recorta nada).
+
+    Caso que lo motivó: `6.21/28510.0015` (LOTE 1, tornillería) y
+    `6.21/28510.0016` (LOTE 2, anclajes) mostraban cada uno las líneas, la
+    baja y el importe de los dos lotes."""
+    if len(lotes_declarados) < 2:
+        return {}
+    codigo = normalizar_codigo_expediente(expediente.codigo_expediente)
+    propios = [d for d in lotes_declarados if normalizar_codigo_expediente(d.codigo_expediente_lote) == codigo]
+    if len(propios) != 1:
+        return {}
+    return {d.identificador: d.codigo_expediente_lote for d in lotes_declarados if d is not propios[0]}
+
+
+def _eliminar_lotes_de_hermanos(db: Session, expediente_id: int, identificadores: set[str]) -> None:
+    """Idempotencia (CONTEXTO.md sección 9): los lotes de hermanos que una
+    pasada anterior guardó en este expediente, con sus líneas, se borran --
+    mismo mecanismo que `_eliminar_lote_sentinela_obsoleto`. Las líneas no
+    se pierden: siguen en el expediente hermano y en el principal."""
+    if not identificadores:
+        return
+    lotes = db.execute(
+        select(Lote).where(Lote.expediente_id == expediente_id, Lote.identificador_lote.in_(identificadores))
+    ).scalars().all()
+    for lote in lotes:
+        db.execute(delete(LineaCatalogo).where(LineaCatalogo.lote_id == lote.id))
+        db.execute(delete(TrazaOrigen).where(TrazaOrigen.entidad_tipo == "lote", TrazaOrigen.entidad_id == lote.id))
+        db.delete(lote)
+    db.commit()
+
+
 def _clasificar_documentos(db: Session, storage: DocumentStorage, documentos: list[Documento]) -> list[_Documento]:
     resultado = []
     for doc in documentos:
@@ -360,19 +409,72 @@ class _LotesExtraidos:
     documento_id: Optional[int]
     lotes_totales_declarados: Optional[int]
     codigo_principal_declarado: Optional[CampoAnclado]
+    # Identificador de lote -> por qué su baja salió del Contrato y no de la
+    # adjudicación (ver `_extraer_lotes_declarados_del_expediente`).
+    motivos_por_lote: Optional[dict[str, str]] = None
+
+
+def _identidades_de_contratos(documentos: list[_Documento]) -> list[tuple[IdentidadContrato, int]]:
+    """Lo que dice cada Contrato firmado del expediente sobre qué lote es
+    (`app.extraccion.lotes.extraer_identidad_contrato`), con su documento.
+    Si dos Contratos se contradicen (el mismo código con dos números de
+    lote, o el mismo número con dos códigos), ninguno de los implicados se
+    usa: sin un único valor no hay autoridad que oponer a la adjudicación."""
+    identidades: list[tuple[IdentidadContrato, int]] = []
+    for item in documentos:
+        if item.tipo != TipoDocumento.contrato:
+            continue
+        identidad = extraer_identidad_contrato(item.paginas)
+        if identidad is not None:
+            identidades.append((identidad, item.documento.id))
+    lotes_por_codigo: dict[str, set[str]] = {}
+    codigos_por_lote: dict[str, set[str]] = {}
+    for identidad, _ in identidades:
+        codigo = normalizar_codigo_expediente(identidad.codigo_expediente_lote)
+        lotes_por_codigo.setdefault(codigo, set()).add(identidad.identificador)
+        codigos_por_lote.setdefault(identidad.identificador, set()).add(codigo)
+    unicas: dict[str, tuple[IdentidadContrato, int]] = {}
+    for identidad, documento_id in identidades:
+        codigo = normalizar_codigo_expediente(identidad.codigo_expediente_lote)
+        if len(lotes_por_codigo[codigo]) == 1 and len(codigos_por_lote[identidad.identificador]) == 1:
+            unicas.setdefault(codigo, (identidad, documento_id))
+    return sorted(unicas.values(), key=lambda par: (len(par[0].identificador), par[0].identificador))
 
 
 def _extraer_lotes_declarados_del_expediente(documentos: list[_Documento]) -> _LotesExtraidos:
     """Primer documento (por prioridad de plantilla, no por orden de lista)
     que declare al menos un lote por su nombre gana — mismo criterio que
     `app.extraccion.baja.elegir_baja_preferida` aplicado a listas de lotes
-    en vez de a una baja suelta."""
+    en vez de a una baja suelta.
+
+    Sesión 2026-09-14 (continuación): los Contratos firmados del expediente
+    tienen la última palabra sobre la identidad de cada lote (qué número
+    lleva qué código), CONTEXTO.md sección 27. Corrigen una errata de
+    número en la adjudicación (ver `extraer_lotes_declarados`) y completan
+    el código y la baja de un lote que la adjudicación nombra sin traerlos
+    -- caso real: tornillería, cuya única Resolución es la del LOTE 2; el
+    LOTE 1 (`6.21/28510.0015`) solo lo nombra de pasada, y su código y su
+    baja salen de su Contrato. Si el Contrato de un lote declara una baja
+    distinta de la que la adjudicación le atribuye, gana la del Contrato --
+    el único documento que habla solo de ese lote -- y queda como motivo
+    de revisión.
+
+    Nunca añaden un lote que la adjudicación no nombra: convertiría en
+    multi-lote un expediente que hoy declara uno solo, y sus tablas sin
+    "LOTE N" dejarían de tener lote (verificado en seco:
+    `6.23/28510.0051`, cuadro común de 1.080 líneas sin ningún "LOTE N",
+    habría quedado entero sin lote)."""
+    identidades = _identidades_de_contratos(documentos)
+    lote_por_codigo = {
+        normalizar_codigo_expediente(identidad.codigo_expediente_lote): identidad.identificador
+        for identidad, _ in identidades
+    }
     candidatos: list[tuple[int, ResultadoLotes, int]] = []
     for item in documentos:
         prioridad = _PRIORIDAD_LOTES.get(item.tipo)
         if prioridad is None:
             continue
-        resultado = extraer_lotes_declarados(item.paginas)
+        resultado = extraer_lotes_declarados(item.paginas, lote_por_codigo)
         if resultado.lotes:
             candidatos.append((prioridad, resultado, item.documento.id))
     if not candidatos:
@@ -381,11 +483,48 @@ def _extraer_lotes_declarados_del_expediente(documentos: list[_Documento]) -> _L
         )
     candidatos.sort(key=lambda c: c[0])
     _, resultado, documento_id = candidatos[0]
+
+    lotes = list(resultado.lotes)
+    motivos_por_lote: dict[str, str] = {}
+    por_identificador = {identidad.identificador: (identidad, doc_id) for identidad, doc_id in identidades}
+    for i, declarado in enumerate(lotes):
+        par = por_identificador.pop(declarado.identificador, None)
+        if par is None:
+            continue
+        identidad, doc_id = par
+        cambios = {}
+        if declarado.codigo_expediente_lote is None:
+            cambios["codigo_expediente_lote"] = identidad.codigo_expediente_lote
+        if identidad.baja is not None and declarado.baja != identidad.baja:
+            cambios.update(
+                baja=identidad.baja, pagina=identidad.pagina, fragmento=identidad.fragmento, documento_id=doc_id
+            )
+            if declarado.baja is not None:
+                # El Contrato de ESTE lote contradice el bloque que la
+                # adjudicación le atribuye: gana el Contrato, y el resto del
+                # bloque (adjudicatario, importe) deja de ser atribuible.
+                # Caso real: la Resolución del LOTE 2 de `6.22/28510.0033`
+                # copia en su RESUELVE "LOTE 1 ... EXPEDIENTE Nº
+                # 6.22/28510.0057" con la empresa y la baja del LOTE 2
+                # (TECNOLOGÍA SEÑALÉTICA, 0,50 %); el Contrato de `0057` es
+                # de INDUSTRIAS LANEKO, 10,50 %.
+                cambios.update(adjudicatario=None, importe_adjudicacion=None)
+                baja_adjudicacion = f"{declarado.baja * 100:.2f}".replace(".", ",")
+                baja_contrato = f"{identidad.baja * 100:.2f}".replace(".", ",")
+                motivos_por_lote[declarado.identificador] = (
+                    f"lote {declarado.identificador}: la adjudicación le atribuye una baja del "
+                    f"{baja_adjudicacion} % y su Contrato ({identidad.codigo_expediente_lote}) declara "
+                    f"{baja_contrato} % -- se usa la del Contrato; el adjudicatario y el importe de "
+                    "ese bloque de la adjudicación no se atribuyen a este lote"
+                )
+        if cambios:
+            lotes[i] = replace(declarado, **cambios)
     return _LotesExtraidos(
-        lotes=resultado.lotes,
+        lotes=lotes,
         documento_id=documento_id,
         lotes_totales_declarados=resultado.lotes_totales_declarados,
         codigo_principal_declarado=resultado.codigo_principal_declarado,
+        motivos_por_lote=motivos_por_lote,
     )
 
 
@@ -764,8 +903,8 @@ def _procesar_lotes_declarados(
         lotes.append(lote)
 
         _traza(
-            db, lote.id, "baja_declarada", documento_id, declarado.pagina, declarado.fragmento,
-            declarado.baja, entidad_tipo="lote",
+            db, lote.id, "baja_declarada", declarado.documento_id or documento_id, declarado.pagina,
+            declarado.fragmento, declarado.baja, entidad_tipo="lote",
         )
     return lotes, motivo_revision
 
@@ -871,7 +1010,7 @@ def ejecutar_extraccion_expediente(
         motivo_revision: Optional[str] = None
         estado_especial: Optional[EstadoExpediente] = None
         lineas_creadas = lineas_actualizadas = tablas_procesadas = llamadas_modelo = 0
-        lineas_podadas = 0
+        lineas_podadas = lineas_de_lotes_hermanos = 0
         documentos_procesados = 0
         documentos_pliego_omitidos: list[str] = []
         documentos_escaneados: list[str] = []
@@ -952,6 +1091,7 @@ def ejecutar_extraccion_expediente(
 
             resultado_lotes = _extraer_lotes_declarados_del_expediente(items)
             lotes_declarados = resultado_lotes.lotes
+            lotes_hermanos: dict[str, Optional[str]] = {}
             if lotes_declarados:
                 # Camino multi-lote (o de un único lote declarado por su nombre
                 # real, p.ej. si algún día aparece un "LOTE 2" suelto): los
@@ -970,8 +1110,17 @@ def ejecutar_extraccion_expediente(
                 # relación con acuerdo marco (CONTEXTO.md sección 27):
                 # escribirla ahí reintroduciría el bug de autorreferencia
                 # de las secciones 20/21.
+                #
+                # Un expediente que es uno de los lotes de la licitación
+                # (`lotes_hermanos` no vacío) no tiene la identidad rota: que
+                # el documento declare otro expediente principal es lo
+                # esperado, y ya se sabe exactamente qué lote es.
+                lotes_hermanos = _lotes_de_expedientes_hermanos(expediente, lotes_declarados)
+                for identificador, motivo_lote in (resultado_lotes.motivos_por_lote or {}).items():
+                    if identificador not in lotes_hermanos:
+                        motivo_revision = _acumular_motivo(motivo_revision, motivo_lote)
                 principal = resultado_lotes.codigo_principal_declarado
-                if principal is not None and normalizar_codigo_expediente(
+                if not lotes_hermanos and principal is not None and normalizar_codigo_expediente(
                     principal.valor
                 ) != normalizar_codigo_expediente(expediente.codigo_expediente):
                     motivo_revision = _acumular_motivo(
@@ -981,8 +1130,10 @@ def ejecutar_extraccion_expediente(
                     )
 
                 _eliminar_lote_sentinela_obsoleto(db, expediente.id, lotes_declarados)
+                _eliminar_lotes_de_hermanos(db, expediente.id, set(lotes_hermanos))
                 lotes, motivo_lotes = _procesar_lotes_declarados(
-                    db, expediente, lotes_declarados, resultado_lotes.documento_id
+                    db, expediente, [d for d in lotes_declarados if d.identificador not in lotes_hermanos],
+                    resultado_lotes.documento_id,
                 )
                 motivo_revision = _acumular_motivo(motivo_revision, motivo_lotes)
                 _resumir_lotes_en_expediente(expediente, lotes)
@@ -999,7 +1150,17 @@ def ejecutar_extraccion_expediente(
                 # bloque de adjudicación (ninguno de los 15 reales, pero
                 # `_procesar_lotes_declarados` lo modela igual, sección 27)
                 # no cuenta como "conocido" para este cálculo.
-                if expediente.lotes_totales_declarados is not None:
+                #
+                # Un expediente que es uno de los lotes solo responde de SU
+                # lote: los demás son de sus hermanos.
+                if lotes_hermanos:
+                    if all(l.baja_lote is None and l.importe_adjudicacion is None for l in lotes):
+                        motivo_revision = _acumular_motivo(
+                            motivo_revision,
+                            f"el lote propio de este expediente (lote {lotes[0].identificador_lote}) no trae "
+                            "baja ni importe de adjudicación en ningún documento",
+                        )
+                elif expediente.lotes_totales_declarados is not None:
                     lotes_con_datos = [
                         l for l in lotes if l.baja_lote is not None or l.importe_adjudicacion is not None
                     ]
@@ -1161,7 +1322,14 @@ def ejecutar_extraccion_expediente(
             db.commit()
 
             lotes_por_identificador = {l.identificador_lote: l.id for l in lotes}
-            bajas_por_identificador = {l.identificador_lote: l.baja_lote for l in lotes}
+            # Los lotes de los hermanos siguen contando para asociar cada
+            # tabla a su "LOTE N" (si no, sus tablas se leerían como de un
+            # lote no declarado, huérfanas); sus líneas se descartan al
+            # guardar, más abajo.
+            bajas_por_identificador = {
+                **{identificador: None for identificador in lotes_hermanos},
+                **{l.identificador_lote: l.baja_lote for l in lotes},
+            }
 
             # Etapas 3-6: el cuadro de precios se busca por contenido en TODOS
             # los documentos, nunca solo en los clasificados como "anejo"
@@ -1222,6 +1390,9 @@ def ejecutar_extraccion_expediente(
                         # de tocar.
                         ids_tocadas_documento: set[int] = set()
                         for identificador, lineas_grupo in grupos.items():
+                            if identificador in lotes_hermanos:
+                                lineas_de_lotes_hermanos += len(lineas_grupo)
+                                continue
                             lote_id = lotes_por_identificador.get(identificador) if identificador is not None else None
                             guardado = guardar_lineas_catalogo(db, lote_id, lineas_grupo)
                             lineas_creadas_doc += guardado.creadas
@@ -1418,6 +1589,7 @@ def ejecutar_extraccion_expediente(
             "lineas_creadas": lineas_creadas,
             "lineas_actualizadas": lineas_actualizadas,
             "lineas_podadas": lineas_podadas,
+            "lineas_de_lotes_hermanos": lineas_de_lotes_hermanos,
             "llamadas_modelo": llamadas_modelo,
             "lotes": [l.identificador_lote for l in lotes],
             "baja_global": str(expediente.baja_global) if expediente.baja_global is not None else None,

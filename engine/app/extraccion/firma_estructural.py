@@ -33,6 +33,7 @@ import re
 from typing import Optional
 
 from app.catalogo import _MATRICULA_VALIDA_RE, _matricula_recuperable_de_celda_multilinea
+from app.extraccion.normalizacion import limpiar_codigo_celda
 
 _UMBRAL_MATRICULA = 0.5
 _UMBRAL_PRECIO = 0.5
@@ -90,8 +91,17 @@ def tiene_forma_de_matricula(valor: str) -> bool:
     campo. Una celda con exactamente un número de 9 dígitos entre ruido
     cuenta igual que una limpia: es el mismo criterio que ya aplica, celda a
     celda, `app.catalogo._matricula_recuperable_de_celda_multilinea` al
-    construir la línea; aquí se aplica también al decidir qué columna es."""
-    return bool(_MATRICULA_VALIDA_RE.match(valor.replace(" ", ""))) or (
+    construir la línea; aquí se aplica también al decidir qué columna es.
+
+    Misma sesión, continuación: la celda se limpia igual que al construir la
+    línea (`limpiar_codigo_celda`, sin espacios NI saltos de línea). Una
+    matrícula partida por el ancho de la columna ("59420000\\n0",
+    `6.25/28510.0251` ANEJO p.18, columna "CÓDIGO ADIF") no contaba como
+    matrícula: el mapeo cacheado la tomaba por `codigo_precio`, la
+    corrección de la confusión no la veía, y las 10 filas de esa tabla se
+    guardaban con la matrícula en `codigo_precio`, duplicando las de la
+    p.23."""
+    return bool(_MATRICULA_VALIDA_RE.match(limpiar_codigo_celda(valor) or "")) or (
         _matricula_recuperable_de_celda_multilinea(valor) is not None
     )
 

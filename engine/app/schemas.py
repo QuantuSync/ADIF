@@ -141,6 +141,14 @@ class LineaCatalogoPosibleDuplicado(BaseModel):
     precio_unitario: Optional[Decimal] = None
 
 
+class CeldaVaciaOut(BaseModel):
+    """Por qué está vacía una celda de datos (`app.celdas_vacias`): los
+    mismos códigos que `MotivoVacio` de la web."""
+
+    motivo: str  # "na" | "no-consta" | "pendiente"
+    detalle: Optional[str] = None
+
+
 class LineaCatalogoOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -198,6 +206,8 @@ class LineaCatalogoOut(BaseModel):
     # resuelta del mismo expediente -- `None` en cualquier otro caso,
     # incluida una huérfana sin ninguna coincidencia real.
     posible_duplicado_de: Optional[LineaCatalogoPosibleDuplicado] = None
+    # Campo de datos vacío -> su motivo (sesión 2026-09-14, continuación).
+    celdas_vacias: dict[str, CeldaVaciaOut] = {}
 
 
 class CatalogoRespuesta(BaseModel):

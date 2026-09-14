@@ -14,17 +14,18 @@ rellena una persona a mano, no el documento.
 
 El marcador entre paréntesis ("(no consta)", "(no aplica)") es una
 convención de la interfaz web (`app/ui.tsx`, `DatoVacio`) para que una
-persona lea la pantalla sin ambigüedad. **No viaja al Excel** (encargo de
+persona lea la pantalla sin ambigüedad. **No viaja a la celda** (encargo de
 esta sesión, punto 1): en una columna numérica (Cantidad, Precio unitario,
 Precio adjudicado, Baja del lote) un marcador de texto convierte la columna
 entera en texto mixto y rompe sumar/filtrar/ordenar en Excel. En las
 columnas de texto (Matrícula, Código del material, Lote, Unidad de medida)
 se aplica el mismo criterio único por consistencia y porque es el que trae
 el Excel que ya maneja el cliente: celda vacía, sin ninguna variante. El
-motivo por el que falta (partida alzada, cruce sin confirmar, tabla
-ambigua, cuadro de precios sin columna de unidad) ya vive en
-`motivo_revision`/la cola de revisión, trazable desde ahí — no se
-inventa aquí un texto nuevo para la casilla.
+motivo sí viaja, en su propia columna de texto ("Motivo de las celdas
+vacías", sesión 2026-09-14): el mismo criterio de tres motivos de la web,
+decidido en `app.celdas_vacias`, para que una cantidad vacía porque el
+documento da una distinta para cada lote no se lea igual que una que el
+documento no trae.
 
 Líneas huérfanas (`lote_id IS NULL`, tabla que no se pudo asociar a un
 lote sin ambigüedad, `app.extraccion.lote_tabla`) sin ningún equivalente
@@ -50,6 +51,7 @@ from sqlalchemy.orm import Session
 
 from app.catalogo import MOTIVO_MAPEO_INCOHERENTE
 from app.catalogo_consulta import consultar_catalogo
+from app.celdas_vacias import ETIQUETA_MOTIVO, PENDIENTE, celdas_vacias
 from app.models import LineaCatalogo
 
 
@@ -76,6 +78,49 @@ def _celda_texto_o_espacio(valor: str | None) -> str:
 
 def _celda_numero(valor) -> object:
     return float(valor) if valor is not None else None
+
+
+# Campo de `app.celdas_vacias` -> su columna en esta hoja.
+_COLUMNA_DE_CAMPO = {
+    "matricula": "Matrícula del material",
+    "codigo_material": "Código del material",
+    "cantidad": "Cantidad",
+    "precio_unitario": "Precio unitario",
+    "lote": "Lote",
+    "precio_adjudicado": "Precio adjudicado",
+    "baja_lote": "Baja del lote",
+    "unidad_medida": "Unidad de medida",
+}
+
+
+def _texto_celdas_vacias(linea: LineaCatalogo, identificador_lote: Optional[str]) -> Optional[str]:
+    """"Cantidad: pendiente (el documento da una cantidad distinta para cada
+    lote...); Matrícula del material: no consta" -- `None` si la fila no
+    tiene ninguna celda de datos vacía."""
+    partes = [
+        f"{_COLUMNA_DE_CAMPO[c.campo]}: {ETIQUETA_MOTIVO[c.motivo]}" + (f" ({c.detalle})" if c.detalle else "")
+        for c in celdas_vacias(linea, identificador_lote)
+    ]
+    return "; ".join(partes) or None
+
+
+# Leyenda de la columna "Motivo de las celdas vacías" en la hoja Resumen: los
+# mismos tres motivos de la web, en lenguaje llano.
+_LEYENDA_MOTIVOS = (
+    ("No consta", "El documento de origen no trae ese dato para esta línea."),
+    (
+        "No aplica",
+        "El dato no corresponde a este tipo de línea: una partida alzada es una reserva presupuestaria, no un "
+        "artículo de almacén, y no lleva matrícula, código de material ni unidad propios.",
+    ),
+    (
+        "Pendiente",
+        "El dato depende de otro que todavía falta. En Cantidad o Precio unitario: el documento trae un valor "
+        "distinto para cada lote bajo el mismo código de precio y aún no se sabe cuál es el de este lote -- se "
+        "deja vacío en vez de mostrar el de otro lote. En Precio adjudicado: falta la baja del lote o el precio "
+        "unitario del que se calcula.",
+    ),
+)
 
 
 COLUMNAS = [
@@ -115,6 +160,13 @@ COLUMNAS = [
     # desplazar ninguna columna existente -- "Comentarios" se queda última.
     "Nº de expediente (documento)",
     "Objeto del contrato (documento)",
+    # Sesión 2026-09-14 (continuación), encargo del cliente: por qué está
+    # vacía cada celda de datos de la fila, con los tres motivos de la web
+    # (no aplica / no consta / pendiente, `app.celdas_vacias`). Las celdas
+    # siguen vacías -- un marcador de texto rompería las columnas numéricas
+    # (ver docstring del módulo) --, el motivo va aquí. Justo antes de
+    # "Comentarios", que se queda la última.
+    "Motivo de las celdas vacías",
     # Segunda tanda de cambios del cliente tras revisar el catálogo (bloque
     # 1, sesión 2026-09-09): la única de las once columnas originales que el
     # cliente pidió mover -- de la novena posición al final de todas,
@@ -199,6 +251,14 @@ _CATEGORIAS_MOTIVO = (
         "Que alguien revise el documento y asigne el lote a mano.",
     ),
     (
+        "tabla separada de la anterior",
+        "tabla tras páginas sin tabla, sin título de lote",
+        "Esta tabla aparece varias páginas después de la anterior y no lleva título de lote propio, así que "
+        "no se puede dar por hecho que continúa el lote de la tabla anterior (suele ser un cuadro común a "
+        "todos los lotes: criterios técnicos, precios para la partida alzada...).",
+        "Que alguien mire el documento y decida si pertenece a un lote concreto o es común a todos.",
+    ),
+    (
         "no está entre los lotes declarados",
         "la tabla declara un lote no registrado en el expediente",
         "La tabla menciona un número de lote que no coincide con ninguno de los lotes ya confirmados de "
@@ -276,13 +336,22 @@ _NOTA_CODIGO_MATERIAL = (
 
 
 def _escribir_resumen(
-    libro: Workbook, incluidas: int, excluidas_por_categoria: Counter[str], incluir_pendientes_sin_lote: bool
+    libro: Workbook,
+    incluidas: int,
+    excluidas_por_categoria: Counter[str],
+    incluir_pendientes_sin_lote: bool,
+    con_valor_de_otro_lote: int = 0,
 ) -> None:
     hoja = libro.create_sheet("Resumen")
     hoja.append(["Concepto", "Valor"])
     hoja.append(["Líneas en este catálogo", incluidas])
     total_excluidas = sum(excluidas_por_categoria.values())
     hoja.append(["Líneas pendientes de revisión (no incluidas arriba)", total_excluidas])
+    hoja.append([
+        "Líneas del catálogo con Cantidad o Precio unitario pendiente (el documento da un valor distinto "
+        "para cada lote)",
+        con_valor_de_otro_lote,
+    ])
     hoja.append([])
     if incluir_pendientes_sin_lote:
         hoja.append(["Exportado con las líneas pendientes de revisión incluidas en \"Materiales\".", None])
@@ -315,6 +384,15 @@ def _escribir_resumen(
             )
             hoja.append([explicacion, cantidad, resolucion])
     hoja.append([])
+    hoja.append([
+        "Columna \"Motivo de las celdas vacías\": por qué está vacía cada celda de datos de la fila. Las "
+        "celdas se dejan vacías (una marca de texto impediría sumar u ordenar las columnas de números); el "
+        "motivo va en esta columna, con uno de estos tres valores:",
+        None,
+    ])
+    for motivo, explicacion in _LEYENDA_MOTIVOS:
+        hoja.append([f"{motivo}: {explicacion}", None])
+    hoja.append([])
     hoja.append(["Nota sobre la columna \"Código del material\"", None])
     hoja.append([_NOTA_CODIGO_MATERIAL, None])
     for fila in hoja.iter_rows():
@@ -333,6 +411,7 @@ def generar_excel_catalogo(db: Session, incluir_pendientes_sin_lote: bool = Fals
     hoja.append(COLUMNAS)
 
     incluidas = 0
+    con_valor_de_otro_lote = 0
     excluidas_por_categoria: Counter[str] = Counter()
 
     # Bloque de medición del hallazgo de sesión (ver comentario de
@@ -418,14 +497,22 @@ def generar_excel_catalogo(db: Session, incluir_pendientes_sin_lote: bool = Fals
             # PCSP en cuanto se lee, `app.extraccion.identidad_expediente`).
             _celda_texto_o_espacio(expediente.codigo_expediente),
             _celda_texto_o_espacio(expediente.nombre_proyecto),
+            _celda_texto_o_espacio(_texto_celdas_vacias(linea, lote.identificador_lote if lote else None)),
             _celda_texto_o_espacio(linea.comentarios),
         ])
+        if any(
+            c.motivo == PENDIENTE and c.campo in ("cantidad", "precio_unitario")
+            for c in celdas_vacias(linea, lote.identificador_lote if lote else None)
+        ):
+            con_valor_de_otro_lote += 1
         hoja.cell(row=fila, column=_COLUMNA_CANTIDAD).number_format = _formato_cantidad(linea.cantidad)
         for columna in _COLUMNAS_IMPORTE:
             hoja.cell(row=fila, column=columna).number_format = _FORMATO_IMPORTE
         hoja.cell(row=fila, column=_COLUMNA_PORCENTAJE).number_format = _FORMATO_PORCENTAJE
 
-    _escribir_resumen(libro, incluidas, excluidas_por_categoria, incluir_pendientes_sin_lote)
+    _escribir_resumen(
+        libro, incluidas, excluidas_por_categoria, incluir_pendientes_sin_lote, con_valor_de_otro_lote
+    )
 
     buffer = io.BytesIO()
     libro.save(buffer)

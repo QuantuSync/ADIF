@@ -78,10 +78,12 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Optional
 
-from app.extraccion.baja import buscar_baja_en_texto
+from app.extraccion.baja import CODIGO_PROPIO_RE, buscar_baja_en_texto, extraer_baja_declarada
 from app.extraccion.campos_pcsp import CODIGO_EXPEDIENTE_RE, CampoAnclado
+from app.extraccion.cruce_codigos import normalizar_codigo_expediente
 from app.extraccion.normalizacion import parsear_importe_es
 from app.extraccion.texto import PaginaTexto
+from app.models import TipoDocumento
 
 
 def _importe_o_none(texto: str) -> Optional[Decimal]:
@@ -101,6 +103,24 @@ def _importe_o_none(texto: str) -> Optional[Decimal]:
 # "En el"/"-"/"▪"/"•"/numeración ("1º.-") delante. Deliberadamente NO exige
 # ninguno de esos prefijos -- son justo lo que varía entre documentos.
 _LOTE_OCURRENCIA_RE = re.compile(r"LOTE\s*(\d{1,2})\b", re.IGNORECASE)
+
+# Sesión 2026-09-14 (revisión del cliente, continuación): la descripción de un
+# lote puede nombrar a OTRO lote -- "LOTE 2: SUR Y, EN CASO DE URGENCIA QUE NO
+# PUEDA SER TENDIDA POR EL ADJUDICATARIO DEL LOTE1, NORTE | EXPEDIENTE Nº
+# 6.22/28510.0058" (`6.22/28510.0033`; la misma redacción en
+# `6.22/28510.0122`). Esa referencia no es el arranque de un bloque: si abre
+# ventana, el código propio y la baja de LOTE 2 acaban atribuidos a LOTE 1
+# (verificado contra los dos Contratos de cada familia, que dicen lo
+# contrario). La referencia no abre ventana, pero el lote queda nombrado.
+# Solo esta redacción exacta, la única verificada: un "del lote N" más
+# genérico podría ser el arranque real de un bloque en otra plantilla.
+_REFERENCIA_A_OTRO_LOTE_RE = re.compile(r"adjudicatario\s+del\s*$", re.IGNORECASE)
+
+# Identidad declarada por un Contrato firmado: "Contrato nº: X" en la cabecera
+# y, justo debajo del título de la licitación, "LOTE N: <descripción>"
+# (distancia real entre los dos: de 78 a 223 caracteres en todos los
+# Contratos del corpus que traen las dos cosas).
+_DISTANCIA_MAXIMA_CONTRATO_LOTE = 300
 
 # Código propio del lote: con etiqueta ("EXPEDIENTE Nº", "Nº DE EXPEDIENTE:")
 # o, verificado en `6.25/28510.0019` (LOTE 1: "...MATERIAL AUXILIAR.
@@ -181,6 +201,22 @@ class LoteDeclarado:
     codigo_expediente_lote: Optional[str]
     pagina: int
     fragmento: str
+    # Documento del que sale el lote cuando no es el documento de lotes
+    # elegido por el orquestador (un lote que solo conoce su Contrato).
+    documento_id: Optional[int] = None
+
+
+@dataclass(frozen=True)
+class IdentidadContrato:
+    """Lo que un Contrato firmado dice de sí mismo: qué lote es y con qué
+    código de expediente ("Contrato nº"). CONTEXTO.md sección 27, relación
+    "Contrato ⟷ lote": el "Contrato nº" coincide siempre con el
+    "EXPEDIENTE Nº" que el lote declara en su adjudicación."""
+    identificador: str
+    codigo_expediente_lote: str
+    baja: Optional[Decimal]
+    pagina: int
+    fragmento: str
 
 
 @dataclass(frozen=True)
@@ -243,12 +279,68 @@ def _codigo_principal_declarado(texto: str) -> Optional[CampoAnclado]:
     return CampoAnclado(valor=valor, pagina=0, fragmento=m.group(0).strip())
 
 
-def extraer_lotes_declarados(paginas: list[PaginaTexto]) -> ResultadoLotes:
+def _entrada_vacia(offset: int) -> dict:
+    return {
+        "baja": None, "fragmento_baja": None,
+        "importe_adjudicacion": None,
+        "adjudicatario": None,
+        "codigo_expediente_lote": None,
+        "offset": offset,
+    }
+
+
+def _es_referencia_a_otro_lote(texto: str, inicio: int) -> bool:
+    return _REFERENCIA_A_OTRO_LOTE_RE.search(texto[max(0, inicio - 40):inicio]) is not None
+
+
+def extraer_identidad_contrato(paginas: list[PaginaTexto]) -> Optional[IdentidadContrato]:
+    """`None` si el documento no declara "Contrato nº: X" seguido de cerca
+    por un "LOTE N" (un contrato de un expediente sin lotes, la mayoría).
+    Solo la cabecera (tres primeras páginas, mismo criterio que
+    `extraer_codigo_propio_documento`): en el cuerpo, un Contrato puede
+    nombrar otro lote de pasada -- incluso con errata, verificado en
+    `6.21/28510.0016` ("Ascendiendo el importe de licitación del lote 1 a
+    15.000,00 €" en el Contrato del LOTE 2)."""
+    for pagina in paginas[:3]:
+        m = CODIGO_PROPIO_RE.search(pagina.texto)
+        if not m:
+            continue
+        m_lote = _LOTE_OCURRENCIA_RE.search(pagina.texto, m.end(), m.end() + _DISTANCIA_MAXIMA_CONTRATO_LOTE)
+        if m_lote is None:
+            return None
+        baja = extraer_baja_declarada(paginas, tipo_documento=TipoDocumento.contrato)
+        return IdentidadContrato(
+            identificador=m_lote.group(1),
+            codigo_expediente_lote=m.group(1),
+            baja=baja.baja if baja is not None else None,
+            pagina=pagina.numero,
+            fragmento=(baja.fragmento if baja is not None else pagina.texto[m.start():m_lote.end()]).strip(),
+        )
+    return None
+
+
+def extraer_lotes_declarados(
+    paginas: list[PaginaTexto], lote_por_codigo: Optional[dict[str, str]] = None
+) -> ResultadoLotes:
     """Lista vacía si el documento no menciona ningún "LOTE N" por su
     nombre -- el llamador (orquestador) cae entonces al camino de un único
-    lote implícito (CONTEXTO.md, sección 19, "un único lote implícito")."""
+    lote implícito (CONTEXTO.md, sección 19, "un único lote implícito").
+
+    `lote_por_codigo` (código de expediente normalizado -> identificador de
+    lote, de los Contratos firmados del expediente): cuando una ventana
+    declara un código propio que un Contrato ata a OTRO número de lote, el
+    número de la ventana es una errata y la ventana se atribuye al lote del
+    Contrato. Caso real: la Resolución del LOTE 2 de tornillería
+    (`6.21/28510.0016`) lo llama "LOTE 2" en la cabecera y en la firma, pero
+    "LOTE 1: ANCLAJES DE SEGURIDAD. EXPEDIENTE Nº: 6.21/28510.0016" en el
+    RESUELVE -- sin esto, la baja y el importe del LOTE 2 se guardaban en el
+    LOTE 1, y los dos lotes quedaban ligados a `0016`."""
+    lote_por_codigo = lote_por_codigo or {}
     texto, limites = _texto_y_paginas(paginas)
-    ocurrencias = list(_LOTE_OCURRENCIA_RE.finditer(texto))
+    ocurrencias = []
+    referencias = []
+    for m in _LOTE_OCURRENCIA_RE.finditer(texto):
+        (referencias if _es_referencia_a_otro_lote(texto, m.start()) else ocurrencias).append(m)
     if not ocurrencias:
         return ResultadoLotes(lotes=[], lotes_totales_declarados=None, codigo_principal_declarado=None)
 
@@ -267,20 +359,25 @@ def extraer_lotes_declarados(paginas: list[PaginaTexto]) -> ResultadoLotes:
         identificador = m.group(1)
         fin = ocurrencias[i + 1].start() if i + 1 < len(ocurrencias) else len(texto)
         ventana = texto[m.start():fin]
+        codigo_ventana = _codigo_propio_lote(ventana)
+        if codigo_ventana is not None:
+            identificador_contrato = lote_por_codigo.get(normalizar_codigo_expediente(codigo_ventana))
+            if identificador_contrato is not None and identificador_contrato != identificador:
+                # El número de la errata sigue nombrando un lote que existe
+                # (el documento lo menciona): se conserva, sin los datos de
+                # esta ventana, para que su propio Contrato lo complete.
+                if identificador not in datos:
+                    datos[identificador] = _entrada_vacia(m.start())
+                    orden.append(identificador)
+                identificador = identificador_contrato
 
         if identificador not in datos:
-            datos[identificador] = {
-                "baja": None, "fragmento_baja": None,
-                "importe_adjudicacion": None,
-                "adjudicatario": None,
-                "codigo_expediente_lote": None,
-                "offset": m.start(),
-            }
+            datos[identificador] = _entrada_vacia(m.start())
             orden.append(identificador)
         entrada = datos[identificador]
 
         if entrada["codigo_expediente_lote"] is None:
-            entrada["codigo_expediente_lote"] = _codigo_propio_lote(ventana)
+            entrada["codigo_expediente_lote"] = codigo_ventana
 
         if entrada["baja"] is None:
             baja_encontrada = buscar_baja_en_texto(ventana)
@@ -297,6 +394,15 @@ def extraer_lotes_declarados(paginas: list[PaginaTexto]) -> ResultadoLotes:
             m_adj = _ADJUDICATARIO_RE.search(ventana)
             if m_adj:
                 entrada["adjudicatario"] = re.sub(r"\s+", " ", m_adj.group(1)).strip()
+
+    # Una referencia cruzada no abre ventana, pero sí dice que ese lote
+    # existe: queda nombrado, sin datos (`6.22/28510.0122`: la Propuesta del
+    # LOTE 2 es el único documento de lotes, y solo nombra el LOTE 1 así; su
+    # código y su baja los completa su Contrato, en el orquestador).
+    for m in referencias:
+        if m.group(1) not in datos:
+            datos[m.group(1)] = _entrada_vacia(m.start())
+            orden.append(m.group(1))
 
     lotes = [
         LoteDeclarado(

@@ -191,6 +191,19 @@ def _extraer_unidad_embebida(cantidad_bruta: Optional[str], precio_bruto: Option
 _CANTIDAD_ANIO_MIN = 1900
 _CANTIDAD_ANIO_MAX = 2100
 
+# Sesión 2026-09-14 (continuación): lo que cabe en `lineas_catalogo.cantidad`
+# (Numeric(14, 3)), `precio_unitario` (Numeric(14, 4)) y `unidad_medida`
+# (String(32)). Un valor mayor no es un dato real y, al guardar, tumbaba el
+# documento ENTERO
+# (NumericValueOutOfRange; CONTEXTO.md sección 12: lo que no cuadra va a
+# revisión, no revienta). Caso real: el CONTRATO del LOTE 2 de
+# `6.22/28510.0156` (doc 702) p.123/134, una tabla de aplicabilidad con un
+# "1" en cada casilla leída como cantidad 111.111.111.111.111 -- las 164
+# líneas del documento nunca se habían llegado a guardar.
+_LIMITE_CANTIDAD = Decimal(10) ** 11
+_LIMITE_PRECIO = Decimal(10) ** 10
+_LARGO_MAXIMO_UNIDAD = 32  # `lineas_catalogo.unidad_medida`, String(32)
+
 
 def _cantidad_parece_implausible(cantidad: Decimal) -> Optional[str]:
     """Devuelve el motivo de revisión si `cantidad` no parece una cantidad de
@@ -901,6 +914,17 @@ def _construir_campos(
                 "está desplazada una columna respecto a su cabecera), confirmar antes de dar por buena",
             )
 
+    if unidad_medida and len(unidad_medida) > _LARGO_MAXIMO_UNIDAD:
+        # Sesión 2026-09-14 (continuación): mismo caso que `_LIMITE_CANTIDAD`
+        # -- la fila de casillas de `6.22/28510.0156` CONTRATO_1 p.123 trae
+        # "UD. UD. UD. ..." (111 caracteres) en la columna de unidad; no cabe
+        # en `lineas_catalogo.unidad_medida` y tumbaba el documento entero.
+        motivo_revision = _acumular_motivo(
+            motivo_revision,
+            f"unidad de medida descartada por larga ({len(unidad_medida)} caracteres, ninguna unidad real "
+            f"lo es): {unidad_medida[:40]!r}…",
+        )
+        unidad_medida = None
     if unidad_medida and _unidad_medida_implausible(unidad_medida):
         # Ver docstring de `_UNIDAD_MEDIDA_IMPLAUSIBLE_RE` y de
         # `_UNIDAD_MEDIDA_CON_TRES_DIGITOS_RE`: solo dígitos y puntos, o tres
@@ -1062,6 +1086,13 @@ def _construir_campos(
                 "cabecera de esta tabla, confirmar antes de dar por buena",
             )
 
+    if cantidad is not None and abs(cantidad) >= _LIMITE_CANTIDAD:
+        motivo_revision = _acumular_motivo(
+            motivo_revision,
+            f"cantidad descartada ({cantidad_bruta!r}): cifra imposible, más de 11 dígitos enteros -- no "
+            "es una cantidad de material (p.ej. una fila de casillas leída como un solo número)",
+        )
+        cantidad = None
     if cantidad is not None:
         motivo_cantidad = _cantidad_parece_implausible(cantidad)
         if motivo_cantidad is not None:
@@ -1085,6 +1116,12 @@ def _construir_campos(
                 "precio unitario recuperado de una columna fantasma sin etiquetar junto a \"precio "
                 "unitario\" en la cabecera de esta tabla, confirmar antes de dar por buena",
             )
+    if precio_unitario is not None and abs(precio_unitario) >= _LIMITE_PRECIO:
+        motivo_revision = _acumular_motivo(
+            motivo_revision,
+            f"precio unitario descartado ({precio_bruto!r}): cifra imposible, más de 9 dígitos enteros",
+        )
+        precio_unitario = None
 
     if unidad_medida is None:
         unidad_medida = _extraer_unidad_embebida(cantidad_bruta, precio_bruto)
@@ -1251,6 +1288,14 @@ def construir_linea_catalogo(
             # relleno de tabla.
             fragmento_bruto = " | ".join((celda or "").strip() for celda in fila)
             if not fragmento_bruto.replace("|", "").strip():
+                return None
+            if not _LETRA_RE.search(fragmento_bruto.replace("€", "")):
+                # Sesión 2026-09-14 (continuación): una fila con solo cifras
+                # e importes -- ni un código, ni una letra -- tampoco dice
+                # qué material es: es relleno de otra tabla (caso real, la
+                # tabla de aplicabilidad del CONTRATO del LOTE 2 de
+                # `6.22/28510.0156`, p.123/134: "21.206,61 €" repetido por
+                # columnas), no una línea que revisar.
                 return None
             campos["motivo_revision"] = _acumular_motivo(
                 campos["motivo_revision"],
@@ -1809,7 +1854,7 @@ def _combinar_por_clave(lineas: list[dict], permitir_fusion_material: bool = Tru
             linea["precio_adjudicado"] = None
         linea["motivo_revision"] = _acumular_motivo_unico(
             linea.get("motivo_revision"),
-            f"el mismo codigo_precio aparece varias veces en el documento, dentro del mismo lote, con "
+            f"{MOTIVO_VALOR_DE_OTRO_LOTE}, con "
             f"{' y '.join(_NOMBRE_CAMPO_CONFLICTO[c] for c in sorted(campos))} distintos: probablemente "
             f"cuadros de lotes distintos adjuntos al mismo documento -- no se puede atribuir un valor a "
             f"este lote con certeza, se deja vacío en vez de quedarse con el último visto",
@@ -1835,6 +1880,24 @@ def _combinar_por_clave(lineas: list[dict], permitir_fusion_material: bool = Tru
 # anterior salió de este mismo choque ("el último gana"), y debe borrarse.
 _CAMPOS_CONFLICTO_MISMA_CLAVE = ("precio_unitario", "cantidad")
 _NOMBRE_CAMPO_CONFLICTO = {"precio_unitario": "precios unitarios", "cantidad": "cantidades"}
+
+# Arranque fijo del motivo de esta guarda: la exportación y la API lo
+# reconocen para decir de la celda vacía "pendiente" (el valor existe en el
+# documento, pero es de otro lote), no "no consta" (sesión 2026-09-14,
+# continuación: el Excel no distinguía los dos huecos).
+MOTIVO_VALOR_DE_OTRO_LOTE = "el mismo codigo_precio aparece varias veces en el documento, dentro del mismo lote"
+_CAMPOS_EN_MOTIVO_OTRO_LOTE_RE = re.compile(re.escape(MOTIVO_VALOR_DE_OTRO_LOTE) + r", con (.+?) distintos")
+
+
+def campos_vacios_por_valor_de_otro_lote(motivo_revision: Optional[str]) -> frozenset[str]:
+    """Campos (`cantidad`, `precio_unitario`) que la guarda de choques dejó
+    vacíos en esta línea, leídos de su propio motivo."""
+    if not motivo_revision:
+        return frozenset()
+    m = _CAMPOS_EN_MOTIVO_OTRO_LOTE_RE.search(motivo_revision)
+    if m is None:
+        return frozenset()
+    return frozenset(campo for campo, nombre in _NOMBRE_CAMPO_CONFLICTO.items() if nombre in m.group(1))
 
 
 def _limpiar_huerfana_superada(db: Session, expediente_id: int, clave_huerfana_hipotetica: Optional[str]) -> None:

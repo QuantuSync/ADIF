@@ -9,6 +9,7 @@ import {
   formatearImporte,
   formatearNumero,
   formatearPorcentaje,
+  type MotivoVacio,
 } from "../ui";
 
 type LineaCatalogo = {
@@ -40,6 +41,9 @@ type LineaCatalogo = {
   documento_origen_nombre: string | null;
   pagina: number | null;
   fragmento: string | null;
+  // Por qué está vacía cada celda de datos, decidido en el motor
+  // (`app.celdas_vacias`) -- el mismo criterio que el Excel.
+  celdas_vacias?: Record<string, { motivo: MotivoVacio; detalle: string | null }>;
 };
 
 // Encargo de esta sesión: "sin confirmar" es el estado por defecto de las
@@ -113,6 +117,12 @@ function celdaPrecioAdjudicado(linea: LineaCatalogo) {
       />
     );
   }
+  // Mismo criterio que el Excel (`app.celdas_vacias`): sin precio unitario
+  // tampoco hay de qué calcularlo -- pendiente de ese dato, no un hueco sin
+  // explicar.
+  if (!linea.precio_unitario) {
+    return <DatoVacio motivo="pendiente" titulo="Falta el precio unitario del que se calcula." />;
+  }
   return "";
 }
 
@@ -176,9 +186,26 @@ function celdaCodigoPrecio(linea: LineaCatalogo) {
 // no un hueco de extracción. Un caso real donde el número sí estaba en el
 // documento y no se leía (columna fantasma en la cabecera) ya se corrige en
 // el motor (`app.catalogo._recuperar_cantidad_columna_fantasma`), no aquí.
+// Sesión 2026-09-14 (continuación), encargo del cliente: cuando el documento
+// da un valor distinto para cada lote bajo el mismo código de precio, el
+// motor deja la celda vacía antes que mostrar el de otro lote -- ese hueco no
+// es "no consta", está pendiente de saber qué lote es este expediente.
+function celdaPendienteDeLote(linea: LineaCatalogo, campo: "cantidad" | "precio_unitario") {
+  const vacia = linea.celdas_vacias?.[campo];
+  if (vacia?.motivo !== "pendiente") return null;
+  return (
+    <DatoVacio
+      motivo="pendiente"
+      titulo={`${vacia.detalle ?? "El documento da un valor distinto para cada lote"}. Se deja vacío en vez de mostrar el valor de otro lote.`}
+    />
+  );
+}
+
 function celdaCantidad(linea: LineaCatalogo) {
   const texto = formatearNumero(linea.cantidad, 2);
   if (texto) return texto;
+  const pendiente = celdaPendienteDeLote(linea, "cantidad");
+  if (pendiente) return pendiente;
   return (
     <DatoVacio
       motivo="no-consta"
@@ -219,6 +246,8 @@ function sufijoUnidad(unidad: string | null): string {
 function celdaPrecioUnitario(linea: LineaCatalogo) {
   const texto = formatearNumero(linea.precio_unitario);
   if (texto) return texto;
+  const pendiente = celdaPendienteDeLote(linea, "precio_unitario");
+  if (pendiente) return pendiente;
   return (
     <DatoVacio
       motivo="no-consta"
@@ -511,11 +540,9 @@ export default function CatalogoPanel({ apiUrl }: { apiUrl: string }) {
               <dl className="trace-field">
                 <dt>Cantidad</dt>
                 <dd>
-                  {seleccion.cantidad ? (
-                    `${formatearNumero(seleccion.cantidad, 2)}${seleccion.unidad_medida ? ` ${seleccion.unidad_medida}` : ""}`
-                  ) : (
-                    <span className="muted">no consta</span>
-                  )}
+                  {seleccion.cantidad
+                    ? `${formatearNumero(seleccion.cantidad, 2)}${seleccion.unidad_medida ? ` ${seleccion.unidad_medida}` : ""}`
+                    : celdaCantidad(seleccion)}
                 </dd>
               </dl>
             </div>

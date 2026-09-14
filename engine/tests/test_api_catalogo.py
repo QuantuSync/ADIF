@@ -12,6 +12,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app import models
+from app.catalogo import MOTIVO_VALOR_DE_OTRO_LOTE
 from app.config import settings
 from app.db import Base, get_db
 from app.interfaces.document_storage import LocalDiskStorage
@@ -256,6 +257,7 @@ def test_exportar_catalogo_genera_xlsx_con_columnas_del_formato_esperado(cliente
         "Precio adjudicado", "Baja del lote", "Unidad de medida",
         "Estado del contrato (SAP)",
         "Nº de expediente (documento)", "Objeto del contrato (documento)",
+        "Motivo de las celdas vacías",
         "Comentarios",
     ]
     fila = [c.value for c in next(hoja.iter_rows(min_row=2, max_row=2))]
@@ -285,9 +287,54 @@ def test_exportar_catalogo_genera_xlsx_con_columnas_del_formato_esperado(cliente
     # mismo test por la misma razón).
     assert fila[14] == "6.24/28510.0008"
     assert fila[15] == "SUMINISTRO DE GUANTES CONTRA RIESGO ELECTRICO."
+    # Sesión 2026-09-14 (continuación): la línea sembrada trae todos sus
+    # datos, así que no hay ninguna celda vacía que explicar.
+    assert fila[16] == " "
     # Segunda tanda de cambios del cliente (bloque 1, sesión 2026-09-09):
     # "Comentarios" se mueve al final de todas las columnas.
-    assert fila[16] == " "
+    assert fila[17] == " "
+
+
+def test_exportar_catalogo_explica_el_hueco_de_un_valor_de_otro_lote(cliente, db_session, tmp_path, monkeypatch):
+    """Encargo del cliente (sesión 2026-09-14, continuación): una cantidad
+    vacía porque el documento da una distinta para cada lote no puede leerse
+    igual que una que el documento no trae. La celda sigue vacía (y la
+    columna numérica), el motivo va en su columna con el criterio de los
+    tres motivos, y la hoja Resumen lo cuenta y lo explica."""
+    monkeypatch.setattr(settings, "codigos_proyecto_path", None)
+    _expediente, _lote, _documento, linea = _sembrar_catalogo(db_session)
+    linea.cantidad = None
+    linea.matricula = None
+    linea.motivo_revision = (
+        f"{MOTIVO_VALOR_DE_OTRO_LOTE}, con cantidades distintos: probablemente cuadros de lotes distintos "
+        "adjuntos al mismo documento -- no se puede atribuir un valor a este lote con certeza, se deja vacío "
+        "en vez de quedarse con el último visto"
+    )
+    db_session.commit()
+
+    resp = cliente.get("/catalogo/exportar.xlsx")
+
+    ruta = tmp_path / "salida.xlsx"
+    ruta.write_bytes(resp.content)
+    libro = openpyxl.load_workbook(ruta)
+    fila = [c.value for c in next(libro["Materiales"].iter_rows(min_row=2, max_row=2))]
+    assert fila[7] is None  # Cantidad: vacía, no un texto en una columna numérica
+    assert fila[16] == (
+        "Matrícula del material: no consta; "
+        "Cantidad: pendiente (el documento da una cantidad distinta para cada lote y falta saber cuál es la de este)"
+    )
+    filas_resumen = [[c.value for c in f] for f in libro["Resumen"].iter_rows()]
+    assert any(
+        (f[0] or "").startswith("Líneas del catálogo con Cantidad o Precio unitario pendiente") and f[1] == 1
+        for f in filas_resumen
+    )
+    assert any((f[0] or "").startswith("Pendiente: ") for f in filas_resumen)
+
+    # La web recibe el mismo motivo.
+    datos = cliente.get("/catalogo").json()["lineas"][0]
+    assert datos["celdas_vacias"]["cantidad"]["motivo"] == "pendiente"
+    assert datos["celdas_vacias"]["matricula"] == {"motivo": "no-consta", "detalle": None}
+    assert "precio_unitario" not in datos["celdas_vacias"]
 
 
 def _agregar_linea_huerfana(db_session, expediente, documento, *, motivo):

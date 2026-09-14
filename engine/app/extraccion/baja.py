@@ -34,8 +34,12 @@ from app.models import TipoDocumento
 # La distancia entre "% " y "precios unitarios" varía (de un espacio a una
 # subordinada entera) pero nunca cruza a la frase siguiente en los ejemplos
 # vistos; 160 caracteres da margen sin arriesgarse a saltar de párrafo.
+# "de" además de "del" (sesión 2026-09-14, continuación): "La baja ofertada
+# de 0,00% será aplicable al conjunto de precios unitarios" -- 8 Contratos
+# del corpus con esta redacción, en ninguno se encontraba la baja (entre
+# ellos el del LOTE 1 de tornillería, `6.21/28510.0015`).
 _BAJA_RE = re.compile(
-    r"baja(?:\s+econ[oó]mica)?(?:\s+ofertada)?\s+del[.,]?\s*([\d.,]+)\s*%[^.]{0,160}?precios unitarios",
+    r"baja(?:\s+econ[oó]mica)?(?:\s+ofertada)?\s+del?[.,]?\s*([\d.,]+)\s*%[^.]{0,160}?precios unitarios",
     re.IGNORECASE | re.DOTALL,
 )
 
@@ -127,7 +131,7 @@ class BajaEnTexto:
 # COMPLETO, y cada uno declara sin ambigüedad a qué expediente pertenece:
 # "Contrato nº: 6.24/28510.0017" -- no hace falta ventanear el texto ni
 # emparejar por `nombre_proyecto`, el propio documento ya lo dice.
-_CODIGO_PROPIO_RE = re.compile(
+CODIGO_PROPIO_RE = re.compile(
     r"Contrato\s*n[ºo]:?\s*(" + CODIGO_EXPEDIENTE_RE.pattern + r")", re.IGNORECASE
 )
 
@@ -142,7 +146,7 @@ def extraer_codigo_propio_documento(paginas: list[PaginaTexto]) -> Optional[str]
     arriesgarse a coger una referencia a OTRO expediente mencionada de
     pasada más adelante."""
     for pagina in paginas[:3]:
-        m = _CODIGO_PROPIO_RE.search(pagina.texto)
+        m = CODIGO_PROPIO_RE.search(pagina.texto)
         if m:
             return m.group(1)
     return None
