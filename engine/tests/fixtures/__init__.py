@@ -271,3 +271,33 @@ PROPUESTA_REFERENCIA_CRUZADA_0156 = FIXTURES_DIR / "6.22_28510.0156_ADJUDICACION
 ANEJO_LOTE_EN_TITULO_Y_COLA_0020 = FIXTURES_DIR / "4.26_28510.0020_ANEJO_1_lote_en_titulo_y_cola_p14-18_39.pdf"
 CONTRATO_LOTE2_0156 = FIXTURES_DIR / "6.22_28510.0156_CONTRATO_1_p1.pdf"
 CONTRATO_LOTE1_0155 = FIXTURES_DIR / "6.22_28510.0156_CONTRATO_2_p1.pdf"
+
+# Sesión 2026-09-14, tercera parte. Aparatos de vía de ancho mixto o métrico
+# (`6.23/28510.0051`, 2 lotes; `0060` LOTE 1, `0061` LOTE 2). Su Propuesta
+# solo nombra el LOTE 1 (`0060`, 25,31 %); sus dos Contratos dicen LOTE 1 ->
+# `0060` (25,31 %) y LOTE 2 -> `0061` (25,10 %). Del ANEJO_1, p.14, 38, 55 y
+# 56 del original: p.14 abre "Lote 1: ANCHO MIXTO"; p.38 cierra el LOTE 1 y
+# abre "Lote 2: ANCHO METRICO"; p.55-56, el anejo de criterios técnicos
+# ("materiales a suministrar en el expediente “... 2 LOTES”"), con su propia
+# numeración de códigos.
+PROPUESTA_SOLO_LOTE1_0051 = FIXTURES_DIR / "6.23_28510.0051_ADJUDICACION_1_p1-2.pdf"
+CONTRATO_LOTE1_0060 = FIXTURES_DIR / "6.23_28510.0051_CONTRATO_1_p1.pdf"
+CONTRATO_LOTE2_0061 = FIXTURES_DIR / "6.23_28510.0051_CONTRATO_2_p1.pdf"
+ANEJO_LOTES_Y_CRITERIOS_0051 = FIXTURES_DIR / "6.23_28510.0051_ANEJO_1_lotes_y_criterios_p14_38_55_56.pdf"
+
+# El Contrato del LOTE 1 de `6.22/28510.0122` trae el pliego entero; el
+# localizador no abre las páginas de sus cuadros salvo sueltas. p.116 del
+# original: "LLote 1: SEMICAMBIOS..." (negrita simulada), sin tabla que
+# abrir; p.122: tabla del LOTE 1 sin cabecera; p.127: "LLote 2:
+# CRUZAMIENTOS..."; p.133: tabla del LOTE 2 sin cabecera.
+CONTRATO_LOTE1_PLIEGO_0155 = FIXTURES_DIR / "6.22_28510.0156_CONTRATO_2_pliego_p116_122_127_133.pdf"
+
+# Aparatos de vía, 5 lotes (`6.21/28510.0109`; `0112` LOTE 4, `0113` LOTE 5):
+# sin documento de lotes, solo sus Contratos. CONTRATO_1: `0113`, LOTE 5,
+# 3,00 %; CONTRATO_2: `0112`, LOTE 4, 18,30 %. Del ANEJO_1, p.18, 19, 42, 43
+# y 49 del original: p.18 abre "Lote 1. Semicambios..." sin tabla; p.19,
+# tabla del LOTE 1 sin cabecera; p.42, "Lote 4. Corazones..." y su tabla;
+# p.43, su continuación; p.49, "Lote 5. Pequeño material".
+CONTRATO_LOTE5_0113 = FIXTURES_DIR / "6.21_28510.0112_CONTRATO_1_p1.pdf"
+CONTRATO_LOTE4_0112 = FIXTURES_DIR / "6.21_28510.0112_CONTRATO_2_p1.pdf"
+ANEJO_LOTE4_0112 = FIXTURES_DIR / "6.21_28510.0109_ANEJO_1_lote4_p18_19_42_43_49.pdf"

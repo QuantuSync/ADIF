@@ -596,8 +596,24 @@ def _recuperar_descripcion_columna_fantasma_anterior(
         return None
     otros_indices = {indice for campo, indice in mapeo.items() if campo != "descripcion"}
 
+    # Sesión 2026-09-14 (tercera parte): la otra huella del mismo colapso es
+    # la propia celda de descripción en `None` -- `pdfplumber` devuelve `None`
+    # (no cadena vacía) para una celda fundida con la vecina. Caso real,
+    # `ANEJO_57694f5d5dacb236.pdf` p.23 (`6.22/28510.0126`, LOTE 2): `['P-101',
+    # '618050300', 'EN-54', None, 'UD.', ...]`, con la unidad justo al lado.
+    # Antes lo tapaba la fusión con la línea del mismo código del LOTE 1;
+    # separados los lotes, 17 líneas se quedaban sin descripción.
+    # Solo en filas con matrícula: sin ella, `_recuperar_descripcion_
+    # ultimo_recurso` ya escanea la fila entera con su guard de ambigüedad.
+    celda_fundida = (
+        indice_descripcion < len(fila)
+        and fila[indice_descripcion] is None
+        and bool(limpiar_codigo_celda(_valor_en(fila, mapeo.get("matricula"))))
+    )
     indice_siguiente = indice_descripcion + 1
-    if indice_siguiente in otros_indices or _parece_descripcion_recuperable(_valor_en(fila, indice_siguiente)):
+    if not celda_fundida and (
+        indice_siguiente in otros_indices or _parece_descripcion_recuperable(_valor_en(fila, indice_siguiente))
+    ):
         return None
 
     indice_anterior = indice_descripcion - 1
@@ -1736,6 +1752,17 @@ _MOTIVO_FUSION_SIN_MATRICULA = (
 )
 
 
+def _codigos_distintos_de_verdad(a: Optional[str], b: Optional[str]) -> bool:
+    """Dos códigos de precio propios que son de verdad dos entradas del
+    catálogo: distintos, y ninguno es el otro con ruido delante ("VP-63" y
+    "P-63": `6.21/28510.0109_ANEJO_1` p.30 dice "P-63", la extracción leyó
+    "VP-63"). Sesión 2026-09-14, tercera parte."""
+    if not a or not b:
+        return False
+    a, b = re.sub(r"[^A-Z0-9]", "", a.upper()), re.sub(r"[^A-Z0-9]", "", b.upper())
+    return a != b and not a.endswith(b) and not b.endswith(a)
+
+
 def _combinar_por_clave(lineas: list[dict], permitir_fusion_material: bool = True) -> list[dict]:
     """El mismo cuadro de precios puede reaparecer varias veces dentro de un
     único documento (CONTEXTO.md sección 3 y docstring de `guardar_lineas_catalogo`),
@@ -1789,12 +1816,15 @@ def _combinar_por_clave(lineas: list[dict], permitir_fusion_material: bool = Tru
     # distinta a la misma firma nunca puede resolverse fundiendo, porque
     # ninguna tabla real repite el mismo material dos veces con dos códigos.
     claves_por_pagina: dict[tuple, dict[object, set[str]]] = {}
+    origen_por_clave: dict[str, object] = {}
     if permitir_fusion_material:
         for datos in lineas:
             firma = _firma_material(datos)
             if firma is None:
                 continue
             tiene_codigo = bool(datos.get("codigo_precio"))
+            if tiene_codigo:
+                origen_por_clave.setdefault(datos["clave_linea"], datos.get("tabla_origen"))
             actual = clave_por_firma.get(firma)
             if actual is None or (tiene_codigo and not actual[1]):
                 clave_por_firma[firma] = (datos["clave_linea"], tiene_codigo)
@@ -1817,9 +1847,28 @@ def _combinar_por_clave(lineas: list[dict], permitir_fusion_material: bool = Tru
         # secundaria, docstring de arriba) no tiene identidad propia que
         # perder, así que sigue pudiendo redirigirse a la clave con código
         # de esa misma firma sin más.
+        #
         redirige_por_firma = firma is not None and not (
             tiene_codigo and datos.get("pagina") in paginas_en_conflicto.get(firma, ())
         )
+        # Sesión 2026-09-14 (tercera parte): el mismo principio que el guard
+        # de página, para toda la tabla -- sus páginas de continuación
+        # incluidas (`tabla_origen`, `app.extraccion.pipeline_anejo`). El
+        # cuadro de `6.23/28510.0051` trae P-0166 (p.21) y P-0178 (p.22) con
+        # el mismo texto y precio, "Semicambio izq (sencillo)
+        # DIRD-B1-54-190-0.11-CR-D", 22.712,17 €: dos entradas del catálogo,
+        # no un eco. Entre tablas distintas (el eco de una tabla de criterios
+        # o de impacto con su propia numeración) sí se funde, con el código
+        # de la primera (ver más abajo).
+        if redirige_por_firma and tiene_codigo:
+            canonica = clave_por_firma[firma][0]
+            origen_canonica = origen_por_clave.get(canonica)
+            if (
+                _codigos_distintos_de_verdad(canonica, datos["clave_linea"])
+                and datos.get("tabla_origen") is not None
+                and datos.get("tabla_origen") == origen_canonica
+            ):
+                redirige_por_firma = False
         clave = clave_por_firma[firma][0] if redirige_por_firma else datos["clave_linea"]
         existente = combinadas.get(clave)
         if existente is None:
@@ -1842,8 +1891,25 @@ def _combinar_por_clave(lineas: list[dict], permitir_fusion_material: bool = Tru
                         and anterior != nuevo_valor
                     ):
                         conflictos.setdefault(clave, set()).add(campo)
+            # Sesión 2026-09-14 (tercera parte, P-0996): fundida por firma, una
+            # fila con OTRO código propio no se lo pasa a la canónica. El
+            # anejo de criterios numera a su manera: `6.23/28510.0051` llama
+            # P-0996 en criterios (p.95) a "ENF-54 Curva", que en el cuadro de
+            # precios es P-0994 (p.49) -- y P-0996 es otro material del mismo
+            # lote. Llevarse el código hacía que la clave pasara a "P-0996" al
+            # guardar y el documento entero se deshiciera
+            # (`uq_linea_lote_clave`); en `6.24/28510.0180` dejaba la línea
+            # con el código de la tabla de impacto ("PN004ps") en vez del de
+            # precios ("PN004"). La fila se sigue fundiendo (es el mismo
+            # material), con el código de la tabla que lo trajo primero.
+            codigo_ajeno = (
+                redirige_por_firma
+                and tiene_codigo
+                and existente.get("codigo_precio")
+                and existente.get("codigo_precio") != datos.get("codigo_precio")
+            )
             for campo, valor in datos.items():
-                if valor is not None:
+                if valor is not None and not (codigo_ajeno and campo == "codigo_precio"):
                     existente[campo] = valor
             existente["clave_linea"] = clave
     for clave, campos in conflictos.items():
@@ -1900,7 +1966,9 @@ def campos_vacios_por_valor_de_otro_lote(motivo_revision: Optional[str]) -> froz
     return frozenset(campo for campo, nombre in _NOMBRE_CAMPO_CONFLICTO.items() if nombre in m.group(1))
 
 
-def _limpiar_huerfana_superada(db: Session, expediente_id: int, clave_huerfana_hipotetica: Optional[str]) -> None:
+def _limpiar_huerfana_superada(
+    db: Session, expediente_id: int, clave_huerfana_hipotetica: Optional[str], documento_origen_id: Optional[int] = None
+) -> None:
     """Ver docstring de `guardar_lineas_catalogo`. Solo se llama cuando la
     línea se acaba de guardar bajo un `lote_id` real (nunca para huérfanas:
     no tendría de qué "superarse"). Comparación exacta de `clave_linea`
@@ -1912,17 +1980,24 @@ def _limpiar_huerfana_superada(db: Session, expediente_id: int, clave_huerfana_h
     descripción y precio."""
     if clave_huerfana_hipotetica is None:
         return
-    huerfana = (
-        db.query(LineaCatalogo)
-        .filter_by(expediente_id=expediente_id, lote_id=None, clave_linea=clave_huerfana_hipotetica)
-        .one_or_none()
+    consulta = db.query(LineaCatalogo).filter_by(
+        expediente_id=expediente_id, lote_id=None, clave_linea=clave_huerfana_hipotetica
     )
+    # Sesión 2026-09-14 (tercera parte): la clave de huérfana no lleva el
+    # documento, y dos Contratos del mismo expediente pueden tener la misma
+    # tabla en la misma posición (`4.25/28510.0208`: el propio, cuya tabla
+    # es de su lote, y el del LOTE 1, cuya tabla queda sin lote). Sin este
+    # filtro, guardar la del primero borraba la huérfana del segundo, que se
+    # recreaba en cada pasada con un `id` nuevo.
+    if documento_origen_id is not None:
+        consulta = consulta.filter(LineaCatalogo.documento_origen_id == documento_origen_id)
+    huerfana = consulta.one_or_none()
     if huerfana is not None:
         db.delete(huerfana)
 
 
 def guardar_lineas_catalogo(
-    db: Session, lote_id: Optional[int], lineas: list[dict]
+    db: Session, lote_id: Optional[int], lineas: list[dict], ids_vivas: frozenset[int] = frozenset()
 ) -> ResultadoGuardadoCatalogo:
     """Escritura por clave, no añadido ciego (CONTEXTO.md sección 9.9): una
     línea ya vista para este lote se actualiza, nunca se duplica. La
@@ -2025,12 +2100,15 @@ def guardar_lineas_catalogo(
     actualizadas = 0
     objetos_tocados: list[LineaCatalogo] = []
     fusion_material = lote_id is not None
-    for datos in _combinar_por_clave(lineas, permitir_fusion_material=fusion_material):
+    combinadas = _combinar_por_clave(lineas, permitir_fusion_material=fusion_material)
+    claves_de_esta_llamada = {datos["clave_linea"] for datos in combinadas}
+    for datos in combinadas:
         # Transitorio, nunca una columna de `LineaCatalogo` -- se retira
         # antes de que `datos` se use para crear/actualizar la fila real,
         # y se guarda aparte para la limpieza de huérfana superada de más
         # abajo (ver docstring de esta función).
         clave_huerfana_hipotetica = datos.pop("clave_huerfana_hipotetica", None)
+        datos.pop("tabla_origen", None)  # transitorio, ver `_combinar_por_clave`
         existente = (
             db.query(LineaCatalogo)
             .filter_by(lote_id=lote_id, expediente_id=datos["expediente_id"], clave_linea=datos["clave_linea"])
@@ -2061,6 +2139,29 @@ def guardar_lineas_catalogo(
                 if existente is not None:
                     consulta = consulta.filter(LineaCatalogo.id != existente.id)
                 duplicados_por_firma = consulta.order_by(LineaCatalogo.id).all()
+                # Sesión 2026-09-14 (tercera parte): una línea que ESTA MISMA
+                # pasada ya guardó desde otro documento (`ids_vivas`) con otro
+                # código propio no es un resto de una pasada anterior -- es
+                # otra entrada del catálogo con el mismo texto y precio
+                # (`6.23/28510.0051`: P-0167 y P-0179, guardadas desde el
+                # ANEJO; el Contrato, al guardar su P-0167, se tragaba la
+                # P-0179 y la borraba). Los restos de verdad (código con
+                # ruido de una pasada vieja) no están en `ids_vivas` y se
+                # siguen absorbiendo.
+                # Lo mismo para una línea que ESTA MISMA llamada va a
+                # escribir con su propia clave: guardada por la pasada
+                # anterior, todavía no está en `ids_vivas` cuando otra fila
+                # de su firma la encuentra, y se borraba para recrearse
+                # enseguida con un `id` nuevo (P-0178 al guardar P-0166).
+                codigo_entrante = datos.get("codigo_precio") or None
+                if codigo_entrante is not None:
+                    duplicados_por_firma = [
+                        d for d in duplicados_por_firma
+                        if not (
+                            (d.id in ids_vivas or d.clave_linea in claves_de_esta_llamada)
+                            and _codigos_distintos_de_verdad(d.codigo_precio, codigo_entrante)
+                        )
+                    ]
 
         # Firma sin matrícula (`_firma_material`, docstring): señal más débil
         # que con ella, se anota en `motivo_revision` para que la fusión
@@ -2087,6 +2188,7 @@ def guardar_lineas_catalogo(
             objetos_tocados.append(nueva)
         else:
             objetos_tocados.append(existente)
+            codigo_previo = existente.codigo_precio
             # `clave_linea` se recalcula aparte, más abajo: cuando la fila
             # existente se encontró por firma (no por clave exacta),
             # `datos["clave_linea"]` puede ser justo la clave *distinta* que
@@ -2203,6 +2305,24 @@ def guardar_lineas_catalogo(
                 # aplica cuando de verdad hace falta: dentro de un lote
                 # conocido, tras fundir por firma de material.
                 clave_ideal = existente.codigo_precio.strip()
+                # Sesión 2026-09-14 (tercera parte, P-0996): si esa clave ya
+                # es de OTRA línea del lote (guardada, o de esta misma
+                # llamada), el código que trajo la fusión no es el de este
+                # material -- se conserva el que tenía, en vez de reventar el
+                # documento entero al guardar.
+                if clave_ideal and clave_ideal != existente.clave_linea and (
+                    (clave_ideal in claves_de_esta_llamada and clave_ideal != datos["clave_linea"])
+                    or db.query(LineaCatalogo.id)
+                    .filter(
+                        LineaCatalogo.lote_id == lote_id,
+                        LineaCatalogo.clave_linea == clave_ideal,
+                        LineaCatalogo.id != existente.id,
+                    )
+                    .first()
+                    is not None
+                ):
+                    existente.codigo_precio = codigo_previo
+                    clave_ideal = None
                 if clave_ideal:
                     existente.clave_linea = clave_ideal
             if fusion_sin_matricula:
@@ -2211,7 +2331,9 @@ def guardar_lineas_catalogo(
                 )
             actualizadas += 1
         if lote_id is not None:
-            _limpiar_huerfana_superada(db, datos["expediente_id"], clave_huerfana_hipotetica)
+            _limpiar_huerfana_superada(
+                db, datos["expediente_id"], clave_huerfana_hipotetica, datos.get("documento_origen_id")
+            )
     # `flush()`, no `commit()` (docstring: el llamador decide cuándo): las
     # líneas recién creadas no tienen `id` hasta que el `INSERT` viaja a
     # postgres, y el llamador necesita esos `id` YA (bloque 4, sesión

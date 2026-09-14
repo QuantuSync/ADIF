@@ -1580,6 +1580,27 @@ def test_construir_linea_catalogo_recupera_descripcion_de_columna_fantasma_anter
     assert linea["motivo_revision"] is not None
 
 
+def test_construir_linea_catalogo_recupera_descripcion_de_celda_fundida_con_la_anterior():
+    # Sesión 2026-09-14, tercera parte: fila real de `ANEJO_57694f5d5dacb236.pdf`
+    # p.23 (`6.22/28510.0126`, LOTE 2). La celda de descripción sale `None`
+    # (fundida con la anterior) y la siguiente es la unidad, reclamada.
+    mapeo = {"codigo_precio": 0, "matricula": 1, "descripcion": 3, "unidad_medida": 4, "cantidad": 5, "precio_unitario": 7}
+    fila = ["P-101", "618050300", "EN-54", None, "UD.", "0", "", "91.314,71 €", ""]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=23, documento_origen_id=670, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea["descripcion"] == "EN-54"
+    assert linea["unidad_medida"] == "UD."
+    # Una celda vacía de verdad ('') con la unidad al lado no es este caso.
+    vacia = construir_linea_catalogo(
+        ["P-101", "618050300", "EN-54", "", "UD.", "0", "", "91.314,71 €", ""], mapeo,
+        pagina=23, documento_origen_id=670, expediente_id=1, baja_lote=None, orden_aparicion=0,
+    )
+    assert not vacia["descripcion"]
+
+
 def test_construir_lineas_desde_tabla_encadena_fragmentos_de_descripcion_envuelta():
     # Mismo hallazgo real, generalizado: el resto de la frase envuelta
     # ("SECCIÓN CIRCULAR DE", "120 MM2 DE", "ALEACIÓN COBRE-", "MAGNESIO
@@ -1786,6 +1807,197 @@ def test_combinar_por_clave_funde_por_firma_sin_matricula_dentro_del_mismo_lote(
     assert len(combinadas) == 1
     assert combinadas[0]["cantidad"] == Decimal("1200")  # se conserva el dato que solo traía una de las dos
     assert "sin matrícula" in combinadas[0]["motivo_revision"]
+
+
+def test_fusion_por_firma_no_se_lleva_el_codigo_de_la_tabla_de_criterios_p0996(db_session):
+    """Sesión 2026-09-14, tercera parte. `6.23/28510.0051_ANEJO_1`: el cuadro
+    de precios (p.49) y el anejo de criterios (p.95) numeran distinto el
+    mismo material -- "ENF-54 Curva", matrícula 618050403, es P-0994 en el
+    cuadro y P-0996 en criterios; P-0996 es en el cuadro otro material
+    ("ESF-B1-UIC54-186-1/10.5- CR-I-E:3500"). La fusión por firma se llevaba
+    el código de criterios a la línea del cuadro y, al guardar, la clave
+    pasaba a "P-0996": `uq_linea_lote_clave`, y el documento entero se
+    deshacía en cada reproceso. Las dos filas guardadas son las de la base
+    real (la primera, de una pasada anterior, ya con el código cambiado)."""
+    lote = _lote(db_session)
+    db_session.add_all([
+        LineaCatalogo(
+            lote_id=lote.id, expediente_id=lote.expediente_id, clave_linea="P-0994", orden_aparicion=0,
+            codigo_precio="P-0996", matricula="618050403", descripcion="ENF-54 Curva", pagina=95,
+            precio_unitario=Decimal("54788.83"),
+        ),
+        LineaCatalogo(
+            lote_id=lote.id, expediente_id=lote.expediente_id, clave_linea="P-0996", orden_aparicion=1,
+            codigo_precio="P-0996", descripcion="ESF-B1-UIC54-186-1/10.5- CR-I-E:3500", pagina=49,
+            precio_unitario=Decimal("204094.04"),
+        ),
+    ])
+    db_session.commit()
+    mapeo = {"codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": None, "cantidad": None, "precio_unitario": 3}
+    filas = [
+        (["P-0994", "618050403", "ENF-54 Curva", "54.788,83"], 49),
+        (["P-0996", None, "ESF-B1-UIC54-186-1/10.5- CR-I-E:3500", "204.094,04"], 49),
+        (["P-0996", "618050403", "ENF-54 Curva", "54.788,83"], 95),
+    ]
+    lineas = [
+        construir_linea_catalogo(fila, mapeo, pagina, None, lote.expediente_id, None, orden)
+        for orden, (fila, pagina) in enumerate(filas)
+    ]
+
+    guardar_lineas_catalogo(db_session, lote.id, lineas)
+    db_session.commit()
+
+    por_clave = {l.clave_linea: l for l in db_session.query(LineaCatalogo).filter_by(lote_id=lote.id)}
+    assert set(por_clave) == {"P-0994", "P-0996"}
+    assert por_clave["P-0994"].codigo_precio == "P-0994"
+    assert por_clave["P-0994"].descripcion == "ENF-54 Curva"
+    assert por_clave["P-0996"].descripcion == "ESF-B1-UIC54-186-1/10.5- CR-I-E:3500"
+    assert por_clave["P-0996"].precio_unitario == Decimal("204094.04")
+
+
+def test_fusion_por_firma_no_junta_dos_codigos_de_la_misma_tabla():
+    # `6.23/28510.0051`, cuadro de precios del LOTE 1: P-0166 (p.21) y P-0178
+    # (p.22, continuación de la misma tabla) traen el mismo texto y precio.
+    # Son dos entradas del catálogo, no un eco.
+    comunes = {"matricula": None, "descripcion": "Semicambio izq (sencillo) DIRD-B1-54-190-0.11-CR-D",
+               "precio_unitario": Decimal("22712.17")}
+    p0166 = {**comunes, "clave_linea": "P-0166", "codigo_precio": "P-0166", "pagina": 21, "tabla_origen": (36, 1)}
+    p0178 = {**comunes, "clave_linea": "P-0178", "codigo_precio": "P-0178", "pagina": 22, "tabla_origen": (36, 1)}
+    assert sorted(l["codigo_precio"] for l in _combinar_por_clave([p0166, p0178])) == ["P-0166", "P-0178"]
+    # De tablas distintas (el eco de otra tabla con su propia numeración),
+    # sí se funden, con el código de la primera.
+    eco = {**p0178, "tabla_origen": (36, 2)}
+    combinadas = _combinar_por_clave([p0166, eco])
+    assert [l["codigo_precio"] for l in combinadas] == ["P-0166"]
+
+
+def test_guardar_no_absorbe_una_linea_de_esta_misma_pasada_con_otro_codigo(db_session):
+    # `6.23/28510.0051`: P-0167 y P-0179, mismo texto y precio, guardadas
+    # desde el ANEJO; el Contrato trae la misma tabla y, al guardar su P-0167,
+    # la búsqueda por firma se tragaba la P-0179 y la borraba.
+    lote = _lote(db_session)
+    comunes = dict(
+        lote_id=lote.id, expediente_id=lote.expediente_id, descripcion="Semicambio dcha (sencillo) DIRD-B1-54-190-0.11-CR-D",
+        precio_unitario=Decimal("22712.17"), pagina=22,
+    )
+    p0167 = LineaCatalogo(clave_linea="P-0167", codigo_precio="P-0167", orden_aparicion=0, **comunes)
+    p0179 = LineaCatalogo(clave_linea="P-0179", codigo_precio="P-0179", orden_aparicion=1, **comunes)
+    db_session.add_all([p0167, p0179])
+    db_session.commit()
+    mapeo = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": None, "cantidad": None, "precio_unitario": 2}
+    del_contrato = construir_linea_catalogo(
+        ["P-0167", "Semicambio dcha (sencillo) DIRD-B1-54-190-0.11-CR-D", "22.712,17"], mapeo, 118, None,
+        lote.expediente_id, None, 0,
+    )
+
+    guardar_lineas_catalogo(db_session, lote.id, [del_contrato], ids_vivas=frozenset({p0167.id, p0179.id}))
+    db_session.commit()
+
+    assert sorted(l.codigo_precio for l in db_session.query(LineaCatalogo).filter_by(lote_id=lote.id)) == [
+        "P-0167", "P-0179",
+    ]
+
+
+def test_reguardar_una_pareja_de_codigos_de_la_misma_tabla_conserva_los_ids(db_session):
+    # Determinismo (misma sesión): P-0166 y P-0178 ya guardadas por la
+    # pasada anterior. Al volver a guardar las dos, la de P-0166 no debe
+    # tragarse la P-0178 (que esta misma llamada va a escribir) para que se
+    # recree con otro `id`.
+    lote = _lote(db_session)
+    texto = "Semicambio izq (sencillo) DIRD-B1-54-190-0.11-CR-D"
+    guardadas = [
+        LineaCatalogo(
+            lote_id=lote.id, expediente_id=lote.expediente_id, clave_linea=codigo, codigo_precio=codigo,
+            orden_aparicion=i, descripcion=texto, precio_unitario=Decimal("22712.17"), pagina=21 + i,
+        )
+        for i, codigo in enumerate(["P-0166", "P-0178"])
+    ]
+    db_session.add_all(guardadas)
+    db_session.commit()
+    ids = sorted(l.id for l in guardadas)
+    mapeo = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": None, "cantidad": None, "precio_unitario": 2}
+    lineas = []
+    for i, codigo in enumerate(["P-0166", "P-0178"]):
+        linea = construir_linea_catalogo([codigo, texto, "22.712,17"], mapeo, 21 + i, None, lote.expediente_id, None, i)
+        linea["tabla_origen"] = (36, 1)
+        lineas.append(linea)
+
+    guardar_lineas_catalogo(db_session, lote.id, lineas)
+    db_session.commit()
+
+    assert sorted(l.id for l in db_session.query(LineaCatalogo).filter_by(lote_id=lote.id)) == ids
+
+
+def test_limpiar_huerfana_superada_no_toca_la_de_otro_documento(db_session):
+    # `4.25/28510.0208`: su Contrato y el del LOTE 1 tienen la misma tabla en
+    # la misma posición. Guardar la del primero (en su lote) no debe borrar
+    # la huérfana del segundo, con la misma clave de huérfana.
+    lote = _lote(db_session)
+    otra = LineaCatalogo(
+        lote_id=None, expediente_id=lote.expediente_id, clave_linea="P-01@p109y186", codigo_precio="P-01",
+        orden_aparicion=0, descripcion="Vagón de bogies", precio_unitario=Decimal("61.60"), pagina=109,
+        documento_origen_id=None,
+    )
+    db_session.add(otra)
+    db_session.commit()
+    from app.catalogo import _limpiar_huerfana_superada
+
+    _limpiar_huerfana_superada(db_session, lote.expediente_id, "P-01@p109y186", documento_origen_id=858)
+    db_session.commit()
+
+    assert db_session.get(LineaCatalogo, otra.id) is not None
+
+
+def test_guardar_si_absorbe_el_mismo_codigo_leido_con_ruido(db_session):
+    # `6.21/28510.0109_ANEJO_1` p.30 dice "P-63"; la extracción leyó "VP-63".
+    # El mismo código con ruido delante no es otra entrada del catálogo.
+    lote = _lote(db_session)
+    ruidosa = LineaCatalogo(
+        lote_id=lote.id, expediente_id=lote.expediente_id, clave_linea="VP-63", codigo_precio="VP-63",
+        orden_aparicion=0, descripcion="Semicambio para desvío tipo B1 de radio 320/197",
+        precio_unitario=Decimal("15015.00"), pagina=30,
+    )
+    db_session.add(ruidosa)
+    db_session.commit()
+    mapeo = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": None, "cantidad": None, "precio_unitario": 2}
+    buena = construir_linea_catalogo(
+        ["P-63", "Semicambio para desvío tipo B1 de radio 320/197", "15.015,00"], mapeo, 14, None,
+        lote.expediente_id, None, 0,
+    )
+
+    guardar_lineas_catalogo(db_session, lote.id, [buena], ids_vivas=frozenset({ruidosa.id}))
+    db_session.commit()
+
+    assert [l.codigo_precio for l in db_session.query(LineaCatalogo).filter_by(lote_id=lote.id)] == ["P-63"]
+
+
+def test_fusion_por_firma_nunca_renombra_a_una_clave_de_otra_linea(db_session):
+    # Red de seguridad de la misma sesión: una fila sin código (eco de una
+    # tabla sin columna de código) encuentra por firma la línea que una
+    # pasada anterior dejó con clave P-0994 y código P-0996. Renombrarla a
+    # su código chocaría con la P-0996 real del lote: se conserva la clave.
+    lote = _lote(db_session)
+    db_session.add_all([
+        LineaCatalogo(
+            lote_id=lote.id, expediente_id=lote.expediente_id, clave_linea="P-0994", orden_aparicion=0,
+            codigo_precio="P-0996", matricula="618050403", descripcion="ENF-54 Curva", pagina=95,
+            precio_unitario=Decimal("54788.83"),
+        ),
+        LineaCatalogo(
+            lote_id=lote.id, expediente_id=lote.expediente_id, clave_linea="P-0996", orden_aparicion=1,
+            codigo_precio="P-0996", descripcion="ESF-B1-UIC54-186-1/10.5- CR-I-E:3500", pagina=49,
+            precio_unitario=Decimal("204094.04"),
+        ),
+    ])
+    db_session.commit()
+    mapeo = {"codigo_precio": None, "matricula": 0, "descripcion": 1, "unidad_medida": None, "cantidad": None, "precio_unitario": 2}
+    eco = construir_linea_catalogo(["618050403", "ENF-54 Curva", "54.788,83"], mapeo, 12, None, lote.expediente_id, None, 0)
+
+    guardar_lineas_catalogo(db_session, lote.id, [eco])
+    db_session.commit()
+
+    claves = sorted(l.clave_linea for l in db_session.query(LineaCatalogo).filter_by(lote_id=lote.id))
+    assert claves == ["P-0994", "P-0996"]
 
 
 def test_guardar_lineas_catalogo_funde_por_firma_sin_matricula_entre_documentos_distintos(db_session):

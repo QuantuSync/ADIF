@@ -681,10 +681,16 @@ hermanos. Desde esa sesión (detalle en
 - El Contrato firmado ("Contrato nº: X" + "LOTE N") tiene la última palabra
   sobre la identidad de cada lote: corrige erratas de número en la
   adjudicación, completa código y baja, y su baja gana si contradice la que
-  la adjudicación atribuye a ese lote. Nunca añade un lote que la
-  adjudicación no nombra.
+  la adjudicación atribuye a ese lote. ~~Nunca añade un lote que la
+  adjudicación no nombra.~~ Tercera parte de la misma sesión: sí lo añade
+  -- la restricción salía de una lectura equivocada de `6.23/28510.0051`.
 - "… POR EL ADJUDICATARIO DEL LOTE N" dentro de la descripción de otro lote
   es una referencia cruzada, no el arranque de un bloque.
+- Tercera parte (decisión del cliente): un expediente de lote que sabe cuál
+  es el suyo se queda con las tablas que no declaran lote, salvo el anejo
+  de criterios técnicos del conjunto de los lotes; sin ningún documento de
+  lotes, su lote implícito es el LOTE N de su propio Contrato, con su
+  código.
 
 ---
 

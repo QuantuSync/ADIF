@@ -7,6 +7,7 @@ líneas extraídas y llamadas al modelo.
 from decimal import Decimal
 
 from app.catalogo import guardar_lineas_catalogo
+from app.extraccion.lote_tabla import MOTIVO_TABLA_DEL_CONJUNTO
 from app.extraccion.pipeline_anejo import procesar_anejo
 from app.extraccion.texto import extraer_texto
 from app.models import Documento, DocumentoExpediente, Expediente, Lote, TipoDocumento
@@ -194,6 +195,101 @@ def test_lote_en_el_titulo_de_la_tabla_o_al_final_de_la_pagina_anterior(db_sessi
     assert por_pagina[3] == {("2", None)}   # cola de la página anterior
     assert por_pagina[6] == {(None, None)}  # partida alzada, común
     assert any("página 6: tabla separada de la anterior por páginas sin tabla" in m for m in resultado.tablas_sin_lote)
+
+
+def _documento_de_prueba(db_session, codigo_expediente: str, ruta) -> tuple[Expediente, Documento]:
+    expediente = db_session.query(Expediente).filter_by(codigo_expediente=codigo_expediente).one_or_none()
+    if expediente is None:
+        expediente = Expediente(codigo_expediente=codigo_expediente)
+        db_session.add(expediente)
+        db_session.commit()
+    documento = db_session.query(Documento).filter_by(hash=f"hash-{ruta.name}").one_or_none()
+    if documento is None:
+        documento = Documento(
+            tipo_documento=TipoDocumento.anejo, hash=f"hash-{ruta.name}", ruta_almacenamiento=str(ruta)
+        )
+        db_session.add(documento)
+        db_session.commit()
+    return expediente, documento
+
+
+def _lotes_por_pagina(resultado) -> dict[int, set]:
+    por_pagina: dict[int, set] = {}
+    for linea in resultado.lineas:
+        por_pagina.setdefault(linea["pagina"], set()).add((linea["identificador_lote"], linea["lote_del_expediente"]))
+    return por_pagina
+
+
+def test_anejo_de_criterios_del_conjunto_no_es_de_ningun_lote(db_session):
+    """Sesión 2026-09-14, tercera parte: `6.23/28510.0051_ANEJO_1`, p.14, 38,
+    55 y 56 del original. El cuadro de precios trae cada lote con su
+    cabecera ("Lote 1: ANCHO MIXTO", "Lote 2: ANCHO METRICO"); el anejo de
+    criterios se declara del conjunto ("materiales a suministrar en el
+    expediente “... 2 LOTES”") y no es de ningún lote -- tampoco en `0060`,
+    que es el LOTE 1 y se queda con las tablas sin cabecera: esta la tiene,
+    y dice que es de todos."""
+    for lote_propio in (None, "1"):
+        expediente, documento = _documento_de_prueba(
+            db_session, f"6.23/28510.{'0051' if lote_propio is None else '0060'}", fx.ANEJO_LOTES_Y_CRITERIOS_0051
+        )
+        resultado = procesar_anejo(
+            fx.ANEJO_LOTES_Y_CRITERIOS_0051, extraer_texto(fx.ANEJO_LOTES_Y_CRITERIOS_0051),
+            documento_origen_id=documento.id, expediente_id=expediente.id,
+            lotes={"1": None, "2": None}, db=db_session, model_provider=ProveedorModeloCabeceraPorContenido(),
+            lote_propio=lote_propio,
+        )
+        por_pagina = _lotes_por_pagina(resultado)
+        assert por_pagina[1] == {("1", None)}
+        assert ("2", None) in por_pagina[2]
+        assert por_pagina[3] == {(None, None)}
+        assert por_pagina[4] == {(None, None)}
+        criterios = [l for l in resultado.lineas if l["pagina"] in (3, 4)]
+        assert all(l["motivo_revision"] == MOTIVO_TABLA_DEL_CONJUNTO for l in criterios)
+        # No es una ambigüedad: no manda el expediente a revisión.
+        assert not any(MOTIVO_TABLA_DEL_CONJUNTO in m for m in resultado.tablas_sin_lote)
+        # El cuadro repite su cabecera en cada página: sigue siendo la misma
+        # tabla (la fusión por firma no junta dos códigos suyos); el anejo de
+        # criterios es otra.
+        origen = {l["pagina"]: l["tabla_origen"] for l in resultado.lineas if l["identificador_lote"] == "1"}
+        origen_criterios = {l["tabla_origen"] for l in criterios}
+        assert origen[1] == origen[2]
+        assert origen[1] not in origen_criterios
+
+
+def test_expediente_de_lote_se_queda_las_tablas_sin_cabecera_de_su_seccion(db_session):
+    """Decisión del cliente (misma sesión): en un expediente que sabe cuál
+    es su lote, las tablas que no declaran lote son suyas. Contrato del LOTE
+    1 de `6.22/28510.0122` (p.116, 122, 127 y 133 del original): la tabla
+    de la p.122 no trae cabecera, y la última mención de lote antes de ella
+    es "LLote 1:" (p.116); la de la p.133 va detrás de "LLote 2:" (p.127).
+    La del LOTE 1 es de `0155`, la del LOTE 2 de `0156` -- nunca al revés."""
+    ruta = fx.CONTRATO_LOTE1_PLIEGO_0155
+
+    def procesar(codigo, lote_propio, documento_de_otro_lote=False):
+        expediente, documento = _documento_de_prueba(db_session, codigo, ruta)
+        return procesar_anejo(
+            ruta, extraer_texto(ruta), documento_origen_id=documento.id, expediente_id=expediente.id,
+            lotes={"1": None, "2": None}, db=db_session, model_provider=ProveedorModeloCabeceraPorContenido(),
+            lote_propio=lote_propio, documento_de_otro_lote=documento_de_otro_lote,
+        )
+
+    lote1 = _lotes_por_pagina(procesar("6.22/28510.0155", "1"))
+    assert lote1[2] == {("1", True)}
+    assert lote1[4] == {(None, None)}
+
+    lote2 = procesar("6.22/28510.0156", "2")
+    assert _lotes_por_pagina(lote2)[2] == {(None, None)}
+    assert _lotes_por_pagina(lote2)[4] == {("2", True)}
+    assert any("la última mención de lote antes de ella es la del LOTE 1" in m for m in lote2.tablas_sin_lote)
+
+    # Archivado con `0156` es el Contrato de otro lote: nada sin cabecera se
+    # le atribuye.
+    otro = _lotes_por_pagina(procesar("6.22/28510.0156", "2", documento_de_otro_lote=True))
+    assert otro[2] == {(None, None)} and otro[4] == {(None, None)}
+
+    # El principal (sin lote propio) los deja sin lote, como hasta ahora.
+    principal = _lotes_por_pagina(procesar("6.22/28510.0122", None))
+    assert principal[2] == {(None, None)} and principal[4] == {(None, None)}
 
 
 def test_documento_0156_hereda_lote_entre_paginas_de_continuacion(db_session):

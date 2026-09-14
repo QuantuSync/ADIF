@@ -270,6 +270,12 @@ sigue la última), con el mismo criterio de tres motivos que la web. En
 particular, una cantidad o un precio que el documento da distinto para cada
 lote bajo el mismo código de precio es "pendiente", nunca "no consta".
 
+**Anejo de criterios técnicos (sesión 2026-09-14, tercera parte):** en una
+licitación por lotes, la lista "materiales a suministrar en el expediente
+“… N LOTES”" es del conjunto de los lotes, con su propia numeración -- sus
+líneas no son de ningún lote, no salen en "Materiales" y el Resumen las
+cuenta en su propia fila, fuera de "pendientes de revisión".
+
 `unidad_medida` se guarda desde el principio del proyecto (etapa 6 de la
 cascada, junto a cantidad y precio) — lo nuevo en la sesión 2026-09-07 es
 que deja de ser solo interno y pasa a mostrarse en las cuatro pantallas y
@@ -614,13 +620,20 @@ suficientes, no ahora.
   lote), fuera de alcance de un arreglo urgente. Ver
   `docs/identidad-expediente.md`, sección "autoridad del PDF sobre la
   sindicación". **Sesión 2026-09-14:** cuando el expediente de lote SÍ
-  existe y la adjudicación lo nombra, ya guarda solo su lote. Queda el caso
-  inverso, que necesita decisión del cliente: 36 expedientes cuyo propio
-  Contrato dice "soy el LOTE N" pero cuyo único documento de lotes es la
-  adjudicación de otro lote (o ninguno, con el anejo de todos los lotes en
-  su lote implícito) — 2.713 líneas; detalle y la pregunta concreta en
-  `docs/sesion-2026-09-14-revision-cliente-pliegos.md`, "Pendiente al cerrar
-  la continuación".
+  existe y lo sabe (la adjudicación o su propio Contrato ligan su número a
+  su código), guarda solo su lote y se queda con las tablas que no declaran
+  lote, salvo el anejo de criterios del conjunto (decisión del cliente,
+  tercera parte de `docs/sesion-2026-09-14-revision-cliente-pliegos.md`).
+- **Abierto al cerrar la sesión 2026-09-14 (tercera parte):** revisar la
+  pasada completa F11 (primera con "Lote nº1" y los motivos de expediente
+  de lote corregidos) y compararla con F10; generar el Excel y la
+  comparación de materiales distintos contra el estado de partida
+  (encargo del cliente: "es el número que dice si se pierde algo"); la
+  tabla "LOTE 6: RAM NORTE" de `6.22/28510.0016` (ANEJO_1 p.21) que
+  `pdfplumber` no detecta; el residuo del localizador en los Contratos de
+  `0122` y en el ANEJO de `6.24/28510.0064` (p.115-119); el anejo de
+  criterios se guarda una vez por documento y expediente (volumen, no
+  hueco).
 - **`expedientes.aviso_sindicacion` existe en la API pero no se muestra
   todavía en la web** — pendiente menor de la sesión de criterios del
   cliente (`docs/decisiones-cliente.md` sección 26).
@@ -1532,7 +1545,8 @@ suficientes, no ahora.
   referencias cruzadas "adjudicatario del LOTE N" ya no roban el código de
   otro lote (`0033`, `0122`), y su baja gana si contradice la de la
   adjudicación (`0057`: 10,50 %, no el 0,50 % del LOTE 2); nunca añade un
-  lote que la adjudicación no nombra. **Huérfanas nuevas** (519): 83 eran
+  lote que la adjudicación no nombra (corregido en la tercera parte: sí lo
+  añade). **Huérfanas nuevas** (519): 83 eran
   legítimas sin aplicar — el "LOTE N" en las filas de título de la tabla o
   al final de la página anterior (`4.26/28510.0020`) —, el resto son
   criterios técnicos comunes a todos los lotes o lotes no declarados; y la
@@ -1553,8 +1567,55 @@ suficientes, no ahora.
   reprocesos completos; E1 = E2, E3 = E4 y E5 = E6 línea a línea;
   auditoría a 0 errores. 743 tests.
   Pendiente de decisión del cliente: 36 expedientes cuyo Contrato dice que
-  son el LOTE N pero muestran otro lote (2.713 líneas), ver "Pendiente de
-  resolver".
+  son el LOTE N pero muestran otro lote (2.713 líneas) — resuelto en la
+  tercera parte, abajo.
+- **Tercera parte de la misma sesión (`docs/sesion-2026-09-14-revision-
+  cliente-pliegos.md`, T1-T4).** Las 5.875 líneas sin lote eran, contra los
+  documentos: 4.239 del **anejo de criterios técnicos** del conjunto de los
+  lotes ("materiales a suministrar en el expediente “… N LOTES”": la lista
+  de la licitación entera, con su propia numeración), 208 del cuadro de la
+  partida alzada común de `4.26/28510.0020`, 492 de tablas de lotes que el
+  expediente no tiene y 936 de los Contratos de `0122` (que eran el anejo
+  de criterios, no un anexo de precios); **no se perdía material** (5.512
+  → 5.519 materiales distintos en el Excel). Tres premisas de la
+  continuación corregidas: `0060` no es un cuadro común sin "LOTE N" (trae
+  "Lote 1:" y "Lote 2:"), la regla de no añadir lotes que solo nombra un
+  Contrato salía de esa lectura, y el anejo de criterios dice de sí mismo
+  que es de todos. **Decisión del cliente:** un expediente de lote que sabe
+  cuál es el suyo (adjudicación o Contrato propio) se queda con las tablas
+  que no declaran lote, salvo el anejo de criterios; los lotes que solo
+  nombra un Contrato se registran (el principal `0051` recupera su LOTE 2);
+  sin documento de lotes, el lote implícito es el LOTE N del Contrato
+  propio. Salvaguardas verificadas en el PDF: continuación de una tabla de
+  otro lote, última mención de lote de otro lote antes de la tabla (cabecera
+  en una página que el localizador no abre), Contrato de otro lote.
+  Trazabilidad: `lineas_catalogo.lote_del_expediente` (migración 0030).
+  **P-0996** (`0051`/`0060`): el anejo de criterios y el cuadro numeran
+  distinto el mismo material; la fusión por firma ya no pasa el código de
+  una tabla a la otra, nunca renombra a una clave ocupada, no junta dos
+  códigos propios de la misma tabla (parejas reales con el mismo texto y
+  precio, P-0166/P-0178) y no absorbe al guardar una línea de otro código
+  que la misma pasada acaba de guardar desde otro documento. Descartar las
+  líneas de un lote hermano solo si su expediente está en el catálogo (si
+  no, se conservan sin lote: `6.21/28510.0066`); "Lote 1." con punto
+  resuelve la cláusula de urgencia mutua (`0125`/`0126`). El Resumen del
+  Excel cuenta el anejo de criterios en su propia fila, fuera de
+  "pendientes de revisión", y no manda el expediente a revisión.
+  **Estado al cerrar:** última medición completa con el código casi final
+  (pasadas F9 = F10, idénticas línea a línea con `id` incluidos): 33.150
+  líneas, 18.504 sin lote -- 13.288 del anejo de criterios, 2.161 de lotes
+  no declarados, 2.522 sin cabecera o continuación de otro lote, 461 de un
+  hermano fuera del catálogo --; ningún documento del corpus falla al
+  guardar (P-0996 resuelto); auditoría sin errores salvo 11 parejas de
+  códigos distintos con el mismo texto y precio que el propio documento
+  repite (verificadas en el PDF). Después entraron tres cambios sin pasada
+  completa verificada: "Lote nº1" (`4.25/28510.0207`/`0208`), y los
+  motivos "EXPEDIENTE PRINCIPAL distinto" y "cobertura parcial" que ya no
+  se piden a un expediente de lote que sabe cuál es el suyo (reproceso
+  dirigido de los 20 afectados). Una pasada completa (F11) quedó lanzada
+  al cerrar, sin revisar. **Sin hacer:** el Excel final y la comparación de
+  materiales distintos con el estado final (la última, D → E5, dio 5.512 →
+  5.519, sin material perdido). 766 tests.
 
 ---
 

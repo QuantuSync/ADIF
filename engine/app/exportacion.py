@@ -229,6 +229,11 @@ _TAMANO_LOTE = 500
 # punto 4: "nadie en ADIF" debe poder entenderlo sin traducir jerga.)
 _OTRO_MOTIVO = "otro_motivo_ambiguedad"
 _SIN_MOTIVO = "sin_motivo_registrado"
+# Sesión 2026-09-14 (tercera parte): las líneas del anejo de criterios
+# técnicos del conjunto de los lotes no esperan ninguna revisión -- el
+# documento dice que son de todos los lotes. Se cuentan en su propia fila
+# del Resumen, fuera de "pendientes de revisión".
+_CATEGORIA_CRITERIOS = "anejo de criterios técnicos, común a todos los lotes"
 _CATEGORIAS_MOTIVO = (
     (
         "banda vacía",
@@ -257,6 +262,28 @@ _CATEGORIAS_MOTIVO = (
         "no se puede dar por hecho que continúa el lote de la tabla anterior (suele ser un cuadro común a "
         "todos los lotes: criterios técnicos, precios para la partida alzada...).",
         "Que alguien mire el documento y decida si pertenece a un lote concreto o es común a todos.",
+    ),
+    (
+        "anejo de criterios técnicos, que el documento declara del conjunto",
+        _CATEGORIA_CRITERIOS,
+        "Es la lista de materiales de la licitación entera (\"materiales a suministrar en el expediente ... "
+        "N lotes\"): reúne los de todos los lotes con su propia numeración, y el propio documento dice que no "
+        "coincide con el cuadro de precios. Cada material ya figura con su precio en el lote que lo compra.",
+        "Nada, salvo que se quiera consultar la lista completa en el documento original.",
+    ),
+    (
+        "otro lote de la licitación cuyo expediente no está en el catálogo",
+        "tabla de otro lote, cuyo expediente no está en el catálogo",
+        "La tabla es de otro lote de la misma licitación (otro contrato), cuyo expediente no está en el "
+        "catálogo. No es de este expediente, así que no se muestra en él, pero se conserva.",
+        "Nada en este expediente; si se incorpora el del otro lote, esas líneas saldrán allí.",
+    ),
+    (
+        "última mención de lote antes de ella es",
+        "tabla sin título de lote, detrás de la sección de otro lote",
+        "La tabla no lleva título de lote, pero lo último que el documento dice antes de ella es de otro "
+        "lote, así que no se atribuye al lote de este expediente.",
+        "Que alguien mire el documento y confirme de qué lote es.",
     ),
     (
         "no está entre los lotes declarados",
@@ -341,12 +368,19 @@ def _escribir_resumen(
     excluidas_por_categoria: Counter[str],
     incluir_pendientes_sin_lote: bool,
     con_valor_de_otro_lote: int = 0,
+    del_anejo_de_criterios: int = 0,
 ) -> None:
     hoja = libro.create_sheet("Resumen")
     hoja.append(["Concepto", "Valor"])
     hoja.append(["Líneas en este catálogo", incluidas])
     total_excluidas = sum(excluidas_por_categoria.values())
     hoja.append(["Líneas pendientes de revisión (no incluidas arriba)", total_excluidas])
+    hoja.append([
+        "Líneas del anejo de criterios técnicos, común a todos los lotes (no incluidas arriba: es la lista de "
+        "materiales de la licitación entera, con su propia numeración; los de cada lote figuran con su precio "
+        "en el cuadro de ese lote)",
+        del_anejo_de_criterios,
+    ])
     hoja.append([
         "Líneas del catálogo con Cantidad o Precio unitario pendiente (el documento da un valor distinto "
         "para cada lote)",
@@ -412,6 +446,7 @@ def generar_excel_catalogo(db: Session, incluir_pendientes_sin_lote: bool = Fals
 
     incluidas = 0
     con_valor_de_otro_lote = 0
+    del_anejo_de_criterios = 0
     excluidas_por_categoria: Counter[str] = Counter()
 
     # Bloque de medición del hallazgo de sesión (ver comentario de
@@ -463,10 +498,13 @@ def generar_excel_catalogo(db: Session, incluir_pendientes_sin_lote: bool = Fals
             # balasto) -- esto es solo una categoría más honesta en el
             # Resumen, "hueco real" vs "ruido sin pérdida de información".
             clave = (expediente.id, linea.matricula, linea.descripcion, linea.precio_unitario)
-            if linea.matricula is not None and clave in claves_incluidas:
+            categoria = _categoria_motivo(linea.motivo_revision)
+            if categoria == _CATEGORIA_CRITERIOS:
+                del_anejo_de_criterios += 1
+            elif linea.matricula is not None and clave in claves_incluidas:
                 excluidas_por_categoria[_CATEGORIA_DUPLICADO_SIN_PERDIDA] += 1
             else:
-                excluidas_por_categoria[_categoria_motivo(linea.motivo_revision)] += 1
+                excluidas_por_categoria[categoria] += 1
             continue
         incluidas += 1
         # "El sistema nunca inventa una matriz. Si no cruza, se deja
@@ -511,7 +549,8 @@ def generar_excel_catalogo(db: Session, incluir_pendientes_sin_lote: bool = Fals
         hoja.cell(row=fila, column=_COLUMNA_PORCENTAJE).number_format = _FORMATO_PORCENTAJE
 
     _escribir_resumen(
-        libro, incluidas, excluidas_por_categoria, incluir_pendientes_sin_lote, con_valor_de_otro_lote
+        libro, incluidas, excluidas_por_categoria, incluir_pendientes_sin_lote, con_valor_de_otro_lote,
+        del_anejo_de_criterios,
     )
 
     buffer = io.BytesIO()

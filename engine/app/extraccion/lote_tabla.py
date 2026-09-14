@@ -65,14 +65,59 @@ hereda (`separada_por_paginas`): heredaba el último lote a páginas de
 distancia en tablas comunes a todos los lotes (criterios técnicos, precios
 de la partida alzada). Y la cabecera "LOTE N" de una tabla también se busca
 en sus filas de título y al pie de la página anterior, cuando la franja no
-trae nada (ver `asociar_lote_tabla`)."""
+trae nada (ver `asociar_lote_tabla`).
+
+Sesión 2026-09-14 (tercera parte): el anejo de criterios técnicos de una
+licitación por lotes se declara a sí mismo del conjunto ("detallar los
+materiales a suministrar en el expediente “... 9 LOTES”") y avisa de que "no
+coincide" con el cuadro de precios: sus tablas son de todos los lotes a la
+vez, nunca de uno (`ResultadoAsociacionLote.del_conjunto_de_lotes`). Y en un
+expediente que es uno de los lotes, el texto entre la tabla anterior y esta
+decide si una tabla sin cabecera puede ser suya
+(`ResultadoAsociacionLote.ultimo_lote_previo`)."""
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Optional
 
-_LOTE_CABECERA_RE = re.compile(r"\bLOTE\s*[Nº°]?\.?\s*(\d{1,2})\b", re.IGNORECASE)
+# Lo que puede ir entre "LOTE" y su número: "N", "Nº", "Nº." y, desde la
+# sesión 2026-09-14 (tercera parte), "nº" -- "• Lote nº1: Arrendamiento de
+# vagones de bogies" (`4.25/28510.0207`/`0208`, 35 menciones en 6
+# documentos): sin él, esas tablas parecían sin cabecera y un expediente de
+# lote se quedaba las de los dos lotes.
+_ORDINAL = r"(?:N\s*[º°o]|[Nº°])?\.?"
+
+_LOTE_CABECERA_RE = re.compile(r"\bLOTE\s*" + _ORDINAL + r"\s*(\d{1,2})\b", re.IGNORECASE)
+
+# Frase con la que abre el anejo de criterios técnicos de una licitación por
+# lotes (plantilla de ADIF, 55 documentos del corpus): "El presente documento
+# tiene como objeto detallar los materiales a suministrar en el expediente
+# “SUMINISTRO DE ... 9 LOTES”, así como los requisitos técnicos...". En una
+# licitación de un solo lote la misma frase no trae "N LOTES" (53
+# documentos) y no se toca. Variantes reales de lo que se detalla: "los
+# materiales de la especialidad de instalaciones" (`6.25/28510.0019`), "los
+# elementos" (`6.25/28510.0214`), "los productos ferroviarios" (con la
+# comilla sin mapa Unicode, "(cid:862)").
+_CONJUNTO_DE_LOTES_RE = re.compile(
+    r"detallar\s+(?:los|las)\s+(?:[^\s“\"]+\s+){1,6}?a\s+suministrar\s+en\s+el\s+expediente\s*[^”\"]{0,260}?"
+    r"\b\d{1,2}\s*LOTES\b",
+    re.IGNORECASE | re.DOTALL,
+)
+# Menciones de lote en el texto entre la tabla anterior y esta, cuando hay
+# páginas por medio: la negrita simulada de algunos PDF duplica la primera
+# letra ("LLote 2: CRUZAMIENTOS", Contratos de `6.22/28510.0122`).
+_LOTE_EN_TEXTO_PREVIO_RE = re.compile(r"\bL?LOTE\s*" + _ORDINAL + r"\s*(\d{1,2})\b", re.IGNORECASE)
+_ENUMERACION_DE_LOTES_RE = re.compile(
+    r"tanto\s+en\s+el\s+lote\s*\d{1,2}\s+como\s+en\s+el\s+lote\s*\d{1,2}", re.IGNORECASE
+)
+
+# Motivo de las líneas de esas tablas: la exportación lo cuenta aparte en la
+# hoja Resumen.
+MOTIVO_TABLA_DEL_CONJUNTO = (
+    "tabla del anejo de criterios técnicos, que el documento declara del conjunto de los lotes "
+    "(\"materiales a suministrar en el expediente ... N LOTES\"): no es de ningún lote en concreto"
+)
 
 # Las dos mitades de la cláusula de "urgencia mutua" (ver docstring del
 # módulo): "Lote N:" abre la sección real que sigue; "del lote M"/"por el
@@ -80,9 +125,14 @@ _LOTE_CABECERA_RE = re.compile(r"\bLOTE\s*[Nº°]?\.?\s*(\d{1,2})\b", re.IGNOREC
 # cabecera. Verificado contra las dos variantes reales del corpus ("...que
 # no pueda ser atendida por el adjudicatario del lote 2..." y su espejo
 # "...del lote 1...").
-_LOTE_CABECERA_FUERTE_RE = re.compile(r"\bLOTE\s*[Nº°]?\.?\s*(\d{1,2})\s*:", re.IGNORECASE)
+# Sesión 2026-09-14 (tercera parte): también con punto, "Lote 1. NORTE y,
+# en caso de urgencia que no pueda ser atendida por el adjudicatario del
+# lote 2, SUR." (`6.22/28510.0125`/`0126`, ANEJO_1 y los dos Contratos) --
+# con los dos puntos solamente, las tablas de esos tres documentos quedaban
+# ambiguas en cuanto el expediente pasó a saber cuál es su lote.
+_LOTE_CABECERA_FUERTE_RE = re.compile(r"\bLOTE\s*" + _ORDINAL + r"\s*(\d{1,2})\s*(?::|\.(?!\d))", re.IGNORECASE)
 _LOTE_REFERENCIA_URGENCIA_RE = re.compile(
-    r"\b(?:del|por el)\s+lote\s*[Nº°]?\.?\s*(\d{1,2})\b", re.IGNORECASE
+    r"\b(?:del|por el)\s+lote\s*" + _ORDINAL + r"\s*(\d{1,2})\b", re.IGNORECASE
 )
 
 
@@ -123,6 +173,43 @@ class ResultadoAsociacionLote:
     # para un rastro dudoso (encargo explícito del cliente, sesión
     # 2026-09-08).
     elegible_para_herencia: bool = False
+    # Sesión 2026-09-14 (tercera parte): la tabla abre el anejo de criterios
+    # técnicos de la licitación entera (`_CONJUNTO_DE_LOTES_RE` en el texto
+    # que la precede, sin ninguna cabecera "LOTE N" después): no es de
+    # ningún lote. Nunca con `identificador_lote`.
+    del_conjunto_de_lotes: bool = False
+    # Solo para una tabla sin ningún rastro de lote en su franja: el último
+    # lote mencionado en el texto de las páginas que la separan de la tabla
+    # anterior (o del principio del documento), sin contar las referencias
+    # de urgencia ("del lote 2"). En un expediente que es uno de los lotes,
+    # si es otro lote, la tabla no se le atribuye (ver
+    # `app.extraccion.pipeline_anejo`).
+    ultimo_lote_previo: Optional[str] = None
+    # `separada_por_paginas` con la franja, el título y la cola limpios (el
+    # único caso en que se devuelve el motivo de "tabla separada").
+    separada: bool = False
+
+
+def _ultimo_lote_mencionado(texto: str) -> Optional[str]:
+    referencias = {m.start(1) for m in _LOTE_REFERENCIA_URGENCIA_RE.finditer(texto)}
+    ultimo = None
+    for m in _LOTE_EN_TEXTO_PREVIO_RE.finditer(texto):
+        if m.start(1) not in referencias:
+            ultimo = m.group(1)
+    return ultimo
+
+
+def _abre_anejo_del_conjunto(texto: str) -> bool:
+    """La frase del anejo de criterios aparece en `texto` y ninguna mención
+    de lote la sigue (una cabecera "LOTE N" posterior abre una sección de
+    lote y manda). La enumeración del propio anejo ("el listado inicial de
+    materiales a suministrar ... tanto en el lote 1 como en el lote 2",
+    `6.22/28510.0126`) no es una cabecera."""
+    texto = _ENUMERACION_DE_LOTES_RE.sub(" ", texto)
+    marcas = list(_CONJUNTO_DE_LOTES_RE.finditer(texto))
+    if not marcas:
+        return False
+    return _LOTE_EN_TEXTO_PREVIO_RE.search(texto, marcas[-1].end()) is None
 
 
 def asociar_lote_tabla(
@@ -133,6 +220,7 @@ def asociar_lote_tabla(
     texto_titulo_tabla: str = "",
     texto_cola_pagina_anterior: str = "",
     separada_por_paginas: bool = False,
+    texto_paginas_previas: str = "",
 ) -> ResultadoAsociacionLote:
     """`banda_top`: fondo (en coordenadas de página) de la tabla anterior en
     esta misma página, o 0 si `tabla_bbox` es la primera tabla de la
@@ -170,16 +258,55 @@ def asociar_lote_tabla(
     el último lote a páginas de distancia: el cuadro de precios de la
     partida alzada del ANEJO de `4.26/28510.0020` (p.39, 22 páginas después
     del presupuesto del LOTE 2) y la tabla de criterios técnicos del ANEJO
-    de `6.25/28510.0214` (p.30, cinco páginas después de la del LOTE 8)."""
+    de `6.25/28510.0214` (p.30, cinco páginas después de la del LOTE 8).
+
+    Sesión 2026-09-14 (tercera parte), con la franja, el título y la cola
+    limpios:
+
+    - Si el texto que precede a la tabla abre el anejo de criterios técnicos
+      de una licitación por lotes (`_CONJUNTO_DE_LOTES_RE`, sin ninguna
+      mención de lote después), la tabla es del conjunto
+      (`del_conjunto_de_lotes`): no se hereda nada ni se atribuye a ningún
+      lote. Verificado en los siete anejos de criterios del corpus con
+      líneas sin lote: la lista reúne los materiales de todos los lotes con
+      su propia numeración (`6.23/28510.0051`: "ENF-54 Curva" es P-0994 en el
+      cuadro de precios y P-0996 en criterios) y la cantidad, cuando la trae,
+      es la "mínima a incluir en cada pedido", no la del lote.
+    - `texto_paginas_previas`: el texto de las páginas que separan esta
+      tabla de la anterior (con el final de la página de aquella), o todo el
+      documento hasta aquí si es la primera. Solo se lee para esas dos
+      cosas: la frase del anejo de criterios y `ultimo_lote_previo` --
+      nunca para asignar un lote a la tabla, porque ese texto puede ser un
+      pliego entero."""
     _x0, techo_tabla, _x1, _bottom = tabla_bbox
     banda = pagina_pdfplumber.crop((0, banda_top, pagina_pdfplumber.width, techo_tabla))
     texto_banda = banda.extract_text() or ""
 
+    if _abre_anejo_del_conjunto(texto_banda):
+        # Antes que las menciones de lote de la franja: la frase del anejo
+        # es la declaración más fuerte que hay sobre esta tabla.
+        return ResultadoAsociacionLote(
+            identificador_lote=None,
+            motivo_ambiguo=MOTIVO_TABLA_DEL_CONJUNTO,
+            elegible_para_herencia=False,
+            del_conjunto_de_lotes=True,
+        )
     resultado = _asociar_por_texto(texto_banda, identificadores_validos)
     if resultado.elegible_para_herencia:
         for texto in (texto_titulo_tabla, texto_cola_pagina_anterior):
             if _LOTE_CABECERA_RE.search(texto):
                 return _asociar_por_texto(texto, identificadores_validos)
+        texto_previo = "\n".join(
+            t for t in (texto_paginas_previas, texto_cola_pagina_anterior, texto_banda, texto_titulo_tabla) if t
+        )
+        if _abre_anejo_del_conjunto(texto_previo):
+            return ResultadoAsociacionLote(
+                identificador_lote=None,
+                motivo_ambiguo=MOTIVO_TABLA_DEL_CONJUNTO,
+                elegible_para_herencia=False,
+                del_conjunto_de_lotes=True,
+            )
+        ultimo_lote_previo = _ultimo_lote_mencionado(texto_paginas_previas) if texto_paginas_previas else None
         if separada_por_paginas:
             return ResultadoAsociacionLote(
                 identificador_lote=None,
@@ -188,7 +315,10 @@ def asociar_lote_tabla(
                     "no se hereda el lote"
                 ),
                 elegible_para_herencia=False,
+                ultimo_lote_previo=ultimo_lote_previo,
+                separada=True,
             )
+        return replace(resultado, ultimo_lote_previo=ultimo_lote_previo)
     return resultado
 
 

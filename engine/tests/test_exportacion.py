@@ -130,6 +130,18 @@ def test_categoria_motivo_lote_no_declarado():
     assert _categoria_motivo(motivo) == "la tabla declara un lote no registrado en el expediente"
 
 
+def test_categoria_motivo_anejo_de_criterios_y_seccion_de_otro_lote():
+    # Sesión 2026-09-14, tercera parte.
+    from app.extraccion.lote_tabla import MOTIVO_TABLA_DEL_CONJUNTO
+
+    assert _categoria_motivo(MOTIVO_TABLA_DEL_CONJUNTO) == "anejo de criterios técnicos, común a todos los lotes"
+    motivo = (
+        "tabla sin cabecera de lote, pero la última mención de lote antes de ella es la del LOTE 1, no la de "
+        "este expediente (LOTE 4): no se le atribuye"
+    )
+    assert _categoria_motivo(motivo) == "tabla sin título de lote, detrás de la sección de otro lote"
+
+
 def test_categoria_motivo_sin_registrar():
     assert _categoria_motivo(None) == "sin_motivo_registrado"
 

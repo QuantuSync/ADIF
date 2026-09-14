@@ -10,7 +10,11 @@ ejercita cuando `lotes` trae más de una entrada: con un único lote no hay
 ambigüedad que resolver, y buscar cabeceras "LOTE N" en cada página sería
 trabajo — y riesgo de falso positivo— sin ningún propósito (CONTEXTO.md
 sección 6, el mismo principio de "no hacer trabajo que el caso no pide" que
-rige cuándo se llama al modelo)."""
+rige cuándo se llama al modelo). Excepción desde la sesión 2026-09-14
+(tercera parte): un expediente que es uno de los lotes (`lote_propio`)
+también la ejercita con un solo lote conocido -- los documentos que
+comparte con sus hermanos traen las tablas de los demás lotes, y no son
+suyas."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -25,7 +29,7 @@ from app.extraccion.codigo_material import derivar_codigo_material_con_modelo
 from app.extraccion.firma_estructural import calcular_firma_estructural
 from app.extraccion.invalidado import INVALIDADO
 from app.extraccion.localizador import ResultadoLocalizacion, localizar_paginas_candidatas
-from app.extraccion.lote_tabla import asociar_lote_tabla
+from app.extraccion.lote_tabla import MOTIVO_TABLA_DEL_CONJUNTO, asociar_lote_tabla
 from app.extraccion.mapeo_cabecera import (
     cabecera_sin_senal,
     corregir_confusion_matricula_codigo_precio,
@@ -53,7 +57,9 @@ class ResultadoProcesamientoAnejo:
     # Vacía siempre que `lotes` traiga un único lote. El orquestador la usa
     # para componer el motivo de revisión del expediente; el script de
     # medición del corpus la usa para contar cuántas líneas caen en cada
-    # caso de ambigüedad.
+    # caso de ambigüedad. Las tablas del anejo de criterios del conjunto de
+    # los lotes no entran (sesión 2026-09-14, tercera parte): no son una
+    # ambigüedad.
     tablas_sin_lote: list[str] = field(default_factory=list)
     # Líneas cuyo valor de cantidad/precio/matrícula no se pudo interpretar
     # (CONTEXTO.md, sesión de rodaje 2026-09-03) — `linea["motivo_revision"]`
@@ -104,6 +110,8 @@ def procesar_anejo(
     lotes: dict[str, Optional[Decimal]],
     db: Session,
     model_provider: Optional[ModelProvider] = None,
+    lote_propio: Optional[str] = None,
+    documento_de_otro_lote: bool = False,
 ) -> ResultadoProcesamientoAnejo:
     """`paginas_texto`: el texto plano de cada página, ya extraído por el
     llamador (etapa 1 de la cascada, `app.extraccion.texto.
@@ -127,7 +135,24 @@ def procesar_anejo(
     asocia a su lote por posición (etapa 3.5); las que resulten ambiguas
     quedan con `identificador_lote=None` en cada línea — el orquestador las
     guarda con `lote_id=None` (huérfanas, CONTEXTO.md encargo de esta sesión
-    punto 3: nunca por proximidad ni adivinando)."""
+    punto 3: nunca por proximidad ni adivinando).
+
+    `lote_propio` (sesión 2026-09-14, tercera parte, decisión del cliente):
+    el lote de este expediente, cuando es uno de los lotes de la licitación
+    y lo sabe (su Contrato o la adjudicación lo ligan a su código). "Las
+    tablas que no declaran lote dentro de un expediente que sabe cuál es el
+    suyo, son suyas": una tabla sin ningún rastro de lote que no sea
+    continuación de otra se le atribuye (`lote_del_expediente` en la
+    línea), salvo que sea del anejo de criterios del conjunto de los lotes
+    (el documento dice que es de todos, `app.extraccion.lote_tabla`), que
+    siga a una tabla de otro lote o ambigua sin páginas por medio, o que la
+    última mención de lote antes de ella sea la de otro lote (la cabecera de
+    su sección está en una página que el localizador no abrió: los
+    Contratos de `6.22/28510.0122` traen el pliego entero, con el "Lote 1:"
+    en la p.116 y una tabla suya suelta en la p.122). `documento_de_otro_lote`:
+    el documento es el Contrato de otro lote -- sus tablas se siguen
+    asociando por su cabecera, pero ninguna sin cabecera se atribuye a este
+    expediente."""
     lineas: list[dict] = []
     tablas_procesadas = 0
     llamadas_modelo = 0
@@ -135,7 +160,7 @@ def procesar_anejo(
     tablas_sin_lote: list[str] = []
     lineas_con_aviso = 0
 
-    multi_lote = len(lotes) > 1
+    multi_lote = len(lotes) > 1 or lote_propio is not None
     identificador_unico = next(iter(lotes)) if len(lotes) == 1 else None
     # Herencia de lote entre páginas de continuación (sesión de verificación
     # del Excel, 2026-09-08, aprobado por el cliente tras verificar contra
@@ -152,6 +177,16 @@ def procesar_anejo(
     # documento (esta función procesa uno solo): heredar de un documento a
     # otro no tendría ninguna base textual.
     ultimo_lote_resuelto: Optional[str] = None
+    # Sesión 2026-09-14 (tercera parte, ver `lote_propio` en el docstring):
+    # si `ultimo_lote_resuelto` salió de atribuir una tabla sin cabecera al
+    # lote del expediente (para marcar igual sus continuaciones); si se está
+    # dentro del anejo de criterios del conjunto de los lotes (hasta la
+    # próxima tabla con cabecera de lote); y si la tabla anterior tenía una
+    # mención de lote que no se pudo resolver (otro lote, o varios) -- su
+    # continuación tampoco es del expediente.
+    ultimo_lote_del_expediente = False
+    en_anejo_del_conjunto = False
+    anterior_de_otro_lote = False
     # (página, fondo) de la última tabla procesada de este documento.
     ultima_tabla: Optional[tuple[int, float]] = None
     # Bloque 3 (caché de tablas sin cabecera, sesión de auditoría
@@ -177,6 +212,8 @@ def procesar_anejo(
     # ese mapeo, validado contra sus filas, antes de probar nada más. Como
     # `cache_estructural`, nunca sale de esta llamada.
     ultima_con_cabecera: Optional[tuple[dict[str, Optional[int]], tuple, bool]] = None
+    tablas_con_cabecera = 0
+    ultima_cabecera_vista: Optional[str] = None
 
     with pdfplumber.open(ruta_pdf) as pdf:
         localizacion = localizar_paginas_candidatas(paginas_texto)
@@ -187,34 +224,54 @@ def procesar_anejo(
             banda_top = 0.0
             for tabla in tablas_pagina:
                 heredado_de_pagina_anterior = False
+                lote_del_expediente = False
                 if multi_lote:
                     # Sesión 2026-09-14 (continuación, ver
                     # `asociar_lote_tabla`): si esta es la primera tabla de su
                     # página, lo que queda debajo de la última tabla de la
                     # página contigua puede traer su cabecera; si la tabla
                     # anterior está más atrás, con páginas sin tabla por
-                    # medio, esta no es su continuación.
+                    # medio, esta no es su continuación. Tercera parte: en
+                    # ese caso, y para la primera tabla del documento, el
+                    # texto de las páginas de por medio (o de todo lo
+                    # anterior).
                     cola_anterior = ""
                     separada = False
-                    if banda_top == 0.0 and ultima_tabla is not None:
+                    paginas_previas = ""
+                    if banda_top == 0.0 and ultima_tabla is None:
+                        paginas_previas = "\n".join(p.texto for p in paginas_texto if p.numero < candidata.numero)
+                    elif banda_top == 0.0:
+                        pagina_anterior = pdf.pages[ultima_tabla[0] - 1]
+                        cola = pagina_anterior.crop(
+                            (0, ultima_tabla[1], pagina_anterior.width, pagina_anterior.height)
+                        ).extract_text() or ""
                         if ultima_tabla[0] == candidata.numero - 1:
-                            pagina_anterior = pdf.pages[ultima_tabla[0] - 1]
-                            cola_anterior = pagina_anterior.crop(
-                                (0, ultima_tabla[1], pagina_anterior.width, pagina_anterior.height)
-                            ).extract_text() or ""
+                            cola_anterior = cola
                         elif ultima_tabla[0] < candidata.numero - 1:
                             separada = True
+                            paginas_previas = "\n".join(
+                                [cola] + [p.texto for p in paginas_texto if ultima_tabla[0] < p.numero < candidata.numero]
+                            )
                     resultado_asociacion = asociar_lote_tabla(
                         pagina, banda_top, tabla.bbox, identificadores_validos=set(lotes),
                         texto_titulo_tabla=" ".join(c for c in tabla.cabecera if c),
                         texto_cola_pagina_anterior=cola_anterior,
                         separada_por_paginas=separada,
+                        texto_paginas_previas=paginas_previas,
                     )
                     identificador_lote = resultado_asociacion.identificador_lote
                     motivo_ambiguo = resultado_asociacion.motivo_ambiguo
-                    if (
-                        identificador_lote is None
-                        and resultado_asociacion.elegible_para_herencia
+                    # Sin ningún rastro de lote en la franja, el título ni la
+                    # cola: franja limpia (heredable) o tabla separada.
+                    sin_rastro = resultado_asociacion.elegible_para_herencia or resultado_asociacion.separada
+                    if identificador_lote is not None:
+                        ultimo_lote_del_expediente = False
+                        en_anejo_del_conjunto = anterior_de_otro_lote = False
+                    elif resultado_asociacion.del_conjunto_de_lotes:
+                        en_anejo_del_conjunto = True
+                        anterior_de_otro_lote = False
+                    elif (
+                        resultado_asociacion.elegible_para_herencia
                         and ultimo_lote_resuelto is not None
                     ):
                         # Ausencia total de rastro de "LOTE" en la franja Y
@@ -226,7 +283,44 @@ def procesar_anejo(
                         identificador_lote = ultimo_lote_resuelto
                         motivo_ambiguo = None
                         heredado_de_pagina_anterior = True
-                    if motivo_ambiguo is not None:
+                        lote_del_expediente = ultimo_lote_del_expediente
+                    elif sin_rastro and en_anejo_del_conjunto:
+                        # Sigue el anejo de criterios, aunque haya páginas
+                        # sin tabla por medio (`6.23/28510.0051`, p.82).
+                        motivo_ambiguo = MOTIVO_TABLA_DEL_CONJUNTO
+                    elif sin_rastro and resultado_asociacion.separada:
+                        anterior_de_otro_lote = False
+                    if (
+                        identificador_lote is None
+                        and lote_propio is not None
+                        and not documento_de_otro_lote
+                        and sin_rastro
+                        and not en_anejo_del_conjunto
+                        and not anterior_de_otro_lote
+                    ):
+                        previo = resultado_asociacion.ultimo_lote_previo
+                        if previo is None or previo == lote_propio:
+                            identificador_lote = lote_propio
+                            motivo_ambiguo = None
+                            lote_del_expediente = True
+                            ultimo_lote_del_expediente = True
+                        else:
+                            motivo_ambiguo = (
+                                f"tabla sin cabecera de lote, pero la última mención de lote antes de ella es "
+                                f"la del LOTE {previo}, no la de este expediente (LOTE {lote_propio}): no se le "
+                                "atribuye"
+                            )
+                            # Su continuación en la página siguiente tampoco
+                            # (`6.21/28510.0112`, ANEJO_1 p.19-21).
+                            anterior_de_otro_lote = True
+                    if identificador_lote is None and not sin_rastro and not resultado_asociacion.del_conjunto_de_lotes:
+                        anterior_de_otro_lote = True
+                        en_anejo_del_conjunto = False
+                    # El anejo de criterios no se "pudo" asociar: el documento
+                    # dice que es de todos los lotes. Sus líneas llevan el
+                    # motivo (la exportación lo cuenta aparte), pero no manda
+                    # el expediente a revisión.
+                    if motivo_ambiguo is not None and motivo_ambiguo != MOTIVO_TABLA_DEL_CONJUNTO:
                         tablas_sin_lote.append(
                             f"página {tabla.pagina}: {motivo_ambiguo}"
                         )
@@ -262,6 +356,16 @@ def procesar_anejo(
                 baja_lote = lotes.get(identificador_lote) if identificador_lote is not None else None
 
                 sin_cabecera_propia = cabecera_sin_senal(tabla.cabecera)
+                if not sin_cabecera_propia:
+                    # Una cabecera distinta de la anterior abre una tabla
+                    # nueva; las siguientes sin cabecera, o que repiten la
+                    # misma en cada página (el cuadro de `6.23/28510.0051`), son
+                    # la misma tabla (ver `tabla_origen` en las líneas, más
+                    # abajo).
+                    texto_cabecera = normalizar(" ".join(c for c in tabla.cabecera if c))
+                    if texto_cabecera != ultima_cabecera_vista:
+                        tablas_con_cabecera += 1
+                        ultima_cabecera_vista = texto_cabecera
                 firma_estructural = calcular_firma_estructural(tabla.filas) if sin_cabecera_propia else None
                 entrada_estructural = cache_estructural.get(firma_estructural) if firma_estructural is not None else None
                 mapeo_heredado, heredado_corregido = entrada_estructural if entrada_estructural else (None, False)
@@ -479,6 +583,9 @@ def procesar_anejo(
                     # `False` explícito (mismo convenio que
                     # `heredado_de_matriz`).
                     linea["lote_heredado_de_pagina_anterior"] = True if heredado_de_pagina_anterior else None
+                    # Mismo convenio para el lote que viene de ser el del
+                    # expediente, no de una cabecera (ver `lote_propio`).
+                    linea["lote_del_expediente"] = True if lote_del_expediente else None
                     # `construir_linea_catalogo` (CONTEXTO.md, sesión de rodaje
                     # 2026-09-03) ya puede haber puesto su propio
                     # `motivo_revision` (un valor de cantidad/precio/matrícula
@@ -510,6 +617,14 @@ def procesar_anejo(
                     # tabla de origen es la única señal que distingue dos
                     # tablas de la misma página sin ambigüedad.
                     linea["clave_huerfana_hipotetica"] = f"{linea['clave_linea']}@p{tabla.pagina}y{int(tabla.bbox[1])}"
+                    # Sesión 2026-09-14 (tercera parte): de qué tabla del
+                    # documento sale la línea (la última con cabecera propia
+                    # y sus continuaciones), transitorio como la clave de
+                    # arriba -- `app.catalogo._combinar_por_clave` no funde
+                    # por firma dos códigos propios distintos de la MISMA
+                    # tabla (`6.23/28510.0051`: P-0166 y P-0178, mismo texto
+                    # y precio en las p.21 y 22 del mismo cuadro).
+                    linea["tabla_origen"] = (documento_origen_id, tablas_con_cabecera)
                     if identificador_lote is None:
                         # Hallazgo real (expediente 6.25/28510.0027): varias
                         # tablas ambiguas del mismo documento pueden compartir

@@ -630,3 +630,245 @@ partida. Ocho recortes de página reales nuevos en `engine/tests/fixtures`
   referencia.
 - Siguen abiertos los dos últimos puntos de la primera parte (residuo del
   localizador y filas desalineadas de `ANEJO_ce1df15b39efdb8c.pdf`).
+
+**Resueltos en la tercera parte (abajo):** los 36 expedientes, `0051`/`0060`
+(P-0996) y los anexos de los Contratos de `0122`, que resultaron no ser un
+anexo de precios.
+
+---
+
+# Tercera parte — expedientes que saben cuál es su lote
+
+Respuesta del cliente al cierre de la continuación:
+
+- **Los 36 expedientes:** "si el propio Contrato dice «soy el LOTE N», ese
+  expediente tiene lote conocido. Las tablas que no declaran lote dentro de
+  un expediente que sabe cuál es el suyo, son suyas". Que `0060` se quede
+  sin catálogo teniendo 1.069 líneas propias sería peor que el problema.
+- **1.** Antes de nada, cuántas de las 5.875 líneas sin lote son tablas
+  comunes legítimas y cuántas se recuperarían: ¿la caída del Excel es
+  corrección o se pierde material?
+- **2.** Arreglar la clave duplicada P-0996 de `0051`/`0060`.
+- **3.** Los anexos de los Contratos de `0122`: si su expediente tiene lote
+  conocido, entran con la misma regla.
+- Al terminar, reproceso, auditoría y Excel, con la comparación de
+  **materiales distintos**, no solo de filas.
+
+## T1 — Las 5.875 líneas sin lote, contra los documentos
+
+| Qué son | Líneas |
+|---|---:|
+| Anejo de **criterios técnicos** del conjunto de los lotes ("detallar los materiales a suministrar en el expediente “… N LOTES”"): la lista de materiales de la licitación entera, con su propia numeración — `0019` (9 expedientes), `0122`, `0033`, `0130`, `0088`, `0203`, `0214` | 4.239 |
+| Cuadro de precios de la partida alzada de `4.26/28510.0020`, común a sus dos lotes (principal) | 208 |
+| Tablas con cabecera explícita de un lote que el expediente no tiene, y sus continuaciones (`0130`, `0027`, `0028`) | 492 |
+| "Anexos" de los Contratos de `0122` (156 × 2 × 3 expedientes) | 936 |
+
+**No se perdía material.** En el Excel, materiales distintos (matrícula, o
+descripción sin espacios ni signos) 5.512 al empezar la continuación →
+5.519 después; el único que "desaparece" es la errata del anejo de criterios
+de `0019` ("Biela Izquierda tipo AV4 para 1º, **2**, 3º…"), que sigue en su
+lote como P-706, mismo código y precio, con "2º". La caída de filas era el
+mismo material repetido en cada hermano y el anejo de criterios mostrado
+como si fuera de un lote.
+
+**Tres correcciones a lo que dijo la continuación, verificadas en el PDF:**
+
+- **`0060` no es un cuadro común sin "LOTE N".** Su anejo trae "Lote 1:
+  ANCHO MIXTO" (p.14) y "Lote 2: ANCHO METRICO" (p.38); lo que no trae lote
+  es el anejo de criterios (p.55-97). Con su lote identificado por su
+  Contrato, `0060` se queda su LOTE 1 por la cabecera explícita. La regla
+  "nunca añadir un lote que la adjudicación no nombra" nació de esa misma
+  lectura equivocada: su principal `0051` mostraba el LOTE 2 como LOTE 1.
+- **Los "anexos de precios" de los Contratos de `0122` son el anejo de
+  criterios** (Grupo 2, con la columna de impacto en la seguridad): 150 de
+  cada 156 líneas. Las otras 6 son tablas sueltas de los cuadros de cada
+  lote (p.122 del LOTE 1, p.133 del LOTE 2), cuyas cabeceras ("LLote 1:",
+  negrita simulada) están en páginas que el localizador no abre.
+- **El anejo de criterios no es "de nadie":** dice de sí mismo que es de
+  todos los lotes, y en `0122` añade que "no coincide" con el cuadro de
+  precios. Aplicar la regla a esas tablas contradecía el documento: `0047`
+  (LOTE 9, 4 precios) recibía 229 líneas, 225 con códigos de los lotes
+  1-8; en `0203`/`0088` la cifra es la "cantidad mínima a incluir en cada
+  pedido" y volvía la "CANTIDAD 50" sobre el LOTE 6 real; y en `0051` el
+  anejo numera distinto (ver T3). **Decisión del cliente: la regla se
+  aplica salvo al anejo de criterios**, "el documento dice de sí mismo que
+  es del conjunto de lotes y que no coincide con el cuadro de precios, así
+  que atribuirlo a uno sería contradecirlo". Y dos encargos más: arreglar
+  el principal `0051`, y acotar la fusión por firma entre criterios y
+  cuadro (T3).
+
+## T2 — La regla, aplicada
+
+**Lote propio** (`orquestador._lote_propio`): el de un expediente cuando
+exactamente uno de los lotes declarados trae su código. **Los lotes que
+solo nombra un Contrato se registran** (antes no): `0060` recupera su LOTE
+1 (25,31 % de su Contrato) aunque su único documento de lotes sea la
+adjudicación de `0061`; `0051` pasa a tener sus dos lotes. **Sin ningún
+documento de lotes** (17 expedientes, p.ej. `6.21/28510.0112`), el lote
+implícito deja de ser "1": es el LOTE N del Contrato propio, con su código,
+y los demás Contratos archivados con él son de sus hermanos.
+
+**Asociación de tablas** (`pipeline_anejo`, `lote_tabla`), en un
+expediente con lote propio — también con un solo lote conocido, porque los
+documentos compartidos traen las tablas de todos:
+
+- Tabla con cabecera de lote: la de siempre. Si es de otro lote, sus
+  líneas no se guardan (hermano) o quedan sin lote (lote no declarado).
+- **Tabla sin ningún rastro de lote: es del expediente**
+  (`lineas_catalogo.lote_del_expediente`, migración 0030, para poder
+  encontrarlas todas), salvo que:
+  - sea del **anejo de criterios del conjunto**
+    (`del_conjunto_de_lotes`): la frase "detallar los … a suministrar en el
+    expediente “… N LOTES”" (61 documentos del corpus, cuatro redacciones)
+    en el texto que la precede, sin cabecera de lote después — sigue siendo
+    del conjunto hasta la próxima tabla con cabecera, aunque haya páginas
+    sin tabla por medio; en cualquier expediente, no solo en los de lote;
+  - siga, sin páginas por medio, a una tabla de otro lote o ambigua (es su
+    continuación);
+  - la **última mención de lote** en las páginas que la separan de la tabla
+    anterior (o en todo el documento hasta ella, si es la primera) sea de
+    otro lote: la cabecera de su sección está en una página que el
+    localizador no abrió (`6.21/28510.0109_ANEJO_1`: "Lote 1. Semicambios…"
+    en la p.18, su tabla en la p.19 sin cabecera);
+  - el documento sea el **Contrato de otro lote** (su "Contrato nº" no es el
+    código del expediente): sus tablas sin cabecera son de ese lote.
+
+Verificado en seco, antes de reprocesar, contra los documentos: `0051`
+ANEJO_1 (p.14-38 LOTE 1, 577 líneas; p.38-51 LOTE 2, 496; p.55-97 criterios,
+1.033), los Contratos de `0122` en `0155` y `0156` (la tabla de la p.122 es
+del LOTE 1 en los dos Contratos; la de la p.133 del LOTE 2), `0112`
+(ANEJO_1: p.19-26 del LOTE 1 fuera; p.42 y siguientes, su LOTE 4), `0059`,
+`0047`, `0011`, `0057`, `0214`.
+
+**Lo que salió al revisar la primera pasada (F1), contra los documentos:**
+
+- **Líneas de un hermano que no está en el catálogo.** `6.21/28510.0066`
+  (LOTE 2) guarda el Contrato del LOTE 1 (`0065`), que trae el "LISTADO
+  LOTE 1" (p.116, 17 materiales) y el "LISTADO LOTE 2" (p.117, 9). Con el
+  LOTE 1 registrado desde ese Contrato, sus 17 líneas eran de un hermano y
+  se descartaban -- pero `0065` no está en el catálogo, y desaparecían de
+  todas partes. La continuación descartaba las líneas de hermanos porque
+  "siguen en el hermano y en el principal"; eso solo vale si están. Ahora
+  solo se descartan si el expediente del hermano existe; si no, se
+  conservan en este expediente sin lote, con su motivo ("tabla del LOTE 1
+  (6.21/28510.0065), otro lote de la licitación cuyo expediente no está en
+  el catálogo"), fuera del Excel y con su categoría en el Resumen.
+- **"Lote 1." con punto.** `6.22/28510.0125`/`0126`: "Lote 1. NORTE y, en
+  caso de urgencia que no pueda ser atendida por el adjudicatario del lote
+  2, SUR." -- la cláusula de urgencia mutua de siempre, con punto en vez de
+  dos puntos; la regla que la resuelve pedía los dos puntos. Antes daba
+  igual (todo iba a su único lote implícito); en cuanto `0125` supo que es
+  el LOTE 1, sus tablas quedaban ambiguas y se quedaba sin catálogo (209 →
+  0). Con el punto aceptado, 209 líneas en su LOTE 1 (p.15-20 del ANEJO_1),
+  las del LOTE 2 para `0126`.
+- **`6.22/28510.0016` (balasto, LOTE 6) se queda sin líneas en su lote, y
+  es correcto.** Sus 4 líneas de antes eran P-1…P-4 de las tablas de los
+  lotes 1-5 fundidas (con precio "pendiente" por la guarda de choques). Su
+  propia tabla, "LOTE 6: RAM NORTE" (ANEJO_1 p.21: P-1 65.000 m³ a 14,20 €,
+  P-2 64.000 a 16,50 €, P-3 65.000 a 1,10 €, P-4 100.000 m³·km a 0,12 €),
+  **no la detecta `pdfplumber`** como tabla -- solo la del LOTE 5 que tiene
+  encima. Hueco de detección de tablas que ya existía, antes escondido.
+- **P-0167 y P-0179** de `0051`/`0060` salen en la auditoría como
+  "duplicadas exactas", y el documento las repite así: "Semicambio dcha
+  (sencillo) DIRD-B1-54-190-0.11-CR-D", 22.712,17 €, dos códigos (Contrato
+  del LOTE 2, p.118). Se quedan las dos, con su código.
+
+## T3 — P-0996
+
+La p.49 del ANEJO_1 de `0051` (cuadro de precios) y la p.95 (anejo de
+criterios) numeran distinto: "ENF-54 Curva", matrícula 618050403, es P-0994
+en el cuadro y P-0996 en criterios; y P-0996 es en el cuadro otro material
+("ESF-B1-UIC54-186-1/10.5- CR-I-E:3500", 204.094,04 €). Con los dos lotes y
+los criterios en un único lote, la fusión por firma (misma matrícula,
+descripción y precio) juntaba las dos filas y se quedaba con el último
+código visto: la clave pasaba a "P-0996", ya ocupada, y el documento entero
+se deshacía en cada reproceso (`uq_linea_lote_clave`; 97 líneas de `0051`
+seguían con código y clave distintos de una pasada antigua).
+
+Con la identidad de lote, el anejo de criterios ya no entra en ningún lote
+y el choque no se da. Además, **acotada la fusión** (`catalogo.
+_combinar_por_clave`): fundida por firma, una fila con otro código propio
+no le pasa ese código a la línea del cuadro — sigue siendo el mismo
+material, con el código de la tabla que lo trajo primero. Bloquear la
+fusión sin más habría duplicado el caso de `6.24/28510.0180` (la tabla de
+impacto en la seguridad repite "PN004" como "PN004ps", test existente), que
+además quedaba con el código de la tabla de impacto. Y una red en el
+guardado: nunca se renombra una clave a otra que ya tiene otra línea del
+lote. Test con las filas reales: con el código anterior, `IntegrityError`.
+
+**Y dos acotamientos más, que salieron al revisar la segunda pasada.** El
+cuadro del LOTE 1 de `0051` trae parejas de códigos con el mismo texto y
+precio ("Semicambio izq (sencillo) DIRD-B1-54-190-0.11-CR-D", 22.712,17 €:
+P-0166 en la p.21 y P-0178 en la p.22; y "dcha": P-0167 y P-0179). Son dos
+entradas del catálogo, y la fusión por firma las juntaba:
+
+- **Dentro de una misma tabla** (sus páginas de continuación incluidas,
+  también las que repiten la misma cabecera en cada página, como este
+  cuadro: la tabla nueva empieza cuando cambia el texto de la cabecera) dos
+  códigos propios de verdad distintos ya no se funden nunca (el mismo código
+  con ruido delante, "VP-63"/"P-63" en `6.21/28510.0109`, sí) -- el mismo principio que
+  el guard de página que ya existía (`6.22/28510.0125`, P-133/P-137), para
+  toda la tabla. Entre tablas distintas (el eco de una tabla de criterios o
+  de impacto con su propia numeración, `6.24/28510.0180`) se sigue fundiendo,
+  con el código de la primera.
+- **Al guardar**, una línea que esta misma pasada ya guardó desde otro
+  documento, con otro código propio, no se absorbe: el Contrato, que trae la
+  misma tabla, se tragaba al guardar su P-0167 la P-0179 que acababa de
+  guardar el anejo, y la borraba. Los restos de pasadas anteriores (códigos
+  con ruido de pie de página, `6.23/28510.0042`) se siguen absorbiendo.
+
+**"Lote nº1".** Revisando las líneas que la regla atribuía al expediente
+(solo 20 en todo el corpus, una vez excluido el anejo de criterios):
+`4.25/28510.0207` (LOTE 1) y `0208` (LOTE 2) se quedaban cada uno las
+cuatro líneas de su cuadro, pero el documento dice "• Lote nº1:
+Arrendamiento de vagones de bogies" (P-01, P-02) y "• Lote nº 2: …" (P-03,
+P-04). El patrón de "LOTE N" no leía la forma "nº" (35 menciones en 6
+documentos), y esas tablas parecían sin cabecera. Ya la lee: cada lote con
+sus dos líneas, por la cabecera explícita. (Antes de esta parte los dos
+expedientes mostraban también las cuatro, en su lote implícito.)
+
+**Determinismo.** Con los dos acotamientos, dos pasadas seguidas daban el
+mismo contenido línea a línea, pero 24 líneas cambiaban de `id` en cada
+pasada (se borraban y se recreaban): el segundo miembro de cada pareja de
+`0051`/`0060` (al guardar P-0166, la búsqueda por firma se tragaba la
+P-0178 de la pasada anterior, que esa misma llamada iba a volver a
+escribir), y 4 huérfanas de `4.25/28510.0208` (su Contrato y el del LOTE
+1 tienen la misma tabla en la misma posición: guardar la del primero en su
+lote borraba, por la clave de huérfana, la del segundo). Arreglados los
+dos: la protección cubre también las claves que la propia llamada va a
+escribir, y la limpieza de huérfanas superadas mira el documento.
+
+Y una recuperación más, del mismo tipo de defecto de columnas: en el
+ANEJO_1 de `0126` (p.23, LOTE 2), `pdfplumber` funde en 17 filas con
+matrícula la celda de descripción con la anterior (`['P-101', '618050300',
+'EN-54', None, 'UD.', ...]`). Antes lo tapaba la fusión con la línea del
+mismo código del LOTE 1; separados los lotes, se quedaban sin descripción.
+La recuperación "columna anterior" ya existente acepta ahora también esa
+huella (celda en `None`, fila con matrícula).
+
+## T4 — Excel
+
+Las líneas del anejo de criterios tienen su propio motivo y su propia fila
+en el Resumen, fuera de "pendientes de revisión" (no esperan ninguna
+revisión: el documento dice de quién son), y ya no mandan su expediente a
+revisión. Categorías nuevas también para "tabla sin título de lote, detrás
+de la sección de otro lote" y "tabla de otro lote, cuyo expediente no está
+en el catálogo".
+
+## Pendiente al cerrar la tercera parte
+
+- **Tabla no detectada:** "LOTE 6: RAM NORTE" de `6.22/28510.0016`
+  (ANEJO_1 p.21), ver arriba. `pdfplumber` solo ve la tabla del LOTE 5 de
+  esa página.
+- **Residuo del localizador, visto de nuevo:** los Contratos de `0122` traen
+  el pliego entero y el localizador solo abre sueltas las páginas de sus
+  cuadros (p.122, 133); el ANEJO de `6.24/28510.0064` no abre las p.115-119
+  del cuadro del LOTE 1 (sus materiales entran por el anejo de criterios,
+  que en ese pliego sí va por lotes con cabecera).
+- **El anejo de criterios se guarda una vez por documento y expediente**
+  (el ANEJO y los dos Contratos de `0051` lo traen entero: 3 × 1.033 líneas
+  sin lote en cada expediente de la familia). No sale en el Excel ni manda
+  a revisión; es volumen en la base de datos, no un hueco.
+- Siguen abiertos: huérfanas de lotes no declarados en un expediente de lote
+  (decisión de producto del 12-09), `0058` sin importe de adjudicación, y
+  las filas desalineadas de `ANEJO_ce1df15b39efdb8c.pdf`.

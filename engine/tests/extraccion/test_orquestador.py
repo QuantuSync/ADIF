@@ -20,6 +20,7 @@ from app.extraccion.orquestador import (
     _detectar_numero_lotes_pcsp,
     _extraer_campos_expediente,
     _extraer_lotes_declarados_del_expediente,
+    _lote_propio,
     ejecutar_extraccion_expediente,
 )
 from app.extraccion.invalidado import INVALIDADO
@@ -810,6 +811,7 @@ def test_expediente_de_lote_solo_guarda_su_propio_lote(db_session):
     de su Contrato), y solo las líneas de las tablas del LOTE 1 del anejo
     (p.1-3 del fixture)."""
     expediente = _crear_familia_0122(db_session, "6.22/28510.0155")
+    _registrar_expediente(db_session, "6.22/28510.0156")  # el hermano está en el catálogo
     trabajo = SimpleNamespace(expediente_id=expediente.id)
 
     resultado = ejecutar_extraccion_expediente(db_session, _StorageDirecta(), trabajo, model_provider=None)
@@ -855,6 +857,7 @@ def test_reprocesar_expediente_de_lote_borra_los_lotes_de_hermanos_de_antes(db_s
     """Idempotencia: lo que una pasada anterior guardó en el expediente como
     lote del hermano (con sus líneas) desaparece al reprocesar."""
     expediente = _crear_familia_0122(db_session, "6.22/28510.0156")
+    _registrar_expediente(db_session, "6.22/28510.0155")
     lote_viejo = Lote(expediente_id=expediente.id, identificador_lote="1", codigo_expediente_lote="6.22/28510.0156")
     db_session.add(lote_viejo)
     db_session.commit()
@@ -872,6 +875,167 @@ def test_reprocesar_expediente_de_lote_borra_los_lotes_de_hermanos_de_antes(db_s
     assert db_session.query(LineaCatalogo).filter_by(codigo_precio="P-999").first() is None
     paginas = {l.pagina for l in db_session.query(LineaCatalogo).filter_by(expediente_id=expediente.id)}
     assert paginas and paginas <= {4, 5}
+
+
+# --- Sesión 2026-09-14, tercera parte: el lote que solo nombra su Contrato, y
+# el expediente de lote que se queda con las tablas sin cabecera
+
+
+def test_lote_que_solo_nombra_su_contrato_se_registra():
+    """`6.23/28510.0051`: su Propuesta solo nombra el LOTE 1 (`0060`); sus
+    dos Contratos dicen LOTE 1 -> `0060` y LOTE 2 -> `0061`. Antes el LOTE 2
+    no se registraba y el principal mostraba sus líneas como del LOTE 1."""
+    resultado = _extraer_lotes_declarados_del_expediente([
+        _item(1, TipoDocumento.propuesta_lc27, extraer_texto(fx.PROPUESTA_SOLO_LOTE1_0051)),
+        _item(2, TipoDocumento.contrato, extraer_texto(fx.CONTRATO_LOTE1_0060)),
+        _item(3, TipoDocumento.contrato, extraer_texto(fx.CONTRATO_LOTE2_0061)),
+    ])
+    lotes = {l.identificador: l for l in resultado.lotes}
+    assert set(lotes) == {"1", "2"}
+    assert (lotes["1"].codigo_expediente_lote, lotes["1"].baja) == ("6.23/28510.0060", Decimal("0.2531"))
+    assert (lotes["2"].codigo_expediente_lote, lotes["2"].baja) == ("6.23/28510.0061", Decimal("0.2510"))
+    assert lotes["2"].documento_id == 3
+    assert _lote_propio(SimpleNamespace(codigo_expediente="6.23/28510.0051"), resultado.lotes) is None
+    assert _lote_propio(SimpleNamespace(codigo_expediente="6.23/28510.0060"), resultado.lotes) == "1"
+    assert _lote_propio(SimpleNamespace(codigo_expediente="6.23/28510.0061"), resultado.lotes) == "2"
+
+
+def _registrar_expediente(db_session, codigo_expediente: str) -> None:
+    db_session.add(Expediente(codigo_expediente=codigo_expediente))
+    db_session.commit()
+
+
+def _crear_familia_0112(db_session):
+    return _crear_expediente_con_documentos(
+        db_session, "6.21/28510.0112",
+        [("CONTRATO_1", fx.CONTRATO_LOTE5_0113), ("CONTRATO_2", fx.CONTRATO_LOTE4_0112), ("ANEJO", fx.ANEJO_LOTE4_0112)],
+    )
+
+
+def _crear_familia_0051(db_session, codigo_expediente: str):
+    return _crear_expediente_con_documentos(
+        db_session, codigo_expediente,
+        [
+            ("ADJUDICACION", fx.PROPUESTA_SOLO_LOTE1_0051),
+            ("CONTRATO_1", fx.CONTRATO_LOTE1_0060),
+            ("CONTRATO_2", fx.CONTRATO_LOTE2_0061),
+            ("ANEJO", fx.ANEJO_LOTES_Y_CRITERIOS_0051),
+        ],
+    )
+
+
+def test_expediente_de_lote_cuyo_unico_documento_de_lotes_es_el_del_hermano(db_session):
+    """`0061` (LOTE 2) comparte con su principal una Propuesta que solo
+    nombra el LOTE 1: su propio lote sale de su Contrato. Del anejo se queda
+    con la tabla del LOTE 2 (p.2 del fixture); la del LOTE 1 es de su
+    hermano, y el anejo de criterios (p.3-4) no es de ningún lote."""
+    expediente = _crear_familia_0051(db_session, "6.23/28510.0061")
+    _registrar_expediente(db_session, "6.23/28510.0060")
+    trabajo = SimpleNamespace(expediente_id=expediente.id)
+
+    resultado = ejecutar_extraccion_expediente(
+        db_session, _StorageDirecta(), trabajo, model_provider=ProveedorModeloCabeceraPorContenido()
+    )
+
+    lotes = db_session.query(Lote).filter_by(expediente_id=expediente.id).all()
+    assert [(l.identificador_lote, l.codigo_expediente_lote, l.baja_lote) for l in lotes] == [
+        ("2", "6.23/28510.0061", Decimal("0.2510")),
+    ]
+    lineas = db_session.query(LineaCatalogo).filter_by(expediente_id=expediente.id).all()
+    assert {l.pagina for l in lineas if l.lote_id == lotes[0].id} == {2}
+    assert {l.pagina for l in lineas if l.lote_id is None} == {3, 4}
+    assert resultado["lineas_de_lotes_hermanos"] > 0
+
+
+def test_principal_registra_el_lote_de_su_segundo_contrato(db_session):
+    expediente = _crear_familia_0051(db_session, "6.23/28510.0051")
+    trabajo = SimpleNamespace(expediente_id=expediente.id)
+
+    ejecutar_extraccion_expediente(
+        db_session, _StorageDirecta(), trabajo, model_provider=ProveedorModeloCabeceraPorContenido()
+    )
+
+    lotes = {l.identificador_lote: l for l in db_session.query(Lote).filter_by(expediente_id=expediente.id)}
+    assert {k: l.codigo_expediente_lote for k, l in lotes.items()} == {"1": "6.23/28510.0060", "2": "6.23/28510.0061"}
+    paginas = {
+        k: {l.pagina for l in db_session.query(LineaCatalogo).filter_by(lote_id=lote.id)} for k, lote in lotes.items()
+    }
+    assert paginas["1"] and paginas["1"] <= {1, 2}
+    assert paginas["2"] == {2}
+    huerfanas = db_session.query(LineaCatalogo).filter_by(expediente_id=expediente.id, lote_id=None).all()
+    assert {l.pagina for l in huerfanas} == {3, 4}
+
+
+def test_expediente_de_lote_sin_documento_de_lotes_toma_su_lote_del_contrato(db_session):
+    """`6.21/28510.0112` (LOTE 4) no tiene ningún documento de lotes: antes
+    guardaba en su lote implícito "1" las tablas de todos los lotes del
+    anejo que comparte con sus hermanos. Ahora su lote es el LOTE 4 de su
+    Contrato (18,30 %), con su código; se queda con la tabla del LOTE 4 (p.3
+    y su continuación p.4 del fixture); la del LOTE 5 es de `0113` (su
+    Contrato también está archivado aquí); y la tabla sin cabecera de la
+    p.2, que sigue al "Lote 1." de la p.1, no se le atribuye. El lote "1" de
+    una pasada anterior, con sus líneas, desaparece."""
+    expediente = _crear_familia_0112(db_session)
+    _registrar_expediente(db_session, "6.21/28510.0113")
+    viejo = Lote(expediente_id=expediente.id, identificador_lote="1")
+    db_session.add(viejo)
+    db_session.commit()
+    db_session.add(LineaCatalogo(
+        expediente_id=expediente.id, lote_id=viejo.id, clave_linea="vieja", orden_aparicion=0,
+        codigo_precio="P-999", descripcion="línea del lote implícito de una pasada anterior",
+    ))
+    db_session.commit()
+    trabajo = SimpleNamespace(expediente_id=expediente.id)
+
+    resultado = ejecutar_extraccion_expediente(
+        db_session, _StorageDirecta(), trabajo, model_provider=ProveedorModeloCabeceraPorContenido()
+    )
+
+    lotes = db_session.query(Lote).filter_by(expediente_id=expediente.id).all()
+    assert [(l.identificador_lote, l.codigo_expediente_lote, l.baja_lote) for l in lotes] == [
+        ("4", "6.21/28510.0112", Decimal("0.1830")),
+    ]
+    lineas = db_session.query(LineaCatalogo).filter_by(expediente_id=expediente.id).all()
+    propias = [l for l in lineas if l.lote_id == lotes[0].id]
+    # p.5 del fixture (p.49 del original) empieza con el final de la tabla
+    # del LOTE 4, antes del "Lote 5.": esas líneas heredan el LOTE 4.
+    assert {l.pagina for l in propias} == {3, 4, 5}
+    assert all(l.lote_heredado_de_pagina_anterior for l in propias if l.pagina != 3)
+    assert not any(l.lote_del_expediente for l in propias)  # todas bajo su cabecera "Lote 4."
+    sin_lote = [l for l in lineas if l.lote_id is None]
+    assert {l.pagina for l in sin_lote} == {2}
+    assert all("la última mención de lote antes de ella es la del LOTE 1" in l.motivo_revision for l in sin_lote)
+    assert resultado["lineas_de_lotes_hermanos"] > 0
+    assert db_session.query(LineaCatalogo).filter_by(codigo_precio="P-999").first() is None
+
+    ids = sorted(l.id for l in lineas)
+    ejecutar_extraccion_expediente(
+        db_session, _StorageDirecta(), trabajo, model_provider=ProveedorModeloCabeceraPorContenido()
+    )
+    assert sorted(l.id for l in db_session.query(LineaCatalogo).filter_by(expediente_id=expediente.id)) == ids
+
+
+def test_lineas_de_un_hermano_que_no_esta_en_el_catalogo_se_conservan_sin_lote(db_session):
+    """Misma sesión: descartar las líneas de un lote hermano solo es no
+    perder nada si están en el expediente del hermano. `6.21/28510.0066`
+    (LOTE 2) guarda el Contrato del LOTE 1 (`0065`, fuera del catálogo) con
+    su listado: descartarlo lo borraba de todas partes. Si el hermano no está,
+    sus líneas se quedan en este expediente, sin lote y con el motivo."""
+    expediente = _crear_familia_0112(db_session)  # sin registrar `0113`
+    trabajo = SimpleNamespace(expediente_id=expediente.id)
+
+    resultado = ejecutar_extraccion_expediente(
+        db_session, _StorageDirecta(), trabajo, model_provider=ProveedorModeloCabeceraPorContenido()
+    )
+
+    assert resultado["lineas_de_lotes_hermanos"] == 0
+    del_hermano = [
+        l for l in db_session.query(LineaCatalogo).filter_by(expediente_id=expediente.id, lote_id=None)
+        if "LOTE 5 (6.21/28510.0113), otro lote de la licitación cuyo expediente no está en el catálogo"
+        in (l.motivo_revision or "")
+    ]
+    assert del_hermano and {l.pagina for l in del_hermano} == {5}
+    assert all("@p" in l.clave_linea for l in del_hermano)
 
 
 # --- CONTEXTO.md sección 26: criterios de alcance del cliente ----------------
