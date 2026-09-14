@@ -29,13 +29,15 @@ from app.extraccion.lote_tabla import asociar_lote_tabla
 from app.extraccion.mapeo_cabecera import (
     cabecera_sin_senal,
     corregir_confusion_matricula_codigo_precio,
+    completar_matricula_por_contenido,
     corregir_confusion_precio_cantidad,
     derivar_mapeo_por_contenido,
     evaluar_coherencia_mapeo,
+    heredar_mapeo_por_geometria,
     mapear_cabecera,
 )
 from app.extraccion.tabla import extraer_tablas_pagina
-from app.extraccion.texto import PaginaTexto
+from app.extraccion.texto import PaginaTexto, normalizar
 from app.interfaces.model_provider import ModelProvider
 
 
@@ -59,6 +61,39 @@ class ResultadoProcesamientoAnejo:
     # sepa si tiene que avisar a nivel de expediente sin releer todas las
     # líneas.
     lineas_con_aviso: int = 0
+
+
+# Sesión 2026-09-14 (`6.23/28510.0051_ANEJO_3_9d725c710163f3db.pdf`, "NOTA DE
+# SUBSANACIÓN A LOS ANEJOS DEL PLIEGO..."): una nota de subsanación repite
+# cada partida dos veces, en dos tablas -- "Donde aparece:" con el precio
+# equivocado (62.171,96 €) y "Debiendo ser:" con el corregido (136.315,00 €).
+# Con la guarda de choques de `app.catalogo._combinar_por_clave` (misma
+# sesión), el mismo código con dos precios en un documento se dejaba vacío
+# -- correcto para cuadros de lotes distintos, pero aquí el documento dice
+# explícitamente cuál vale. Las dos redacciones verificadas en el corpus
+# real (4 documentos de 1-2 páginas: 38, 456, 527, 552) ponen siempre la
+# corrección DESPUÉS del original, así que en un documento así se conserva
+# solo la última aparición de cada código. Solo se miran las primeras
+# páginas: un pliego largo menciona "subsanación" en su prosa administrativa
+# sin ser una nota de corrección.
+_MARCAS_SUBSANACION = (("donde aparece", "debiendo ser"), ("donde dice", "debe decir"))
+
+
+def _es_nota_de_subsanacion(paginas_texto: list[PaginaTexto]) -> bool:
+    texto = normalizar(" ".join(p.texto for p in paginas_texto[:3]))
+    return any(original in texto and correccion in texto for original, correccion in _MARCAS_SUBSANACION)
+
+
+def _quedarse_con_la_correccion(lineas: list[dict]) -> list[dict]:
+    ultima: dict[tuple, int] = {}
+    for indice, linea in enumerate(lineas):
+        if linea.get("codigo_precio"):
+            ultima[(linea.get("identificador_lote"), linea["clave_linea"])] = indice
+    return [
+        linea
+        for indice, linea in enumerate(lineas)
+        if not linea.get("codigo_precio") or ultima[(linea.get("identificador_lote"), linea["clave_linea"])] == indice
+    ]
 
 
 def procesar_anejo(
@@ -124,7 +159,19 @@ def procesar_anejo(
     # texto de la cabecera es una señal fuerte; el contenido de una tabla sin
     # cabecera no lo es lo bastante como para arriesgarse fuera del
     # documento que la vio).
-    cache_estructural: dict[tuple, dict[str, Optional[int]]] = {}
+    # Sesión 2026-09-14: junto al mapeo viaja si hubo que corregir la
+    # confusión matrícula/`codigo_precio` para obtenerlo -- una tabla que lo
+    # reutiliza tiene la misma confusión en sus filas ya guardadas, y sin la
+    # marca su `codigo_precio` viejo (la matrícula) sobrevivía al reproceso
+    # (`6.21/28510.0016_ANEJO_e40fc4e4546ec90b.pdf` p.20, 12 líneas).
+    cache_estructural: dict[tuple, tuple[dict[str, Optional[int]], bool]] = {}
+    # Sesión 2026-09-14: mapeo final (ya corregido) y geometría de columnas
+    # de la última tabla con cabecera propia de ESTE documento. Una tabla sin
+    # cabecera cuyas columnas caen en las mismas posiciones es la misma tabla
+    # continuando en otra página (`heredar_mapeo_por_geometria`) -- hereda
+    # ese mapeo, validado contra sus filas, antes de probar nada más. Como
+    # `cache_estructural`, nunca sale de esta llamada.
+    ultima_con_cabecera: Optional[tuple[dict[str, Optional[int]], tuple, bool]] = None
 
     with pdfplumber.open(ruta_pdf) as pdf:
         localizacion = localizar_paginas_candidatas(paginas_texto)
@@ -191,7 +238,8 @@ def procesar_anejo(
 
                 sin_cabecera_propia = cabecera_sin_senal(tabla.cabecera)
                 firma_estructural = calcular_firma_estructural(tabla.filas) if sin_cabecera_propia else None
-                mapeo_heredado = cache_estructural.get(firma_estructural) if firma_estructural is not None else None
+                entrada_estructural = cache_estructural.get(firma_estructural) if firma_estructural is not None else None
+                mapeo_heredado, heredado_corregido = entrada_estructural if entrada_estructural else (None, False)
 
                 # Bloque 3 (caché de tablas sin cabecera): un mapeo heredado
                 # de otra tabla sin cabecera de ESTE documento con la misma
@@ -214,16 +262,38 @@ def procesar_anejo(
                 # es estrictamente más fiable que un mapeo de modelo cacheado
                 # de otra tabla del mismo documento, y evita ensuciar la
                 # caché estructural con nada (esta vía no escribe en ella).
-                mapeo_por_contenido = derivar_mapeo_por_contenido(tabla.filas) if sin_cabecera_propia else None
+                # Sesión 2026-09-14: antes que nada de lo anterior, la tabla
+                # con cabecera de la que esta es continuación (misma
+                # geometría de columnas) -- trae la semántica completa de la
+                # cabecera real (cantidad, unidad, código de material), que
+                # la derivación por contenido nunca asigna. Solo se acepta si
+                # cuadra con las filas de ESTA tabla.
+                mapeo_por_geometria = None
+                if sin_cabecera_propia and ultima_con_cabecera is not None:
+                    candidato = heredar_mapeo_por_geometria(
+                        ultima_con_cabecera[0], ultima_con_cabecera[1], tabla.columnas_x
+                    )
+                    if candidato is not None and evaluar_coherencia_mapeo(candidato, tabla.filas) is None:
+                        mapeo_por_geometria = candidato
+                mapeo_por_contenido = (
+                    derivar_mapeo_por_contenido(tabla.filas)
+                    if sin_cabecera_propia and mapeo_por_geometria is None
+                    else None
+                )
                 matricula_codigo_corregido = False
                 precio_cantidad_corregido = False
 
-                if mapeo_por_contenido is not None:
+                if mapeo_por_geometria is not None:
+                    mapeo = mapeo_por_geometria
+                    motivo_mapeo_incoherente = None
+                    matricula_codigo_corregido = ultima_con_cabecera[2]
+                elif mapeo_por_contenido is not None:
                     mapeo = mapeo_por_contenido
                     motivo_mapeo_incoherente = evaluar_coherencia_mapeo(mapeo, tabla.filas)
                 elif mapeo_heredado is not None and evaluar_coherencia_mapeo(mapeo_heredado, tabla.filas) is None:
                     mapeo = mapeo_heredado
                     motivo_mapeo_incoherente = None
+                    matricula_codigo_corregido = heredado_corregido
                 else:
                     resultado_mapeo = mapear_cabecera(tabla.cabecera, tabla.filas[:3], db, model_provider)
                     firmas_cabecera.add(resultado_mapeo.firma)
@@ -254,6 +324,10 @@ def procesar_anejo(
                     matricula_codigo_corregido = (
                         indice_codigo_antes is not None and mapeo.get("codigo_precio") is None
                     )
+                    # Sesión 2026-09-14: una columna de matrícula que la
+                    # cabecera nombra de otra forma ("CÓDIGO ADIF") -- ver el
+                    # docstring. Antes de guardar el mapeo para heredarlo.
+                    mapeo = completar_matricula_por_contenido(mapeo, tabla.filas)
                     if sin_cabecera_propia:
                         # Bloque 2, sesión 2026-09-12 (continuación): misma
                         # idea, para la confusión precio_unitario/cantidad --
@@ -285,7 +359,9 @@ def procesar_anejo(
                         evaluar_coherencia_mapeo(mapeo, tabla.filas) if sin_cabecera_propia else None
                     )
                     if sin_cabecera_propia and firma_estructural is not None and motivo_mapeo_incoherente is None:
-                        cache_estructural[firma_estructural] = mapeo
+                        cache_estructural[firma_estructural] = (mapeo, matricula_codigo_corregido)
+                    if not sin_cabecera_propia and tabla.columnas_x:
+                        ultima_con_cabecera = (mapeo, tabla.columnas_x, matricula_codigo_corregido)
                 tablas_procesadas += 1
                 lineas_tabla = construir_lineas_desde_tabla(
                     tabla, mapeo, documento_origen_id, expediente_id, baja_lote,
@@ -424,6 +500,9 @@ def procesar_anejo(
                         # lote.
                         linea["clave_linea"] = linea["clave_huerfana_hipotetica"]
                 lineas.extend(lineas_tabla)
+
+    if _es_nota_de_subsanacion(paginas_texto):
+        lineas = _quedarse_con_la_correccion(lineas)
 
     # `Código del material`, vía de modelo (CONTEXTO.md sección 6, bloque 5 de
     # la sesión de vocabulario): `construir_lineas_desde_tabla` (dentro de

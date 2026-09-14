@@ -45,9 +45,11 @@ antes sin ninguna página candidata en todo el expediente).
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from decimal import Decimal
 
+from app.extraccion.normalizacion import normalizar_guiones
 from app.extraccion.texto import PaginaTexto, normalizar
 
 UMBRAL_DENSIDAD_NUMERICA = Decimal("0.025")
@@ -66,6 +68,61 @@ MIN_GRUPOS_MARCADORES = 2
 # `6.20/28510.0047_ANEJO_abd69efbdd39b552.pdf` (el caso real que motiva este
 # arreglo) están en 0,38-0,47 -- ni siquiera cerca del límite.
 UMBRAL_DENSIDAD_CONTINUACION = Decimal("0.20")
+
+# Sesión 2026-09-14 (revisión del cliente sobre el Excel, pliegos
+# `6.21/28510.0109_ANEJO_7bfc92005f43e68e.pdf` y `6.21/28510.0016_ANEJO_
+# e40fc4e4546ec90b.pdf`): la densidad no es una señal fiable de "esta página
+# continúa la tabla de la anterior". Una tabla de repuestos de aparatos de
+# vía trae descripciones de 20-40 líneas de prosa técnica por fila -- sus
+# páginas de continuación caen en 0,10-0,20 de densidad, por debajo de
+# `UMBRAL_DENSIDAD_CONTINUACION`, y nunca se abrían: medido sobre el corpus
+# real, 246 páginas con filas reales en 30 documentos (46 expedientes), 89
+# de las 148 filas del anejo 588. Lo que sí distingue una página de
+# continuación de la prosa que sigue a una tabla es que trae identificadores
+# de FILA -- el código de precio o la matrícula de cada línea --, nunca
+# presentes en un párrafo de pliego. Formas de `app.extraccion.tabla` /
+# `app.catalogo` (código de precio con guion, "COD0001", "L01-T01", matrícula
+# de 9 dígitos, también con puntos "643.910.630"), más el sufijo de variante
+# en mayúscula verificado en esos mismos documentos ("P-39B", "P-41 A").
+# Solo formas con separador o longitud fija: "P1"/"P01" sin guion también
+# existen en el corpus, pero sueltos aparecen en prosa corriente ("tipo P o
+# P1 de radio 1500") y no bastan como prueba de fila.
+_IDENTIFICADOR_FILA_RE = re.compile(
+    r"(?<![\w.\-])"
+    r"(?:(?:P|PN|PA)-\s?\d{1,4}(?:\s?[A-Z](?![a-z]))?|(?i:COD)\d{4}|L\d{1,2}-T\d{1,2}|\d{9}|\d{3}\.\d{3}\.\d{3})"
+    r"(?![\w\-]|[.,]\d)"
+)
+
+# Importe con coma y exactamente dos decimales, con o sin separador de miles
+# ("4.292,05" o "1262,94", las dos formas reales -- `4.26/28510.0020_ANEJO_
+# 8f2a33dd634a5454.pdf` usa la segunda), buscado dentro de una línea de
+# texto, no anclado a una celda.
+_IMPORTE_EN_LINEA_RE = re.compile(r"(?<![\d.,])(?:\d{1,3}(?:\.\d{3})+|\d+),\d{2}(?![\d])")
+
+# Arranque de tabla sin ningún marcador de cabecera legible (misma sesión,
+# `6.21/28510.0016_ANEJO_e40fc4e4546ec90b.pdf` p.13): la cabecera de la tabla
+# está en una fuente sin mapa Unicode ("(cid:69)(cid:465)..." en vez de "Nº
+# MATRÍCULA") y la página no trae ningún marcador de `_GRUPOS_MARCADORES`,
+# así que ni se abría ni podía encadenar las cuatro páginas de continuación
+# que la siguen (69 de los 78 materiales con matrícula del Lote 1 nunca se
+# leían).
+# Sin cabecera legible, la señal es el propio contenido: varias líneas que
+# traen A LA VEZ un identificador de fila y un importe -- la forma de una fila
+# de cuadro de precios, no de un párrafo. Tres, no una: una sola línea así
+# puede ser una frase de pliego que cita un precio concreto.
+MIN_FILAS_DATO_SIN_CABECERA = 3
+
+
+def _identificadores_fila(texto: str) -> int:
+    return len(_IDENTIFICADOR_FILA_RE.findall(normalizar_guiones(texto)))
+
+
+def _lineas_con_fila_de_datos(texto: str) -> int:
+    return sum(
+        1
+        for linea in normalizar_guiones(texto).splitlines()
+        if _IDENTIFICADOR_FILA_RE.search(linea) and _IMPORTE_EN_LINEA_RE.search(linea)
+    )
 
 _GRUPOS_MARCADORES: dict[str, tuple[str, ...]] = {
     "codigo": (
@@ -93,6 +150,12 @@ class PaginaCandidata:
     # porque ella misma repita ningún marcador de cabecera -- `grupos_
     # marcadores` viene vacío en ese caso, no es un error.
     continuacion: bool = False
+    # Sesión 2026-09-14: `True` cuando la página entró sin marcadores de
+    # cabecera y sin continuar a ninguna candidata, solo por traer
+    # `MIN_FILAS_DATO_SIN_CABECERA` o más líneas con forma de fila de cuadro
+    # de precios (ver `_lineas_con_fila_de_datos`) -- el arranque de una
+    # tabla cuya cabecera no se puede leer.
+    sin_cabecera_legible: bool = False
 
 
 @dataclass(frozen=True)
@@ -153,7 +216,17 @@ def localizar_paginas_candidatas(paginas: list[PaginaTexto]) -> ResultadoLocaliz
     posteriores no relacionadas. `etapa 5` (`app.extraccion.mapeo_cabecera`
     vía `app.extraccion.pipeline_anejo`) es quien decide qué mapeo de
     columnas usar para una tabla sin cabecera propia -- esto solo decide
-    que la página se ABRA."""
+    que la página se ABRA.
+
+    Sesión 2026-09-14: la continuación ya no depende solo de la densidad.
+    Una página que continúa una tabla ya abierta se acepta también si trae
+    al menos un identificador de fila (`_IDENTIFICADOR_FILA_RE`) -- una
+    página de continuación con descripciones largas en prosa técnica tiene
+    la densidad de un párrafo, no la de una tabla que empieza, y aun así es
+    fila tras fila del mismo cuadro. Y una página sin marcadores que no
+    continúa nada se acepta si trae `MIN_FILAS_DATO_SIN_CABECERA` líneas con
+    identificador de fila e importe a la vez (tabla cuya cabecera no se
+    puede leer, ver el comentario de esa constante)."""
     candidatas: list[PaginaCandidata] = []
     anterior_es_candidata = False
     for pagina in paginas:
@@ -165,9 +238,14 @@ def localizar_paginas_candidatas(paginas: list[PaginaTexto]) -> ResultadoLocaliz
         if len(grupos) >= MIN_GRUPOS_MARCADORES:
             candidatas.append(PaginaCandidata(pagina.numero, densidad, grupos))
             anterior_es_candidata = True
-        elif anterior_es_candidata and densidad >= UMBRAL_DENSIDAD_CONTINUACION:
+        elif anterior_es_candidata and (
+            densidad >= UMBRAL_DENSIDAD_CONTINUACION or _identificadores_fila(pagina.texto) >= 1
+        ):
             candidatas.append(PaginaCandidata(pagina.numero, densidad, grupos, continuacion=True))
             # anterior_es_candidata ya es True: se deja igual, la cadena sigue.
+        elif _lineas_con_fila_de_datos(pagina.texto) >= MIN_FILAS_DATO_SIN_CABECERA:
+            candidatas.append(PaginaCandidata(pagina.numero, densidad, grupos, sin_cabecera_legible=True))
+            anterior_es_candidata = True
         else:
             anterior_es_candidata = False
     return ResultadoLocalizacion(candidatas=candidatas, total_paginas=len(paginas))

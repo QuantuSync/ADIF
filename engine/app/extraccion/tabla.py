@@ -74,7 +74,16 @@ FILA = list[CELDA]
 # Alternativas verificadas contra el corpus real (ver docstring del módulo,
 # hallazgo 6): un guion opcional cubre "P-001" y "P1"/"P01" a la vez, sin
 # necesitar una rama aparte para cada uno.
-_CODIGO_PRECIO_RE = re.compile(r"^(?:P-?\d+|PN\d+|PA-\d+|L\d+-T\d+|COD\d+)$", re.IGNORECASE)
+#
+# Séptimo formato, sesión 2026-09-14 (`6.21/28510.0109_ANEJO_7bfc92005f43e68e.
+# pdf` p.15-22 y `ANEJO_ce1df15b39efdb8c.pdf` p.27-36): variante de un mismo
+# precio con una letra MAYÚSCULA de sufijo, pegada o separada por un espacio
+# ("P-39B", "P-41 A", "P-67 A" -- aguja y contraaguja del mismo desvío). Sin
+# ella, una página entera de filas así no tenía ninguna "fila de datos" y la
+# tabla se descartaba como espuria. Solo mayúscula (`(?-i:...)`): una letra
+# minúscula pegada al código es el sello de verificación CSV invertido que se
+# cuela en la celda ("P-13\np", de "psj.adilav..."), no una variante real.
+_CODIGO_PRECIO_RE = re.compile(r"^(?:P-?\d+(?-i:[A-Z])?|PN\d+|PA-\d+|L\d+-T\d+|COD\d+)$", re.IGNORECASE)
 # Matrícula como identificador de fila cuando la tabla no trae ninguna
 # columna de código en absoluto (CONTEXTO.md sección 2: forma fija de 9
 # dígitos) — señal aparte, nunca se confunde con un código de precio.
@@ -93,6 +102,25 @@ class TablaExtraida:
     # lote (CONTEXTO.md sección 3: un lote pequeño cabe entero en una página
     # junto a otro) confundiría una tabla con la cabecera de la siguiente.
     bbox: tuple[float, float, float, float]
+    # Sesión 2026-09-14: (x0, x1) de cada columna, en el mismo orden que las
+    # celdas de `filas` (`None` si pdfplumber no dio ninguna celda con
+    # geometría en esa columna). `app.extraccion.mapeo_cabecera.
+    # heredar_mapeo_por_geometria` la usa para que una tabla sin cabecera
+    # propia que continúa otra de la página anterior herede su mapeo solo si
+    # sus columnas caen en las MISMAS posiciones -- nunca por número de
+    # columnas, que ya falló una vez (docstring retirado en `mapeo_cabecera`).
+    columnas_x: tuple[tuple[float, float] | None, ...] = ()
+
+
+def _columnas_x(tabla) -> tuple[tuple[float, float] | None, ...]:
+    resultado = []
+    for columna in tabla.columns:
+        if not any(columna.cells):
+            resultado.append(None)
+            continue
+        x0, _, x1, _ = columna.bbox
+        resultado.append((float(x0), float(x1)))
+    return tuple(resultado)
 
 
 def _es_fila_de_datos(fila: FILA) -> bool:
@@ -112,7 +140,34 @@ def _indice_primera_fila_datos(filas: list[FILA]) -> int | None:
     return None
 
 
+_GLIFO_CID_RE = re.compile(r"\(cid:\d+\)")
+_PALABRA_LEGIBLE_RE = re.compile(r"[A-Za-zÀ-ÿ]{3,}")
+
+
+def _celda_cabecera_ilegible(celda: str) -> bool:
+    """Sesión 2026-09-14 (`6.21/28510.0016_ANEJO_e40fc4e4546ec90b.pdf`
+    p.13-20): una fuente sin mapa Unicode hace que `pdfplumber` devuelva
+    identificadores de glifo crudos en vez de letras -- "Nº MATRÍCULA" sale
+    como "(cid:69)(cid:465)(cid:3)(cid:68)(cid:4)...". Una celda así no dice
+    nada sobre qué columna es: mandada al modelo, este mapeó `codigo_precio`
+    a la columna de la matrícula y `matricula` a la de "REF. ADIF", y el
+    mapeo quedó cacheado bajo esa firma para siempre. Ilegible = trae
+    glifos crudos y, quitándolos, no queda ni una palabra de tres letras (a
+    veces se cuela un trozo de dato de la fila siguiente, "015-05", que
+    tampoco es nombre de columna). Una celda legible con algún glifo suelto
+    ("PRECIO UNITARIO DE REFERENCIA (cid:11)(cid:227)(cid:12)", el "(€)" en
+    esa fuente) sigue siendo legible y no se toca."""
+    if not _GLIFO_CID_RE.search(celda):
+        return False
+    return not _PALABRA_LEGIBLE_RE.search(_GLIFO_CID_RE.sub("", celda))
+
+
 def _combinar_filas_cabecera(filas_cabecera: list[FILA]) -> FILA:
+    """Una celda de cabecera ilegible (`_celda_cabecera_ilegible`) se deja
+    en `None`, igual que una columna fantasma: si TODA la cabecera es así,
+    `app.extraccion.mapeo_cabecera.cabecera_sin_senal` la trata como una
+    tabla sin cabecera -- nunca se manda ese texto al modelo como si fuera
+    una cabecera ni se cachea un mapeo bajo su firma."""
     if not filas_cabecera:
         return []
     num_columnas = max(len(fila) for fila in filas_cabecera)
@@ -123,7 +178,8 @@ def _combinar_filas_cabecera(filas_cabecera: list[FILA]) -> FILA:
             for fila in filas_cabecera
             if columna < len(fila) and fila[columna] and fila[columna].strip()
         ]
-        cabecera.append(" ".join(trozos) if trozos else None)
+        texto = " ".join(trozos) if trozos else None
+        cabecera.append(None if texto is not None and _celda_cabecera_ilegible(texto) else texto)
     return cabecera
 
 
@@ -146,6 +202,7 @@ def extraer_tablas_pagina(pagina) -> list[TablaExtraida]:
                 filas=filas[indice_datos:],
                 pagina=pagina.page_number,
                 bbox=tuple(tabla.bbox),
+                columnas_x=_columnas_x(tabla),
             )
         )
     return resultado

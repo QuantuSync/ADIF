@@ -255,6 +255,101 @@ def test_documento_0156_hereda_lote_entre_paginas_de_continuacion(db_session):
     assert guardado1.creadas + guardado2.creadas == len(resultado.lineas)
 
 
+def test_documento_0109_continuaciones_heredan_mapeo_y_repuesto_sin_modelo(db_session):
+    # Sesión 2026-09-14: las páginas 2-3 del fixture (p.4-5 del original)
+    # continúan la tabla de la p.1 sin repetir cabecera. Deben abrirse
+    # (localizador), heredar el mapeo de la cabecera por geometría de
+    # columnas -- sin llamar al modelo: el doble revienta si se le llama -- y
+    # tomar el Código del material de la columna REPUESTO (decisión del
+    # cliente), no de la descripción.
+    expediente, lote, documento = _crear_lote(db_session, "6.21/28510.0109", fx.ANEJO_REPUESTO_CONTINUACION_0109)
+    modelo = ProveedorModeloFalso({})
+
+    resultado = procesar_anejo(
+        fx.ANEJO_REPUESTO_CONTINUACION_0109,
+        extraer_texto(fx.ANEJO_REPUESTO_CONTINUACION_0109),
+        documento_origen_id=documento.id,
+        expediente_id=expediente.id,
+        lotes={"1": None},
+        db=db_session,
+        model_provider=modelo,
+    )
+
+    assert [c.numero for c in resultado.localizacion.candidatas] == [1, 2, 3]
+    assert modelo.llamadas == 0
+    codigos = [l["codigo_precio"] for l in resultado.lineas]
+    assert codigos == [f"P-{n}" for n in range(11, 23)]
+    assert all(l["descripcion"] and l["precio_unitario"] for l in resultado.lineas)
+    assert {l["codigo_material"] for l in resultado.lineas} == {"SEMICAMBIO", "AGUJA", "CONTRAAGUJA"}
+    p13 = next(l for l in resultado.lineas if l["codigo_precio"] == "P-13")
+    assert p13["pagina"] == 2
+    assert p13["precio_unitario"] == Decimal("91537.95")
+    assert p13["unidad_medida"] == "€/UD"
+
+
+def test_documento_0016_cabecera_ilegible_no_se_cachea_y_la_matricula_va_a_su_campo(db_session):
+    # Sesión 2026-09-14. El doble devuelve exactamente el mapeo equivocado
+    # que dio el modelo real sobre esta tabla (quedó cacheado en su día):
+    # `codigo_precio` en la matrícula, `matricula` en "REF. ADIF", unidad en
+    # el plano. La cabecera ilegible no debe llegar al prompt ni cachearse;
+    # la corrección matrícula/código debe aplicarse a las DOS páginas (la
+    # segunda reutiliza el mapeo de la primera por firma estructural) y
+    # marcar `codigo_precio` para borrar el valor viejo guardado.
+    from app.extraccion.invalidado import INVALIDADO
+    from app.models import MapeoCabeceraCache
+
+    expediente, lote, documento = _crear_lote(db_session, "6.21/28510.0016", fx.ANEJO_CABECERA_ILEGIBLE_0016)
+    modelo = ProveedorModeloFalso({
+        "codigo_precio": 0, "matricula": 1, "descripcion": 2,
+        "unidad_medida": 3, "cantidad": 4, "precio_unitario": 5,
+    })
+    resultado = procesar_anejo(
+        fx.ANEJO_CABECERA_ILEGIBLE_0016,
+        extraer_texto(fx.ANEJO_CABECERA_ILEGIBLE_0016),
+        documento_origen_id=documento.id,
+        expediente_id=expediente.id,
+        lotes={"1": None},
+        db=db_session,
+        model_provider=modelo,
+    )
+
+    assert all("(cid:" not in prompt for prompt in modelo.prompts)
+    assert db_session.query(MapeoCabeceraCache).count() == 0
+
+    con_matricula = [l for l in resultado.lineas if l["matricula"]]
+    assert len(con_matricula) == 25
+    assert {l["pagina"] for l in con_matricula} == {1, 2}
+    assert all(l["codigo_precio"] is INVALIDADO for l in con_matricula)
+    assert all(l["unidad_medida"] is None for l in con_matricula)
+    primera = next(l for l in con_matricula if l["matricula"] == "642370100")
+    assert primera["cantidad"] == Decimal("30")
+    assert primera["precio_unitario"] == Decimal("9.92")
+    partida = next(l for l in resultado.lineas if (l["descripcion"] or "").startswith("Partida alzada"))
+    assert partida["precio_unitario"] == Decimal("1467.20")
+
+
+def test_nota_de_subsanacion_se_queda_con_la_correccion():
+    # `6.23/28510.0051_ANEJO_3_9d725c710163f3db.pdf`: "Donde aparece:"
+    # 62.171,96 € / "Debiendo ser:" 136.315,00 € para la misma partida.
+    from app.extraccion.pipeline_anejo import _es_nota_de_subsanacion, _quedarse_con_la_correccion
+    from app.extraccion.texto import PaginaTexto
+
+    texto = (
+        "NOTA DE SUBSANACIÓN A LOS ANEJOS DEL PLIEGO\nSe subsana el precio reflejado en los Anejos del PPT\n"
+        "Donde aparece:\nP-0063 Semicambio dcha UD. 0 62.171,96 €\nDebiendo ser:\nP-0063 Semicambio dcha UD. 0 136.315,00"
+    )
+    assert _es_nota_de_subsanacion([PaginaTexto(numero=1, texto=texto)])
+    assert not _es_nota_de_subsanacion([PaginaTexto(numero=1, texto="Plazo de subsanación de la documentación: 3 días")])
+
+    lineas = [
+        {"identificador_lote": "1", "clave_linea": "P-0063", "codigo_precio": "P-0063", "precio_unitario": Decimal("62171.96")},
+        {"identificador_lote": "1", "clave_linea": "abc", "codigo_precio": None, "precio_unitario": Decimal("5")},
+        {"identificador_lote": "1", "clave_linea": "P-0063", "codigo_precio": "P-0063", "precio_unitario": Decimal("136315.00")},
+    ]
+    resultado = _quedarse_con_la_correccion(lineas)
+    assert [l["precio_unitario"] for l in resultado] == [Decimal("5"), Decimal("136315.00")]
+
+
 def test_reprocesar_el_mismo_documento_no_duplica_lineas_ni_repite_llamadas(db_session):
     expediente, lote, documento = _crear_lote(db_session, "6.24/28510.0088", fx.ANEJO_PRECIOS_TRAVIESAS)
 

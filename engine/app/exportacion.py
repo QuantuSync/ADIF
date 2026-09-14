@@ -259,20 +259,19 @@ _EXPLICACIONES_MOTIVO[_CATEGORIA_DUPLICADO_SIN_PERDIDA] = (
     _EXPLICACION_DUPLICADO_SIN_PERDIDA, _RESOLUCION_DUPLICADO_SIN_PERDIDA
 )
 
-# CONTEXTO.md sección 6/7: "Código del material" solo se rellena cuando el
-# sustantivo principal de la descripción casa contra un vocabulario todavía
-# pequeño (BRIDA, PLACA, JUNTA...); ampliarlo con el modelo cuando no casa
-# nada queda fuera de esta sesión (sin ningún caso real sin casar en el
-# corpus de prueba). El resultado es una columna vacía en la mayoría de las
-# filas *por diseño*, no un fallo de extracción -- se explica aquí para que
-# no parezca un defecto del entregable.
+# CONTEXTO.md sección 6/7: de dónde sale "Código del material", explicado
+# para que una celda vacía no parezca un defecto del entregable. Sesión
+# 2026-09-14 (revisión del cliente): la nota decía "vacía en la mayoría de
+# las filas", ya falso (el vocabulario y la vía de modelo la rellenan en
+# torno a dos tercios del catálogo), y no contaba la columna REPUESTO del
+# propio documento, que ahora manda cuando existe.
 _NOTA_CODIGO_MATERIAL = (
-    "La columna \"Código del material\" solo se rellena cuando el sistema reconoce con seguridad la "
-    "primera palabra de la descripción (por ejemplo BRIDA, PLACA, JUNTA, GUANTE, TRAVIESA). Hoy reconoce "
-    "una lista corta de palabras, así que queda vacía en la mayoría de las filas -- no es un fallo de "
-    "extracción ni un dato perdido: la descripción completa del material sí está siempre en la columna "
-    "\"Descripción del material\". Ampliar la lista de palabras reconocidas es un trabajo pendiente, no "
-    "una corrección urgente."
+    "La columna \"Código del material\" se toma de la columna de tipo de pieza del propio cuadro de "
+    "precios cuando el documento la trae (\"REPUESTO\": Semicambio, Aguja, Cruzamiento...). Si no la trae, "
+    "se deriva de la primera palabra de la descripción cuando el sistema la reconoce con seguridad (por "
+    "ejemplo BRIDA, PLACA, JUNTA, TRAVIESA). Una celda vacía significa que no se ha reconocido ninguna "
+    "de las dos -- no es un fallo de extracción ni un dato perdido: la descripción completa del material "
+    "sí está siempre en la columna \"Descripción del material\"."
 )
 
 

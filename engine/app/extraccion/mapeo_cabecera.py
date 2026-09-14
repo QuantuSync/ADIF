@@ -19,9 +19,9 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from app.catalogo import _CODIGO_PRECIO_VALIDO_RE, _MATRICULA_VALIDA_RE
+from app.catalogo import _CODIGO_PRECIO_VALIDO_RE
 from app.extraccion.firma_cabecera import calcular_firma_cabecera
-from app.extraccion.firma_estructural import clasificar_columnas
+from app.extraccion.firma_estructural import clasificar_columnas, tiene_forma_de_matricula
 from app.extraccion.texto import normalizar
 from app.interfaces.model_provider import ModelProvider
 from app.models import MapeoCabeceraCache
@@ -98,7 +98,39 @@ def intentar_mapeo_determinista(cabecera: list[Optional[str]]) -> Optional[dict[
     if not (tiene_obligatorios and tiene_identificador):
         return None
 
-    return {campo: campo_a_columna.get(campo) for campo in CAMPOS}
+    mapeo = {campo: campo_a_columna.get(campo) for campo in CAMPOS}
+    columna_codigo_material = _columna_codigo_material(normalizados, columnas_usadas)
+    if columna_codigo_material is not None:
+        mapeo[CAMPO_CODIGO_MATERIAL] = columna_codigo_material
+    return mapeo
+
+
+# Sesión 2026-09-14, decisión del cliente tras revisar el Excel: cuando el
+# propio documento trae una columna con el TIPO de pieza de cada fila, eso es
+# el "Código del material" del catálogo -- literal del documento, no derivado
+# de la descripción (`app.extraccion.codigo_material`, que sigue siendo la
+# vía para todas las tablas sin esa columna). Verificado contra el corpus
+# real: la única forma existente es la columna "REPUESTO" de los criterios
+# técnicos de repuestos de aparatos de vía (`6.21/28510.0109_ANEJO_
+# 7bfc92005f43e68e.pdf` y los dos CONTRATO de la familia `6.21/28510.0108`,
+# "Semicambio", "Aguja", "Cruzamiento obtuso"...). Coincidencia EXACTA del
+# nombre de columna, nunca "contiene": "repuesto" dentro de otro nombre
+# ("PRECIO DEL REPUESTO") no es esta columna, y el reparto voraz de arriba
+# por longitud de alias le robaría su columna a `precio_unitario`. Campo
+# opcional, fuera de `CAMPOS`: el modelo nunca lo ve ni lo devuelve (cambiar
+# su esquema invalidaría todas las respuestas ya cacheadas sin ningún
+# beneficio -- esta columna solo existe con cabecera legible).
+CAMPO_CODIGO_MATERIAL = "codigo_material"
+_NOMBRES_COLUMNA_CODIGO_MATERIAL = frozenset({"repuesto"})
+
+
+def _columna_codigo_material(normalizados: list[str], columnas_usadas: set[int]) -> Optional[int]:
+    candidatas = [
+        indice
+        for indice, texto in enumerate(normalizados)
+        if texto in _NOMBRES_COLUMNA_CODIGO_MATERIAL and indice not in columnas_usadas
+    ]
+    return candidatas[0] if len(candidatas) == 1 else None
 
 
 _ESQUEMA_MAPEO = {
@@ -264,7 +296,7 @@ def evaluar_coherencia_mapeo(
         ]
         if valores:
             con_forma_valida = sum(
-                1 for valor in valores if _MATRICULA_VALIDA_RE.match(valor.replace(" ", ""))
+                1 for valor in valores if tiene_forma_de_matricula(valor)
             )
             if con_forma_valida / len(valores) < _UMBRAL_COHERENCIA:
                 return (
@@ -405,13 +437,86 @@ def corregir_confusion_precio_cantidad(
     return corregido
 
 
+def completar_matricula_por_contenido(
+    mapeo: dict[str, Optional[int]], filas: list[list[Optional[str]]]
+) -> dict[str, Optional[int]]:
+    """Sesión 2026-09-14 (`6.25/28510.0251_ANEJO_1f2691ba90da3138.pdf` p.23,
+    `6.25/28510.0213_ANEJO_ce2a25e8e58ae967.pdf` p.23): la columna de
+    matrícula se llama "CÓDIGO ADIF" -- ningún alias determinista de
+    `matricula` la reconoce ("codigo" ya lo ha reclamado "CÓDIGO DE
+    PRECIO"), así que el mapeo cacheado la deja sin asignar aunque el 100% de
+    sus valores sean matrículas de 9 dígitos ("594200000", "591000065"...).
+    Con `matricula` sin columna, si hay EXACTAMENTE una columna que ningún
+    otro campo reclama y cuyo contenido es de matrícula
+    (`clasificar_columnas`, mismo criterio que la derivación por contenido),
+    se le asigna. Con cero o más de una, no se adivina."""
+    if mapeo.get("matricula") is not None or not filas:
+        return mapeo
+    reclamadas = {indice for indice in mapeo.values() if indice is not None}
+    candidatas = [
+        indice for indice, tipo in enumerate(clasificar_columnas(filas))
+        if tipo == "matricula" and indice not in reclamadas
+    ]
+    if len(candidatas) != 1:
+        return mapeo
+    completado = dict(mapeo)
+    completado["matricula"] = candidatas[0]
+    return completado
+
+
+_TOLERANCIA_GEOMETRIA = 3.0
+
+
+def heredar_mapeo_por_geometria(
+    mapeo_origen: dict[str, Optional[int]],
+    columnas_origen: tuple,
+    columnas_destino: tuple,
+) -> Optional[dict[str, Optional[int]]]:
+    """Sesión 2026-09-14 (páginas de continuación del anejo `6.21/28510.0109_
+    ANEJO_7bfc92005f43e68e.pdf` y del cuadro de precios `ANEJO_
+    ce1df15b39efdb8c.pdf`, que ahora sí se abren -- ver `app.extraccion.
+    localizador`): una tabla que continúa en la página siguiente no repite
+    su cabecera, pero sus columnas caen exactamente en las mismas posiciones
+    horizontales (verificado: las 8 columnas de la p.4 del anejo coinciden
+    con las de la p.3 a menos de 1 punto). Reutilizar el mapeo de la tabla
+    con cabecera por esa geometría es determinista y no pregunta nada al
+    modelo -- a diferencia del intento retirado (docstring de más abajo, por
+    NÚMERO de columnas, que no garantizaba la misma forma), aquí cada campo
+    mapeado tiene que encontrar en la tabla nueva UNA sola columna con el
+    mismo (x0, x1) de su columna de origen. Si algún campo no la encuentra, o
+    encuentra más de una, no se hereda nada (`None`) y el llamador sigue por
+    el camino de siempre. El llamador valida además el resultado contra las
+    filas reales (`evaluar_coherencia_mapeo`) antes de usarlo."""
+    if not columnas_origen or not columnas_destino:
+        return None
+    resultado: dict[str, Optional[int]] = {}
+    for campo, indice in mapeo_origen.items():
+        if indice is None:
+            resultado[campo] = None
+            continue
+        if indice >= len(columnas_origen) or columnas_origen[indice] is None:
+            return None
+        x0, x1 = columnas_origen[indice]
+        coincidencias = [
+            j
+            for j, columna in enumerate(columnas_destino)
+            if columna is not None
+            and abs(columna[0] - x0) <= _TOLERANCIA_GEOMETRIA
+            and abs(columna[1] - x1) <= _TOLERANCIA_GEOMETRIA
+        ]
+        if len(coincidencias) != 1:
+            return None
+        resultado[campo] = coincidencias[0]
+    return resultado
+
+
 def _columna_parece_matricula(indice: int, filas: list[list[Optional[str]]]) -> bool:
     valores = [
         fila[indice].strip() for fila in filas if indice < len(fila) and fila[indice] and fila[indice].strip()
     ]
     if not valores:
         return False
-    con_forma_matricula = sum(1 for v in valores if _MATRICULA_VALIDA_RE.match(v.replace(" ", "")))
+    con_forma_matricula = sum(1 for v in valores if tiene_forma_de_matricula(v))
     return con_forma_matricula / len(valores) >= _UMBRAL_COHERENCIA
 
 
@@ -421,6 +526,16 @@ def _columna_vacia(indice: int, filas: list[list[Optional[str]]]) -> bool:
     es CERO, la huella de un nombre de cabecera desalineado con sus propios
     datos, no de una columna que a veces trae dato y a veces no."""
     return not any(indice < len(fila) and fila[indice] and fila[indice].strip() for fila in filas)
+
+
+def _columna_sin_forma_de_matricula(indice: int, filas: list[list[Optional[str]]]) -> bool:
+    """Ningún valor de la columna tiene forma de matrícula (9 dígitos) --
+    cero, no "pocos": una columna de matrícula real puede traer huecos o
+    algún valor ilegible, nunca ninguno bueno en toda la tabla."""
+    return not any(
+        indice < len(fila) and fila[indice] and tiene_forma_de_matricula(fila[indice].strip())
+        for fila in filas
+    )
 
 
 def corregir_confusion_matricula_codigo_precio(
@@ -474,8 +589,19 @@ def corregir_confusion_matricula_codigo_precio(
     campos (`_recuperar_descripcion_columna_fantasma` y compañía), aquí sin
     cubrir para `matricula`.
 
+    Cuarta variante, sesión 2026-09-14 (`6.21/28510.0016_ANEJO_
+    e40fc4e4546ec90b.pdf`, tornillería, cabecera en fuente sin mapa
+    Unicode): el modelo pone `codigo_precio` en la columna de la matrícula
+    real ("642190360") y `matricula` en la columna vecina "REF. ADIF"
+    ("RT58", "Pa1", "AsEM8-20"). La columna de `matricula` no está vacía --
+    la comprobación de la tercera variante no la ve --, pero ninguno de sus
+    valores tiene forma de matrícula: es la misma confusión, con otra
+    columna de relleno. Se trata igual que "vacía": una columna asignada a
+    `matricula` sin NINGÚN valor con forma de matrícula no es una matrícula
+    legítima que falte a veces (CONTEXTO.md sección 2), es otra columna.
+
     Zona de riesgo conocida, sin cubrir aquí: el modelo puede producir
-    variantes distintas de estas dos (p.ej. `descripcion` sin columna en vez
+    variantes distintas de estas (p.ej. `descripcion` sin columna en vez
     de `matricula`) en otro reproceso -- ver CONTEXTO.md para la vía
     estructural más robusta (derivar la columna de `matricula`/`precio_
     unitario` de `app.extraccion.firma_estructural.calcular_firma_
@@ -490,6 +616,7 @@ def corregir_confusion_matricula_codigo_precio(
         indice_matricula is not None
         and indice_matricula != indice_codigo_precio
         and not _columna_vacia(indice_matricula, filas)
+        and not _columna_sin_forma_de_matricula(indice_matricula, filas)
     ):
         return mapeo
     if not _columna_parece_matricula(indice_codigo_precio, filas):

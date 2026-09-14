@@ -210,3 +210,22 @@ DOCUMENTO_ESCANEADO_SIN_TEXTO = FIXTURES_DIR / "6.20_28510.0136_ANEJO_2_p1.pdf"
 # transición interna semicambios→cruzamientos es el orden del propio
 # catálogo, no un cambio de lote sin marcar.
 ANEJO_HERENCIA_LOTE_0156 = FIXTURES_DIR / "6.22_28510.0156_ANEJO_herencia_lote_p15-16_25-27.pdf"
+
+# Sesión 2026-09-14 (revisión del cliente sobre el Excel): 3 páginas reales
+# de `6.21/28510.0109_ANEJO_7bfc92005f43e68e.pdf` (criterios técnicos de
+# repuestos de aparatos de vía, 5 lotes) -- p.3, 4 y 5 del original. p.3 trae
+# la cabecera real ("TIPOLOGÍA APARATO | CÓDIGO DEL ELEMENTO | REPUESTO |
+# DESCRIPCIÓN | ...") con P-11/P-12; p.4 y p.5 son continuación sin cabecera
+# (P-13..P-22), con descripciones de 20-40 líneas de prosa técnica por fila:
+# densidad numérica ~0,10, por debajo del umbral de continuación antiguo, así
+# que antes de esta sesión esas dos páginas nunca se abrían.
+ANEJO_REPUESTO_CONTINUACION_0109 = FIXTURES_DIR / "6.21_28510.0109_ANEJO_repuesto_continuacion_p3-5.pdf"
+
+# Misma sesión: 2 páginas reales de `6.21/28510.0016_ANEJO_e40fc4e4546ec90b.pdf`
+# (tornillería, Lote 2 "Anclajes de seguridad") -- p.19 y p.20 del original.
+# La cabecera de la tabla está en una fuente sin mapa Unicode: `pdfplumber`
+# devuelve "(cid:69)(cid:465)..." en vez de "Nº MATRÍCULA", "REF. ADIF",
+# "DESCRIPCIÓN", "PLANO DE REFERENCIA", "CANTIDADES...", "PRECIO". 25
+# anclajes con matrícula (13 + 12) más una partida alzada al final de la
+# p.20.
+ANEJO_CABECERA_ILEGIBLE_0016 = FIXTURES_DIR / "6.21_28510.0016_ANEJO_cabecera_ilegible_p19-20.pdf"

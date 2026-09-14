@@ -32,7 +32,7 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from app.catalogo import _MATRICULA_VALIDA_RE
+from app.catalogo import _MATRICULA_VALIDA_RE, _matricula_recuperable_de_celda_multilinea
 
 _UMBRAL_MATRICULA = 0.5
 _UMBRAL_PRECIO = 0.5
@@ -80,6 +80,22 @@ _REFERENCIA_ALFANUMERICA_RE = re.compile(r"^[A-Za-zÀ-ÿ]{1,4}\d{1,4}(?:[.,]\d{1
 _PRECIO_SIN_SIMBOLO_RE = re.compile(r"^\d{1,3}(?:\.\d{3})*,\d{2}$")
 
 
+def tiene_forma_de_matricula(valor: str) -> bool:
+    """Sesión 2026-09-14 (`6.24/28510.0209_CONTRATO_12d53d58eda5a9e6.pdf`
+    p.95/98): el sello de verificación CSV invertido se cuela en la celda de
+    matrícula ("664510030\\nps", "j.adil\\n664510035", "e\\n664510070 elb") en
+    11 de las 18 filas de la tabla -- la columna bajaba del 50% de valores
+    "con forma de matrícula" y se clasificaba como texto, así que ninguna
+    vía de mapeo la reconocía y 28 matrículas reales quedaban fuera de su
+    campo. Una celda con exactamente un número de 9 dígitos entre ruido
+    cuenta igual que una limpia: es el mismo criterio que ya aplica, celda a
+    celda, `app.catalogo._matricula_recuperable_de_celda_multilinea` al
+    construir la línea; aquí se aplica también al decidir qué columna es."""
+    return bool(_MATRICULA_VALIDA_RE.match(valor.replace(" ", ""))) or (
+        _matricula_recuperable_de_celda_multilinea(valor) is not None
+    )
+
+
 def _parece_precio(valor: str) -> bool:
     # CONTEXTO.md sección 8: "El símbolo € viene dentro de la celda" cubre
     # la mayoría de las tablas del corpus; `_PRECIO_SIN_SIMBOLO_RE` cubre las
@@ -102,7 +118,7 @@ def _clasificar_columna(valores: list[str], total_filas: int) -> str:
     if not valores or len(valores) / total_filas < _UMBRAL_RELLENO_MINIMO:
         return "vacia"
 
-    con_forma_matricula = sum(1 for v in valores if _MATRICULA_VALIDA_RE.match(v.replace(" ", "")))
+    con_forma_matricula = sum(1 for v in valores if tiene_forma_de_matricula(v))
     if con_forma_matricula / len(valores) >= _UMBRAL_MATRICULA:
         return "matricula"
 
