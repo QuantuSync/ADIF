@@ -226,3 +226,47 @@ def test_segundo_intento_no_toca_las_tablas_que_ya_salen():
 
     assert lote_5.bbox == tuple(por_defecto.bbox)
     assert lote_5.filas == por_defecto.extract()[3:]
+
+
+# Sesión 2026-09-15: cuadro de precios de un solo artículo, sin código de
+# precio ni matrícula -- antes se descartaba entero como espurio.
+def test_cuadro_sin_codigo_con_cabecera_de_cuadro_se_extrae_sin_el_pie_de_totales():
+    with pdfplumber.open(fx.PPT_COMPRESOR_SIN_CODIGO_0027) as pdf:
+        tablas = extraer_tablas_pagina(pdf.pages[0])
+
+    assert len(tablas) == 1
+    assert tablas[0].cabecera == ["CONCEPTO", "CANTIDAD", "PRECIO", "TOTAL"]
+    assert tablas[0].filas == [["Compresor", "1", "18.000,00€", "18.000,00€"]]
+
+
+def test_tabla_sin_codigo_necesita_descripcion_cantidad_y_precio_en_la_cabecera():
+    from app.extraccion.tabla import _filas_cuadro_sin_codigo
+
+    # Resumen de presupuesto por lotes (`2.24/28510.0050`, PPT p.9): sin
+    # columna de cantidad no es un cuadro de precios.
+    assert _filas_cuadro_sin_codigo([
+        ["SUMINISTRO DE ADBLUE (SOLUCIÓN DE UREA AL 32,5%)", None],
+        ["TOTAL LOTE 1: Líneas de la Zona Noreste", "35.490,00 €"],
+    ]) is None
+    # Valor estimado del contrato (`2.26/28510.0006`, PPT p.6).
+    assert _filas_cuadro_sin_codigo([
+        ["Presupuesto de licitación:", None, "(A) BASE IMPONIBLE", "IVA: (21%)", "TOTAL CON IVA"],
+        [None, None, "2.740.603,26 €", "575.526,68 €", "3.316.129,94 €"],
+    ]) is None
+
+
+def test_tabla_sin_codigo_se_corta_en_la_primera_fila_sin_descripcion_o_sin_importe():
+    from app.extraccion.tabla import _filas_cuadro_sin_codigo
+
+    filas = [
+        ["Nº", "DESCRIPCIÓN", "UD", "PRECIO", "IMPORTE"],
+        ["1", "SUMINISTRO\nGAÓLEO C", "89.900,00", "0,808", "72.639,20"],
+        [None, None, None, "TOTAL:", "72.639,20"],
+        ["2", "Otra cosa", "1", "5,00", "5,00"],
+    ]
+    assert _filas_cuadro_sin_codigo(filas) == [filas[1]]
+    # "TOTAL..." en la columna de descripción es el pie, aunque traiga importe.
+    assert _filas_cuadro_sin_codigo([
+        ["CONCEPTO", "CANTIDAD", "PRECIO", "TOTAL"],
+        ["TOTAL, IVA no incluido", None, "18.000,00€", "18.000,00€"],
+    ]) is None

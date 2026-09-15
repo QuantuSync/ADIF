@@ -180,13 +180,20 @@ Cada documento cae por la primera etapa que lo resuelva. **No saltes etapas.**
    matrícula), no por densidad: con descripciones largas, una continuación tiene
    la densidad de un párrafo (sesión 2026-09-14). Y una página con tres o más
    líneas que traen a la vez identificador de fila e importe entra aunque la
-   prosa que rodea al cuadro baje su densidad (sesión 2026-09-15).
+   prosa que rodea al cuadro baje su densidad (sesión 2026-09-15), igual que
+   una con una línea que nombra a la vez descripción, cantidad y precio (la
+   cabecera de un cuadro de un solo artículo, misma sesión).
 4. **Extraer la tabla** con `pdfplumber` sobre esas páginas. Si una tabla sale
    sin ninguna fila de datos, segundo intento sin imantar las líneas
    verticales (`snap_x_tolerance` 1): el borde de una tabla vecina puede
    arrastrar el suyo y dejarla sin su primera columna (sesión 2026-09-15). Una
    tabla sin líneas horizontales entre filas sale como una sola fila con un
    valor por línea en cada celda: esos valores nunca se pegan en un número.
+   Una tabla sin ninguna fila con código de precio ni matrícula de 9 dígitos
+   es espuria, salvo que su primera fila nombre en columnas distintas la
+   descripción, la cantidad y el precio: entonces es un cuadro sin código y se
+   leen las filas con descripción e importe hasta el pie de totales (sesión
+   2026-09-15, `docs/sesion-2026-09-15-criterio-28510-y-cuadros-sin-codigo.md`).
 5. **Mapear cabecera → esquema.** Única etapa donde interviene el modelo. Ver sección 6.
 6. **Normalizar y derivar.** Ver secciones 7 y 8.
 
@@ -1681,6 +1688,28 @@ suficientes, no ahora.
   buscar los no confirmados en seguida y los confirmados cada 14 días
   (`SIN_PUBLICAR_REINTENTO_DIAS`, tope `SIN_PUBLICAR_REINTENTOS_POR_CICLO`).
   Un fallo transitorio al reintentar ya no lo pasa a `fallido`.
+- **Criterio de descubrimiento del cliente, y cuadros de precios sin código
+  (sesión 2026-09-15, tercera parte,
+  `docs/sesion-2026-09-15-criterio-28510-y-cuadros-sin-codigo.md`).** El
+  descubrimiento por sindicación ya no mira el órgano de contratación ni la
+  forma exacta del código: entra todo expediente cuyo código contenga los
+  dígitos de `SINDICACION_DEPARTAMENTOS_ADIF` (28510), en cualquier estado
+  (decisión del cliente). Lo que el filtro anterior habría perdido se anota en
+  `codigos_criterio_ampliado` de cada periodo. De los 8 expedientes que
+  entraron sin líneas en la segunda parte, 6 eran un fallo de extracción: un
+  cuadro de uno o pocos artículos sin código de precio ni matrícula se
+  descartaba entero como tabla espuria (sección 5, etapa 4). Los otros dos
+  son `3.24/28510.0126` (el pliego técnico solo da el presupuesto total:
+  límite de origen) y `6.17/28510.0056` (anejos escaneados, sección 15).
+  Aceptar esos cuadros (etapas 3 y 4, sección 5), medido antes de desplegar
+  sobre todo el corpus, recupera 43 tablas en 18 expedientes, 16 de ellos
+  sin ninguna línea, y ninguna tabla que no sea un cuadro de precios. Excel
+  15.067 → 15.308 filas, expedientes con filas 253 → 269, materiales
+  distintos 5.887 → 6.119, 0 perdidos. **Sin terminar al cerrar:** la
+  medición del criterio ampliado exige releer los 26 meses de sindicación (~6
+  h a la velocidad de descarga de la Plataforma); leídos 2 (202609 y
+  202608), 0 expedientes nuevos; los otros 24 quedaron en la cola, un
+  trabajo por mes.
 
 ---
 
@@ -1708,4 +1737,5 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `sesion-2026-09-14-revision-cliente-pliegos.md`,
 `sesion-2026-09-15-verificacion-localizador-tablas.md`,
 `sesion-2026-09-15-expedientes-2026-presidencia.md`,
+`sesion-2026-09-15-criterio-28510-y-cuadros-sin-codigo.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.

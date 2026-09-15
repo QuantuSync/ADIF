@@ -318,3 +318,15 @@ CONTRATO_LOTE4_0112_CON_IMPORTE = FIXTURES_DIR / "6.21_28510.0112_CONTRATO_2_p1-
 # pierde la primera columna de la tabla del LOTE 6 (ver
 # `app.extraccion.tabla._AJUSTES_SEGUNDO_INTENTO`).
 ANEJO_LOTES_5_Y_6_BALASTO_0016 = FIXTURES_DIR / "6.22_28510.0012_ANEJO_1_lotes5_6_p21.pdf"
+
+# Sesión 2026-09-15 (expedientes recuperados sin líneas). Pliego técnico de
+# `3.24/28510.0027`, p.5: "CONCEPTO | CANTIDAD | PRECIO | TOTAL", una fila
+# ("Compresor", 1, 18.000,00€) y el pie de totales -- ni código de precio ni
+# matrícula.
+PPT_COMPRESOR_SIN_CODIGO_0027 = FIXTURES_DIR / "3.24_28510.0027_ANEJO_p5.pdf"
+
+# Mismo encargo. Pliego técnico de `3.24/28510.0132`, p.4: "Concepto |
+# Unidades | Importe" y una fila (caja de resistencia patrón, 1, 16.125,00 €)
+# en una página de prosa con densidad numérica 0,023, por debajo de
+# `app.extraccion.localizador.UMBRAL_DENSIDAD_NUMERICA`.
+PPT_RESISTENCIA_PATRON_0132 = FIXTURES_DIR / "3.24_28510.0132_ANEJO_p4.pdf"

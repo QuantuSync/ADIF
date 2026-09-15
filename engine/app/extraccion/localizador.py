@@ -113,6 +113,26 @@ _IMPORTE_EN_LINEA_RE = re.compile(r"(?<![\d.,])(?:\d{1,3}(?:\.\d{3})+|\d+),\d{2}
 MIN_FILAS_DATO_SIN_CABECERA = 3
 
 
+# Sesión 2026-09-15 (`3.24/28510.0132`, `3.25/28510.0012`): el cuadro de
+# precios de un solo equipo ("Concepto Unidades Importe" y una fila) en una
+# página de prosa queda por debajo de `UMBRAL_DENSIDAD_NUMERICA` y no trae
+# identificadores de fila. Una línea que nombra a la vez descripción, cantidad y
+# precio es la cabecera de ese cuadro; `app.extraccion.tabla` decide después si
+# la tabla lo es de verdad.
+_CABECERA_CUADRO_PALABRAS = (
+    ("descripcion", "concepto", "designacion", "denominacion"),
+    ("cantidad", "unidades", "medicion"),
+    ("precio", "importe"),
+)
+
+
+def _tiene_linea_cabecera_cuadro(texto: str) -> bool:
+    return any(
+        all(any(p in linea for p in palabras) for palabras in _CABECERA_CUADRO_PALABRAS)
+        for linea in map(normalizar, texto.splitlines())
+    )
+
+
 def _identificadores_fila(texto: str) -> int:
     return len(_IDENTIFICADOR_FILA_RE.findall(normalizar_guiones(texto)))
 
@@ -250,6 +270,10 @@ def localizar_paginas_candidatas(paginas: list[PaginaTexto]) -> ResultadoLocaliz
             if _lineas_con_fila_de_datos(pagina.texto) >= MIN_FILAS_DATO_SIN_CABECERA:
                 grupos = _grupos_presentes(normalizar(pagina.texto))
                 candidatas.append(PaginaCandidata(pagina.numero, densidad, grupos, sin_cabecera_legible=True))
+                anterior_es_candidata = True
+            elif _tiene_linea_cabecera_cuadro(pagina.texto):
+                grupos = _grupos_presentes(normalizar(pagina.texto))
+                candidatas.append(PaginaCandidata(pagina.numero, densidad, grupos))
                 anterior_es_candidata = True
             else:
                 anterior_es_candidata = False
