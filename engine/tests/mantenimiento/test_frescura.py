@@ -19,6 +19,7 @@ from app.mantenimiento.frescura import (
     sin_publicar_reintento_desde,
 )
 from app.models import Documento, EstadoExpediente, Expediente, Lote, LineaCatalogo
+from app.schemas import ExpedienteOut
 
 
 def _documento(hash_: str) -> Documento:
@@ -213,6 +214,31 @@ def test_fecha_sin_huso_se_lee_como_utc():
 def test_solo_se_rebusca_lo_que_esta_sin_publicar():
     assert debe_rebuscar_sin_publicar(_expediente(estado=EstadoExpediente.fallido), _PLAZO, _AHORA) is False
     assert sin_publicar_reintento_desde(_expediente(estado=EstadoExpediente.completado), _PLAZO) is None
+
+
+def test_api_distingue_negativo_confirmado_y_de_antes(db_session):
+    confirmado = _expediente(
+        codigo_expediente="6.26/28510.0101", estado=EstadoExpediente.sin_publicar,
+        sin_publicar_en=datetime(2026, 9, 15, tzinfo=timezone.utc), sin_publicar_version_busqueda=VERSION_LOGICA_BUSQUEDA,
+    )
+    de_antes = _expediente(
+        codigo_expediente="6.26/28510.0102", estado=EstadoExpediente.sin_publicar,
+        sin_publicar_en=datetime(2026, 9, 7, 17, 17, tzinfo=timezone.utc),
+    )
+    normal = _expediente(codigo_expediente="6.26/28510.0103", estado=EstadoExpediente.completado)
+    db_session.add_all([confirmado, de_antes, normal])
+    db_session.commit()
+
+    salida = {e.codigo_expediente: ExpedienteOut.model_validate(e).model_dump() for e in (confirmado, de_antes, normal)}
+
+    assert salida["6.26/28510.0101"]["sin_publicar_confirmado"] is True
+    assert salida["6.26/28510.0101"]["sin_publicar_reintento_desde"] == datetime(2026, 9, 29, tzinfo=timezone.utc)
+    assert salida["6.26/28510.0102"]["sin_publicar_confirmado"] is False
+    assert salida["6.26/28510.0102"]["sin_publicar_reintento_desde"].replace(tzinfo=timezone.utc) == datetime(
+        2026, 9, 7, 17, 17, tzinfo=timezone.utc
+    )
+    assert salida["6.26/28510.0103"]["sin_publicar_confirmado"] is None
+    assert salida["6.26/28510.0103"]["sin_publicar_reintento_desde"] is None
 
 
 def test_estampar_descarga_exitosa(db_session):
