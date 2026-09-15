@@ -1668,8 +1668,19 @@ suficientes, no ahora.
   sin líneas: su matriz (departamento 04110) no aparece en la Plataforma. La
   columna "Código de expediente" del Excel solo se rellena si el expediente
   cruza con el Excel de códigos; el código siempre está en "Nº de expediente
-  (documento)". Pendiente: 24 `sin_publicar` más del 28510 buscados antes del
-  arreglo, y si el ciclo debe volver a buscar los `sin_publicar`.
+  (documento)". **Segunda parte, misma sesión:** reintentados los 34
+  `sin_publicar` cuya última búsqueda era anterior al arreglo (el encargo
+  decía 43; ningún dato del sistema da esa cifra): aparecen 22, los 22 del
+  28510 que están en la sindicación, con 710 líneas (515 en el Excel); los
+  12 restantes, 11 de ellos del conjunto de prueba, son negativos
+  confirmados. Y
+  **`sin_publicar` deja de ser definitivo**: `sin_publicar_en` y
+  `sin_publicar_version_busqueda` (migración 0031,
+  `VERSION_LOGICA_BUSQUEDA`) distinguen el negativo confirmado con la
+  búsqueda corregida del que viene de antes. El ciclo semanal vuelve a
+  buscar los no confirmados en seguida y los confirmados cada 14 días
+  (`SIN_PUBLICAR_REINTENTO_DIAS`, tope `SIN_PUBLICAR_REINTENTOS_POR_CICLO`).
+  Un fallo transitorio al reintentar ya no lo pasa a `fallido`.
 
 ---
 
