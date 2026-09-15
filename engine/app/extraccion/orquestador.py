@@ -514,6 +514,27 @@ def _identidades_de_contratos(documentos: list[_Documento]) -> list[tuple[Identi
     return sorted(unicas.values(), key=lambda par: (len(par[0].identificador), par[0].identificador))
 
 
+def _completar_importes_con_contrato(
+    declarado: LoteDeclarado, identidad: IdentidadContrato, documento_id: int
+) -> LoteDeclarado:
+    """Sesión 2026-09-15: el importe que el Contrato de un lote declara de sí
+    mismo completa el que la adjudicación no le da (`6.22/28510.0058`, cuyo
+    único bloque con importe es el RESUELVE con la errata de número). Nunca
+    pisa un importe ya encontrado: solo rellena huecos."""
+    cambios = {}
+    trazas = list(declarado.trazas_importe)
+    for campo, anclado in (
+        ("importe_licitacion", identidad.importe_licitacion),
+        ("importe_adjudicacion", identidad.importe_adjudicacion),
+    ):
+        if anclado is not None and getattr(declarado, campo) is None:
+            cambios[campo] = parsear_importe_es(anclado.valor)
+            trazas.append((campo, documento_id, anclado))
+    if not cambios:
+        return declarado
+    return replace(declarado, trazas_importe=tuple(trazas), **cambios)
+
+
 def _extraer_lotes_declarados_del_expediente(documentos: list[_Documento]) -> _LotesExtraidos:
     """Primer documento (por prioridad de plantilla, no por orden de lista)
     que declare al menos un lote por su nombre gana — mismo criterio que
@@ -595,15 +616,17 @@ def _extraer_lotes_declarados_del_expediente(documentos: list[_Documento]) -> _L
                     f"{baja_contrato} % -- se usa la del Contrato; el adjudicatario y el importe de "
                     "ese bloque de la adjudicación no se atribuyen a este lote"
                 )
-        if cambios:
-            lotes[i] = replace(declarado, **cambios)
+        lotes[i] = _completar_importes_con_contrato(replace(declarado, **cambios), identidad, doc_id)
     for identidad, doc_id in por_identificador.values():
         lotes.append(
-            LoteDeclarado(
-                identificador=identidad.identificador, baja=identidad.baja, importe_licitacion=None,
-                importe_adjudicacion=None, adjudicatario=None,
-                codigo_expediente_lote=identidad.codigo_expediente_lote, pagina=identidad.pagina,
-                fragmento=identidad.fragmento, documento_id=doc_id,
+            _completar_importes_con_contrato(
+                LoteDeclarado(
+                    identificador=identidad.identificador, baja=identidad.baja, importe_licitacion=None,
+                    importe_adjudicacion=None, adjudicatario=None,
+                    codigo_expediente_lote=identidad.codigo_expediente_lote, pagina=identidad.pagina,
+                    fragmento=identidad.fragmento, documento_id=doc_id,
+                ),
+                identidad, doc_id,
             )
         )
     return _LotesExtraidos(
@@ -993,6 +1016,11 @@ def _procesar_lotes_declarados(
             db, lote.id, "baja_declarada", declarado.documento_id or documento_id, declarado.pagina,
             declarado.fragmento, declarado.baja, entidad_tipo="lote",
         )
+        for campo, documento_importe, anclado in declarado.trazas_importe:
+            _traza(
+                db, lote.id, campo, documento_importe, anclado.pagina, anclado.fragmento,
+                getattr(declarado, campo), entidad_tipo="lote",
+            )
     return lotes, motivo_revision
 
 
@@ -1360,13 +1388,13 @@ def ejecutar_extraccion_expediente(
                 # que comparten.
                 identidades_contratos = _identidades_de_contratos(items)
                 codigo_propio = normalizar_codigo_expediente(expediente.codigo_expediente)
-                identidad_propia = next(
+                identidad_propia, documento_identidad_propia = next(
                     (
-                        identidad
-                        for identidad, _ in identidades_contratos
+                        (identidad, documento_id)
+                        for identidad, documento_id in identidades_contratos
                         if normalizar_codigo_expediente(identidad.codigo_expediente_lote) == codigo_propio
                     ),
-                    None,
+                    (None, None),
                 )
                 identificador_implicito = LOTE_UNICO
                 if identidad_propia is not None:
@@ -1390,6 +1418,21 @@ def ejecutar_extraccion_expediente(
                 lote.baja_lote = baja_efectiva
                 lote.importe_licitacion = importe_licitacion
                 lote.importe_adjudicacion = importe_adjudicacion
+                if identidad_propia is not None:
+                    # Sesión 2026-09-15: el importe que su Contrato declara
+                    # completa el que no dieron la adjudicación ni el Anuncio
+                    # (ver `_completar_importes_con_contrato`).
+                    for campo, anclado in (
+                        ("importe_licitacion", identidad_propia.importe_licitacion),
+                        ("importe_adjudicacion", identidad_propia.importe_adjudicacion),
+                    ):
+                        if anclado is not None and getattr(lote, campo) is None:
+                            setattr(lote, campo, parsear_importe_es(anclado.valor))
+                            setattr(expediente, campo, getattr(lote, campo))
+                            _traza(
+                                db, lote.id, campo, documento_identidad_propia, anclado.pagina,
+                                anclado.fragmento, getattr(lote, campo), entidad_tipo="lote",
+                            )
                 if adjudicatario_invalidado:
                     # Encontrado pero no atribuible con confianza (documento
                     # multi-lote ambiguo): a diferencia de "no hay nada

@@ -791,6 +791,47 @@ def test_contrato_contradice_la_baja_que_la_adjudicacion_da_a_su_lote():
     assert "baja del 0,50 % y su Contrato (6.22/28510.0057) declara 10,50 %" in resultado.motivos_por_lote["1"]
 
 
+def test_el_contrato_completa_el_importe_que_la_adjudicacion_no_da_a_su_lote():
+    """Sesión 2026-09-15: `6.22/28510.0058` (LOTE 2) se quedaba sin importe --
+    el único bloque de la Resolución que lo traía es el RESUELVE con la
+    errata, que ya no se atribuye a ningún lote. Su Contrato lo declara, y el
+    de `0057` el suyo; los dos quedan trazados a la página del Contrato."""
+    resultado = _extraer_lotes_declarados_del_expediente([
+        _item(1, TipoDocumento.resolucion_adjudicacion, extraer_texto(fx.RESOLUCION_REFERENCIA_CRUZADA_0058)),
+        _item(2, TipoDocumento.contrato, extraer_texto(fx.CONTRATO_LOTE2_0058_CON_IMPORTE)),
+        _item(3, TipoDocumento.contrato, extraer_texto(fx.CONTRATO_LOTE1_0057_CON_IMPORTE)),
+    ])
+    lotes = {l.identificador: l for l in resultado.lotes}
+    for identificador, documento_id in (("1", 3), ("2", 2)):
+        assert lotes[identificador].importe_licitacion == Decimal("2400000.00")
+        assert lotes[identificador].importe_adjudicacion == Decimal("2400000.00")
+        assert {(c, d, a.pagina) for c, d, a in lotes[identificador].trazas_importe} == {
+            ("importe_licitacion", documento_id, 2), ("importe_adjudicacion", documento_id, 2),
+        }
+    assert lotes["1"].baja == Decimal("0.1050")
+    assert lotes["2"].baja == Decimal("0.0050")
+
+
+def test_el_contrato_no_pisa_el_importe_que_ya_trae_la_adjudicacion():
+    # Tornillería `6.21/28510.0016`: el LOTE 2 ya tiene 15.000,00 € de la
+    # Resolución; aunque su Contrato declarase otro, no se toca.
+    from app.extraccion.orquestador import _completar_importes_con_contrato
+    from app.extraccion.campos_pcsp import CampoAnclado
+    from app.extraccion.lotes import IdentidadContrato, LoteDeclarado
+
+    declarado = LoteDeclarado(
+        identificador="2", baja=None, importe_licitacion=None, importe_adjudicacion=Decimal("15000.00"),
+        adjudicatario=None, codigo_expediente_lote="6.21/28510.0016", pagina=1, fragmento="",
+    )
+    identidad = IdentidadContrato(
+        identificador="2", codigo_expediente_lote="6.21/28510.0016", baja=None, pagina=1, fragmento="",
+        importe_adjudicacion=CampoAnclado(valor="99.000,00", pagina=2, fragmento="Base imponible 99.000,00 €"),
+    )
+    completado = _completar_importes_con_contrato(declarado, identidad, 7)
+    assert completado.importe_adjudicacion == Decimal("15000.00")
+    assert completado.trazas_importe == ()
+
+
 def _crear_familia_0122(db_session, codigo_expediente: str):
     return _crear_expediente_con_documentos(
         db_session, codigo_expediente,
@@ -1325,3 +1366,23 @@ def test_detectar_numero_lotes_pcsp_ignora_pliego_de_clausulas_administrativas()
     )
 
     assert _detectar_numero_lotes_pcsp([item]) is None
+
+
+def test_sin_documento_de_lotes_el_contrato_propio_da_el_importe_de_su_lote(db_session):
+    """Sesión 2026-09-15: `6.21/28510.0112` no tiene adjudicación; su lote
+    (LOTE 4) sale de su Contrato, y ahora también su importe (710.000,00 €),
+    trazado a la p.2 del Contrato."""
+    expediente = _crear_expediente_con_documentos(
+        db_session, "6.21/28510.0112",
+        [("CONTRATO_1", fx.CONTRATO_LOTE5_0113), ("CONTRATO_2", fx.CONTRATO_LOTE4_0112_CON_IMPORTE)],
+    )
+    ejecutar_extraccion_expediente(db_session, _StorageDirecta(), SimpleNamespace(expediente_id=expediente.id))
+
+    lote = db_session.query(Lote).filter_by(expediente_id=expediente.id).one()
+    assert (lote.identificador_lote, lote.importe_adjudicacion) == ("4", Decimal("710000.00"))
+    db_session.refresh(expediente)
+    assert expediente.importe_adjudicacion == Decimal("710000.00")
+    traza = db_session.query(TrazaOrigen).filter_by(
+        entidad_tipo="lote", entidad_id=lote.id, campo="importe_adjudicacion"
+    ).one()
+    assert traza.pagina == 2

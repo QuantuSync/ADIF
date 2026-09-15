@@ -200,6 +200,29 @@ def test_identidad_de_contrato_tornilleria_baja_ofertada_de():
     assert (lote2.identificador, lote2.codigo_expediente_lote) == ("2", "6.21/28510.0016")
 
 
+def test_identidad_de_contrato_trae_el_importe_de_su_lote():
+    # Sesión 2026-09-15: "Ascendiendo el importe de licitación del lote 2 a
+    # 2.400.000,00 € (IVA excluido)" y "CUARTO. El importe del contrato es de:
+    # - Base imponible ... 2.400.000,00 €", en la p.2.
+    lote2 = extraer_identidad_contrato(extraer_texto(fx.CONTRATO_LOTE2_0058_CON_IMPORTE))
+    assert lote2.importe_licitacion.valor == "2.400.000,00"
+    assert lote2.importe_adjudicacion.valor == "2.400.000,00"
+    assert lote2.importe_adjudicacion.pagina == 2
+    assert "Base imponible" in lote2.importe_adjudicacion.fragmento
+
+
+def test_importe_de_licitacion_de_otro_numero_de_lote_no_se_toma():
+    # El Contrato del LOTE 2 de `6.21/28510.0016` dice "del lote 1" en sus
+    # antecedentes (errata): no es el importe de licitación de su lote por
+    # lo que dice el texto, así que no se usa.
+    texto = _CABECERA_CONTRATO_TORNILLERIA_LOTE2 + (
+        "\nAscendiendo el importe de licitación del lote 1 a 15.000,00 € (IVA excluido) y un valor estimado de "
+        "15.000,00 €.\n"
+    )
+    lote2 = extraer_identidad_contrato([PaginaTexto(numero=1, texto=texto)])
+    assert lote2.importe_licitacion is None
+
+
 def test_documento_sin_contrato_no_declara_identidad():
     assert extraer_identidad_contrato(extraer_texto(fx.PROPUESTA_LC27_UTE)) is None
 

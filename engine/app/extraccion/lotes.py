@@ -122,6 +122,26 @@ _REFERENCIA_A_OTRO_LOTE_RE = re.compile(r"adjudicatario\s+del\s*$", re.IGNORECAS
 # Contratos del corpus que traen las dos cosas).
 _DISTANCIA_MAXIMA_CONTRATO_LOTE = 300
 
+# Importes que un Contrato firmado declara de su propio lote (sesión
+# 2026-09-15, `6.22/28510.0058`: la única adjudicación que traía su importe es
+# el RESUELVE con la errata de número, que ya no se atribuye a ningún lote).
+# Cláusula CUARTA, "El importe del contrato es de: - Base imponible ....
+# 2.400.000,00 €": medido sobre los 98 expedientes que conocen su lote, 47
+# Contratos propios la traen, y en los 24 que ya tenían importe de
+# adjudicación por la adjudicación o el Anuncio, coincide siempre.
+_IMPORTE_DEL_CONTRATO_RE = re.compile(
+    r"importe\s+del\s+contrato\s+es\s+de\s*:?\s*-?\s*Base\s+imponible[\s.]*?(\d{1,3}(?:\.\d{3})*,\d{2})\s*€",
+    re.IGNORECASE,
+)
+# Antecedentes, "Ascendiendo el importe de licitación del lote 2 a
+# 2.400.000,00 € (IVA excluido)". Solo si el número es el del propio Contrato:
+# el de `6.21/28510.0016` (LOTE 2) dice "del lote 1" (docstring de
+# `extraer_identidad_contrato`).
+_LICITACION_DEL_LOTE_RE = re.compile(
+    r"importe\s+de\s+licitaci[oó]n\s+del\s+lote\s*(\d{1,2})\s+a\s+(\d{1,3}(?:\.\d{3})*,\d{2})\s*€\s*\(IVA\s+excluido\)",
+    re.IGNORECASE,
+)
+
 # Código propio del lote: con etiqueta ("EXPEDIENTE Nº", "Nº DE EXPEDIENTE:")
 # o, verificado en `6.25/28510.0019` (LOTE 1: "...MATERIAL AUXILIAR.
 # 6.25/28510.0039:"), sin ninguna etiqueta -- el código pelado justo después
@@ -204,6 +224,9 @@ class LoteDeclarado:
     # Documento del que sale el lote cuando no es el documento de lotes
     # elegido por el orquestador (un lote que solo conoce su Contrato).
     documento_id: Optional[int] = None
+    # Importes que completó el Contrato del lote (campo, documento, dónde):
+    # el orquestador los traza aparte de la baja.
+    trazas_importe: tuple[tuple[str, int, CampoAnclado], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -217,6 +240,11 @@ class IdentidadContrato:
     baja: Optional[Decimal]
     pagina: int
     fragmento: str
+    # Lo que el Contrato dice de su propio importe (ver
+    # `_IMPORTE_DEL_CONTRATO_RE`), anclado a su página y fragmento; `valor`
+    # es el literal del documento.
+    importe_licitacion: Optional[CampoAnclado] = None
+    importe_adjudicacion: Optional[CampoAnclado] = None
 
 
 @dataclass(frozen=True)
@@ -309,14 +337,33 @@ def extraer_identidad_contrato(paginas: list[PaginaTexto]) -> Optional[Identidad
         if m_lote is None:
             return None
         baja = extraer_baja_declarada(paginas, tipo_documento=TipoDocumento.contrato)
+        importe_licitacion, importe_adjudicacion = _importes_del_contrato(paginas[:3], m_lote.group(1))
         return IdentidadContrato(
             identificador=m_lote.group(1),
             codigo_expediente_lote=m.group(1),
             baja=baja.baja if baja is not None else None,
             pagina=pagina.numero,
             fragmento=(baja.fragmento if baja is not None else pagina.texto[m.start():m_lote.end()]).strip(),
+            importe_licitacion=importe_licitacion,
+            importe_adjudicacion=importe_adjudicacion,
         )
     return None
+
+
+def _importes_del_contrato(
+    paginas: list[PaginaTexto], identificador: str
+) -> tuple[Optional[CampoAnclado], Optional[CampoAnclado]]:
+    """Importe de licitación y del contrato (el adjudicado) que el Contrato
+    declara de su propio lote, en su cabecera, anclados a su página."""
+    licitacion = adjudicacion = None
+    for pagina in paginas:
+        m = _IMPORTE_DEL_CONTRATO_RE.search(pagina.texto)
+        if m and adjudicacion is None and _importe_o_none(m.group(1)) is not None:
+            adjudicacion = CampoAnclado(valor=m.group(1), pagina=pagina.numero, fragmento=m.group(0).strip())
+        m = _LICITACION_DEL_LOTE_RE.search(pagina.texto)
+        if m and licitacion is None and m.group(1) == identificador and _importe_o_none(m.group(2)) is not None:
+            licitacion = CampoAnclado(valor=m.group(2), pagina=pagina.numero, fragmento=m.group(0).strip())
+    return licitacion, adjudicacion
 
 
 def extraer_lotes_declarados(
