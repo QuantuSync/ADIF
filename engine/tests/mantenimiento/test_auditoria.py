@@ -387,6 +387,39 @@ def test_importe_licitacion_compartido_entre_expedientes_distintos(db_session):
     assert set(hallazgo["expedientes"]) == {"6.20/28510.0041", "6.20/28510.0042"}
 
 
+def test_el_mismo_lote_en_el_principal_y_en_su_expediente_no_da_hallazgo(db_session):
+    # Sesión 2026-09-15: `6.22/28510.0033` (principal) y `0058` (su LOTE 2)
+    # guardan el mismo lote, con el importe que declara su Contrato.
+    principal = _expediente(db_session, codigo="6.22/28510.0033")
+    lote_2 = _expediente(db_session, codigo="6.22/28510.0058")
+    documento = _vincular_documento(db_session, principal.id)
+    _vincular_documento(db_session, lote_2.id, documento=documento)
+    for expediente in (principal, lote_2):
+        _lote(db_session, expediente.id, identificador="2", importe_licitacion=Decimal("2400000"),
+              codigo_expediente_lote="6.22/28510.0058")
+
+    resultado = ejecutar_auditoria(db_session, _trabajo(db_session))
+
+    categorias = {h["categoria"] for h in resultado["hallazgos"]}
+    assert "importe_licitacion_compartido_entre_expedientes" not in categorias
+
+
+def test_lotes_distintos_con_el_mismo_importe_del_mismo_documento_si_dan_hallazgo(db_session):
+    principal = _expediente(db_session, codigo="6.22/28510.0033")
+    lote_2 = _expediente(db_session, codigo="6.22/28510.0058")
+    documento = _vincular_documento(db_session, principal.id)
+    _vincular_documento(db_session, lote_2.id, documento=documento)
+    _lote(db_session, principal.id, identificador="1", importe_licitacion=Decimal("2400000"),
+          codigo_expediente_lote="6.22/28510.0057")
+    _lote(db_session, lote_2.id, identificador="2", importe_licitacion=Decimal("2400000"),
+          codigo_expediente_lote="6.22/28510.0058")
+
+    resultado = ejecutar_auditoria(db_session, _trabajo(db_session))
+
+    categorias = {h["categoria"] for h in resultado["hallazgos"]}
+    assert "importe_licitacion_compartido_entre_expedientes" in categorias
+
+
 def test_importe_licitacion_distinto_entre_expedientes_no_da_hallazgo(db_session):
     exp1 = _expediente(db_session, codigo="6.20/28510.0041")
     exp2 = _expediente(db_session, codigo="6.20/28510.0042")

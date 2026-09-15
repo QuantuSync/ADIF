@@ -145,8 +145,8 @@ Consecuencias:
 | Dato | Origen |
 |---|---|
 | Baja de lote | Declarada en texto en la propuesta LC.27 y en el contrato. Se extrae, no se calcula. |
-| Importe de licitación | Anuncio PCSP: *Presupuesto base de licitación → Importe (sin impuestos)*. LC.27: tabla de presupuesto. |
-| Importe adjudicado | Anuncio PCSP: *Importes de Adjudicación → Importe total ofertado (sin impuestos)*. |
+| Importe de licitación | Anuncio PCSP: *Presupuesto base de licitación → Importe (sin impuestos)*. LC.27: tabla de presupuesto. Si falta, el Contrato del lote: *"Ascendiendo el importe de licitación del lote N a X € (IVA excluido)"* (sesión 2026-09-15). |
+| Importe adjudicado | Anuncio PCSP: *Importes de Adjudicación → Importe total ofertado (sin impuestos)*. Si falta, el Contrato del lote: *"El importe del contrato es de: Base imponible X €"* (sesión 2026-09-15; coincide con la adjudicación en los 24 casos en que hay las dos). |
 | Precio unitario licitado | Cuadro de precios unitarios del anejo. |
 | Precio unitario adjudicado | Derivado. |
 
@@ -178,8 +178,15 @@ Cada documento cae por la primera etapa que lo resuelva. **No saltes etapas.**
    numérica. Reduce el trabajo antes de gastar nada. Una página que continúa una
    tabla ya abierta entra por traer identificadores de fila (código de precio o
    matrícula), no por densidad: con descripciones largas, una continuación tiene
-   la densidad de un párrafo (sesión 2026-09-14).
-4. **Extraer la tabla** con `pdfplumber` sobre esas páginas.
+   la densidad de un párrafo (sesión 2026-09-14). Y una página con tres o más
+   líneas que traen a la vez identificador de fila e importe entra aunque la
+   prosa que rodea al cuadro baje su densidad (sesión 2026-09-15).
+4. **Extraer la tabla** con `pdfplumber` sobre esas páginas. Si una tabla sale
+   sin ninguna fila de datos, segundo intento sin imantar las líneas
+   verticales (`snap_x_tolerance` 1): el borde de una tabla vecina puede
+   arrastrar el suyo y dejarla sin su primera columna (sesión 2026-09-15). Una
+   tabla sin líneas horizontales entre filas sale como una sola fila con un
+   valor por línea en cada celda: esos valores nunca se pegan en un número.
 5. **Mapear cabecera → esquema.** Única etapa donde interviene el modelo. Ver sección 6.
 6. **Normalizar y derivar.** Ver secciones 7 y 8.
 
@@ -624,16 +631,11 @@ suficientes, no ahora.
   su código), guarda solo su lote y se queda con las tablas que no declaran
   lote, salvo el anejo de criterios del conjunto (decisión del cliente,
   tercera parte de `docs/sesion-2026-09-14-revision-cliente-pliegos.md`).
-- **Abierto al cerrar la sesión 2026-09-14 (tercera parte):** revisar la
-  pasada completa F11 (primera con "Lote nº1" y los motivos de expediente
-  de lote corregidos) y compararla con F10; generar el Excel y la
-  comparación de materiales distintos contra el estado de partida
-  (encargo del cliente: "es el número que dice si se pierde algo"); la
-  tabla "LOTE 6: RAM NORTE" de `6.22/28510.0016` (ANEJO_1 p.21) que
-  `pdfplumber` no detecta; el residuo del localizador en los Contratos de
-  `0122` y en el ANEJO de `6.24/28510.0064` (p.115-119); el anejo de
-  criterios se guarda una vez por documento y expediente (volumen, no
-  hueco).
+- **Abierto al cerrar la sesión 2026-09-14 (tercera parte): cerrado en la
+  sesión 2026-09-15** (`docs/sesion-2026-09-15-verificacion-localizador-
+  tablas.md`), ver la entrada de esa sesión al final de esta sección. Sigue
+  en pie: el anejo de criterios se guarda una vez por documento y expediente
+  (volumen, no hueco).
 - **`expedientes.aviso_sindicacion` existe en la API pero no se muestra
   todavía en la web** — pendiente menor de la sesión de criterios del
   cliente (`docs/decisiones-cliente.md` sección 26).
@@ -1616,6 +1618,45 @@ suficientes, no ahora.
   al cerrar, sin revisar. **Sin hacer:** el Excel final y la comparación de
   materiales distintos con el estado final (la última, D → E5, dio 5.512 →
   5.519, sin material perdido). 766 tests.
+- **Verificación de la pasada completa, tablas que no entraban y
+  pendientes antiguos (sesión 2026-09-15,
+  `docs/sesion-2026-09-15-verificacion-localizador-tablas.md`).** F11 = F12
+  byte a byte. Los motivos de expediente de lote se cumplen (0 de 98). "Lote
+  nº1" se lee bien, pero destapó un defecto de idempotencia: las líneas que
+  un pedido heredó de su matriz en una pasada antigua no se borraban nunca
+  (la poda las deja fuera a propósito) y las marcas de origen
+  (`heredado_de_matriz`, `lote_heredado_de_pagina_anterior`,
+  `lote_del_expediente`) no se recalculaban ("un `None` no pisa"): `0207`
+  (LOTE 1) mostraba P-03/P-04 del LOTE 2. Ahora las marcas se recalculan en
+  cada pasada y `podar_lineas_heredadas_obsoletas` borra las heredadas que la
+  herencia ya no escribe. **La premisa del localizador era falsa**: abre las
+  páginas de `0064` y de los Contratos de `0122`; lo que falla en `0122` es
+  `pdfplumber` (tabla sin líneas horizontales → una fila con 41 códigos), sin
+  pérdida de material porque el anejo trae el mismo cuadro limpio. Medido:
+  246 → 10 páginas con filas que el localizador no abre; arregladas las 4
+  que perdían material ("Mat." como marcador: carril de `6.21/28510.0041`;
+  cuadros de balasto por debajo de la densidad mínima); quedan 6, ninguna
+  con material que falte. **"LOTE 6: RAM
+  NORTE"** sí se detectaba, pero sin su primera columna: el borde de la
+  tabla vecina arrastra el suyo al "imantar" líneas; segundo intento con
+  `snap_x_tolerance` 1 solo para tablas descartadas (recupera exactamente esa
+  en todo el corpus). Una celda con varios valores, uno por línea, ya no se
+  lee como un número (600.200.201 en `6.21/28510.0152`); una regresión de la
+  primera versión de esa regla (30 precios de `0108`-`0113` a 4-5 € en F14)
+  se corrigió y verificó en la misma sesión. **`6.22/28510.0058` y otros
+  lotes sin importe**: el Contrato propio lo declara ("El importe del
+  contrato es de: Base imponible X") y ahora rellena los huecos, nunca pisa
+  (lotes propios sin importe de adjudicación 40 → 17; en 4 lotes sin baja
+  declarada, con los dos importes ya distintos, la baja se deriva de ellos
+  como en otros 83 lotes). Pendiente de decisión del cliente: las 2.161
+  líneas de lotes no declarados (categoría del Resumen, y si ~65 materiales
+  que solo están ahí deben verse en el Excel). Pendiente sin tocar:
+  `trazas_origen` duplica las trazas de lote en cada pasada (7.848 filas de
+  `baja_declarada` para 440 distintas), contra el invariante 9.
+  **Sin terminar al cerrar**: la pasada final F16 terminó pero no se revisó,
+  y el Excel final y su comparación de materiales distintos no se hicieron
+  (última medida, F13: 5.519 → 5.463, sin material perdido de la base de
+  datos).
 
 ---
 
@@ -1641,4 +1682,5 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `sesion-2026-09-12-defecto-mapeo-calidad-interfaz-rendimiento.md`,
 `sesion-2026-09-12-huecos-determinismo-ingesta.md`,
 `sesion-2026-09-14-revision-cliente-pliegos.md`,
+`sesion-2026-09-15-verificacion-localizador-tablas.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.
