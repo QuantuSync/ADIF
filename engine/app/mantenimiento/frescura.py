@@ -59,7 +59,7 @@ VERSION_LOGICA_EXTRACCION = "2026-09-14.3"
 # de búsqueda en la Plataforma cuyo "sin resultados" es de fiar. Hasta el
 # arreglo de límite de tasa (commit `eeab48b`, desplegado hacia las 20:00 UTC
 # del 2026-09-07) un timeout o un bloqueo se leía como "no publicado": de 34
-# `sin_publicar` de esa época, reintentados, aparecieron varios publicados.
+# `sin_publicar` de esa época, reintentados, 22 estaban publicados.
 # `Expediente.sin_publicar_version_busqueda` guarda con qué versión se
 # confirmó cada negativo; uno sin versión o con otra distinta de esta viene
 # de antes y se vuelve a buscar en el próximo ciclo. Sube este valor si
