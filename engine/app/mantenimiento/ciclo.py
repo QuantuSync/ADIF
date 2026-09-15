@@ -19,17 +19,24 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.interfaces.document_storage import DocumentStorage
 from app.interfaces.model_provider import ModelProvider
 from app.mantenimiento.auditoria import TIPO_TRABAJO as TIPO_TRABAJO_AUDITORIA
-from app.mantenimiento.frescura import debe_descargar, debe_extraer
+from app.mantenimiento.frescura import (
+    debe_descargar,
+    debe_extraer,
+    debe_rebuscar_sin_publicar,
+    sin_publicar_confirmado,
+    sin_publicar_reintento_desde,
+)
 from app.models import Documento, DocumentoExpediente, EstadoExpediente, Expediente, TrabajoCola
 from app.queue import ejecutar_trabajo, encolar_trabajo, tomar_siguiente_trabajo
 from app.sindicacion.descubrimiento import descubrir_novedades
@@ -54,6 +61,12 @@ class ResumenCiclo:
     saltados_descarga: int = 0
     saltados_extraccion: int = 0
     trabajos_drenados: int = 0
+    # Sesión 2026-09-15 (`_reintentar_sin_publicar`): búsquedas lanzadas de
+    # nuevo, las que tocaban pero no cupieron en el tope, y las que aún
+    # están dentro de su plazo.
+    sin_publicar_reintentados: int = 0
+    sin_publicar_aplazados: int = 0
+    sin_publicar_en_plazo: int = 0
     duracion_segundos: float = 0.0
     # Resumen completo de app.sindicacion.descubrimiento.ResumenDescubrimiento
     # (o {"error": ...} si el descubrimiento falló) — None si estaba
@@ -75,6 +88,9 @@ class ResumenCiclo:
             "saltados_descarga": self.saltados_descarga,
             "saltados_extraccion": self.saltados_extraccion,
             "trabajos_drenados": self.trabajos_drenados,
+            "sin_publicar_reintentados": self.sin_publicar_reintentados,
+            "sin_publicar_aplazados": self.sin_publicar_aplazados,
+            "sin_publicar_en_plazo": self.sin_publicar_en_plazo,
             "duracion_segundos": round(self.duracion_segundos, 3),
             "descubrimiento": self.descubrimiento,
             "auditoria": self.auditoria,
@@ -114,6 +130,35 @@ def _documentos_por_expediente(db: Session, expedientes: list[Expediente]) -> di
     for expediente_id, doc in filas:
         resultado.setdefault(expediente_id, []).append(doc)
     return resultado
+
+
+def _reintentar_sin_publicar(db: Session, resumen: ResumenCiclo) -> None:
+    """Sesión 2026-09-15: `sin_publicar` deja de ser definitivo. Hasta ahora
+    el ciclo lo excluía siempre (arriba sigue fuera del bucle normal: sin
+    documentos, `debe_descargar` lo buscaría en cada ciclo), así que un
+    negativo falso -- los del bloqueo de la Plataforma de antes del
+    2026-09-07 -- dejaba el expediente fuera para siempre. Aquí se vuelve a
+    buscar el que ya toca (`debe_rebuscar_sin_publicar`): primero los no
+    confirmados y los más antiguos, hasta `sin_publicar_reintentos_por_ciclo`.
+    La descarga encadena su extracción sola si lo encuentra, y el drenaje de
+    abajo la recoge igual que cualquier otra."""
+    plazo = timedelta(days=settings.sin_publicar_reintento_dias)
+    ahora = datetime.now(timezone.utc)
+    candidatos = (
+        db.execute(select(Expediente).where(Expediente.estado == EstadoExpediente.sin_publicar))
+        .scalars()
+        .all()
+    )
+    pendientes = sorted(
+        (e for e in candidatos if debe_rebuscar_sin_publicar(e, plazo, ahora)),
+        key=lambda e: (sin_publicar_confirmado(e), sin_publicar_reintento_desde(e, plazo), e.id),
+    )
+    tope = max(settings.sin_publicar_reintentos_por_ciclo, 0)
+    for expediente in pendientes[:tope]:
+        encolar_trabajo(db, tipo="descargar_expediente", expediente_id=expediente.id)
+    resumen.sin_publicar_reintentados = min(len(pendientes), tope)
+    resumen.sin_publicar_aplazados = len(pendientes) - resumen.sin_publicar_reintentados
+    resumen.sin_publicar_en_plazo = len(candidatos) - len(pendientes)
 
 
 def ejecutar_ciclo_mantenimiento(
@@ -189,6 +234,8 @@ def ejecutar_ciclo_mantenimiento(
             resumen.extracciones_lanzadas += 1
         else:
             resumen.saltados_extraccion += 1
+
+    _reintentar_sin_publicar(db, resumen)
 
     # Drenaje síncrono: ejecuta aquí mismo todo lo que se acaba de encolar
     # (y cualquier otro trabajo pendiente que hubiera quedado suelto en la

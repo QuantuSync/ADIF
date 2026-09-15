@@ -44,6 +44,11 @@ class EstadoExpediente(str, enum.Enum):
     # reintentar, el documento no está publicado". Distinto también de
     # `pendiente_revision`: no hace falta un humano, no es trabajo pendiente,
     # es un expediente fuera de alcance del sistema.
+    # Sesión 2026-09-15: no es definitivo. Un negativo puede venir de un fallo
+    # que la búsqueda no reconoció (el bloqueo de la Plataforma del
+    # 2026-09-07), o el expediente publicarse después: el ciclo de
+    # mantenimiento lo vuelve a buscar (`sin_publicar_en`,
+    # `sin_publicar_version_busqueda`, más abajo).
     sin_publicar = "sin_publicar"
     # CONTEXTO.md sección 26, criterio del cliente: solo bajas de material por
     # lotes; un contrato de obra (campo "Tipo de Contrato" del Anuncio PCSP
@@ -252,6 +257,16 @@ class Expediente(Base):
     # documentado y una exportación futura puede traer otros.
     estado_contrato_sap = Column(String(64), nullable=True)
     estado_contrato_sap_actualizado_en = Column(DateTime(timezone=True), nullable=True)
+    # Migración 0031 (sesión 2026-09-15): cuándo y con qué versión de la
+    # lógica de búsqueda (`app.mantenimiento.frescura.VERSION_LOGICA_BUSQUEDA`)
+    # confirmó la Plataforma que no tiene este expediente. Solo con
+    # `estado == sin_publicar`; se vacían en cuanto una descarga lo encuentra.
+    # Versión `None` = negativo anterior al arreglo de límite de tasa, no
+    # confirmado. El ciclo de mantenimiento vuelve a buscar los no
+    # confirmados en seguida y los confirmados pasado un plazo
+    # (`sin_publicar_reintento_dias`): `sin_publicar` ya no es definitivo.
+    sin_publicar_en = Column(DateTime(timezone=True), nullable=True)
+    sin_publicar_version_busqueda = Column(String(32), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),

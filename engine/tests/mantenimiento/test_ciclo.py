@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from app.mantenimiento.auditoria import TIPO_TRABAJO as TIPO_TRABAJO_AUDITORIA
 from app.mantenimiento.auditoria import ejecutar_auditoria
 from app.mantenimiento.ciclo import ejecutar_ciclo_mantenimiento
-from app.mantenimiento.frescura import VERSION_LOGICA_EXTRACCION, huella_documentos
+from app.mantenimiento.frescura import VERSION_LOGICA_BUSQUEDA, VERSION_LOGICA_EXTRACCION, huella_documentos
 from app.models import Documento, DocumentoExpediente, EstadoExpediente, EstadoTrabajo, Expediente, TrabajoCola
 from app.queue import encolar_trabajo
 
@@ -144,13 +144,83 @@ def test_forzar_global_reprocesa_aunque_este_al_dia(db_session):
     assert ejecutados == [exp.id]
 
 
-def test_sin_publicar_se_excluye_del_ciclo(db_session):
-    _crear_expediente(db_session, estado=EstadoExpediente.sin_publicar)
+def _descargas_por_expediente(db) -> list[int]:
+    return [
+        t.expediente_id
+        for t in db.query(TrabajoCola).filter(TrabajoCola.tipo == "descargar_expediente").order_by(TrabajoCola.id)
+    ]
+
+
+def test_sin_publicar_confirmado_dentro_de_plazo_no_se_rebusca(db_session):
+    _crear_expediente(
+        db_session, estado=EstadoExpediente.sin_publicar,
+        sin_publicar_en=datetime.now(timezone.utc) - timedelta(days=3),
+        sin_publicar_version_busqueda=VERSION_LOGICA_BUSQUEDA,
+    )
     trabajo = _trabajo_ciclo(db_session)
 
-    resumen = ejecutar_ciclo_mantenimiento(db_session, storage=None, model_provider=None, manejadores={}, trabajo=trabajo)
+    resumen = ejecutar_ciclo_mantenimiento(
+        db_session, storage=None, model_provider=None, manejadores=dict(_AUDITORIA), trabajo=trabajo,
+    )
 
+    # Fuera del bucle normal de descarga/extracción, y sin búsqueda nueva.
     assert resumen["expedientes_evaluados"] == 0
+    assert resumen["sin_publicar_reintentados"] == 0
+    assert resumen["sin_publicar_en_plazo"] == 1
+    assert _descargas_por_expediente(db_session) == []
+
+
+def test_sin_publicar_se_rebusca_si_no_esta_confirmado_o_vencio_el_plazo(db_session):
+    """Sesión 2026-09-15: `sin_publicar` ya no es definitivo -- los negativos
+    de antes del arreglo de límite de tasa (sin versión) se vuelven a buscar
+    en seguida, y los confirmados, pasado el plazo."""
+    sin_confirmar = _crear_expediente(
+        db_session, sufijo="0001", estado=EstadoExpediente.sin_publicar,
+        sin_publicar_en=datetime.now(timezone.utc) - timedelta(days=1),
+    )
+    vencido = _crear_expediente(
+        db_session, sufijo="0002", estado=EstadoExpediente.sin_publicar,
+        sin_publicar_en=datetime.now(timezone.utc) - timedelta(days=30),
+        sin_publicar_version_busqueda=VERSION_LOGICA_BUSQUEDA,
+    )
+    buscados = []
+
+    def fake_descargar(db, t):
+        buscados.append(t.expediente_id)
+        return {}
+
+    trabajo = _trabajo_ciclo(db_session)
+    resumen = ejecutar_ciclo_mantenimiento(
+        db_session, storage=None, model_provider=None,
+        manejadores={"descargar_expediente": fake_descargar, **_AUDITORIA}, trabajo=trabajo,
+    )
+
+    assert resumen["sin_publicar_reintentados"] == 2
+    # El no confirmado va primero aunque sea más reciente.
+    assert buscados == [sin_confirmar.id, vencido.id]
+
+
+def test_sin_publicar_respeta_el_tope_por_ciclo(db_session, monkeypatch):
+    monkeypatch.setattr("app.mantenimiento.ciclo.settings.sin_publicar_reintentos_por_ciclo", 2)
+    viejos = [
+        _crear_expediente(
+            db_session, sufijo=f"000{i}", estado=EstadoExpediente.sin_publicar,
+            sin_publicar_en=datetime.now(timezone.utc) - timedelta(days=40 - i),
+            sin_publicar_version_busqueda=VERSION_LOGICA_BUSQUEDA,
+        )
+        for i in range(3)
+    ]
+    trabajo = _trabajo_ciclo(db_session)
+
+    resumen = ejecutar_ciclo_mantenimiento(
+        db_session, storage=None, model_provider=None,
+        manejadores={"descargar_expediente": lambda db, t: {}, **_AUDITORIA}, trabajo=trabajo,
+    )
+
+    assert resumen["sin_publicar_reintentados"] == 2
+    assert resumen["sin_publicar_aplazados"] == 1
+    # Los dos más antiguos; el tercero, al ciclo siguiente.
+    assert _descargas_por_expediente(db_session) == [viejos[0].id, viejos[1].id]
 
 
 def test_reintento_de_ciclo_huerfano_no_reextrae_lo_ya_hecho_en_este_ciclo(db_session):

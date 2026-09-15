@@ -118,7 +118,30 @@ export type Expediente = {
   aviso_sindicacion: string | null;
   aviso_ingesta_manual: string | null;
   aviso_conflicto_documento_manual: string | null;
+  // Sesión 2026-09-15: `sin_publicar` ya no es definitivo. `confirmado` es
+  // null si el expediente no está sin publicar; false si el negativo viene
+  // de una búsqueda anterior al arreglo del 2026-09-07 (pudo ser un bloqueo
+  // de la Plataforma). `reintento_desde` null = el próximo ciclo lo busca.
+  sin_publicar_en: string | null;
+  sin_publicar_confirmado: boolean | null;
+  sin_publicar_reintento_desde: string | null;
 };
+
+function fechaCorta(iso: string): string {
+  return new Date(iso).toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
+// Qué se sabe del "no publicado" y cuándo se vuelve a buscar.
+function textoSinPublicar(exp: Expediente): string {
+  const reintento =
+    exp.sin_publicar_reintento_desde && new Date(exp.sin_publicar_reintento_desde) > new Date()
+      ? `se vuelve a buscar a partir del ${fechaCorta(exp.sin_publicar_reintento_desde)}`
+      : "se vuelve a buscar en el próximo ciclo";
+  if (exp.sin_publicar_confirmado) {
+    return `confirmado el ${fechaCorta(exp.sin_publicar_en!)}; ${reintento}`;
+  }
+  return `sin confirmar (búsqueda anterior al arreglo del 07/09/2026); ${reintento}`;
+}
 
 const INTERVALO_SONDEO_MS = 3000;
 
@@ -684,7 +707,9 @@ export default function ExpedientesPanel({
               Plataforma (CONTEXTO.md sección 22) — no hay licitación, adjudicación
               ni baja que mostrar, ni descarga o extracción que tenga sentido
               lanzar por defecto. Una fila de una sola línea, sin las columnas
-              vacías de la tabla principal. */}
+              vacías de la tabla principal. Sesión 2026-09-15: no es
+              definitivo -- cada fila dice si el negativo está confirmado y
+              cuándo lo vuelve a buscar el ciclo de mantenimiento. */}
           {noPublicados.length > 0 && (
             <details className="grupo-no-publicados">
               <summary className="chip">
@@ -696,10 +721,11 @@ export default function ExpedientesPanel({
                   <li key={exp.id} className="fila-no-publicado">
                     <span className="mono">{exp.codigo_expediente}</span>
                     <EstadoTexto estado={exp.estado} />
+                    <span className="muted">{textoSinPublicar(exp)}</span>
                     <button
                       onClick={() => lanzarDescarga(exp.id)}
                       disabled={lanzando === exp.id}
-                      title="Ya se comprobó que no está en la Plataforma — reintentar solo tiene sentido si ha podido publicarse desde entonces"
+                      title="Busca ahora en la Plataforma, sin esperar al ciclo de mantenimiento"
                       className="btn btn-ghost btn-sm"
                     >
                       Reintentar

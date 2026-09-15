@@ -1,10 +1,12 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
-from app.models import ModeloPrecio
+from app.config import settings
+from app.mantenimiento.frescura import sin_publicar_confirmado, sin_publicar_reintento_desde
+from app.models import EstadoExpediente, ModeloPrecio
 
 
 class LoteOut(BaseModel):
@@ -102,7 +104,29 @@ class ExpedienteOut(BaseModel):
     # `Expediente.estado_contrato_sap`.
     estado_contrato_sap: Optional[str] = None
     estado_contrato_sap_actualizado_en: Optional[datetime] = None
+    # Sesión 2026-09-15: un `sin_publicar` ya no es definitivo -- ver
+    # `Expediente.sin_publicar_en` y `app.mantenimiento.frescura`.
+    sin_publicar_en: Optional[datetime] = None
+    sin_publicar_version_busqueda: Optional[str] = None
     created_at: datetime
+
+    @computed_field
+    @property
+    def sin_publicar_confirmado(self) -> Optional[bool]:
+        """`None` si no está `sin_publicar`; si lo está, si el negativo se
+        confirmó con la lógica de búsqueda vigente o viene de antes."""
+        if self.estado != EstadoExpediente.sin_publicar:
+            return None
+        return sin_publicar_confirmado(self)
+
+    @computed_field
+    @property
+    def sin_publicar_reintento_desde(self) -> Optional[datetime]:
+        """Desde cuándo lo vuelve a buscar el ciclo de mantenimiento. `None`
+        si no está `sin_publicar` o si no consta cuándo se marcó (toca ya)."""
+        if self.estado != EstadoExpediente.sin_publicar or self.sin_publicar_en is None:
+            return None
+        return sin_publicar_reintento_desde(self, timedelta(days=settings.sin_publicar_reintento_dias))
 
 
 class DocumentoOut(BaseModel):

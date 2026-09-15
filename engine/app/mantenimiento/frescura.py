@@ -13,7 +13,7 @@ a `app.scraping.job.ejecutar_scraping_expediente` y a
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Iterable, Optional
 
 from sqlalchemy import func
@@ -55,6 +55,17 @@ from app.models import Documento, EstadoExpediente, Expediente, LineaCatalogo
 # propios distintos.
 VERSION_LOGICA_EXTRACCION = "2026-09-14.3"
 
+# Sesión 2026-09-15 (expedientes de 2026 que faltaban): versión de la lógica
+# de búsqueda en la Plataforma cuyo "sin resultados" es de fiar. Hasta el
+# arreglo de límite de tasa (commit `eeab48b`, desplegado hacia las 20:00 UTC
+# del 2026-09-07) un timeout o un bloqueo se leía como "no publicado": de 34
+# `sin_publicar` de esa época, reintentados, aparecieron varios publicados.
+# `Expediente.sin_publicar_version_busqueda` guarda con qué versión se
+# confirmó cada negativo; uno sin versión o con otra distinta de esta viene
+# de antes y se vuelve a buscar en el próximo ciclo. Sube este valor si
+# cambia la forma de decidir que la Plataforma no tiene un expediente.
+VERSION_LOGICA_BUSQUEDA = "2026-09-07"
+
 
 def huella_documentos(documentos: Iterable[Documento]) -> str:
     """Hash estable del conjunto de documentos de un expediente, por
@@ -86,6 +97,45 @@ def debe_descargar(expediente: Expediente, documentos: list[Documento]) -> bool:
     fuera de esta sesión (se puede seguir haciendo a mano, con el endpoint
     ya existente `POST /expedientes/{id}/descargar`)."""
     return not documentos
+
+
+def sin_publicar_confirmado(expediente: Expediente) -> bool:
+    """El negativo de un `sin_publicar` se confirmó con la lógica de búsqueda
+    vigente (`VERSION_LOGICA_BUSQUEDA`). `False` si viene de una búsqueda
+    anterior, que pudo confundir un bloqueo de la Plataforma con "no
+    publicado". Esta y `sin_publicar_reintento_desde` solo leen `estado`,
+    `sin_publicar_en` y `sin_publicar_version_busqueda`: valen igual para el
+    esquema de la API (`app.schemas.ExpedienteOut`), con `estado` en texto."""
+    return (
+        expediente.estado == EstadoExpediente.sin_publicar
+        and expediente.sin_publicar_version_busqueda == VERSION_LOGICA_BUSQUEDA
+    )
+
+
+def _con_tz(momento: datetime) -> datetime:
+    # SQLite (tests) devuelve las fechas sin huso; se guardan siempre en UTC.
+    return momento.replace(tzinfo=timezone.utc) if momento.tzinfo is None else momento
+
+
+def sin_publicar_reintento_desde(expediente: Expediente, plazo: timedelta) -> Optional[datetime]:
+    """Desde cuándo toca volver a buscar un `sin_publicar` en la Plataforma.
+    Un negativo sin confirmar (ver `sin_publicar_confirmado`) toca desde que
+    se marcó, es decir, ya (sin fecha: `datetime.min`); uno confirmado,
+    `plazo` después de confirmarse -- que la Plataforma no tuviera un expediente hace dos
+    semanas no dice que siga sin tenerlo (puede publicarse después, o el
+    negativo ser un fallo que la búsqueda aún no reconoce). `None` si el
+    expediente no está `sin_publicar`."""
+    if expediente.estado != EstadoExpediente.sin_publicar:
+        return None
+    if expediente.sin_publicar_en is None:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    marcado = _con_tz(expediente.sin_publicar_en)
+    return marcado + plazo if sin_publicar_confirmado(expediente) else marcado
+
+
+def debe_rebuscar_sin_publicar(expediente: Expediente, plazo: timedelta, ahora: datetime) -> bool:
+    desde = sin_publicar_reintento_desde(expediente, plazo)
+    return desde is not None and desde <= ahora
 
 
 def debe_extraer(
