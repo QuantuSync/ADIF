@@ -1611,6 +1611,11 @@ def construir_lineas_desde_tabla(
     return resultado
 
 
+# De dónde viene la línea o su lote, no un dato del documento: se recalculan
+# en cada pasada (ver `guardar_lineas_catalogo`).
+_MARCAS_DE_ORIGEN = ("heredado_de_matriz", "lote_heredado_de_pagina_anterior", "lote_del_expediente")
+
+
 @dataclass(frozen=True)
 class ResultadoGuardadoCatalogo:
     creadas: int
@@ -2196,7 +2201,7 @@ def guardar_lineas_catalogo(
             # otro campo, la downgradearía de vuelta a la clave de matrícula
             # si esta llamada es la que no trae `codigo_precio`.
             for campo, valor in datos.items():
-                if campo == "clave_linea":
+                if campo == "clave_linea" or campo in _MARCAS_DE_ORIGEN:
                     continue
                 if campo in ("precio_adjudicado", "baja_lote", "motivo_revision"):
                     # Los tres se recalculan desde cero en cada pasada --
@@ -2254,6 +2259,19 @@ def guardar_lineas_catalogo(
                     setattr(existente, campo, None)
                 elif valor is not None:
                     setattr(existente, campo, valor)
+            # Sesión 2026-09-15: las marcas de origen también se recalculan en
+            # cada pasada, como `motivo_revision` -- con "un `None` no pisa",
+            # un `True` de una pasada vieja se quedaba para siempre: las
+            # líneas de `4.25/28510.0207` que heredó un día de su matriz
+            # seguían marcadas como heredadas (y fuera de la poda) cuando ya
+            # salían de su propio documento. Dentro de una misma pasada
+            # (`ids_vivas`: ya la escribió otro documento), `True` solo si
+            # todos los que la escriben están de acuerdo.
+            for campo in _MARCAS_DE_ORIGEN:
+                nuevo = True if datos.get(campo) else None
+                if existente.id in ids_vivas and not getattr(existente, campo):
+                    nuevo = None
+                setattr(existente, campo, nuevo)
             for duplicado in duplicados_por_firma:
                 # Filas heredadas de antes de este arreglo para la misma
                 # pieza física: se absorben en `existente` (los campos que
@@ -2266,7 +2284,7 @@ def guardar_lineas_catalogo(
                 # exactamente el motivo obsoleto que el arreglo de arriba
                 # acaba de limpiar.
                 for campo in LineaCatalogo.__table__.columns.keys():
-                    if campo in ("id", "lote_id", "clave_linea", "motivo_revision"):
+                    if campo in ("id", "lote_id", "clave_linea", "motivo_revision", *_MARCAS_DE_ORIGEN):
                         continue
                     valor_heredado = getattr(duplicado, campo)
                     if valor_heredado is not None and getattr(existente, campo) is None:
@@ -2389,6 +2407,28 @@ def podar_lineas_obsoletas_de_documento(
     # que `_limpiar_huerfana_superada`/la fusión por firma de arriba): el
     # volumen esperado por documento es bajo, y así el `Session` queda
     # sincronizado sin depender de `synchronize_session`.
+    for linea in candidatas:
+        db.delete(linea)
+    db.flush()
+    return len(candidatas)
+
+
+def podar_lineas_heredadas_obsoletas(db: Session, expediente_id: int, ids_conservar: frozenset[int]) -> int:
+    """Sesión 2026-09-15: el complemento de `podar_lineas_obsoletas_de_documento`
+    para las líneas heredadas de la matriz, que esa poda deja fuera. La
+    herencia (`app.extraccion.herencia_matriz`) reescribe en cada pasada
+    todas las que el pedido hereda (`ids_conservar`), y cualquier documento
+    propio que vuelva a escribir una le quita la marca
+    (`guardar_lineas_catalogo`); una línea que sigue marcada y no está en
+    `ids_conservar` ya no la produce nadie. Solo la llama el orquestador
+    cuando la herencia se pudo decidir en esta pasada."""
+    consulta = db.query(LineaCatalogo).filter(
+        LineaCatalogo.expediente_id == expediente_id,
+        LineaCatalogo.heredado_de_matriz.is_(True),
+    )
+    if ids_conservar:
+        consulta = consulta.filter(LineaCatalogo.id.notin_(ids_conservar))
+    candidatas = consulta.all()
     for linea in candidatas:
         db.delete(linea)
     db.flush()

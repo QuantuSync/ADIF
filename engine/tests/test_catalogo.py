@@ -9,6 +9,7 @@ from app.catalogo import (
     construir_linea_catalogo,
     construir_lineas_desde_tabla,
     guardar_lineas_catalogo,
+    podar_lineas_heredadas_obsoletas,
     podar_lineas_obsoletas_de_documento,
 )
 from app.extraccion.invalidado import INVALIDADO
@@ -2490,6 +2491,104 @@ def test_podar_lineas_obsoletas_de_documento_sin_nada_que_podar(db_session):
     db_session.commit()
 
     assert podar_lineas_obsoletas_de_documento(db_session, expediente.id, 50, frozenset()) == 0
+
+
+# --- Sesión 2026-09-15: marcas de origen y líneas heredadas obsoletas ---
+
+
+def test_podar_lineas_heredadas_obsoletas_borra_las_que_la_herencia_ya_no_escribe(db_session):
+    # `4.25/28510.0207`: heredó de `0124` las cuatro líneas del cuadro común
+    # antes de saber que es el LOTE 1; ya no hereda, y las P-03/P-04 del
+    # LOTE 2 seguían en su lote.
+    expediente = Expediente(codigo_expediente="6.24/28510.8882")
+    db_session.add(expediente)
+    db_session.commit()
+    sigue = _linea_directa(db_session, expediente_id=expediente.id, documento_origen_id=50, clave="f",
+                           heredado_de_matriz=True)
+    vieja = _linea_directa(db_session, expediente_id=expediente.id, documento_origen_id=50, clave="g",
+                           heredado_de_matriz=True)
+    propia = _linea_directa(db_session, expediente_id=expediente.id, documento_origen_id=50, clave="h")
+
+    podadas = podar_lineas_heredadas_obsoletas(db_session, expediente.id, frozenset({sigue.id}))
+
+    assert podadas == 1
+    assert db_session.get(LineaCatalogo, vieja.id) is None
+    assert db_session.get(LineaCatalogo, sigue.id) is not None
+    assert db_session.get(LineaCatalogo, propia.id) is not None
+
+
+def test_podar_lineas_heredadas_obsoletas_sin_herencia_borra_todas_las_heredadas(db_session):
+    expediente = Expediente(codigo_expediente="6.24/28510.8881")
+    db_session.add(expediente)
+    db_session.commit()
+    heredada = _linea_directa(db_session, expediente_id=expediente.id, documento_origen_id=50, clave="i",
+                              heredado_de_matriz=True)
+
+    assert podar_lineas_heredadas_obsoletas(db_session, expediente.id, frozenset()) == 1
+    assert db_session.get(LineaCatalogo, heredada.id) is None
+
+
+def _linea_guante(lote, **marcas):
+    mapeo = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": None, "cantidad": None,
+             "precio_unitario": 2}
+    linea = construir_linea_catalogo(["P-001", "Guante", "24,00"], mapeo, 11, None, lote.expediente_id, None, 0)
+    linea.update(marcas)
+    return linea
+
+
+def test_guardar_lineas_catalogo_recalcula_las_marcas_de_origen_en_cada_pasada(db_session):
+    # Con "un `None` no pisa un valor ya conocido", un `True` de una pasada
+    # vieja se quedaba para siempre.
+    lote = _lote(db_session)
+    guardar_lineas_catalogo(db_session, lote.id, [_linea_guante(
+        lote, heredado_de_matriz=True, lote_heredado_de_pagina_anterior=True, lote_del_expediente=True
+    )])
+    db_session.commit()
+
+    guardar_lineas_catalogo(db_session, lote.id, [_linea_guante(
+        lote, lote_heredado_de_pagina_anterior=None, lote_del_expediente=None
+    )])
+    db_session.commit()
+
+    linea = db_session.query(LineaCatalogo).filter_by(lote_id=lote.id).one()
+    assert linea.heredado_de_matriz is None
+    assert linea.lote_heredado_de_pagina_anterior is None
+    assert linea.lote_del_expediente is None
+
+
+def test_guardar_lineas_catalogo_marca_de_origen_en_la_misma_pasada_exige_acuerdo(db_session):
+    # Dos documentos del mismo expediente escriben la misma línea en la
+    # misma pasada: uno lee su lote en una cabecera, el otro lo hereda de
+    # la página anterior. La línea no es "de lote heredado".
+    lote = _lote(db_session)
+    primera = guardar_lineas_catalogo(db_session, lote.id, [_linea_guante(lote)])
+    db_session.commit()
+
+    guardar_lineas_catalogo(
+        db_session, lote.id, [_linea_guante(lote, lote_heredado_de_pagina_anterior=True)],
+        ids_vivas=primera.ids_tocadas,
+    )
+    db_session.commit()
+
+    linea = db_session.query(LineaCatalogo).filter_by(lote_id=lote.id).one()
+    assert linea.lote_heredado_de_pagina_anterior is None
+
+
+def test_guardar_lineas_catalogo_no_rellena_marcas_de_origen_desde_la_fila_absorbida(db_session):
+    lote = _lote(db_session)
+    vieja = LineaCatalogo(
+        expediente_id=lote.expediente_id, lote_id=lote.id, clave_linea="hash-viejo", orden_aparicion=0,
+        descripcion="Guante", precio_unitario=Decimal("24.00"), heredado_de_matriz=True,
+    )
+    db_session.add(vieja)
+    db_session.commit()
+
+    guardar_lineas_catalogo(db_session, lote.id, [_linea_guante(lote)])
+    db_session.commit()
+
+    linea = db_session.query(LineaCatalogo).filter_by(lote_id=lote.id).one()
+    assert linea.clave_linea == "P-001"
+    assert linea.heredado_de_matriz is None
 
 
 # --- Sesión 2026-09-14 (revisión del cliente sobre el Excel) ---
