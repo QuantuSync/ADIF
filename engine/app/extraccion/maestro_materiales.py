@@ -69,6 +69,7 @@ import openpyxl
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.extraccion.unidad_medida import es_unidad_conocida
 from app.models import LineaCatalogo, MaestroMaterial
 
 COLUMNA_MATRICULA = "Material"
@@ -258,7 +259,14 @@ def completar_unidades_desde_maestro(db: Session) -> ResumenCompletarUnidades:
     maestros = db.execute(
         select(MaestroMaterial).where(MaestroMaterial.matricula.in_(matriculas))
     ).scalars().all()
-    unidad_por_matricula = {m.matricula: m.unidad_medida for m in maestros if m.unidad_medida}
+    # Sesión 2026-09-15 (cuarta parte): la unidad del maestro pasa el mismo
+    # vocabulario que la del documento -- "001" (una fila del maestro) no es
+    # una unidad.
+    unidad_por_matricula = {
+        m.matricula: m.unidad_medida
+        for m in maestros
+        if m.unidad_medida and es_unidad_conocida(m.unidad_medida)
+    }
 
     for linea in lineas:
         unidad_maestro = unidad_por_matricula.get(linea.matricula)

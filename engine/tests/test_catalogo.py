@@ -2857,3 +2857,76 @@ def test_cantidad_y_unidad_juntas_en_la_columna_de_unidad():
     assert linea["unidad_medida"] == "m"
     assert linea["precio_unitario"] == Decimal("49.39")
     assert "misma celda" in linea["motivo_revision"]
+
+
+def test_unidad_que_no_es_una_unidad_conocida_se_descarta_con_motivo():
+    # `6.24/28510.0125_CONTRATO_80584833e422c1ec.pdf` p.99: el mapeo del
+    # modelo tomaba la columna "CARACTERÍSTICAS" por unidad.
+    mapeo = {"codigo_precio": None, "matricula": 0, "descripcion": 1, "unidad_medida": 3, "cantidad": 4,
+             "precio_unitario": 2}
+    fila = ["666050009", "Pigtail SC/UPC 0,9 mm.", "4,09 €", "Fibra monomodo", "1", None]
+
+    linea = construir_linea_catalogo(fila, mapeo, 99, None, 1, None, 0)
+
+    assert linea["unidad_medida"] is None
+    assert linea["matricula"] == "666050009"
+    assert linea["precio_unitario"] == Decimal("4.09")
+    assert "no ser una unidad conocida" in linea["motivo_revision"]
+    assert "'Fibra monomodo'" in linea["motivo_revision"]
+
+
+def test_precio_mensual_en_la_columna_de_unidad_se_descarta():
+    # `4.26/28510.0020_ANEJO_8f2a33dd634a5454.pdf` p.14: el documento escribe
+    # "Precio mensual" en la columna "Ud.".
+    mapeo = {"codigo_precio": 0, "matricula": None, "descripcion": 8, "unidad_medida": 4, "cantidad": 5,
+             "precio_unitario": 11}
+    fila = ["P-1", None, None, None, "Precio\nmensual", "48", None, "",
+            "Responsable Técnico de los Trabajos", "", "", "10.805,22 €"]
+
+    linea = construir_linea_catalogo(fila, mapeo, 14, None, 1, None, 0)
+
+    assert linea["unidad_medida"] is None
+    assert linea["cantidad"] == Decimal("48")
+    assert "no ser una unidad conocida" in linea["motivo_revision"]
+
+
+def test_cabecera_repetida_en_mitad_de_la_tabla_no_es_una_linea():
+    # `4.26/28510.0031_ANEJO_2296757d97322ecf.pdf` p.7: segunda sección de la
+    # tabla con su propia fila de cabecera.
+    mapeo = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": 2, "cantidad": None,
+             "precio_unitario": 4}
+    cabecera = ["CODIGO", "DESCRIPCIÓN", "UNIDAD", "MEDICIÓN", "Precio\nUnitario", "IMPORTE"]
+    datos = ["P2.01", "Mantenimiento anual de cada\nestufa *", "Ud.", "12", "580,00 €", "6.960,00 €"]
+
+    assert construir_linea_catalogo(cabecera, mapeo, 7, None, 1, None, 0) is None
+    linea = construir_linea_catalogo(datos, mapeo, 7, None, 1, None, 1)
+    assert linea["descripcion"] == "Mantenimiento anual de cada estufa *"
+    assert linea["precio_unitario"] == Decimal("580.00")
+
+
+def test_partida_alzada_con_un_signo_delante_en_la_columna_de_matricula():
+    # `6.25/28510.0257_CONTRATO` p.20: "CÓDIGO ADIF" mapeada como matrícula por
+    # contenido, y el texto de la partida alzada cae en ella con el "∅" del
+    # sello lateral de verificación delante.
+    mapeo = {"codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": 3, "cantidad": 7,
+             "precio_unitario": 8}
+    fila = ["ilav/\nP-22", "∅\nPartida alzada a justificar para imprevistos", None, None, None, None, None, None,
+            "25.200,00 €"]
+
+    linea = construir_linea_catalogo(fila, mapeo, 20, None, 1, None, 0)
+
+    assert linea["descripcion"] == "Partida alzada a justificar para imprevistos"
+    assert linea["matricula"] is None
+    assert linea["codigo_precio"] == "P-22"
+    assert linea["precio_unitario"] == Decimal("25200.00")
+
+
+def test_material_llamado_como_una_etiqueta_con_precio_no_es_cabecera():
+    mapeo = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": 2, "cantidad": None,
+             "precio_unitario": 3}
+    fila = ["P-1", "Concepto", "Ud.", "12,00 €"]
+
+    linea = construir_linea_catalogo(fila, mapeo, 1, None, 1, None, 0)
+
+    assert linea is not None
+    assert linea["precio_unitario"] == Decimal("12.00")
