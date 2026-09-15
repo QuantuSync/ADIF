@@ -80,7 +80,7 @@ function ResumenCiclo({ resultado }: { resultado: Record<string, unknown> | null
       {descubrimiento && !descubrimiento.error && (
         <div className="muted">
           sindicación {String(descubrimiento.periodo)}: {String(descubrimiento.expedientes_adif_total)} de ADIF,{" "}
-          {String(descubrimiento.expedientes_filtrados)} tras el filtro de departamento,{" "}
+          {String(descubrimiento.expedientes_filtrados)} con el departamento en el código,{" "}
           {String(descubrimiento.expedientes_con_cambio_estado)} con cambio de estado
         </div>
       )}
