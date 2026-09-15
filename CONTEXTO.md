@@ -1657,6 +1657,19 @@ suficientes, no ahora.
   y el Excel final y su comparación de materiales distintos no se hicieron
   (última medida, F13: 5.519 → 5.463, sin material perdido de la base de
   datos).
+- **Expedientes de 2026 del departamento 28510 que faltaban (sesión
+  2026-09-15, `docs/sesion-2026-09-15-expedientes-2026-presidencia.md`).**
+  No era el órgano ni el estado de tramitación: los 15 `6.26/28510.*` estaban
+  descubiertos (Presidencia y Consejo, estados RES/ADJ/EV/PUB). Seis tenían
+  `sin_publicar` por búsquedas del 2026-09-07 anteriores al arreglo de límite
+  de tasa, y el ciclo nunca vuelve a buscar un `sin_publicar`. Al buscarlos de
+  nuevo aparecieron los seis: +57 líneas (5 de ellos con líneas). Los 5
+  pedidos de EPIs de Presidencia (`0047`/`0048`/`0049`/`0068`/`0073`) siguen
+  sin líneas: su matriz (departamento 04110) no aparece en la Plataforma. La
+  columna "Código de expediente" del Excel solo se rellena si el expediente
+  cruza con el Excel de códigos; el código siempre está en "Nº de expediente
+  (documento)". Pendiente: 24 `sin_publicar` más del 28510 buscados antes del
+  arreglo, y si el ciclo debe volver a buscar los `sin_publicar`.
 
 ---
 
@@ -1683,4 +1696,5 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `sesion-2026-09-12-huecos-determinismo-ingesta.md`,
 `sesion-2026-09-14-revision-cliente-pliegos.md`,
 `sesion-2026-09-15-verificacion-localizador-tablas.md`,
+`sesion-2026-09-15-expedientes-2026-presidencia.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.
