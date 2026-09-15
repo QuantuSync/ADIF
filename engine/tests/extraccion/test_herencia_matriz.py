@@ -507,6 +507,42 @@ def test_pedido_real_hereda_al_reprocesar_una_vez_la_matriz_esta_completa(db_ses
     assert pedido.baja_global == Decimal("0.5400")
     assert resultado_pedido["motivo_revision"] is None
 
+
+def test_pedido_real_no_conserva_una_linea_que_ya_no_hereda(db_session):
+    """Sesión 2026-09-15 (`4.25/28510.0207`): una línea que el pedido heredó
+    en una pasada y que la matriz ya no trae no se quedaba para siempre --
+    la poda por documento deja fuera las heredadas a propósito."""
+    pedido = Expediente(codigo_expediente="6.24/28510.0103")
+    db_session.add(pedido)
+    db_session.commit()
+    _crear_documento(
+        db_session, pedido.id, hash_="h-pedido", nombre_archivo="ADJUDICACION_1.pdf",
+        ruta_almacenamiento=str(fx.ANUNCIO_PCSP_CON_MATRIZ), tipo_documento=TipoDocumento.otro,
+    )
+    ejecutar_extraccion_expediente(db_session, _StorageDirecta(), SimpleNamespace(expediente_id=pedido.id))
+    matriz = db_session.query(Expediente).filter_by(codigo_expediente="2.18/04703.0019").one()
+    matriz.estado = EstadoExpediente.completado
+    lote_matriz = Lote(expediente_id=matriz.id, identificador_lote=LOTE_UNICO, baja_lote=Decimal("0.5400"))
+    db_session.add(lote_matriz)
+    db_session.commit()
+    for clave, descripcion in (("P-001", "POLO MANGA CORTA"), ("P-002", "POLO MANGA LARGA")):
+        db_session.add(LineaCatalogo(
+            lote_id=lote_matriz.id, expediente_id=matriz.id, clave_linea=clave, orden_aparicion=0,
+            codigo_precio=clave, descripcion=descripcion, precio_unitario=Decimal("24.00"),
+        ))
+    db_session.commit()
+    ejecutar_extraccion_expediente(db_session, _StorageDirecta(), SimpleNamespace(expediente_id=pedido.id))
+    heredadas = {l.clave_linea: l.id for l in db_session.query(LineaCatalogo).filter_by(expediente_id=pedido.id)}
+    assert set(heredadas) == {"P-001", "P-002"}
+
+    db_session.query(LineaCatalogo).filter_by(expediente_id=matriz.id, clave_linea="P-002").delete()
+    db_session.commit()
+    resultado = ejecutar_extraccion_expediente(db_session, _StorageDirecta(), SimpleNamespace(expediente_id=pedido.id))
+
+    quedan = {l.clave_linea: l.id for l in db_session.query(LineaCatalogo).filter_by(expediente_id=pedido.id)}
+    assert quedan == {"P-001": heredadas["P-001"]}
+    assert resultado["lineas_podadas"] == 1
+
     lineas = db_session.query(LineaCatalogo).filter_by(expediente_id=pedido.id).all()
     assert len(lineas) == 1
     assert lineas[0].heredado_de_matriz is True

@@ -30,7 +30,11 @@ from typing import Optional
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from app.catalogo import guardar_lineas_catalogo, podar_lineas_obsoletas_de_documento
+from app.catalogo import (
+    guardar_lineas_catalogo,
+    podar_lineas_heredadas_obsoletas,
+    podar_lineas_obsoletas_de_documento,
+)
 from app.extraccion.baja import (
     BajaDeclarada,
     elegir_baja_preferida,
@@ -1611,13 +1615,17 @@ def ejecutar_extraccion_expediente(
         # y nunca si las dos fuentes de matriz ya se marcaron en conflicto
         # (`asegurar_cruce_codigos` más arriba): ahí no hay una matriz
         # fiable de la que heredar.
+        ids_heredadas: frozenset[int] = frozenset()
+        herencia_pendiente = False
         if not lotes_declarados and not expediente.matriz_conflicto and expediente.codigo_matriz and lotes:
             lote_pedido = lotes[0]
             if total_lineas == 0 or lote_pedido.baja_lote is None:
                 resolucion = resolver_o_encolar_matriz(db, expediente)
                 if resolucion.estado == EstadoResolucionMatriz.ciclo:
+                    herencia_pendiente = True
                     motivo_revision = _acumular_motivo(motivo_revision, resolucion.motivo)
                 elif resolucion.estado == EstadoResolucionMatriz.en_proceso:
+                    herencia_pendiente = True
                     estado_especial = EstadoExpediente.esperando_matriz
                     motivo_revision = _acumular_motivo(
                         motivo_revision,
@@ -1627,6 +1635,7 @@ def ejecutar_extraccion_expediente(
                     resultado_herencia = intentar_heredar_de_matriz(
                         db, expediente, resolucion.matriz, lote_pedido, total_lineas,
                     )
+                    ids_heredadas = resultado_herencia.ids_tocadas
                     if resultado_herencia.motivo_revision is not None:
                         motivo_revision = _acumular_motivo(motivo_revision, resultado_herencia.motivo_revision)
                     else:
@@ -1637,6 +1646,18 @@ def ejecutar_extraccion_expediente(
                         expediente.importe_licitacion = expediente.importe_licitacion or lote_pedido.importe_licitacion
                         expediente.importe_adjudicacion = expediente.importe_adjudicacion or lote_pedido.importe_adjudicacion
                 db.commit()
+        if not herencia_pendiente:
+            # Sesión 2026-09-15: una línea heredada de la matriz que esta
+            # pasada ya no hereda (el pedido trae ahora su propio cuadro, sabe
+            # cuál es su lote, o la matriz dejó de tenerla) es de una pasada
+            # anterior. `podar_lineas_obsoletas_de_documento` no la toca a
+            # propósito -- apunta a un documento de la matriz --, así que se
+            # quedaba para siempre: las P-03/P-04 del LOTE 2 en el LOTE 1 de
+            # `4.25/28510.0207`, heredadas de `0124` antes de que supiera su
+            # lote. Si la matriz está en proceso o hay un ciclo, se conservan
+            # hasta que la herencia se pueda decidir.
+            lineas_podadas += podar_lineas_heredadas_obsoletas(db, expediente.id, ids_heredadas)
+            db.commit()
 
         if motivo_revision is None and total_lineas == 0:
             if sin_documentos:

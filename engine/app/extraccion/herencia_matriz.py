@@ -86,6 +86,9 @@ class ResultadoHerencia:
     motivo_revision: Optional[str]
     lineas_creadas: int = 0
     lineas_actualizadas: int = 0
+    # Las líneas que esta herencia escribió: el orquestador borra las
+    # heredadas de pasadas anteriores que ya no están aquí.
+    ids_tocadas: frozenset[int] = frozenset()
 
 
 def _forma_ciclo(db: Session, pedido: Expediente, codigo_matriz_normalizado: str) -> bool:
@@ -345,7 +348,8 @@ def intentar_heredar_de_matriz(
     ]
     guardado = guardar_lineas_catalogo(db, lote_pedido.id, lineas_heredadas)
     return ResultadoHerencia(
-        motivo_revision=None, lineas_creadas=guardado.creadas, lineas_actualizadas=guardado.actualizadas
+        motivo_revision=None, lineas_creadas=guardado.creadas, lineas_actualizadas=guardado.actualizadas,
+        ids_tocadas=guardado.ids_tocadas,
     )
 
 
