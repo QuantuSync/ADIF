@@ -167,8 +167,54 @@ grupos y 22 líneas en `4.25/28510.0132`, `6.23/28510.0051` y `6.23/28510.0060`
 documento repite, conocidas desde la sesión 2026-09-14). Desaparecen el grupo
 de `4.26/28510.0031` y el `sin_descripcion`. 863 pruebas.
 
+## Quinta parte — "PERSONALIZADO" y segunda revisión de la columna
+
+**"PERSONALIZADO" no existe como unidad en el sistema.** El encargo pedía
+sacar 129 líneas con esa unidad. No hay ninguna: ni en `lineas_catalogo`
+(34.162 líneas, 35 valores distintos), ni en el Excel exportado antes o
+después de la cuarta parte, ni en el maestro de SAP, ni en el desglose de SAP,
+ni en la caché de código de material. La palabra solo aparece dentro del texto
+técnico de 4 líneas de cascos (`6.21/28510.0149`/`0097`, unidad `UN`). Tampoco
+figuraba en el informe de la cuarta parte. Si llegara a aparecer, la
+validación de vocabulario ya la descartaría con motivo.
+
+**Revisión de los 35 valores, línea a línea contra su material.** Todos
+cuadran (carril en `M`, balasto en `T`/`Txkm`, grasas y cable en `KG`,
+servicios en `Hora`/`Mes`/`UD/día`). Cuatro, discutibles, se llevaron al
+cliente:
+
+| Valor | Líneas | Expedientes | Decisión |
+|---|---:|---|---|
+| Prefijo `€/` (`€/UD`, `€/Ton`, `€/m`, `€/h`, `€/transporte`, `€/Ton*km`, `€/Ton*mes`) | 4.084 | `6.21/28510.0108`-`0113` | Se guarda la unidad sin el prefijo |
+| `dm3**` | 15 | `6.24/28510.0088`, `0114`, `6.25/28510.0221` | Se guarda `dm3`, sin la llamada de nota |
+| `PA` | 66 | 16: `4.26/0020`, `6.20/0080`, `6.24/0088`, `0094`, `0114`, `0130`, `0152`, `0153`, `0175`, `0176`, `0177`, `6.25/0088`, `0125`, `0127`, `0128`, `0129` | Sin decidir: se queda |
+| `P` | 3 | `6.20/28510.0042`, `0046`, `0047` (placa nervada, del maestro de SAP) | Sin decidir: se queda |
+
+`app.extraccion.unidad_medida.limpiar_unidad`, aplicada en `_construir_campos`
+antes de las validaciones. Reprocesados los 9 expedientes (trabajos
+19289-19297, desde el `worker`): mismos ids, lotes, cantidades, precios y
+motivos (huella idéntica); solo cambia la unidad. 32 valores distintos, 0 con
+`€/` o `**`. 873 pruebas.
+
+Auditoría (trabajo 19298): idéntica a la de la cuarta parte (un error, las 11
+parejas conocidas). Excel: 15.303 filas antes y después, cabeceras iguales,
+mismas filas como conjunto; cambian 951 celdas de unidad (887 `€/UD`→`UD`, 15
+`€/m`, 15 `€/Ton`, 15 `€/transporte`, 6 `€/h`, 5 `€/Ton*km`, 5 `€/Ton*mes`, 3
+`dm3**`); materiales distintos 6.118, sin cambios.
+
+**Hallazgo de paso, sin tocar:** el orden del Excel no es total. El desempate
+(`codigo_expediente`, `identificador_lote`, `orden_aparicion`) se repite entre
+documentos de un mismo expediente y lote (`orden_aparicion` empieza en cada
+documento), así que 5 parejas de filas de `0108`/`0109`/`0111` salen en otro
+orden entre dos exportaciones seguidas. Como `consultar_catalogo` pagina con
+`OFFSET`, una pareja empatada en el borde de una página podría salir repetida
+o faltar (esta vez no ha pasado). Arreglo propuesto: `LineaCatalogo.id` como
+último desempate.
+
 ## Pendiente
 
+- Decisión del cliente sobre `PA` y `P`.
+- Orden no total del catálogo/Excel (ver la quinta parte).
 - `4.26/28510.0005` y `6.26/28510.0004`: por qué no dan ninguna línea.
 - En `4.26/28510.0031`, el mapeo determinista (cachés 295-297) no reconoce
   "MEDICIÓN" como cantidad: las filas P1/P2.xx de ese cuadro salen sin
