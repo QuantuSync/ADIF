@@ -507,6 +507,11 @@ def test_pedido_real_hereda_al_reprocesar_una_vez_la_matriz_esta_completa(db_ses
     assert pedido.baja_global == Decimal("0.5400")
     assert resultado_pedido["motivo_revision"] is None
 
+    lineas = db_session.query(LineaCatalogo).filter_by(expediente_id=pedido.id).all()
+    assert len(lineas) == 1
+    assert lineas[0].heredado_de_matriz is True
+    assert lineas[0].precio_adjudicado == Decimal("11.04")
+
 
 def test_pedido_real_no_conserva_una_linea_que_ya_no_hereda(db_session):
     """Sesión 2026-09-15 (`4.25/28510.0207`): una línea que el pedido heredó
@@ -543,7 +548,31 @@ def test_pedido_real_no_conserva_una_linea_que_ya_no_hereda(db_session):
     assert quedan == {"P-001": heredadas["P-001"]}
     assert resultado["lineas_podadas"] == 1
 
-    lineas = db_session.query(LineaCatalogo).filter_by(expediente_id=pedido.id).all()
-    assert len(lineas) == 1
-    assert lineas[0].heredado_de_matriz is True
-    assert lineas[0].precio_adjudicado == Decimal("11.04")
+
+def test_con_la_matriz_en_proceso_las_lineas_heredadas_se_conservan(db_session):
+    """Mientras la matriz se descarga o se extrae, la herencia no se puede
+    decidir: las líneas heredadas de una pasada anterior se quedan hasta que
+    el pedido se reprocese con la matriz lista."""
+    matriz = _crear_expediente(db_session, "2.18/04703.0019", estado=EstadoExpediente.descargando)
+    db_session.add(TrabajoCola(
+        tipo="descargar_expediente", expediente_id=matriz.id, estado=EstadoTrabajo.en_proceso,
+    ))
+    db_session.commit()
+    pedido = _crear_expediente(db_session, "6.24/28510.0103")
+    _crear_documento(
+        db_session, pedido.id, hash_="h-pedido", nombre_archivo="ADJUDICACION_1.pdf",
+        ruta_almacenamiento=str(fx.ANUNCIO_PCSP_CON_MATRIZ), tipo_documento=TipoDocumento.otro,
+    )
+    lote = _crear_lote(db_session, pedido.id)
+    heredada = LineaCatalogo(
+        lote_id=lote.id, expediente_id=pedido.id, clave_linea="P-001", orden_aparicion=0, codigo_precio="P-001",
+        descripcion="POLO MANGA CORTA", precio_unitario=Decimal("24.00"), heredado_de_matriz=True,
+    )
+    db_session.add(heredada)
+    db_session.commit()
+
+    resultado = ejecutar_extraccion_expediente(db_session, _StorageDirecta(), SimpleNamespace(expediente_id=pedido.id))
+
+    assert resultado["estado"] == "esperando_matriz"
+    assert db_session.get(LineaCatalogo, heredada.id) is not None
+    assert resultado["lineas_podadas"] == 0
