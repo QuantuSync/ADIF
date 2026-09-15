@@ -210,3 +210,79 @@ def test_pagina_sin_marcadores_no_candidata_si_la_anterior_tampoco_lo_era():
     resultado = localizar_paginas_candidatas(paginas)
 
     assert resultado.candidatas == []
+
+
+def test_tabla_con_cabecera_mat_abreviada_se_abre():
+    # `6.21/28510.0041_ANEJO_637638edb5567514.pdf` p.3 (el mismo texto que la
+    # p.113 de su Contrato): "Mat." por "Matrícula", "Designación" y
+    # "Medición estimada" -- solo el grupo "precio" era reconocible, y con dos
+    # filas no llega a `MIN_FILAS_DATO_SIN_CABECERA`.
+    texto = (
+        "2 LISTADO DE MATERIALES A SUMINISTRAR\n"
+        "Medición Precio\n"
+        "Mat. Designación IMPORTE\n"
+        "estimada unitario\n"
+        "601061018 CARRIL 60E1 R350 SIN TALADRAR 18 M 2211,67 m 49,39 € 109.238,72 €\n"
+        "601061036 CARRIL 60E1 R350 SIN TALADRAR 36 M 7.800 m 50,10 € 390.761,28 €\n"
+        "PARTIDA ALZADA A JUSTIFICAR PARA IMPREVISTOS 50.000,00 €\n"
+    )
+    resultado = localizar_paginas_candidatas([PaginaTexto(numero=3, texto=texto)])
+
+    assert [c.numero for c in resultado.candidatas] == [3]
+    assert "matricula" in resultado.candidatas[0].grupos_marcadores
+
+
+def test_cuadro_pequeno_entre_prosa_entra_por_sus_filas_aunque_baje_de_la_densidad():
+    # `6.20/28510.0080_CONTRATO` p.106 (densidad 0,023): el cuadro de precios
+    # de balasto entre dos párrafos largos. El P-4 (m3 x km, 0,12 €) solo
+    # está en esta página.
+    texto = (
+        "resolución del mismo o acordar la continuidad de su ejecución con imposición de nuevas\n"
+        "penalidades.\n"
+        "5. Adif tendrá las mismas facultades a que se refieren los apartados anteriores respecto al\n"
+        "incumplimiento por parte del contratista de los plazos parciales, cuando la demora en el\n"
+        "cumplimiento de aquellos haga presumir razonablemente la imposibilidad de cumplir el\n"
+        "plazo total.\n"
+        "9. PRECIOS UNITARIOS Y PRESUPUESTO DE LICITACION.\n"
+        "A continuación se detalla la composición de los precios unitarios:\n"
+        "CUADRO DE PRECIOS\n"
+        "Ref. ud Denominación Precio\n"
+        "m3 de balasto producido según especificaciones del Pliego de\n"
+        "Prescripciones Técnicas, incluso preparación de las eras de\n"
+        "P-1 m3 12,40 €\n"
+        "almacenamiento en cantera, acopio del material en cantera y\n"
+        "vigilancia de acopios.\n"
+        "P-2 m3 M3 de balasto transportado al punto de carga ofertado 9,60 €\n"
+        "Carga y enrasado del balasto transportado en las tolvas en los puntos\n"
+        "P-3 m3 1,08 €\n"
+        "de carga.\n"
+        "m3 x km de balasto transportado a los puntos de carga que figuran en\n"
+        "P-4 m3xkm 0,12 € el pliego diferente al ofertado\n"
+        "P-5 1 Partida alzada a justificar de acondicionamiento de puntos de carga 50.000 €\n"
+        "Los precios llevan incluido los gastos generales y el beneficio industrial.\n"
+        "Los precios unitarios que figuran en el presente pliego se consideran como límite superior para\n"
+        "que las ofertas puedan ser admitidas.\n"
+        "Si durante la gestión del contrato fuera preciso realizar suministros en puntos distintos a los\n"
+        "recogidos en el presente pliego, se abonarán tomando como referencia los precios ofertados\n"
+        "por el licitador, variando unicamente la distancia entre la cantera ofertada y el nuevo punto de\n"
+        "suministro.\n"
+        "El licitador deberá presentar su oferta cumplimentando la totalidad de los precios unitarios del\n"
+        "presupuesto,. salvo la del precio unitario de la partida alzada (P5), que no admite baja alguna,\n"
+        "debiendo ser el mismo de la licitación (50.000 €).\n"
+        "La partida alzada está destinada a las actuaciones requeridas para el acondicionamiento inicial\n"
+        "de los cargaderos. Las actuaciones para el mantenimiento de los mismos en condiciones\n"
+        "adecuadas están incluidas en el precio del balasto suministrado.\n"
+        "El licitador deberá incluir declaración jurada de la distancia existente entre la cantera con la\n"
+        "que se presenta a esta licitación y el punto de carga ofertado, incluyendo un mapa con el cálculo\n"
+        "de la distancia.\n"
+    )
+    from app.extraccion.localizador import UMBRAL_DENSIDAD_NUMERICA, _densidad_numerica
+
+    assert _densidad_numerica(texto) < UMBRAL_DENSIDAD_NUMERICA
+    resultado = localizar_paginas_candidatas([PaginaTexto(numero=106, texto=texto)])
+    assert [c.numero for c in resultado.candidatas] == [106]
+
+
+def test_prosa_por_debajo_de_la_densidad_sin_filas_de_datos_sigue_fuera():
+    resultado = localizar_paginas_candidatas([PaginaTexto(numero=1, texto=_PAGINA_PROSA)])
+    assert resultado.candidatas == []

@@ -52,6 +52,29 @@ def _resolver_valor_duplicado(cadena: str) -> str:
     return cadena
 
 
+# Sesión 2026-09-15 (`6.21/28510.0152`, Contrato p.114): cuando `pdfplumber`
+# funde varias filas de una tabla sin líneas horizontales, cada celda trae un
+# valor por fila ("600\n200\n20\n1"). Quitando los saltos de línea, las cuatro
+# cantidades se leían como una sola, 600.200.201. Son varios valores cuando
+# hay dos o más líneas (dos iguales ya las resuelve `_resolver_valor_duplicado`)
+# y cada una es una cifra entera y bien formada, con como mucho un sufijo que
+# no sea ni cifra ni separador ("€", "ud"), todas con la misma forma (los
+# mismos decimales, o ninguno). Un número partido por el ancho de la columna
+# no lo cumple: "1.\n234,56" y "1.234\n,56 €" no son cifras completas por
+# mitades, y "80.500,3\n5" (`6.21/28510.0108`, anejo 588 p.30: 80.500,35
+# partido tras el primer decimal) mezcla formas.
+_CIFRA_COMPLETA = re.compile(r"^[^\d,.]*(?:\d{1,3}(?:\.\d{3})+|\d+)(?:,(\d+))?(?:\s*[^\d\s.,][^\d]*)?$")
+
+
+def _varios_valores(cadena: str) -> bool:
+    lineas = [linea.strip() for linea in cadena.splitlines() if linea.strip()]
+    con_cifra = [linea for linea in lineas if any(c.isdigit() for c in linea)]
+    if len(con_cifra) < 2:
+        return False
+    formas = [_CIFRA_COMPLETA.match(linea) for linea in con_cifra]
+    return all(formas) and len({len(m.group(1) or "") for m in formas}) == 1
+
+
 # Bloque 3, sesión 2026-09-10: un importe real con separador de miles nunca
 # tiene un grupo de menos de tres dígitos salvo el primero -- "7.915,61" sí
 # (grupos "7"/"915"), pero "03.361.140.1" (una referencia normativa E.T. con
@@ -89,6 +112,8 @@ def parsear_numero_es(cadena: str) -> Decimal:
             f"no un número: {cadena!r}"
         )
     cadena = _resolver_valor_duplicado(cadena)
+    if _varios_valores(cadena):
+        raise ValueError(f"la celda trae varios valores, uno por línea (filas fundidas), no uno: {cadena!r}")
     limpio = _NO_DIGITO_NI_SEPARADOR.sub("", cadena.strip())
     if not limpio or limpio in ("-", "."):
         raise ValueError(f"no hay dígitos en {cadena!r}")

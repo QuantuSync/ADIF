@@ -252,6 +252,12 @@ RESOLUCION_LOTE2_ERRATA_LOTE1_0016 = FIXTURES_DIR / "6.21_28510.0016_ADJUDICACIO
 RESOLUCION_REFERENCIA_CRUZADA_0058 = FIXTURES_DIR / "6.22_28510.0058_ADJUDICACION_1_p1.pdf"
 CONTRATO_LOTE2_0058 = FIXTURES_DIR / "6.22_28510.0058_CONTRATO_1_p1.pdf"
 CONTRATO_LOTE1_0057 = FIXTURES_DIR / "6.22_28510.0058_CONTRATO_2_p1.pdf"
+# Sesión 2026-09-15: las dos primeras páginas de los mismos Contratos. La
+# p.2 trae su importe: "Ascendiendo el importe de licitación del lote N a
+# 2.400.000,00 € (IVA excluido)" y "CUARTO. El importe del contrato es de:
+# - Base imponible ... 2.400.000,00 €".
+CONTRATO_LOTE2_0058_CON_IMPORTE = FIXTURES_DIR / "6.22_28510.0058_CONTRATO_1_p1-2.pdf"
+CONTRATO_LOTE1_0057_CON_IMPORTE = FIXTURES_DIR / "6.22_28510.0058_CONTRATO_2_p1-2.pdf"
 
 # Repuestos de vía (`6.22/28510.0122`, 2 lotes; `0155` LOTE 1, `0156` LOTE
 # 2): la Propuesta del LOTE 2 es el único documento de lotes, y el LOTE 1
@@ -301,3 +307,14 @@ CONTRATO_LOTE1_PLIEGO_0155 = FIXTURES_DIR / "6.22_28510.0156_CONTRATO_2_pliego_p
 CONTRATO_LOTE5_0113 = FIXTURES_DIR / "6.21_28510.0112_CONTRATO_1_p1.pdf"
 CONTRATO_LOTE4_0112 = FIXTURES_DIR / "6.21_28510.0112_CONTRATO_2_p1.pdf"
 ANEJO_LOTE4_0112 = FIXTURES_DIR / "6.21_28510.0109_ANEJO_1_lote4_p18_19_42_43_49.pdf"
+# Sesión 2026-09-15: las dos primeras páginas del Contrato de `0112`; la p.2
+# trae "El importe del contrato es de: - Base imponible ... 710.000,00 €".
+CONTRATO_LOTE4_0112_CON_IMPORTE = FIXTURES_DIR / "6.21_28510.0112_CONTRATO_2_p1-2.pdf"
+
+# Sesión 2026-09-15. Balasto, 6 lotes (`6.22/28510.0012`; `0016` es el LOTE
+# 6). ANEJO_1, p.21 del original: tabla del LOTE 5 y, debajo, "LOTE 6: RAM
+# NORTE" (P-1 65.000 m3 a 14,20 €, P-2 64.000 a 16,50 €, P-3 65.000 a 1,10 €,
+# P-4 100.000 m3xkm a 0,12 €). Con los ajustes por defecto, `pdfplumber`
+# pierde la primera columna de la tabla del LOTE 6 (ver
+# `app.extraccion.tabla._AJUSTES_SEGUNDO_INTENTO`).
+ANEJO_LOTES_5_Y_6_BALASTO_0016 = FIXTURES_DIR / "6.22_28510.0012_ANEJO_1_lotes5_6_p21.pdf"

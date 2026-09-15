@@ -65,6 +65,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import Optional
 
 from app.extraccion.normalizacion import normalizar_guiones
 
@@ -183,26 +184,62 @@ def _combinar_filas_cabecera(filas_cabecera: list[FILA]) -> FILA:
     return cabecera
 
 
+# Sesión 2026-09-15 (`6.22/28510.0016`, ANEJO_1 p.21, "LOTE 6: RAM NORTE"):
+# `pdfplumber` "imanta" en una sola coordenada las líneas verticales que caen a
+# menos de `snap_tolerance` (3 pt) unas de otras, en toda la página. El borde
+# izquierdo de la tabla del LOTE 5 (x≈96) arrastraba el del LOTE 6 (x≈99) hasta
+# x=95,9, a 3,8 pt de donde empiezan sus líneas horizontales (x=99,7): ya no se
+# cortaban, la primera columna -- la de los códigos P-1..P-4 -- desaparecía, y
+# sin ningún código la tabla se descartaba por espuria. Sin imantar en
+# horizontal (`snap_x_tolerance` 1) la tabla sale entera. Solo como segundo
+# intento para una tabla que el primero descarta (medido sobre el corpus
+# entero: esa es la única que recupera), nunca sustituyendo a una que ya sale.
+_AJUSTES_SEGUNDO_INTENTO = {"snap_x_tolerance": 1}
+
+
+def _solapan(a: tuple, b: tuple) -> bool:
+    return not (a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1])
+
+
+def _tabla_extraida(tabla, pagina) -> Optional[TablaExtraida]:
+    filas = tabla.extract()
+    if not filas:
+        return None
+    indice_datos = _indice_primera_fila_datos(filas)
+    if indice_datos is None:
+        return None  # tabla espuria: ninguna fila trae un código de precio
+    return TablaExtraida(
+        cabecera=_combinar_filas_cabecera(filas[:indice_datos]),
+        filas=filas[indice_datos:],
+        pagina=pagina.page_number,
+        bbox=tuple(tabla.bbox),
+        columnas_x=_columnas_x(tabla),
+    )
+
+
 def extraer_tablas_pagina(pagina) -> list[TablaExtraida]:
     """`pagina` es un objeto página de `pdfplumber` (ya abierto por el
     llamador, que también es quien decide qué páginas son candidatas —
     etapa 3)."""
     resultado: list[TablaExtraida] = []
+    descartadas: list[tuple] = []
     for tabla in pagina.find_tables():
-        filas = tabla.extract()
-        if not filas:
-            continue
-        indice_datos = _indice_primera_fila_datos(filas)
-        if indice_datos is None:
-            continue  # tabla espuria: ninguna fila trae un código de precio
-        cabecera = _combinar_filas_cabecera(filas[:indice_datos])
-        resultado.append(
-            TablaExtraida(
-                cabecera=cabecera,
-                filas=filas[indice_datos:],
-                pagina=pagina.page_number,
-                bbox=tuple(tabla.bbox),
-                columnas_x=_columnas_x(tabla),
-            )
-        )
-    return resultado
+        extraida = _tabla_extraida(tabla, pagina)
+        if extraida is not None:
+            resultado.append(extraida)
+        elif len(tabla.rows) >= 2:
+            descartadas.append(tuple(tabla.bbox))
+    if not descartadas:
+        return resultado
+    recuperadas = [
+        extraida
+        for tabla in pagina.find_tables(_AJUSTES_SEGUNDO_INTENTO)
+        if any(_solapan(tuple(tabla.bbox), d) for d in descartadas)
+        and not any(_solapan(tuple(tabla.bbox), t.bbox) for t in resultado)
+        and (extraida := _tabla_extraida(tabla, pagina)) is not None
+    ]
+    if not recuperadas:
+        return resultado
+    # En su sitio de arriba abajo: `app.extraccion.lote_tabla` busca la
+    # cabecera "LOTE N" en la franja entre una tabla y la anterior.
+    return sorted(resultado + recuperadas, key=lambda t: (t.bbox[1], t.bbox[0]))

@@ -134,7 +134,13 @@ _GRUPOS_MARCADORES: dict[str, tuple[str, ...]] = {
     ),
     "precio": ("precio unitario", "precio de referencia", "precio"),
     "cantidad_unidad": ("cantidad", "unidad de medida", "unidades"),
-    "matricula": ("matricula",),
+    # "Mat." (sesión 2026-09-15): la tabla de carril de `6.21/28510.0041`
+    # ("Mat. | Designación | Medición estimada | Precio unitario | IMPORTE",
+    # ANEJO p.3 y Contrato p.113) solo traía el grupo "precio" y sus dos
+    # filas no llegan a `MIN_FILAS_DATO_SIN_CABECERA`: el expediente se
+    # quedaba sin sus dos líneas de carril. Medido sobre el corpus: abre 3
+    # páginas más, las dos de esa tabla y una sin tabla.
+    "matricula": ("matricula", "mat."),
     "descripcion": ("descripcion",),
 }
 
@@ -154,7 +160,9 @@ class PaginaCandidata:
     # cabecera y sin continuar a ninguna candidata, solo por traer
     # `MIN_FILAS_DATO_SIN_CABECERA` o más líneas con forma de fila de cuadro
     # de precios (ver `_lineas_con_fila_de_datos`) -- el arranque de una
-    # tabla cuya cabecera no se puede leer.
+    # tabla cuya cabecera no se puede leer. Desde la sesión 2026-09-15,
+    # también cuando entró por eso mismo con una densidad por debajo de
+    # `UMBRAL_DENSIDAD_NUMERICA` (un cuadro pequeño entre prosa).
     sin_cabecera_legible: bool = False
 
 
@@ -232,7 +240,19 @@ def localizar_paginas_candidatas(paginas: list[PaginaTexto]) -> ResultadoLocaliz
     for pagina in paginas:
         densidad = _densidad_numerica(pagina.texto)
         if densidad < UMBRAL_DENSIDAD_NUMERICA:
-            anterior_es_candidata = False
+            # Sesión 2026-09-15: un cuadro de precios pequeño en mitad de una
+            # página de prosa baja de la densidad mínima (`6.20/28510.0080`
+            # Contrato p.106, 0,023: el P-4, m3 x km a 0,12 €, solo está ahí).
+            # Tres filas con identificador e importe en la misma línea no las
+            # trae un párrafo: medido sobre el corpus, entran 2 páginas, los
+            # cuadros de balasto de ese Contrato y del anejo de
+            # `6.19/28510.0025`.
+            if _lineas_con_fila_de_datos(pagina.texto) >= MIN_FILAS_DATO_SIN_CABECERA:
+                grupos = _grupos_presentes(normalizar(pagina.texto))
+                candidatas.append(PaginaCandidata(pagina.numero, densidad, grupos, sin_cabecera_legible=True))
+                anterior_es_candidata = True
+            else:
+                anterior_es_candidata = False
             continue
         grupos = _grupos_presentes(normalizar(pagina.texto))
         if len(grupos) >= MIN_GRUPOS_MARCADORES:

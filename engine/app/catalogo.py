@@ -152,6 +152,26 @@ _UNIDAD_EMBEBIDA_EN_CANTIDAD_RE = re.compile(r"^[\d.,]+\s*(Kg|m)\.?$", re.IGNORE
 _UNIDAD_EMBEBIDA_EN_PRECIO_RE = re.compile(r"€\s*/\s*(Kg|m)\b", re.IGNORECASE)
 
 
+def _unir_unidad_partida(valor: Optional[str]) -> Optional[str]:
+    """Sesión 2026-09-15: una unidad partida por el ancho de la columna
+    ("m3x\\nkm" en la tabla del LOTE 6 de `6.22/28510.0016`, "€/transport\\ne")
+    se une sin espacio: la primera línea es un solo token con alguna cifra o
+    símbolo -- no una palabra corriente: "Precio\\nmensual" (`4.26/28510.0020`)
+    son dos -- y la siguiente sigue en minúscula. "t x km" (72 líneas) ya
+    trae sus espacios y no se toca."""
+    if not valor or "\n" not in valor:
+        return valor
+    lineas = [linea.strip() for linea in valor.splitlines() if linea.strip()]
+    # Solo dos líneas distintas: "ud\nud\nud" son tres filas fundidas, no una
+    # unidad partida.
+    if len(lineas) != 2 or lineas[0] == lineas[1]:
+        return valor
+    primera, segunda = lineas
+    if " " not in primera and not primera.isalpha() and primera[-1:].isalnum() and segunda[:1].islower():
+        return primera + segunda
+    return valor
+
+
 def _extraer_unidad_embebida(cantidad_bruta: Optional[str], precio_bruto: Optional[str]) -> Optional[str]:
     """Solo se llama cuando la cabecera no declaró ninguna columna de
     unidad de medida (o su valor salió descartado por implausible, ver
@@ -907,7 +927,7 @@ def _construir_campos(
         # forma de escribirlo -- nunca un valor ambiguo.
         matricula = matricula.replace(".", "")
     descripcion = limpiar_texto_celda(_valor("descripcion")) or ""
-    unidad_medida = limpiar_texto_celda(_valor("unidad_medida"))
+    unidad_medida = limpiar_texto_celda(_unir_unidad_partida(_valor("unidad_medida")))
 
     motivo_revision: Optional[str] = motivo_codigo_precio
 
@@ -941,6 +961,23 @@ def _construir_campos(
             f"lo es): {unidad_medida[:40]!r}…",
         )
         unidad_medida = None
+    cantidad_en_celda_de_unidad = None
+    embebida = _UNIDAD_EMBEBIDA_EN_CANTIDAD_RE.match(unidad_medida.strip()) if unidad_medida else None
+    if embebida and not _valor("cantidad"):
+        # Sesión 2026-09-15 (`6.21/28510.0041`, tabla de carril "Mat. |
+        # Designación | Medición estimada | Precio unitario | IMPORTE"): la
+        # celda que el mapeo toma por unidad trae la medición y su unidad
+        # juntas ("2211,67 m", "7.800 m") y la de cantidad viene vacía. Es la
+        # cantidad con su unidad pegada, la misma forma que ya se lee en la
+        # celda de cantidad (`_UNIDAD_EMBEBIDA_EN_CANTIDAD_RE`), no una
+        # referencia normativa que descartar.
+        cantidad_en_celda_de_unidad = unidad_medida
+        unidad_medida = embebida.group(1)
+        motivo_revision = _acumular_motivo(
+            motivo_revision,
+            f"cantidad y unidad de medida leídas de la misma celda ({cantidad_en_celda_de_unidad!r}), la "
+            "que la cabecera da por unidad, con la de cantidad vacía: confirmar antes de dar por buena",
+        )
     if unidad_medida and _unidad_medida_implausible(unidad_medida):
         # Ver docstring de `_UNIDAD_MEDIDA_IMPLAUSIBLE_RE` y de
         # `_UNIDAD_MEDIDA_CON_TRES_DIGITOS_RE`: solo dígitos y puntos, o tres
@@ -1053,7 +1090,7 @@ def _construir_campos(
                     "de dar por buena",
                 )
 
-    cantidad_bruta = _valor("cantidad")
+    cantidad_bruta = _valor("cantidad") or cantidad_en_celda_de_unidad
     cantidad = None
     if (
         cantidad_bruta

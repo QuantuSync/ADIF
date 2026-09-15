@@ -68,6 +68,28 @@ def test_valor_duplicado_que_no_coincide_sigue_siendo_error():
         parsear_numero_es("306.351,49\n412.000,00")
 
 
+def test_varias_cantidades_de_filas_fundidas_no_se_pegan_en_un_numero():
+    # `6.21/28510.0152`, Contrato p.114: cuatro filas fundidas, una cantidad
+    # por línea -- se leían como 600.200.201.
+    with pytest.raises(ValueError, match="varios valores"):
+        parsear_numero_es("600\n200\n20\n1")
+    with pytest.raises(ValueError, match="varios valores"):
+        parsear_numero_es("1.500 ud\n2.000 ud")
+
+
+def test_un_numero_partido_por_el_ancho_de_columna_sigue_siendo_uno():
+    assert parsear_importe_es("34.100,00\n€") == Decimal("34100.00")
+    assert parsear_importe_es("1.234\n,56 €") == Decimal("1234.56")
+    assert parsear_numero_es("1.\n234,56") == Decimal("1234.56")
+    # `6.21/28510.0108`, anejo 588 p.30: partido después del primer decimal.
+    assert parsear_importe_es("80.500,3\n5") == Decimal("80500.35")
+
+
+def test_varios_importes_con_la_misma_forma_son_varios_valores():
+    with pytest.raises(ValueError, match="varios valores"):
+        parsear_importe_es("366,00 €\n466,00 €\n155,00 €\n34.100,00 €")
+
+
 def test_normalizar_guiones_traduce_variantes_unicode():
     # docs/analisis-corpus.md hallazgo 2: `pdfplumber` extrae el guion del
     # código de precio como uno de estos guiones tipográficos en 9

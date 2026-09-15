@@ -194,3 +194,35 @@ def test_cabecera_legible_con_un_glifo_suelto_se_conserva():
 
     celda = "PRECIO UNITARIO DE\nREFERENCIA (cid:11)(cid:227)(cid:12)"
     assert _combinar_filas_cabecera([["Nº MATRÍCULA", celda]]) == ["Nº MATRÍCULA", celda]
+
+
+def test_tabla_que_pierde_su_primera_columna_se_recupera_con_el_segundo_intento():
+    # `6.22/28510.0016` (LOTE 6), ANEJO_1 p.21: con los ajustes por defecto,
+    # el borde izquierdo de la tabla del LOTE 5 arrastra el del LOTE 6 y
+    # esta pierde la columna de los códigos -- sin ellos, se descartaba.
+    with pdfplumber.open(fx.ANEJO_LOTES_5_Y_6_BALASTO_0016) as pdf:
+        pagina = pdf.pages[0]
+        tablas = extraer_tablas_pagina(pagina)
+        por_defecto = [t.extract() for t in pagina.find_tables()]
+
+    assert not any(f and f[0] == "P-1" for filas in por_defecto[1:] for f in filas)
+    assert len(tablas) == 2
+    lote_5, lote_6 = tablas
+    assert lote_5.bbox[1] < lote_6.bbox[1]
+    assert [f[0] for f in lote_5.filas] == ["P-1", "P-2", "P-3", "P-4"]
+    assert [f[0] for f in lote_6.filas] == ["P-1", "P-2", "P-3", "P-4"]
+    valores = [[c for c in f if c] for f in lote_6.filas]
+    assert [v[-1] for v in valores] == ["14,20 €", "16,50 €", "1,10 €", "0,12 €"]
+    assert [v[-2] for v in valores] == ["65.000", "64.000", "65.000", "100.000"]
+
+
+def test_segundo_intento_no_toca_las_tablas_que_ya_salen():
+    # La del LOTE 5, en la misma página, sale igual que con los ajustes por
+    # defecto (mismas celdas, misma caja).
+    with pdfplumber.open(fx.ANEJO_LOTES_5_Y_6_BALASTO_0016) as pdf:
+        pagina = pdf.pages[0]
+        lote_5 = extraer_tablas_pagina(pagina)[0]
+        por_defecto = pagina.find_tables()[0]
+
+    assert lote_5.bbox == tuple(por_defecto.bbox)
+    assert lote_5.filas == por_defecto.extract()[3:]

@@ -2829,3 +2829,31 @@ def test_campos_vacios_por_valor_de_otro_lote_lee_el_motivo_de_la_guarda():
     assert campos_vacios_por_valor_de_otro_lote(combinadas[0]["motivo_revision"]) == {"cantidad", "precio_unitario"}
     assert campos_vacios_por_valor_de_otro_lote("banda vacía: posible continuación") == frozenset()
     assert campos_vacios_por_valor_de_otro_lote(None) == frozenset()
+
+
+def test_unidad_partida_por_el_ancho_de_columna_se_une():
+    from app.catalogo import _unir_unidad_partida
+
+    assert _unir_unidad_partida("m3x\nkm") == "m3xkm"
+    assert _unir_unidad_partida("€/transport\ne") == "€/transporte"
+    assert _unir_unidad_partida("t x\nkm") == "t x\nkm"
+    assert _unir_unidad_partida("Precio\nmensual") == "Precio\nmensual"
+    assert _unir_unidad_partida("ud\nud\nud") == "ud\nud\nud"
+    assert _unir_unidad_partida("UD.") == "UD."
+
+
+def test_cantidad_y_unidad_juntas_en_la_columna_de_unidad():
+    # `6.21/28510.0041`, ANEJO p.3: "Mat. | Designación | Medición estimada |
+    # Precio unitario | IMPORTE"; la medición y su unidad caen en la columna
+    # que el mapeo da por unidad, y la de cantidad viene vacía.
+    mapeo = {"codigo_precio": None, "matricula": 0, "descripcion": 1, "unidad_medida": 2, "cantidad": 3,
+             "precio_unitario": 5}
+    fila = ["601061018", "CARRIL 60E1 R350 SIN TALADRAR 18 M", "2211,67 m", None, None, "49,39 €", None, None,
+            "109.238,72 €"]
+
+    linea = construir_linea_catalogo(fila, mapeo, 3, None, 1, None, 0)
+
+    assert linea["cantidad"] == Decimal("2211.67")
+    assert linea["unidad_medida"] == "m"
+    assert linea["precio_unitario"] == Decimal("49.39")
+    assert "misma celda" in linea["motivo_revision"]
