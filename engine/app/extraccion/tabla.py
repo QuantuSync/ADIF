@@ -67,7 +67,8 @@ import re
 from dataclasses import dataclass
 from typing import Optional
 
-from app.extraccion.normalizacion import normalizar_guiones
+from app.extraccion.normalizacion import normalizar_guiones, parsear_importe_es
+from app.extraccion.texto import normalizar
 
 CELDA = str | None
 FILA = list[CELDA]
@@ -201,13 +202,82 @@ def _solapan(a: tuple, b: tuple) -> bool:
     return not (a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1])
 
 
+# Sesión 2026-09-15 (expedientes recuperados sin líneas): un cuadro de precios
+# de uno o pocos artículos no numera sus filas -- "CONCEPTO | CANTIDAD | PRECIO
+# | TOTAL" / "Compresor | 1 | 18.000,00€" (`3.24/28510.0027`), "Concepto |
+# Unidades | Importe" (`3.24/28510.0132`, `3.25/28510.0012`), gasóleo y AdBlue
+# (`2.25/28510.0005`, `2.24/28510.0050`), un desglose de precios de servicios
+# (`2.26/28510.0006`). Sin código ni matrícula no había fila de datos y la
+# tabla entera se descartaba por espuria. Se acepta si su PRIMERA fila nombra
+# a la vez, en columnas distintas, la descripción, la cantidad y el precio (lo
+# que no trae una tabla de resumen de presupuesto, de valor estimado ni de
+# criterios), y solo con las filas que la siguen y traen descripción e
+# importe, hasta la primera que no (el pie de totales).
+_COLUMNA_DESCRIPCION = ("descripcion", "concepto", "designacion", "denominacion")
+_COLUMNA_CANTIDAD = ("cantidad", "unidades", "medicion")
+_COLUMNA_CANTIDAD_EXACTA = frozenset({"ud", "ud.", "uds", "uds."})
+_COLUMNA_PRECIO = ("precio", "importe")
+_ETIQUETA_PIE_RE = re.compile(r"^(?:total|subtotal|suma|iva|base imponible|presupuesto|importe total)\b")
+_LETRAS_RE = re.compile(r"[a-zñ]{3,}")
+
+
+def _texto_celda(celda: CELDA) -> str:
+    return normalizar(celda or "")
+
+
+def _columna_con(cabecera: FILA, alias: tuple[str, ...], exactos: frozenset[str] = frozenset()) -> Optional[int]:
+    for indice, celda in enumerate(cabecera):
+        texto = _texto_celda(celda)
+        if texto and (texto in exactos or any(a in texto for a in alias)):
+            return indice
+    return None
+
+
+def _es_importe(celda: CELDA) -> bool:
+    if not celda or ("," not in celda and "€" not in celda):
+        return False
+    try:
+        return parsear_importe_es(celda) > 0
+    except ValueError:
+        return False
+
+
+def _filas_cuadro_sin_codigo(filas: list[FILA]) -> Optional[list[FILA]]:
+    cabecera = filas[0]
+    descripcion = _columna_con(cabecera, _COLUMNA_DESCRIPCION)
+    cantidad = _columna_con(cabecera, _COLUMNA_CANTIDAD, _COLUMNA_CANTIDAD_EXACTA)
+    precio = _columna_con(cabecera, ("precio",))
+    if precio is None:
+        precio = _columna_con(cabecera, _COLUMNA_PRECIO)
+    if None in (descripcion, cantidad, precio) or len({descripcion, cantidad, precio}) < 3:
+        return None
+    datos: list[FILA] = []
+    for fila in filas[1:]:
+        texto = _texto_celda(fila[descripcion]) if descripcion < len(fila) else ""
+        if not _LETRAS_RE.search(texto) or _ETIQUETA_PIE_RE.match(texto):
+            break
+        if not (precio < len(fila) and _es_importe(fila[precio])):
+            break
+        datos.append(fila)
+    return datos or None
+
+
 def _tabla_extraida(tabla, pagina) -> Optional[TablaExtraida]:
     filas = tabla.extract()
     if not filas:
         return None
     indice_datos = _indice_primera_fila_datos(filas)
     if indice_datos is None:
-        return None  # tabla espuria: ninguna fila trae un código de precio
+        datos = _filas_cuadro_sin_codigo(filas)
+        if datos is None:
+            return None  # tabla espuria: ni código de precio ni cabecera de cuadro
+        return TablaExtraida(
+            cabecera=_combinar_filas_cabecera(filas[:1]),
+            filas=datos,
+            pagina=pagina.page_number,
+            bbox=tuple(tabla.bbox),
+            columnas_x=_columnas_x(tabla),
+        )
     return TablaExtraida(
         cabecera=_combinar_filas_cabecera(filas[:indice_datos]),
         filas=filas[indice_datos:],

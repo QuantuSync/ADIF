@@ -286,3 +286,25 @@ def test_cuadro_pequeno_entre_prosa_entra_por_sus_filas_aunque_baje_de_la_densid
 def test_prosa_por_debajo_de_la_densidad_sin_filas_de_datos_sigue_fuera():
     resultado = localizar_paginas_candidatas([PaginaTexto(numero=1, texto=_PAGINA_PROSA)])
     assert resultado.candidatas == []
+
+
+def test_cuadro_de_un_articulo_en_pagina_de_prosa_es_candidata():
+    # Sesión 2026-09-15 (`3.24/28510.0132`): densidad 0,023, sin
+    # identificadores de fila; la línea "Concepto Unidades Importe" es la
+    # cabecera del cuadro.
+    paginas = extraer_texto(fx.PPT_RESISTENCIA_PATRON_0132)
+    resultado = localizar_paginas_candidatas(paginas)
+
+    assert [c.numero for c in resultado.candidatas] == [1]
+
+
+def test_prosa_que_nombra_precio_y_cantidad_en_lineas_distintas_no_es_candidata():
+    from app.extraccion.texto import PaginaTexto
+
+    paginas = [PaginaTexto(numero=1, texto=(
+        "El adjudicatario tiene derecho al abono con arreglo al precio convenido.\n"
+        "La descripción del suministro figura en el apartado 3.\n"
+        "Las cantidades son estimadas.\n"
+    ))]
+
+    assert localizar_paginas_candidatas(paginas).candidatas == []
