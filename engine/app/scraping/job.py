@@ -3,12 +3,14 @@ la interfaz de almacenamiento y registra expediente y documentos en la base de
 datos. Es el punto de entrada que usa el worker (app/worker.py) para el tipo
 de trabajo "descargar_expediente"."""
 import asyncio
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.extraccion.herencia_matriz import reencolar_pedidos_esperando_matriz
 from app.interfaces.document_storage import DocumentStorage
+from app.mantenimiento.frescura import VERSION_LOGICA_BUSQUEDA
 from app.models import (
     Documento,
     DocumentoExpediente,
@@ -91,13 +93,23 @@ def ejecutar_scraping_expediente(db: Session, storage: DocumentStorage, trabajo:
         # aquí mismo en vez de dejar que `ejecutar_trabajo` lo reintente.
         expediente.estado = EstadoExpediente.sin_publicar
         expediente.error = str(exc)
+        # Negativo confirmado con la lógica de búsqueda vigente (sesión
+        # 2026-09-15): el ciclo de mantenimiento lo vuelve a buscar pasado el
+        # plazo (`app.mantenimiento.frescura.sin_publicar_reintento_desde`).
+        expediente.sin_publicar_en = datetime.now(timezone.utc)
+        expediente.sin_publicar_version_busqueda = VERSION_LOGICA_BUSQUEDA
         trabajo.intentos = trabajo.max_intentos
         db.commit()
         if reencolar_pedidos_esperando_matriz(db, expediente):
             db.commit()
         raise
     except Exception as exc:
-        expediente.estado = estado_anterior if ya_tenia_documentos else EstadoExpediente.fallido
+        # Un fallo transitorio en el reintento de un `sin_publicar` (sesión
+        # 2026-09-15) no prueba nada: se queda `sin_publicar` con su fecha y
+        # versión de antes, y el ciclo lo vuelve a buscar cuando toque, en
+        # vez de pasar a `fallido` y perder de dónde venía.
+        conserva_estado = ya_tenia_documentos or estado_anterior == EstadoExpediente.sin_publicar
+        expediente.estado = estado_anterior if conserva_estado else EstadoExpediente.fallido
         expediente.error = str(exc)
         db.commit()
         # Si este expediente es la matriz de algún pedido derivado
@@ -166,6 +178,8 @@ def ejecutar_scraping_expediente(db: Session, storage: DocumentStorage, trabajo:
 
     expediente.estado = EstadoExpediente.descargado
     expediente.error = None
+    expediente.sin_publicar_en = None
+    expediente.sin_publicar_version_busqueda = None
     db.commit()
 
     # Encadenado (CONTEXTO.md, encargo de esta sesión, punto 3): al terminar

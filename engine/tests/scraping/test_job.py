@@ -5,10 +5,12 @@ cualquier otro fallo de scraping (timeout, WAF, formulario no localizado).
 `ejecutar_scraping_expediente` debe marcar el expediente `sin_publicar` (no
 `fallido`) y no gastar más intentos reintentando una búsqueda que ya se sabe
 que no cambia de resultado."""
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
 
+from app.mantenimiento.frescura import VERSION_LOGICA_BUSQUEDA
 from app.models import (
     Documento,
     DocumentoExpediente,
@@ -152,6 +154,67 @@ def test_no_encontrado_sin_documentos_sigue_marcando_sin_publicar(db_session, mo
 
     expediente = db_session.get(Expediente, trabajo.expediente_id)
     assert expediente.estado == EstadoExpediente.sin_publicar
+
+
+# --- Sesión 2026-09-15: `sin_publicar` deja de ser definitivo -- el negativo
+# guarda cuándo y con qué versión de la búsqueda se confirmó, y el
+# reintento de un `sin_publicar` no lo degrada por un fallo transitorio.
+
+
+def test_no_encontrado_estampa_fecha_y_version_de_busqueda(db_session, monkeypatch):
+    _sin_espera(monkeypatch)
+    monkeypatch.setattr("app.scraping.job.scrape_expediente", _scrape_no_encontrado)
+    trabajo = _crear_trabajo(db_session, "6.26/28510.0004")
+
+    with pytest.raises(ExpedienteNoPublicadoError):
+        ejecutar_scraping_expediente(db_session, storage=SimpleNamespace(), trabajo=trabajo)
+
+    expediente = db_session.get(Expediente, trabajo.expediente_id)
+    assert expediente.sin_publicar_en is not None
+    assert expediente.sin_publicar_version_busqueda == VERSION_LOGICA_BUSQUEDA
+
+
+def test_reintento_de_sin_publicar_con_error_generico_sigue_sin_publicar(db_session, monkeypatch):
+    _sin_espera(monkeypatch)
+    monkeypatch.setattr("app.scraping.job.scrape_expediente", _scrape_error_generico)
+    trabajo = _crear_trabajo(db_session, "6.26/28510.0009", estado=EstadoExpediente.sin_publicar)
+    expediente = db_session.get(Expediente, trabajo.expediente_id)
+    marcado = datetime(2026, 9, 7, 17, 17, tzinfo=timezone.utc)
+    expediente.sin_publicar_en = marcado
+    db_session.commit()
+
+    with pytest.raises(RuntimeError):
+        ejecutar_scraping_expediente(db_session, storage=SimpleNamespace(), trabajo=trabajo)
+
+    db_session.refresh(expediente)
+    # Un timeout no prueba nada: ni `fallido` ni un negativo nuevo.
+    assert expediente.estado == EstadoExpediente.sin_publicar
+    assert expediente.sin_publicar_version_busqueda is None
+    assert expediente.sin_publicar_en.replace(tzinfo=timezone.utc) == marcado
+
+
+async def _scrape_encontrado(*args, **kwargs):
+    return ResultadoScraping(
+        codigo_encontrado="6.26/28510.0009",
+        documentos=[DocumentoDescargado(categoria="ANEJO", label="ANEJO_1.pdf", contenido=b"%PDF", hash="h-anejo")],
+    )
+
+
+def test_encontrado_al_reintentar_vacia_el_negativo(db_session, monkeypatch):
+    _sin_espera(monkeypatch)
+    monkeypatch.setattr("app.scraping.job.scrape_expediente", _scrape_encontrado)
+    trabajo = _crear_trabajo(db_session, "6.26/28510.0009", estado=EstadoExpediente.sin_publicar)
+    expediente = db_session.get(Expediente, trabajo.expediente_id)
+    expediente.sin_publicar_en = datetime(2026, 9, 7, 17, 17, tzinfo=timezone.utc)
+    db_session.commit()
+    storage = SimpleNamespace(guardar=lambda ruta, contenido: ruta)
+
+    ejecutar_scraping_expediente(db_session, storage=storage, trabajo=trabajo)
+
+    db_session.refresh(expediente)
+    assert expediente.estado == EstadoExpediente.descargado
+    assert expediente.sin_publicar_en is None
+    assert expediente.sin_publicar_version_busqueda is None
 
 
 # Bloque 6, sesión de comparación documento-vs-listado interno: "si mañana

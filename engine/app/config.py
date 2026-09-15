@@ -132,6 +132,14 @@ class Settings(BaseSettings):
     # manual, `POST /mantenimiento/ejecutar`, sigue funcionando igual).
     mantenimiento_intervalo_segundos: float = 7 * 24 * 3600.0
     mantenimiento_programado_activo: bool = True
+    # Sesión 2026-09-15: un `sin_publicar` ya confirmado con la lógica de
+    # búsqueda vigente se vuelve a buscar pasado este plazo (dos semanas: con
+    # el ciclo semanal, en ciclos alternos). Un negativo sin confirmar no
+    # espera ningún plazo. Tope de búsquedas por ciclo (~40 s cada una en la
+    # Plataforma real), empezando por los más antiguos; los que no caben
+    # quedan para el ciclo siguiente.
+    sin_publicar_reintento_dias: float = 14.0
+    sin_publicar_reintentos_por_ciclo: int = 50
 
     # Copias de seguridad automáticas (bloque de copias de seguridad,
     # sesión 2026-09-06): antes no había ninguna periódica, solo volcados

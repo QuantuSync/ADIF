@@ -3,16 +3,20 @@ frescura sin abrir ningún documento ni tocar la cascada de extracción."""
 from datetime import datetime, timedelta, timezone
 
 from app.mantenimiento.frescura import (
+    VERSION_LOGICA_BUSQUEDA,
     VERSION_LOGICA_EXTRACCION,
     contar_lineas_catalogo,
     debe_descargar,
     debe_estampar_extraccion,
     debe_extraer,
+    debe_rebuscar_sin_publicar,
     detectar_crecimiento_sin_cambios,
     documentos_sin_cambios,
     estampar_descarga_exitosa,
     estampar_extraccion,
     huella_documentos,
+    sin_publicar_confirmado,
+    sin_publicar_reintento_desde,
 )
 from app.models import Documento, EstadoExpediente, Expediente, Lote, LineaCatalogo
 
@@ -160,6 +164,55 @@ def test_debe_estampar_extraccion_estados_terminales():
 def test_debe_estampar_extraccion_excluye_esperando_matriz_y_sin_publicar():
     assert debe_estampar_extraccion(_expediente(estado=EstadoExpediente.esperando_matriz)) is False
     assert debe_estampar_extraccion(_expediente(estado=EstadoExpediente.sin_publicar)) is False
+
+
+# --- Sesión 2026-09-15: `sin_publicar` deja de ser definitivo.
+
+_PLAZO = timedelta(days=14)
+_AHORA = datetime(2026, 9, 15, 12, 0, tzinfo=timezone.utc)
+
+
+def _sin_publicar(en=None, version=None) -> Expediente:
+    return _expediente(
+        estado=EstadoExpediente.sin_publicar, sin_publicar_en=en, sin_publicar_version_busqueda=version,
+    )
+
+
+def test_sin_publicar_confirmado_solo_con_la_version_de_busqueda_vigente():
+    assert sin_publicar_confirmado(_sin_publicar(_AHORA, VERSION_LOGICA_BUSQUEDA)) is True
+    # Negativo de antes del arreglo del 2026-09-07 (sin versión) u otra versión.
+    assert sin_publicar_confirmado(_sin_publicar(_AHORA, None)) is False
+    assert sin_publicar_confirmado(_sin_publicar(_AHORA, "anterior")) is False
+    # Ni siquiera aplica a un expediente que no está sin publicar.
+    assert sin_publicar_confirmado(_expediente(sin_publicar_version_busqueda=VERSION_LOGICA_BUSQUEDA)) is False
+
+
+def test_sin_publicar_confirmado_se_rebusca_pasado_el_plazo():
+    reciente = _sin_publicar(_AHORA - timedelta(days=13), VERSION_LOGICA_BUSQUEDA)
+    vencido = _sin_publicar(_AHORA - timedelta(days=14), VERSION_LOGICA_BUSQUEDA)
+
+    assert debe_rebuscar_sin_publicar(reciente, _PLAZO, _AHORA) is False
+    assert sin_publicar_reintento_desde(reciente, _PLAZO) == _AHORA + timedelta(days=1)
+    assert debe_rebuscar_sin_publicar(vencido, _PLAZO, _AHORA) is True
+
+
+def test_sin_publicar_sin_confirmar_se_rebusca_en_seguida():
+    # Marcado hace un minuto, pero con la búsqueda que confundía un bloqueo
+    # con "no publicado": no espera ningún plazo.
+    assert debe_rebuscar_sin_publicar(_sin_publicar(_AHORA - timedelta(minutes=1), None), _PLAZO, _AHORA) is True
+    # Sin fecha: tampoco.
+    assert debe_rebuscar_sin_publicar(_sin_publicar(None, VERSION_LOGICA_BUSQUEDA), _PLAZO, _AHORA) is True
+
+
+def test_fecha_sin_huso_se_lee_como_utc():
+    # SQLite devuelve las fechas sin huso.
+    exp = _sin_publicar(datetime(2026, 9, 1, 12, 0), VERSION_LOGICA_BUSQUEDA)
+    assert debe_rebuscar_sin_publicar(exp, _PLAZO, _AHORA) is True
+
+
+def test_solo_se_rebusca_lo_que_esta_sin_publicar():
+    assert debe_rebuscar_sin_publicar(_expediente(estado=EstadoExpediente.fallido), _PLAZO, _AHORA) is False
+    assert sin_publicar_reintento_desde(_expediente(estado=EstadoExpediente.completado), _PLAZO) is None
 
 
 def test_estampar_descarga_exitosa(db_session):

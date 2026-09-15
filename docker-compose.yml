@@ -78,6 +78,9 @@ services:
       # servicio "worker".
       MANTENIMIENTO_INTERVALO_SEGUNDOS: ${MANTENIMIENTO_INTERVALO_SEGUNDOS:-604800}
       MANTENIMIENTO_PROGRAMADO_ACTIVO: ${MANTENIMIENTO_PROGRAMADO_ACTIVO:-true}
+      # Sesión 2026-09-15: la API muestra desde cuándo se vuelve a buscar un
+      # `sin_publicar` -- mismo plazo que el servicio "worker".
+      SIN_PUBLICAR_REINTENTO_DIAS: ${SIN_PUBLICAR_REINTENTO_DIAS:-14}
       # Copias de seguridad automáticas (sesión 2026-09-06): mismo motivo
       # que las dos variables de arriba -- solo el worker decide cuándo
       # lanzar la copia, pero la API también las lee para que
@@ -142,6 +145,11 @@ services:
       # MANTENIMIENTO_PROGRAMADO_ACTIVO lo desactiva sin tocar código.
       MANTENIMIENTO_INTERVALO_SEGUNDOS: ${MANTENIMIENTO_INTERVALO_SEGUNDOS:-604800}
       MANTENIMIENTO_PROGRAMADO_ACTIVO: ${MANTENIMIENTO_PROGRAMADO_ACTIVO:-true}
+      # Sesión 2026-09-15: `sin_publicar` ya no es definitivo -- el ciclo
+      # vuelve a buscar los confirmados pasado este plazo (los no
+      # confirmados, en seguida), hasta este tope por ciclo.
+      SIN_PUBLICAR_REINTENTO_DIAS: ${SIN_PUBLICAR_REINTENTO_DIAS:-14}
+      SIN_PUBLICAR_REINTENTOS_POR_CICLO: ${SIN_PUBLICAR_REINTENTOS_POR_CICLO:-50}
       # Copias de seguridad automáticas (sesión 2026-09-06): volcado
       # completo de la base de datos, diario por defecto -- ver
       # `app.mantenimiento.copia_seguridad`. BACKUP_DIR apunta al volumen
