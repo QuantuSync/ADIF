@@ -445,20 +445,33 @@ def _check_importe_licitacion_sospechoso(db: Session) -> list[Hallazgo]:
     hallazgos: list[Hallazgo] = []
 
     filas = db.execute(
-        select(DocumentoExpediente.documento_id, Expediente.id, Expediente.codigo_expediente, Lote.importe_licitacion)
+        select(
+            DocumentoExpediente.documento_id, Expediente.id, Expediente.codigo_expediente, Lote.importe_licitacion,
+            Lote.codigo_expediente_lote,
+        )
         .join(Expediente, Expediente.id == DocumentoExpediente.expediente_id)
         .join(Lote, Lote.expediente_id == Expediente.id)
         .where(Lote.importe_licitacion.isnot(None))
     ).all()
 
+    # Sesión 2026-09-15: un lote con su propio código de expediente es el
+    # MISMO lote en todos los expedientes que lo guardan (el principal y el
+    # propio lote, `6.22/28510.0033`/`0058`) -- que compartan su importe es lo
+    # correcto, no el presupuesto global repartido. Con el importe que ahora
+    # completa el Contrato de cada lote, esa coincidencia legítima pasó de 31
+    # a 275 grupos y tapaba la señal. Es sospechoso cuando el mismo importe
+    # del mismo documento está en lotes que no son el mismo.
     grupos: dict[tuple, dict[int, str]] = {}
-    for documento_id, expediente_id, codigo, importe in filas:
+    lotes_del_grupo: dict[tuple, set] = {}
+    for documento_id, expediente_id, codigo, importe, codigo_lote in filas:
         grupos.setdefault((documento_id, importe), {})[expediente_id] = codigo
+        # Un lote sin código no se puede identificar con ningún otro.
+        lotes_del_grupo.setdefault((documento_id, importe), set()).add(codigo_lote or ("sin código", expediente_id))
 
     codigos_cruzados: set[str] = set()
     grupos_sospechosos = 0
-    for miembros in grupos.values():
-        if len(miembros) > 1:
+    for clave, miembros in grupos.items():
+        if len(miembros) > 1 and len(lotes_del_grupo[clave]) > 1:
             grupos_sospechosos += 1
             codigos_cruzados.update(miembros.values())
 
