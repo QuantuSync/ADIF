@@ -17,6 +17,7 @@ from app.extraccion.normalizacion import (
 )
 from app.extraccion.tabla import TablaExtraida
 from app.extraccion.texto import normalizar
+from app.extraccion.unidad_medida import es_unidad_conocida
 from app.models import LineaCatalogo, Lote
 
 # `LineaCatalogo.codigo_precio` es `String(32)` (app/models.py) -- se lee del
@@ -269,12 +270,39 @@ def _es_pie_de_tabla(texto_normalizado_sin_espacios: str) -> bool:
     return texto_normalizado_sin_espacios in _ETIQUETAS_PIE_TABLA
 
 
+# Sesión 2026-09-15 (cuarta parte): una tabla con varias secciones repite su
+# cabecera en mitad ("MANTENIMIENTO PREVENTIVO" y otra vez "CODIGO |
+# DESCRIPCIÓN | UNIDAD | MEDICIÓN | Precio Unitario | IMPORTE", pp. 7, 8 y 11
+# de `4.26/28510.0031_ANEJO_2296757d97322ecf.pdf`), y esa fila se guardaba
+# como una línea con descripción "DESCRIPCIÓN" y unidad "UNIDAD". Una fila es
+# la cabecera repetida si su celda de descripción es una etiqueta de columna
+# de descripción y la de precio no trae ninguna cifra.
+_ETIQUETAS_CABECERA_DESCRIPCION = frozenset({"descripcion", "concepto", "designacion", "denominacion"})
+
+
+def _es_cabecera_repetida(fila: list[Optional[str]], mapeo: dict[str, Optional[int]]) -> bool:
+    descripcion = _valor_en(fila, mapeo.get("descripcion"))
+    if not descripcion or normalizar(descripcion).replace(" ", "") not in _ETIQUETAS_CABECERA_DESCRIPCION:
+        return False
+    precio = _valor_en(fila, mapeo.get("precio_unitario"))
+    return not (precio and re.search(r"\d", precio))
+
+
 def _es_partida_alzada(texto_normalizado_sin_espacios: str) -> bool:
     # "Partida alzada a justificar para imprevistos" y variantes: CONTEXTO.md
     # sección 2 la define como línea legítima ("sin matrícula ni código de
     # material"), así que el texto no se descarta — se recupera como
     # descripción, nunca como matrícula.
-    return texto_normalizado_sin_espacios.startswith("partidaalzada")
+    return _sin_signos_iniciales(texto_normalizado_sin_espacios).startswith("partidaalzada")
+
+
+def _sin_signos_iniciales(texto: str) -> str:
+    # Sesión 2026-09-15 (cuarta parte): un signo suelto delante del texto
+    # ("∅\nPartida alzada a justificar para imprevistos",
+    # `6.25/28510.0257_CONTRATO` p.20, del sello lateral de verificación, el
+    # mismo que deja "ilav/" pegado al código de precio de esa fila) no cambia
+    # lo que es.
+    return re.sub(r"^[\W_]+", "", texto)
 
 
 # Sesión de los 3 expedientes que seguían en revisión tras el criterio de
@@ -909,13 +937,18 @@ def _construir_campos(
     con un mapeo desplazado, no solo con el original.
 
     Devuelve `("pie_de_tabla", None)` cuando la fila es un resumen de tabla
-    (CONTEXTO.md sección 2, sesión de rodaje 2026-09-03) y `("ok", campos)` en
+    (CONTEXTO.md sección 2, sesión de rodaje 2026-09-03), `("cabecera_repetida",
+    None)` cuando repite la cabecera en mitad de la tabla
+    (`_es_cabecera_repetida`) y `("ok", campos)` en
     cualquier otro caso — `campos["descripcion"]` puede ser `""` y
     `campos["precio_unitario"]` puede ser `None`, eso lo decide el
     llamador."""
 
     def _valor(campo: str) -> Optional[str]:
         return _valor_en(fila, mapeo.get(campo))
+
+    if _es_cabecera_repetida(fila, mapeo):
+        return "cabecera_repetida", None
 
     matricula_bruta = _valor("matricula")
     codigo_precio, motivo_codigo_precio = _normalizar_codigo_precio(_valor("codigo_precio"))
@@ -993,6 +1026,16 @@ def _construir_campos(
             f"normativa, un plano o un valor desplazado de otra columna, revisar el mapeo de esta cabecera",
         )
         unidad_medida = None
+    elif unidad_medida and not es_unidad_conocida(unidad_medida):
+        # Sesión 2026-09-15 (cuarta parte): un texto sin cifras que no es una
+        # unidad ("Fibra monomodo" de la columna "CARACTERÍSTICAS", "Precio
+        # mensual") -- ver `app.extraccion.unidad_medida`.
+        motivo_revision = _acumular_motivo(
+            motivo_revision,
+            f"unidad de medida descartada por no ser una unidad conocida (ud, m, kg, t, h, PA...): "
+            f"{unidad_medida!r} — puede ser otra columna del cuadro leída como unidad, revisar contra el documento",
+        )
+        unidad_medida = None
 
     if matricula is not None and not _MATRICULA_VALIDA_RE.match(matricula):
         clave = normalizar(matricula).replace(" ", "")
@@ -1009,7 +1052,7 @@ def _construir_campos(
             # `matricula`, que ya perdió los espacios entre palabras al
             # limpiarse como si fuera un código.
             if not descripcion:
-                descripcion = limpiar_texto_celda(matricula_bruta) or matricula
+                descripcion = _sin_signos_iniciales(limpiar_texto_celda(matricula_bruta) or matricula)
             matricula = None
         elif matricula_bruta and (
             _recuperada := _matricula_recuperable_de_celda_multilinea(matricula_bruta)
@@ -1260,7 +1303,7 @@ def construir_linea_catalogo(
     desplazados de columna respecto al mapeo, la línea se conserva con
     `motivo_revision` en vez de perderse — no toda fila vacía es relleno."""
     estado, campos = _construir_campos(fila, mapeo)
-    if estado == "pie_de_tabla":
+    if estado in ("pie_de_tabla", "cabecera_repetida"):
         return None
 
     if (

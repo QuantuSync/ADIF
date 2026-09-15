@@ -297,7 +297,10 @@ en el Excel, con el mismo criterio de celda vacía (no aplica/no consta) que
 el resto de columnas. 94,6% de las líneas del catálogo la traen; el 5,4%
 restante es, verificado contra el corpus real, un cuadro de precios que de
 verdad no declara ninguna columna de unidad (no un hueco de extracción) —
-ver `docs/excel-cliente-correccion.md` bloque 5.
+ver `docs/excel-cliente-correccion.md` bloque 5. **Solo se guarda como unidad
+un valor del vocabulario de unidades conocidas**
+(`app.extraccion.unidad_medida`, sesión 2026-09-15): cualquier otro se
+descarta y la línea va a revisión.
 
 Añadir internamente, aunque no salgan al Excel como columna propia:
 `codigo_precio`, `documento_origen`, `pagina`, `fragmento`, `confianza`,
@@ -1710,6 +1713,27 @@ suficientes, no ahora.
   h a la velocidad de descarga de la Plataforma); leídos 2 (202609 y
   202608), 0 expedientes nuevos; los otros 24 quedaron en la cola, un
   trabajo por mes.
+- **Unidades de medida que no lo son, cobertura de 2026 y restos de
+  auditoría (sesión 2026-09-15, cuarta parte,
+  `docs/sesion-2026-09-15-unidades-y-cobertura-2026.md`).** De 40 valores
+  distintos de unidad, ya sin planos ni normas, no eran unidades "Fibra
+  monomodo" (51 líneas, `6.24/28510.0125`: la caché 298 mapeaba
+  "CARACTERÍSTICAS" como unidad; corregida, junto con la 98, "E.T."),
+  "Precio mensual" y "ud ud ud" (restos de pasadas antiguas) y "UNIDAD" (la
+  cabecera repetida de `4.26/28510.0031`). **Validación nueva**
+  (`app.extraccion.unidad_medida.es_unidad_conocida`): una unidad que no es
+  de la lista, o una compuesta de ellas ("t x km", "€/Ton*mes"), se descarta
+  y la línea va a revisión; también en el relleno desde el maestro de SAP.
+  Una fila que repite la cabecera en mitad de la tabla ya no es una línea, y
+  una partida alzada con un signo del sello lateral delante ("∅") se
+  reconoce (`6.25/28510.0257` P-22): 0 líneas sin descripción, auditoría con
+  un solo error (las 11 parejas conocidas). Cobertura de 2026: 24
+  expedientes `*.26/28510.*` (21 en la sindicación, 3 solo en el SAP), 14 con
+  líneas, 343 filas en el Excel; el "3" del cliente es la columna "Código de
+  expediente", que solo se rellena si cruza con el Excel de códigos.
+  Pendiente: `4.26/28510.0005` y `6.26/28510.0004` sin líneas, sin
+  investigar. El contenedor `api` no tiene proveedor de modelo: una
+  extracción lanzada desde él falla en las tablas sin cabecera.
 
 ---
 
@@ -1738,4 +1762,5 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `sesion-2026-09-15-verificacion-localizador-tablas.md`,
 `sesion-2026-09-15-expedientes-2026-presidencia.md`,
 `sesion-2026-09-15-criterio-28510-y-cuadros-sin-codigo.md`,
+`sesion-2026-09-15-unidades-y-cobertura-2026.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.
