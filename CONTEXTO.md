@@ -1733,7 +1733,14 @@ suficientes, no ahora.
   expediente", que solo se rellena si cruza con el Excel de códigos.
   Pendiente: `4.26/28510.0005` y `6.26/28510.0004` sin líneas, sin
   investigar. El contenedor `api` no tiene proveedor de modelo: una
-  extracción lanzada desde él falla en las tablas sin cabecera.
+  extracción lanzada desde él falla en las tablas sin cabecera. **Quinta
+  parte:** la unidad se guarda sin el prefijo de la base del precio ("€/UD"
+  → "UD", 4.084 líneas de `6.21/28510.0108`-`0113`) ni la llamada de nota
+  ("dm3**" → "dm3"), decisión del cliente (`limpiar_unidad`). "PERSONALIZADO"
+  no existe como unidad en el sistema. `PA` (66 líneas) y `P` (3) pendientes
+  de decisión del cliente. El orden del catálogo/Excel no es total (el
+  desempate por `orden_aparicion` se repite entre documentos): falta
+  `LineaCatalogo.id` como último desempate.
 
 ---
 

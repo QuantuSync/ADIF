@@ -17,7 +17,7 @@ from app.extraccion.normalizacion import (
 )
 from app.extraccion.tabla import TablaExtraida
 from app.extraccion.texto import normalizar
-from app.extraccion.unidad_medida import es_unidad_conocida
+from app.extraccion.unidad_medida import es_unidad_conocida, limpiar_unidad
 from app.models import LineaCatalogo, Lote
 
 # `LineaCatalogo.codigo_precio` es `String(32)` (app/models.py) -- se lee del
@@ -961,6 +961,8 @@ def _construir_campos(
         matricula = matricula.replace(".", "")
     descripcion = limpiar_texto_celda(_valor("descripcion")) or ""
     unidad_medida = limpiar_texto_celda(_unir_unidad_partida(_valor("unidad_medida")))
+    if unidad_medida:
+        unidad_medida = limpiar_unidad(unidad_medida)
 
     motivo_revision: Optional[str] = motivo_codigo_precio
 

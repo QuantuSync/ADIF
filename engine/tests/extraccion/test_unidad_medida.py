@@ -1,6 +1,6 @@
 import pytest
 
-from app.extraccion.unidad_medida import es_unidad_conocida
+from app.extraccion.unidad_medida import es_unidad_conocida, limpiar_unidad
 
 
 # Los 36 valores del catálogo real (barrido de la sesión 2026-09-15, cuarta
@@ -20,6 +20,14 @@ def test_unidades_del_corpus(valor):
 ])
 def test_lo_que_no_es_una_unidad(valor):
     assert not es_unidad_conocida(valor)
+
+
+@pytest.mark.parametrize("valor, esperado", [
+    ("€/UD", "UD"), ("€/Ton*km", "Ton*km"), ("€ / h", "h"), ("€/transporte", "transporte"),
+    ("dm3**", "dm3"), ("dm3", "dm3"), ("UD.", "UD."), ("€/", None), ("**", None),
+])
+def test_limpiar_unidad(valor, esperado):
+    assert limpiar_unidad(valor) == esperado
 
 
 def test_unidades_del_maestro_de_sap():

@@ -14,8 +14,8 @@ filas fundidas en `6.21/28510.0152`).
 
 Regla: un valor se acepta como unidad solo si, en minúsculas y sin acentos
 ni puntos, es una unidad de la lista o una compuesta de ellas ("t x km",
-"m3xkm", "UD/día", "€/Ton*mes": el prefijo "€/" dice a qué unidad va el
-precio). Las llamadas de nota al pie ("dm3**") no cuentan. La lista son las
+"m3xkm", "UD/día", "Ton*mes"). El prefijo de la base del precio ("€/") y las
+llamadas de nota al pie ("dm3**") se quitan antes (`limpiar_unidad`). La lista son las
 unidades del corpus, las del maestro de materiales de SAP y las usuales de
 longitud, superficie, volumen, masa y tiempo; no se amplía sin un caso real.
 """
@@ -48,6 +48,16 @@ _UNIDADES = frozenset({
 
 _PREFIJO_PRECIO_RE = re.compile(r"^€\s*/\s*")
 _SEPARADOR_RE = re.compile(r"\s*[x*/·]\s*")
+
+
+def limpiar_unidad(valor: str) -> str | None:
+    """Decisión del cliente (sesión 2026-09-15, quinta parte): lo que se
+    guarda es la unidad, sin el prefijo de la base del precio ("€/UD" ->
+    "UD", "€/Ton*km" -> "Ton*km": 4.084 líneas de `6.21/28510.0108`-`0113`)
+    ni la llamada de nota al pie ("dm3**" -> "dm3": 15 líneas de
+    `6.24/28510.0088`/`0114`, `6.25/28510.0221`)."""
+    limpio = _PREFIJO_PRECIO_RE.sub("", valor.strip()).rstrip("*").strip()
+    return limpio or None
 
 
 def _sin_acentos(texto: str) -> str:

@@ -2681,7 +2681,9 @@ def test_construir_linea_catalogo_unidad_real_con_un_digito_se_conserva():
     linea = construir_linea_catalogo(
         fila, mapeo, pagina=49, documento_origen_id=586, expediente_id=1, baja_lote=None, orden_aparicion=0
     )
-    assert linea["unidad_medida"] == "€/Ton*mes"
+    # Sin el prefijo de la base del precio (decisión del cliente, sesión
+    # 2026-09-15, quinta parte).
+    assert linea["unidad_medida"] == "Ton*mes"
     fila_m3 = ["P-1", "Balasto sobre camión", "m3", "22.780,516", "12,40"]
     linea_m3 = construir_linea_catalogo(
         fila_m3, mapeo, pagina=30, documento_origen_id=319, expediente_id=1, baja_lote=None, orden_aparicion=0
@@ -2919,6 +2921,23 @@ def test_partida_alzada_con_un_signo_delante_en_la_columna_de_matricula():
     assert linea["matricula"] is None
     assert linea["codigo_precio"] == "P-22"
     assert linea["precio_unitario"] == Decimal("25200.00")
+
+
+def test_unidad_sin_prefijo_de_precio_ni_llamada_de_nota():
+    mapeo = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": 2, "cantidad": 3,
+             "precio_unitario": 4}
+    # `6.21/28510.0108`: la columna de unidad trae la base del precio.
+    fila_euro = ["P-35", "Conjunto aguja-contraaguja para ADIH", "€/UD", "2,9", "62.186,25"]
+    # `6.24/28510.0088` p.23: "dm3**", con la llamada a una nota al pie.
+    fila_nota = ["P-001", "Traviesa sin sujeción de pino", "dm3**", None, "1,00"]
+    # `6.21/28510.0108`: unidad partida por el ancho de columna.
+    fila_partida = ["P-40", "Transporte por camión especial", "€/transport\ne", "1", "900,00"]
+
+    assert construir_linea_catalogo(fila_euro, mapeo, 8, None, 1, None, 0)["unidad_medida"] == "UD"
+    linea_nota = construir_linea_catalogo(fila_nota, mapeo, 23, None, 1, None, 0)
+    assert linea_nota["unidad_medida"] == "dm3"
+    assert not (linea_nota["motivo_revision"] or "").count("unidad")
+    assert construir_linea_catalogo(fila_partida, mapeo, 8, None, 1, None, 0)["unidad_medida"] == "transporte"
 
 
 def test_material_llamado_como_una_etiqueta_con_precio_no_es_cabecera():
