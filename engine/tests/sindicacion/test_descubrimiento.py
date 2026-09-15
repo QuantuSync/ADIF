@@ -93,6 +93,63 @@ def test_organo_no_adif_se_ignora(tmp_path, db_session, monkeypatch):
     assert resumen.expedientes_nuevos == 0
 
 
+# Sesión 2026-09-15, criterio del cliente: entra todo código con los dígitos
+# 28510, sin mirar el órgano ni la forma del resto del código.
+def test_codigo_28510_entra_aunque_el_organo_no_diga_adif(tmp_path, db_session, monkeypatch):
+    from app import config
+    monkeypatch.setattr(config.settings, "sindicacion_departamentos_adif", "28510")
+
+    zip_path = construir_zip(
+        tmp_path / "prueba.zip",
+        [
+            entrada_xml(
+                "6.25/28510.0300", "Administrador de Infraestructuras Ferroviarias - Presidencia", "PUB",
+                "2024-08-01T00:00:00+02:00", "1", "1",
+            ),
+            entrada_xml("6.24/28510.0088", "ADIF - Presidencia", "PUB", "2024-08-01T00:00:00+02:00", "1", "1"),
+        ],
+    )
+
+    resumen = descubrir_novedades(db_session, periodo="202408", ruta_zip=zip_path)
+
+    assert resumen.expedientes_nuevos == 2
+    assert resumen.expedientes_adif_total == 1
+    assert db_session.query(Expediente).filter_by(codigo_expediente="6.25/28510.0300").one_or_none() is not None
+    # Solo se señala el que el filtro anterior habría perdido.
+    assert list(resumen.codigos_criterio_ampliado) == ["6.25/28510.0300"]
+    assert "órgano sin 'adif'" in resumen.codigos_criterio_ampliado["6.25/28510.0300"]
+
+
+def test_codigo_28510_con_otro_separador_entra(tmp_path, db_session, monkeypatch):
+    from app import config
+    monkeypatch.setattr(config.settings, "sindicacion_departamentos_adif", "28510")
+
+    zip_path = construir_zip(
+        tmp_path / "prueba.zip",
+        [entrada_xml("6.24-28510-0301", "ADIF - Presidencia", "ADJ", "2024-08-01T00:00:00+02:00", "1", "1")],
+    )
+
+    resumen = descubrir_novedades(db_session, periodo="202408", ruta_zip=zip_path)
+
+    assert resumen.expedientes_nuevos == 1
+    assert resumen.codigos_criterio_ampliado == {"6.24-28510-0301": "código sin la forma N.AA/DDDDD."}
+
+
+def test_28510_dentro_de_otro_numero_no_entra(tmp_path, db_session, monkeypatch):
+    from app import config
+    monkeypatch.setattr(config.settings, "sindicacion_departamentos_adif", "28510")
+
+    zip_path = construir_zip(
+        tmp_path / "prueba.zip",
+        [entrada_xml("EXP 1285107/2024", "Ayuntamiento de Ejemplo", "PUB", "2024-08-01T00:00:00+02:00", "1", "1")],
+    )
+
+    resumen = descubrir_novedades(db_session, periodo="202408", ruta_zip=zip_path)
+
+    assert resumen.expedientes_nuevos == 0
+    assert resumen.expedientes_filtrados == 0
+
+
 def test_cambio_de_estado_en_expediente_existente_reencola_descarga(tmp_path, db_session, monkeypatch):
     from app import config
     monkeypatch.setattr(config.settings, "sindicacion_departamentos_adif", "28510")

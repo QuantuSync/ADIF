@@ -31,6 +31,7 @@ no solo el mes en curso.
 from __future__ import annotations
 
 import logging
+import re
 import tempfile
 import time
 from dataclasses import dataclass, field
@@ -64,13 +65,17 @@ class ResumenDescubrimiento:
     # Expedientes ÚNICOS con órgano de contratación de ADIF (cualquier
     # departamento) vistos en el periodo -- dimensiona el alcance potencial
     # del sistema si algún día se amplía `sindicacion_departamentos_adif`.
+    # Solo informativo: el órgano ya no decide nada (sesión 2026-09-15).
     expedientes_adif_total: int = 0
-    # De esos, cuántos pasan el filtro de departamento configurado -- los
-    # únicos que este descubrimiento da de alta o actualiza de verdad.
+    # Cuántos cumplen el criterio (código con un departamento configurado)
+    # -- los únicos que este descubrimiento da de alta o actualiza de verdad.
     expedientes_filtrados: int = 0
     expedientes_nuevos: int = 0
     expedientes_con_cambio_estado: int = 0
     expedientes_sin_cambios: int = 0
+    # Los que cumplen el criterio pero el filtro anterior (órgano con "adif" y
+    # código con la forma `N.AA/DDDDD.`) habría descartado, con el motivo.
+    codigos_criterio_ampliado: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -80,6 +85,7 @@ class ResumenDescubrimiento:
             "expedientes_nuevos": self.expedientes_nuevos,
             "expedientes_con_cambio_estado": self.expedientes_con_cambio_estado,
             "expedientes_sin_cambios": self.expedientes_sin_cambios,
+            "codigos_criterio_ampliado": self.codigos_criterio_ampliado,
         }
 
 
@@ -103,14 +109,37 @@ def _departamentos_configurados() -> set[str]:
 
 
 def _es_adif(entrada: EntradaSindicacion) -> bool:
-    """Filtro de órgano de contratación (bloque 2, punto 2): por texto, sin
-    acotar todavía por departamento -- eso es un segundo filtro, ver
-    `_departamentos_configurados`. Cubre "ADIF", "ADIF -Consejo de
-    Administración" y "ADIF Alta Velocidad - ..." por igual (los cuatro
-    órganos reales encontrados en la sesión de verificación); un
-    departamento fuera de la lista configurada nunca llega a crear ni
-    actualizar nada, pase lo que pase con el órgano."""
+    """Órgano de contratación con "adif" en el texto. Solo para el recuento
+    informativo `expedientes_adif_total` y para señalar lo que el filtro
+    anterior habría perdido: desde la sesión 2026-09-15 el órgano no decide
+    si un expediente entra (ver `_cumple_criterio`)."""
     return bool(entrada.organo_contratacion) and "adif" in entrada.organo_contratacion.lower()
+
+
+def _cumple_criterio(codigo: Optional[str], departamentos: set[str]) -> bool:
+    """Criterio del cliente (sesión 2026-09-15): entra todo expediente cuyo
+    código contenga los dígitos de un departamento configurado (28510), en
+    cualquier estado, sin mirar el órgano ni la forma del resto del código.
+    Antes se exigía además un órgano con "adif" y la forma exacta
+    `N.AA/28510.`: un expediente 28510 con el órgano escrito de otra manera, o
+    con el código escrito con otro separador, se perdía sin aviso.
+
+    Los dígitos no pueden ir pegados a otros dígitos: "28510" dentro de
+    "1285107" es parte de otro número, no el departamento."""
+    if not codigo:
+        return False
+    return any(re.search(rf"(?<!\d){re.escape(d)}(?!\d)", codigo) for d in departamentos)
+
+
+def _motivo_criterio_ampliado(entrada: EntradaSindicacion, departamentos: set[str]) -> Optional[str]:
+    """Por qué el filtro anterior habría descartado una entrada que cumple el
+    criterio actual, o `None` si también la admitía."""
+    motivos = []
+    if not _es_adif(entrada):
+        motivos.append(f"órgano sin 'adif': {entrada.organo_contratacion!r}")
+    if entrada.departamento not in departamentos:
+        motivos.append("código sin la forma N.AA/DDDDD.")
+    return "; ".join(motivos) or None
 
 
 def _lotes_a_json(entrada: EntradaSindicacion) -> Optional[list[dict]]:
@@ -142,9 +171,11 @@ def descubrir_novedades(
     try:
         vistos_adif: set[str] = set()
         mejores: dict[str, EntradaSindicacion] = {}
-        for entrada in entradas_de_zip(ruta, filtro=_es_adif):
-            vistos_adif.add(entrada.codigo_expediente)
-            if entrada.departamento not in departamentos:
+        filtro = lambda e: _es_adif(e) or _cumple_criterio(e.codigo_expediente, departamentos)  # noqa: E731
+        for entrada in entradas_de_zip(ruta, filtro=filtro):
+            if _es_adif(entrada):
+                vistos_adif.add(entrada.codigo_expediente)
+            if not _cumple_criterio(entrada.codigo_expediente, departamentos):
                 continue
             actual = mejores.get(entrada.codigo_expediente)
             if actual is None or entrada.actualizado_en > actual.actualizado_en:
@@ -157,6 +188,11 @@ def descubrir_novedades(
     resumen.expedientes_filtrados = len(mejores)
 
     for entrada in mejores.values():
+        motivo = _motivo_criterio_ampliado(entrada, departamentos)
+        if motivo is not None:
+            resumen.codigos_criterio_ampliado[entrada.codigo_expediente] = motivo
+            logger.info("expediente %s entra por el criterio ampliado: %s", entrada.codigo_expediente, motivo)
+
         fila = db.execute(
             select(SindicacionExpediente).where(
                 SindicacionExpediente.codigo_expediente == entrada.codigo_expediente
@@ -257,6 +293,7 @@ class ResumenBackfill:
     periodos_con_error: dict[str, str] = field(default_factory=dict)
     expedientes_nuevos: int = 0
     expedientes_con_cambio_estado: int = 0
+    codigos_criterio_ampliado: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -264,6 +301,7 @@ class ResumenBackfill:
             "periodos_con_error": self.periodos_con_error,
             "expedientes_nuevos": self.expedientes_nuevos,
             "expedientes_con_cambio_estado": self.expedientes_con_cambio_estado,
+            "codigos_criterio_ampliado": self.codigos_criterio_ampliado,
         }
 
 
@@ -332,5 +370,6 @@ def descubrir_backfill(db: Session, periodos: list[str]) -> ResumenBackfill:
         resumen.periodos_procesados.append(periodo)
         resumen.expedientes_nuevos += parcial.expedientes_nuevos
         resumen.expedientes_con_cambio_estado += parcial.expedientes_con_cambio_estado
+        resumen.codigos_criterio_ampliado.update(parcial.codigos_criterio_ampliado)
     logger.info("backfill de sindicación terminado: %s", resumen.to_dict())
     return resumen
