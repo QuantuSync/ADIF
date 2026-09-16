@@ -1712,6 +1712,25 @@ def test_linea_sin_descripcion_ni_matricula_con_fragmento_vacio_se_descarta():
     assert linea is None
 
 
+def test_fila_de_totales_sin_etiqueta_en_la_matricula_es_pie_de_tabla():
+    # Sesión 2026-09-16 (noche): el pie de totales con la etiqueta en la
+    # columna de código (`6.22/28510.0174` p.10) o pegada a su importe en la
+    # de cantidad (`6.21/28510.0026` p.11: "21% IVA 7.350,00 €", que se leía
+    # como 217.350 €) no es una línea de material.
+    mapeo = {"codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": 3, "cantidad": 4, "precio_unitario": 5}
+    for fila in (
+        ["PRESUPUESTO DE LICITACIÓN", "", "", "", "", "59.960,00 €"],
+        ["IVA", "", "", "", "", "12.591,60 €"],
+        ["TOTAL CON IVA", "", "", "", "", "72.551,60 €"],
+        ["", "", "", "", "PRESUPUESTO DE LICITACIÓN 35.000,00 €", ""],
+        ["", "", "", "", "21% IVA 7.350,00 €", ""],
+    ):
+        linea = construir_linea_catalogo(
+            fila, mapeo, pagina=10, documento_origen_id=None, expediente_id=1, baja_lote=None, orden_aparicion=0
+        )
+        assert linea is None, fila
+
+
 def test_linea_sin_descripcion_ni_matricula_con_precio_va_a_revision():
     # Variante real del encargo: la fila SÍ trae un precio real (y un
     # código de precio), pero ni descripción ni matrícula sobreviven a

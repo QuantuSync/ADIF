@@ -524,6 +524,9 @@ def _valor_en(fila: list[Optional[str]], indice: Optional[int]) -> Optional[str]
 # izquierda, dentro del mismo grupo de columnas). Verificado que el
 # desplazamiento es uniforme para toda la fila, nunca solo en un campo.
 _LETRA_RE = re.compile(r"[A-Za-zÀ-ÿ]")
+# Lo que no es texto en una fila de totales: importes, porcentajes y separadores
+# de celda ("21% IVA | 7.350,00 €" -> "IVA").
+_CIFRAS_Y_SIMBOLOS_DE_IMPORTE_RE = re.compile(r"[\d.,%€|:()\-]+")
 
 
 def _parece_descripcion_recuperable(texto: Optional[str]) -> bool:
@@ -1394,6 +1397,15 @@ def construir_linea_catalogo(
             # relleno de tabla.
             fragmento_bruto = " | ".join((celda or "").strip() for celda in fila)
             if not fragmento_bruto.replace("|", "").strip():
+                return None
+            if _es_pie_de_tabla(normalizar(_CIFRAS_Y_SIMBOLOS_DE_IMPORTE_RE.sub("", fragmento_bruto)).replace(" ", "")):
+                # Sesión 2026-09-16 (noche): el pie de totales con la etiqueta
+                # fuera de la columna de matrícula -- en la de código
+                # ("PRESUPUESTO DE LICITACIÓN | | 59.960,00 €",
+                # `6.22/28510.0174`) o pegada a su importe en otra celda
+                # ("21% IVA 7.350,00 €", `6.21/28510.0026`, leído como
+                # 217.350 €). Quitadas las cifras, lo único que dice la fila
+                # es la etiqueta de un total.
                 return None
             if not _LETRA_RE.search(fragmento_bruto.replace("€", "")):
                 # Sesión 2026-09-14 (continuación): una fila con solo cifras
