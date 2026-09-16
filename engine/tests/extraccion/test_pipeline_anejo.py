@@ -422,7 +422,7 @@ def test_documento_0109_continuaciones_heredan_mapeo_y_repuesto_sin_modelo(db_se
     p13 = next(l for l in resultado.lineas if l["codigo_precio"] == "P-13")
     assert p13["pagina"] == 2
     assert p13["precio_unitario"] == Decimal("91537.95")
-    assert p13["unidad_medida"] == "UD"  # sin el "€/" de la base del precio (sesión 2026-09-15)
+    assert p13["unidad_medida"] == "ud"  # sin el "€/" de la base del precio (sesión 2026-09-15)
 
 
 def test_documento_0016_cabecera_ilegible_no_se_cachea_y_la_matricula_va_a_su_campo(db_session):

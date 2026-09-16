@@ -69,7 +69,7 @@ import openpyxl
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.extraccion.unidad_medida import es_unidad_conocida
+from app.extraccion.unidad_medida import es_unidad_conocida, normalizar_unidad
 from app.models import LineaCatalogo, MaestroMaterial
 
 COLUMNA_MATRICULA = "Material"
@@ -228,7 +228,9 @@ def _normalizada(unidad: Optional[str]) -> Optional[str]:
     discrepancia real."""
     if unidad is None:
         return None
-    texto = unidad.strip().upper().rstrip(".")
+    # Sesión 2026-09-16 (noche): la forma única ("Ton" -> "t") antes de
+    # comparar; las líneas ya la guardan así desde entonces.
+    texto = normalizar_unidad(unidad).upper().rstrip(".")
     if not texto:
         return None
     return _SINONIMOS_UNIDAD.get(texto, texto)
@@ -276,7 +278,8 @@ def completar_unidades_desde_maestro(db: Session) -> ResumenCompletarUnidades:
             if unidad_maestro is None:
                 resumen.sin_matricula_en_maestro += 1
                 continue
-            linea.unidad_medida = unidad_maestro
+            linea.unidad_medida = normalizar_unidad(unidad_maestro)
+            linea.unidad_medida_original = unidad_maestro
             linea.unidad_medida_completada_desde_maestro = True
             resumen.lineas_completadas += 1
             continue

@@ -213,6 +213,9 @@ class LineaCatalogoOut(BaseModel):
     # la línea (del documento real) -- `unidad_medida` nunca se pisa, esto
     # solo señala la discrepancia para revisión.
     unidad_medida_discrepancia_maestro: Optional[str] = None
+    # Sesión 2026-09-16 (noche): la unidad tal como venía en el documento (o
+    # en el maestro); `unidad_medida` es su forma única.
+    unidad_medida_original: Optional[str] = None
     # Bloque 1, sesión 2026-09-11: `True` cuando la matrícula se aceptó
     # desde la cola de candidatos (`GET /revision/candidatos-matricula`),
     # no se extrajo del documento -- distinción explícita pedida en el

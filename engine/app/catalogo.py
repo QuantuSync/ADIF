@@ -17,7 +17,7 @@ from app.extraccion.normalizacion import (
 )
 from app.extraccion.tabla import TablaExtraida
 from app.extraccion.texto import normalizar
-from app.extraccion.unidad_medida import es_unidad_conocida, limpiar_unidad
+from app.extraccion.unidad_medida import es_unidad_conocida, limpiar_unidad, normalizar_unidad
 from app.models import LineaCatalogo, Lote
 
 # `LineaCatalogo.codigo_precio` es `String(32)` (app/models.py) -- se lee del
@@ -1240,11 +1240,19 @@ def _construir_campos(
     # nada: si no encontró nada recuperable arriba, tampoco lo encuentra
     # aquí.
 
+    # Sesión 2026-09-16 (noche): una sola forma por unidad ("UD." -> "ud",
+    # "Txkm" -> "t·km"); lo que decía la celda queda en
+    # `unidad_medida_original` (`app.extraccion.unidad_medida`).
+    unidad_medida_original = unidad_medida
+    if unidad_medida is not None:
+        unidad_medida = normalizar_unidad(unidad_medida)
+
     return "ok", {
         "codigo_precio": codigo_precio,
         "matricula": matricula,
         "descripcion": descripcion,
         "unidad_medida": unidad_medida,
+        "unidad_medida_original": unidad_medida_original,
         "cantidad": cantidad,
         "precio_unitario": precio_unitario,
         "motivo_revision": motivo_revision,
@@ -1412,6 +1420,7 @@ def construir_linea_catalogo(
         "descripcion": descripcion,
         "codigo_material": _codigo_material_de_columna(fila, mapeo) or derivar_codigo_material(descripcion),
         "unidad_medida": campos["unidad_medida"],
+        "unidad_medida_original": campos["unidad_medida_original"],
         "cantidad": campos["cantidad"],
         "precio_unitario": precio_unitario,
         "baja_lote": baja_lote,

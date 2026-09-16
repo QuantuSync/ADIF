@@ -184,7 +184,8 @@ def test_completa_unidad_cuando_falta_y_hay_matricula(db_session, excel_maestro)
     assert resumen.lineas_evaluadas == 1
     assert resumen.lineas_completadas == 1
     db_session.refresh(linea)
-    assert linea.unidad_medida == "UN"
+    assert linea.unidad_medida == "ud"  # forma única
+    assert linea.unidad_medida_original == "UN"
     assert linea.unidad_medida_completada_desde_maestro is True
 
 

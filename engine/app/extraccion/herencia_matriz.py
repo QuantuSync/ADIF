@@ -327,6 +327,7 @@ def intentar_heredar_de_matriz(
             "descripcion": linea.descripcion,
             "codigo_material": linea.codigo_material,
             "unidad_medida": linea.unidad_medida,
+            "unidad_medida_original": linea.unidad_medida_original,
             "cantidad": linea.cantidad,
             "precio_unitario": linea.precio_unitario,
             "baja_lote": baja_efectiva,

@@ -1,6 +1,6 @@
 import pytest
 
-from app.extraccion.unidad_medida import es_unidad_conocida, limpiar_unidad
+from app.extraccion.unidad_medida import es_unidad_conocida, limpiar_unidad, normalizar_unidad
 
 
 # Los 36 valores del catálogo real (barrido de la sesión 2026-09-15, cuarta
@@ -34,3 +34,29 @@ def test_unidades_del_maestro_de_sap():
     for valor in ("UN", "M", "KG", "PAA", "L", "P", "CJ", "BTO", "M3", "LC", "ROL", "T", "CA", "TS", "CAR",
                   "M-2", "UTR"):
         assert es_unidad_conocida(valor), valor
+
+
+# Sesión 2026-09-16 (noche): los valores del catálogo real, a su forma única.
+@pytest.mark.parametrize("valor, esperado", [
+    ("UD.", "ud"), ("UN", "ud"), ("UD", "ud"), ("ud", "ud"), ("Ud.", "ud"), ("Unidad", "ud"),
+    ("M", "m"), ("m", "m"), ("Kg", "kg"), ("KG", "kg"),
+    ("t", "t"), ("T", "t"), ("Ton", "t"),
+    ("Txkm", "t·km"), ("t x km", "t·km"), ("Ton*km", "t·km"), ("TXKM", "t·km"),
+    ("Ton*mes", "t·mes"), ("m3xkm", "m3·km"), ("UD/día", "ud/día"),
+    ("m3", "m3"), ("m³", "m3"), ("m²", "m2"), ("dm3", "dm3"), ("DM3", "dm3"),
+    ("h", "h"), ("Hora", "h"), ("h.", "h"), ("Mes", "mes"), ("Elemento x mes", "elemento·mes"),
+])
+def test_normalizar_unidad_a_su_forma_unica(valor, esperado):
+    assert normalizar_unidad(valor) == esperado
+
+
+@pytest.mark.parametrize("valor", ["PA", "P", "transporte", "ml", "PAA", "CJ", "pieza"])
+def test_normalizar_unidad_no_inventa_equivalencias(valor):
+    # "PA" no es "ud", "P" y los códigos de SAP no tienen nombre completo, "ml"
+    # puede ser metro lineal o mililitro, "pieza" no se da por "ud".
+    assert normalizar_unidad(valor) == valor
+
+
+def test_normalizar_unidad_es_idempotente():
+    for valor in ("UD.", "Txkm", "UD/día", "m³", "PA", "Elemento x mes"):
+        assert normalizar_unidad(normalizar_unidad(valor)) == normalizar_unidad(valor)
