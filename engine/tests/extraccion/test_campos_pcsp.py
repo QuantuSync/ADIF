@@ -126,3 +126,24 @@ def test_tipo_contrato_obras_sintetico():
     paginas = [PaginaTexto(numero=1, texto="Número de Expediente 6.24/28510.9999\nTipo de Contrato Obras\n")]
     campos = extraer_campos_anuncio_pcsp(paginas)
     assert campos.tipo_contrato.valor == "Obras"
+
+
+def test_objeto_del_contrato_sin_linea_descripcion_termina_en_la_siguiente_etiqueta():
+    # Sesión 2026-09-16 (noche), `6.21/28510.0040` y `6.15/28510.0081`: el
+    # anuncio no repite el objeto en una línea "Descripción"; sin otra etiqueta
+    # de cierre, el objeto llegaba hasta "Descripción de Programas de
+    # Financiación".
+    texto = (
+        "ES300\n"
+        "Objeto del Contrato: Suministro de traviesas rheda2000 para el corredor mediterráneo en el tramo\n"
+        "castellbisbal-martorell\n"
+        "Valor estimado del contrato 970.200 EUR. [2]\n"
+        "Presupuesto base de licitación\n"
+        "Importe (sin impuestos) 970.200 EUR. [4]\n"
+        "Condiciones de Licitación\n"
+        "Descripción de Programas de Financiación Cofinanciado por el Mecanismo Conectar Europa\n"
+    )
+    campos = extraer_campos_anuncio_pcsp([PaginaTexto(numero=1, texto=texto)])
+    assert campos.objeto_contrato.valor == (
+        "Suministro de traviesas rheda2000 para el corredor mediterráneo en el tramo castellbisbal-martorell"
+    )
