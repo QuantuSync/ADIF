@@ -276,13 +276,34 @@ def test_documentos_sin_cambios_nunca_extraido_antes_cuenta_como_cambio():
 
 def test_documentos_sin_cambios_misma_huella():
     docs = [_documento("h1"), _documento("h2")]
-    exp = _expediente(huella_documentos=huella_documentos(docs))
+    exp = _expediente(
+        huella_documentos=huella_documentos(docs),
+        version_logica_extraccion=VERSION_LOGICA_EXTRACCION,
+    )
     assert documentos_sin_cambios(exp, docs) is True
 
 
 def test_documentos_sin_cambios_huella_distinta():
-    exp = _expediente(huella_documentos=huella_documentos([_documento("h1")]))
+    exp = _expediente(
+        huella_documentos=huella_documentos([_documento("h1")]),
+        version_logica_extraccion=VERSION_LOGICA_EXTRACCION,
+    )
     assert documentos_sin_cambios(exp, [_documento("h1"), _documento("h2")]) is False
+
+
+def test_documentos_sin_cambios_con_logica_de_extraccion_nueva():
+    """Sesión 2026-09-16: los documentos son los mismos pero la cascada ya no
+    los lee igual. Crecer es lo esperado, no una duplicación -- si esto
+    devolviera `True`, `app.worker.procesar_extraer_expediente` marcaría con
+    un `error` de "posible duplicación" justo a los expedientes que un
+    arreglo acaba de recuperar (pasó de verdad con `6.26/28510.0004`,
+    `6.23/28510.0034` y `6.24/28510.0048`)."""
+    docs = [_documento("h1"), _documento("h2")]
+    exp = _expediente(
+        huella_documentos=huella_documentos(docs),
+        version_logica_extraccion="2026-01-01.viejo",
+    )
+    assert documentos_sin_cambios(exp, docs) is False
 
 
 def test_detectar_crecimiento_sin_cambios_no_crece():

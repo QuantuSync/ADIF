@@ -270,3 +270,34 @@ def test_tabla_sin_codigo_se_corta_en_la_primera_fila_sin_descripcion_o_sin_impo
         ["CONCEPTO", "CANTIDAD", "PRECIO", "TOTAL"],
         ["TOTAL, IVA no incluido", None, "18.000,00€", "18.000,00€"],
     ]) is None
+
+
+# --- Sesión 2026-09-16 ---
+
+
+def test_matricula_con_puntos_de_miles_es_fila_de_datos():
+    """`6.26/28510.0004`, anejo nº 1 del PPT p.7: un cuadro de un solo
+    artículo, sin ninguna columna de código de precio, con la matrícula
+    escrita "667.500.506". La normalización de la línea ya la trataba como
+    el mismo número desde la sesión 2026-09-14
+    (`app.catalogo._MATRICULA_CON_PUNTOS_RE`), pero este detector exigía los
+    9 dígitos seguidos: sin ninguna fila de datos, la tabla entera se
+    descartaba por espuria y el expediente se quedaba sin líneas."""
+    from app.extraccion.tabla import _es_fila_de_datos
+
+    fila = [
+        "", "667.500.506", "", "",
+        "MÓDEMS G.SHDSL.BIS 2/4 HILOS CON 4 PUERTOS ETHERNET", "", "",
+        "100,00", "", "", "400", "",
+    ]
+    assert _es_fila_de_datos(fila) is True
+
+
+def test_un_importe_de_nueve_digitos_no_se_confunde_con_una_matricula():
+    """El patrón con puntos es exactamente 3+3+3 y nada más: un importe con
+    decimales ("1.234.567,89") o un número de otra longitud no entra."""
+    from app.extraccion.tabla import _es_fila_de_datos
+
+    assert _es_fila_de_datos(["Presupuesto base de licitación", "1.234.567,89"]) is False
+    assert _es_fila_de_datos(["Total", "1.234.567"]) is False
+    assert _es_fila_de_datos(["Total", "12.345.678.901"]) is False

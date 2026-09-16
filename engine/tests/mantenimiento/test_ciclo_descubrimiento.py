@@ -51,3 +51,96 @@ def test_fallo_de_descubrimiento_no_impide_el_resto_del_ciclo(tmp_path, db_sessi
 
     assert "error" in resumen["descubrimiento"]
     assert resumen["expedientes_evaluados"] == 1
+
+
+# --- Sesión 2026-09-16: segunda vía de descubrimiento, por búsqueda directa ---
+
+
+def _doble_busqueda(monkeypatch, codigos):
+    from app.scraping import descubrimiento_busqueda
+
+    async def falso(fragmentos):
+        return {f: list(codigos) for f in fragmentos}
+
+    monkeypatch.setattr(descubrimiento_busqueda, "buscar_codigos_de_fragmentos", falso)
+
+
+def test_expediente_descubierto_por_busqueda_se_descarga_en_el_mismo_ciclo(db_session, monkeypatch):
+    """Mismo trato que el descubrimiento por sindicación: lo que aparece en
+    la búsqueda entra en el bucle de frescura de ESE mismo ciclo."""
+    from app import config
+    monkeypatch.setattr(config.settings, "busqueda_descubrimiento_activo", True)
+    _doble_busqueda(monkeypatch, ["6.26/28510.0016"])
+
+    descargas = []
+    manejadores = {"descargar_expediente": lambda db, t: descargas.append(t.expediente_id) or {}}
+    trabajo = encolar_trabajo(
+        db_session, tipo="mantenimiento_ciclo",
+        payload={"sindicacion_desactivada": True, "busqueda_fragmentos": ["6.26/28510"]},
+    )
+
+    resumen = ejecutar_ciclo_mantenimiento(
+        db_session, storage=None, model_provider=None, manejadores=manejadores, trabajo=trabajo
+    )
+
+    assert resumen["descubrimiento_busqueda"]["expedientes_nuevos"] == 1
+    assert resumen["nuevos_descubiertos"] == 1
+    expediente = db_session.query(Expediente).filter_by(codigo_expediente="6.26/28510.0016").one()
+    assert descargas == [expediente.id]
+    assert resumen["descargas_lanzadas"] == 1
+
+
+def test_un_sin_publicar_reabierto_por_la_busqueda_vuelve_a_descargarse(db_session, monkeypatch):
+    """El bucle de frescura excluye los `sin_publicar`; reabrirlo a
+    `pendiente` es lo único que hace falta para que lo recoja -- por eso el
+    descubrimiento no encola la descarga él mismo (sería la misma petición
+    por duplicado)."""
+    from app import config
+    from app.models import EstadoExpediente
+
+    monkeypatch.setattr(config.settings, "busqueda_descubrimiento_activo", True)
+    exp = Expediente(codigo_expediente="6.26/28510.0004", estado=EstadoExpediente.sin_publicar)
+    db_session.add(exp)
+    db_session.commit()
+    _doble_busqueda(monkeypatch, ["6.26/28510.0004"])
+
+    descargas = []
+    manejadores = {"descargar_expediente": lambda db, t: descargas.append(t.expediente_id) or {}}
+    trabajo = encolar_trabajo(
+        db_session, tipo="mantenimiento_ciclo",
+        payload={"sindicacion_desactivada": True, "busqueda_fragmentos": ["6.26/28510"]},
+    )
+
+    resumen = ejecutar_ciclo_mantenimiento(
+        db_session, storage=None, model_provider=None, manejadores=manejadores, trabajo=trabajo
+    )
+
+    assert resumen["descubrimiento_busqueda"]["sin_publicar_reabiertos"] == 1
+    assert descargas == [exp.id]
+    assert resumen["descargas_lanzadas"] == 1
+
+
+def test_fallo_de_la_busqueda_no_impide_el_resto_del_ciclo(db_session, monkeypatch):
+    from app import config
+    from app.scraping import descubrimiento_busqueda
+
+    monkeypatch.setattr(config.settings, "busqueda_descubrimiento_activo", True)
+
+    async def revienta(fragmentos):
+        raise RuntimeError("la Plataforma devolvió una página de bloqueo")
+
+    monkeypatch.setattr(descubrimiento_busqueda, "buscar_codigos_de_fragmentos", revienta)
+
+    db_session.add(Expediente(codigo_expediente="6.24/28510.0001"))
+    db_session.commit()
+    trabajo = encolar_trabajo(
+        db_session, tipo="mantenimiento_ciclo",
+        payload={"sindicacion_desactivada": True, "busqueda_fragmentos": ["6.26/28510"]},
+    )
+
+    resumen = ejecutar_ciclo_mantenimiento(
+        db_session, storage=None, model_provider=None, manejadores={}, trabajo=trabajo
+    )
+
+    assert "error" in resumen["descubrimiento_busqueda"]
+    assert resumen["expedientes_evaluados"] == 1

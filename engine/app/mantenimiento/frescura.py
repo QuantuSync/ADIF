@@ -53,7 +53,12 @@ from app.models import Documento, EstadoExpediente, Expediente, LineaCatalogo
 # lote (salvo el anejo de criterios del conjunto de los lotes, que ya no se
 # atribuye a ninguno) y la fusión por firma no cruza entre dos códigos
 # propios distintos.
-VERSION_LOGICA_EXTRACCION = "2026-09-14.3"
+# 2026-09-16: la matrícula escrita con puntos de miles ("667.500.506") cuenta
+# como fila de datos (`app.extraccion.tabla._MATRICULA_DATO_RE`) -- un cuadro
+# de precios sin columna de código que solo se identificaba por matrícula se
+# descartaba entero por espurio. Recupera `6.26/28510.0004` (+1 línea),
+# `6.23/28510.0034` (+21) y `6.24/28510.0048` (+26).
+VERSION_LOGICA_EXTRACCION = "2026-09-16"
 
 # Sesión 2026-09-15 (expedientes de 2026 que faltaban): versión de la lógica
 # de búsqueda en la Plataforma cuyo "sin resultados" es de fiar. Hasta el
@@ -230,8 +235,23 @@ def documentos_sin_cambios(expediente: Expediente, documentos: Iterable[Document
     """`False` si nunca hubo una extracción con éxito de la que partir
     (`huella_documentos` todavía `None`) -- ahí no hay nada contra qué
     comparar, y cualquier línea que se cree es la primera vez, no una
-    duplicación."""
+    duplicación.
+
+    También `False` si la lógica de extracción ha cambiado desde la última
+    vez (`VERSION_LOGICA_EXTRACCION`). Sesión 2026-09-16: esta comprobación
+    solo miraba los documentos, así que CUALQUIER arreglo de la cascada que
+    recupere líneas legítimas se denunciaba como "posible duplicación" --
+    pasó de verdad con los tres expedientes que recupera la matrícula con
+    puntos de miles, que quedaron con un `error` que decía justo lo
+    contrario de lo ocurrido. Los documentos no cambiaron, pero la forma de
+    leerlos sí, y entonces crecer es lo esperado. El mecanismo ya existía
+    (es el mismo que usa `debe_extraer` para decidir reprocesar tras un
+    cambio de código), solo que este guard no lo consultaba. Sigue vivo
+    donde importa: en un ciclo de mantenimiento normal, sin despliegue de
+    por medio, la versión coincide y el guard actúa igual que antes."""
     if expediente.huella_documentos is None:
+        return False
+    if expediente.version_logica_extraccion != VERSION_LOGICA_EXTRACCION:
         return False
     return expediente.huella_documentos == huella_documentos(documentos)
 
