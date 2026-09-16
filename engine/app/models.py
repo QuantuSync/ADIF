@@ -125,7 +125,9 @@ class Expediente(Base):
     id = Column(Integer, primary_key=True)
     codigo_expediente = Column(String(64), nullable=False, unique=True)
     codigo_matriz = Column(String(64), nullable=True)
-    nombre_proyecto = Column(String(255), nullable=True)
+    # Texto sin límite desde la sesión 2026-09-16 (noche, migración 0033): hay
+    # objetos de contrato reales de más de 255 caracteres.
+    nombre_proyecto = Column(Text, nullable=True)
     # Cruce con el Excel de códigos (CONTEXTO.md sección 7, "Cruce con el
     # Excel de códigos"): por clave exacta contra `codigo_expediente` /
     # `codigo_matriz`, nunca por similitud de nombre. `codigos_cruzados` es
@@ -528,7 +530,9 @@ class TrazaOrigen(Base):
     documento_id = Column(Integer, ForeignKey("documentos.id"), nullable=False)
     pagina = Column(Integer, nullable=True)
     fragmento = Column(Text, nullable=True)
-    valor_extraido = Column(String(255), nullable=True)
+    # Texto sin límite desde la migración 0033: la traza de `nombre_proyecto`
+    # guarda el objeto del contrato entero.
+    valor_extraido = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 

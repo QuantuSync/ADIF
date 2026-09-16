@@ -61,8 +61,17 @@ _TIPO_CONTRATO_RE = re.compile(r"Tipo de Contrato\s+(\S+)", re.IGNORECASE)
 # "Objeto del Contrato: <texto, a veces partido en varias líneas>\nDescripción"
 # — la etiqueta "Descripción" que sigue siempre repite el mismo texto sin la
 # etiqueta, así que sirve de límite fiable de dónde termina el objeto.
+# Sesión 2026-09-16 (noche): hay anuncios sin esa línea "Descripción" (el
+# objeto va seguido directamente de "Valor estimado del contrato",
+# `6.21/28510.0040` y `6.15/28510.0081`); el objeto capturado llegaba hasta
+# "Descripción de Programas de Financiación", media página después, y no
+# cabía en `expedientes.nombre_proyecto`, así que la extracción entera
+# fallaba. El objeto termina también en la siguiente etiqueta fija del
+# formulario.
 _OBJETO_CONTRATO_RE = re.compile(
-    r"Objeto del Contrato:\s*(.+?)\s*\nDescripci[oó]n", re.DOTALL
+    r"Objeto del Contrato:\s*(.+?)\s*\n(?:Descripci[oó]n|Valor estimado del contrato|"
+    r"Presupuesto base de licitaci[oó]n|Clasificaci[oó]n CPV|Tipo de Contrato)",
+    re.DOTALL,
 )
 # Sesión de identidad de lote (CONTEXTO.md sección 27): el "Anuncio de
 # adjudicación" (familia PCSP) trae este campo estructurado incluso cuando
