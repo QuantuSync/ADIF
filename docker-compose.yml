@@ -140,6 +140,11 @@ services:
       # departamentos de ADIF que se dan de alta solos. "28510" por defecto
       # -- el único que usa el corpus de hoy. Lista separada por comas.
       SINDICACION_DEPARTAMENTOS_ADIF: ${SINDICACION_DEPARTAMENTOS_ADIF:-28510}
+      # Sesión 2026-09-16 (noche): espaciado mínimo entre peticiones reales a
+      # la Plataforma (descargas, búsquedas y pasos de página comparten turno,
+      # `app.scraping.limitador`). 10 s por defecto aquí, el doble que el
+      # valor del código, para tandas grandes de descargas seguidas.
+      SCRAPING_SEPARACION_MINIMA_SEGUNDOS: ${SCRAPING_SEPARACION_MINIMA_SEGUNDOS:-10}
       # Bloque 3, ejecución programada (CONTEXTO.md sección 25): cada cuánto
       # se lanza el ciclo completo solo. Semanal por defecto; "false" en
       # MANTENIMIENTO_PROGRAMADO_ACTIVO lo desactiva sin tocar código.
