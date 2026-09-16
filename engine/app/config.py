@@ -123,6 +123,27 @@ class Settings(BaseSettings):
     # variable, nunca tocar código.
     sindicacion_departamentos_adif: str = "28510"
 
+    # Descubrimiento por búsqueda directa en la Plataforma (sesión
+    # 2026-09-16, `app.scraping.descubrimiento_busqueda`): la sindicación
+    # cubre lo que ha tenido un evento de contratación en el mes -- en la
+    # práctica, lo ya adjudicado -- y deja fuera lo que sigue en licitación
+    # o pendiente de resolver. El buscador de la Plataforma sí lo lista.
+    # Lista de fragmentos de código separados por comas, con coincidencia
+    # POR SUBCADENA (el campo "Nº de expediente" del buscador funciona así):
+    # "28510" trae todo expediente que contenga esos dígitos, en cualquier
+    # estado y de cualquier año, que es literalmente el criterio del cliente
+    # (CONTEXTO.md sección 16). Vacía = usar `sindicacion_departamentos_adif`,
+    # para no mantener dos listas de "qué es nuestro" que puedan divergir.
+    # Un fragmento más fino ("6.26/28510") sirve para acotar una pasada
+    # concreta desde el payload del trabajo, sin tocar la configuración.
+    busqueda_fragmentos: str = ""
+    # Desactiva el descubrimiento por búsqueda dentro del ciclo de
+    # mantenimiento sin tocar código, igual que
+    # `mantenimiento_programado_activo` para el ciclo entero. No hay
+    # intervalo propio: corre dentro de cada ciclo (semanal por defecto),
+    # junto al descubrimiento por sindicación.
+    busqueda_descubrimiento_activo: bool = True
+
     # Bloque 3, ejecución programada (CONTEXTO.md sección 25): cada cuánto se
     # lanza el ciclo completo de mantenimiento solo, sin intervención.
     # Semanal por defecto -- el ciclo puede tardar minutos u horas si hay

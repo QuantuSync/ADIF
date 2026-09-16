@@ -39,6 +39,7 @@ from app.mantenimiento.frescura import (
 )
 from app.models import Documento, DocumentoExpediente, EstadoExpediente, Expediente, TrabajoCola
 from app.queue import ejecutar_trabajo, encolar_trabajo, tomar_siguiente_trabajo
+from app.scraping.descubrimiento_busqueda import descubrir_por_busqueda
 from app.sindicacion.descubrimiento import descubrir_novedades
 
 logger = logging.getLogger("mantenimiento.ciclo")
@@ -72,6 +73,11 @@ class ResumenCiclo:
     # (o {"error": ...} si el descubrimiento falló) — None si estaba
     # desactivado para esta ejecución (payload "sindicacion_desactivada").
     descubrimiento: Optional[dict] = field(default=None)
+    # Sesión 2026-09-16: resumen de `app.scraping.descubrimiento_busqueda`
+    # (la vía que cubre lo que sigue en licitación, que la sindicación no
+    # ve). None si estaba desactivado para esta ejecución
+    # (`BUSQUEDA_DESCUBRIMIENTO_ACTIVO` o payload "busqueda_desactivada").
+    descubrimiento_busqueda: Optional[dict] = field(default=None)
     # BLOQUE 1, sesión de auditoría automática 2026-09-08: resultado completo
     # de `app.mantenimiento.auditoria.ejecutar_auditoria` sobre el estado del
     # catálogo YA con lo que este mismo ciclo acaba de descargar/extraer —
@@ -93,6 +99,7 @@ class ResumenCiclo:
             "sin_publicar_en_plazo": self.sin_publicar_en_plazo,
             "duracion_segundos": round(self.duracion_segundos, 3),
             "descubrimiento": self.descubrimiento,
+            "descubrimiento_busqueda": self.descubrimiento_busqueda,
             "auditoria": self.auditoria,
         }
 
@@ -199,6 +206,27 @@ def ejecutar_ciclo_mantenimiento(
             db.rollback()
             logger.warning("descubrimiento por sindicación falló, se continúa sin él: %s", exc)
             resumen.descubrimiento = {"error": str(exc)}
+
+    # Sesión 2026-09-16: segunda vía de descubrimiento, por búsqueda directa
+    # en la Plataforma (`app.scraping.descubrimiento_busqueda`). Va aquí, en
+    # el mismo sitio y con el mismo trato que la sindicación -- antes del
+    # bucle de frescura, para que lo que aparezca se descargue y se extraiga
+    # en esta misma pasada, y con su fallo aislado (red, WAF, formulario
+    # cambiado) para que no se lleve por delante el resto del ciclo. Las dos
+    # vías son complementarias, no alternativas: la sindicación ve lo
+    # adjudicado de cualquier mes pasado, la búsqueda ve lo que hoy está en
+    # licitación o pendiente.
+    if settings.busqueda_descubrimiento_activo and not payload.get("busqueda_desactivada"):
+        try:
+            resumen_busqueda = descubrir_por_busqueda(db, fragmentos=payload.get("busqueda_fragmentos"))
+            resumen.nuevos_descubiertos += resumen_busqueda.expedientes_nuevos
+            resumen.descubrimiento_busqueda = resumen_busqueda.to_dict()
+        except Exception as exc:  # noqa: BLE001
+            # Mismo motivo que arriba: sin el rollback, el resto del ciclo
+            # reventaría con un PendingRollbackError que enterraría la causa.
+            db.rollback()
+            logger.warning("descubrimiento por búsqueda falló, se continúa sin él: %s", exc)
+            resumen.descubrimiento_busqueda = {"error": str(exc)}
 
     expedientes = (
         db.execute(

@@ -43,6 +43,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.criterio_expediente import cumple_criterio, departamentos_configurados
 from app.models import Expediente, SindicacionExpediente
 from app.queue import encolar_trabajo
 from app.sindicacion.atom_parser import EntradaSindicacion, entradas_de_zip
@@ -105,7 +106,7 @@ def periodo_actual() -> str:
 
 
 def _departamentos_configurados() -> set[str]:
-    return {d.strip() for d in settings.sindicacion_departamentos_adif.split(",") if d.strip()}
+    return departamentos_configurados()
 
 
 def _es_adif(entrada: EntradaSindicacion) -> bool:
@@ -124,11 +125,11 @@ def _cumple_criterio(codigo: Optional[str], departamentos: set[str]) -> bool:
     `N.AA/28510.`: un expediente 28510 con el órgano escrito de otra manera, o
     con el código escrito con otro separador, se perdía sin aviso.
 
-    Los dígitos no pueden ir pegados a otros dígitos: "28510" dentro de
-    "1285107" es parte de otro número, no el departamento."""
-    if not codigo:
-        return False
-    return any(re.search(rf"(?<!\d){re.escape(d)}(?!\d)", codigo) for d in departamentos)
+    La regla vive en `app.criterio_expediente` desde la sesión 2026-09-16,
+    compartida con el descubrimiento por búsqueda directa -- que sin ella
+    daba de alta como expedientes del departamento códigos donde "28510"
+    solo aparecía pegado a otros dígitos."""
+    return cumple_criterio(codigo, departamentos)
 
 
 def _motivo_criterio_ampliado(entrada: EntradaSindicacion, departamentos: set[str]) -> Optional[str]:

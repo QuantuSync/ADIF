@@ -37,6 +37,7 @@ from playwright.async_api import BrowserContext, Page, async_playwright
 from PyPDF2 import PdfReader
 
 from app.config import settings
+from app.scraping.limitador import esperar_turno_async
 
 
 class ExpedienteNoPublicadoError(RuntimeError):
@@ -631,6 +632,126 @@ async def descubrir_candidatos_acuerdo_marco(
         finally:
             await context.close()
             await browser.close()
+
+
+# --------------------------------------------------------------------------- #
+# Descubrimiento por búsqueda directa: todos los códigos que contienen un
+# fragmento dado (sesión 2026-09-16)
+# --------------------------------------------------------------------------- #
+# La sindicación solo publica un expediente cuando hay un evento de
+# contratación en el mes, y en la práctica eso cubre bien lo ya adjudicado
+# (`docs/hallazgos-sindicacion.md` sección 24 y CONTEXTO.md sección 16). Lo
+# que está en licitación o pendiente de resolver puede no haber generado
+# todavía ninguna entrada, y entonces no existe para el descubrimiento por
+# sindicación. El buscador de la Plataforma sí lo lista: el campo "Nº de
+# expediente" hace coincidencia POR SUBCADENA, no exacta ni por prefijo
+# real -- verificado en vivo en esta sesión, "26/28510" devuelve los 21
+# expedientes `2.26/`, `3.26/`, `4.26/` y `6.26/` del departamento a la vez.
+# De ahí que el parámetro se llame "fragmento" y no "prefijo": cualquier
+# trozo del código vale, y "28510" solo es el caso que pidió el cliente
+# (todo expediente que contenga esos dígitos, en cualquier estado).
+_CODIGO_EXPEDIENTE_RESULTADO_RE = re.compile(r"^[0-9A-Za-z][0-9A-Za-z./_-]{4,}$")
+
+# Tope defensivo de páginas de resultado, muy por encima de cualquier
+# búsqueda real prevista (20 filas por página: 200 páginas son 4.000
+# expedientes, y el departamento entero no llega a 500). Sin él, un botón
+# "Siguiente" que siempre se queda habilitado por un fallo de la Plataforma
+# dejaría el trabajo dando vueltas para siempre.
+_MAX_PAGINAS_RESULTADO = 200
+
+
+async def _filas_estables(fr, intentos: int = 6) -> int:
+    """Número de filas de la tabla de resultados, esperando a que deje de
+    crecer. `wait_results` devuelve el frame en cuanto hay UNA fila, así que
+    leer inmediatamente puede coger la página a medio renderizar -- medido
+    en esta sesión: la primera página de una búsqueda de 21 resultados se
+    leyó con 10 filas de 20. Un recuento que se repite dos veces seguidas es
+    la página ya pintada."""
+    anterior = -1
+    for _ in range(intentos):
+        actual = await fr.locator("table#myTablaBusquedaCustom tbody tr").count()
+        if actual == anterior:
+            return actual
+        anterior = actual
+        await fr.page.wait_for_timeout(500)
+    return anterior
+
+
+async def buscar_codigos_por_fragmento(page: Page, fragmento: str) -> list[str]:
+    """Todos los códigos de expediente que la Plataforma devuelve para
+    `fragmento` en el campo "Nº de expediente", recorriendo todas las
+    páginas de resultado. Solo lee la tabla: no abre ninguna ficha ni
+    descarga nada.
+
+    Lista vacía cuando la Plataforma confirma explícitamente "sin
+    resultados" (`wait_results` devuelve `None`). Cualquier otro desenlace
+    -- bloqueo reconocible, timeout, formulario no localizado -- se propaga
+    como excepción, nunca se traduce en "no hay ninguno": mismo principio
+    que `ExpedienteNoPublicadoError` (ver su docstring), y aquí importa
+    todavía más, porque un negativo falso aquí no marca mal un expediente,
+    directamente deja de descubrir todos los que faltan."""
+    await esperar_turno_async()
+    field = await ensure_form(page)
+    await field.click()
+    await field.fill("")
+    await field.fill(fragmento)
+    await click_search(page)
+    fr = await wait_results(page)
+    if fr is None:
+        return []
+
+    codigos: list[str] = []
+    for _ in range(_MAX_PAGINAS_RESULTADO):
+        total = await _filas_estables(fr)
+        rows = fr.locator("table#myTablaBusquedaCustom tbody tr")
+        for i in range(total):
+            try:
+                texto = await rows.nth(i).inner_text()
+            except Exception:
+                continue
+            primera_linea = texto.split("\n", 1)[0].strip()
+            if primera_linea and _CODIGO_EXPEDIENTE_RESULTADO_RE.match(primera_linea):
+                codigos.append(primera_linea)
+        siguiente = fr.locator(BOTON_SIGUIENTE_PAGINA)
+        if not await siguiente.count() or not await siguiente.first.is_enabled():
+            break
+        # Cada paso de página es una petición real más: mismo espaciado que
+        # cualquier otra (sesión de límite de tasa, 2026-09-07).
+        await esperar_turno_async()
+        try:
+            await siguiente.first.click()
+            await page.wait_for_load_state("domcontentloaded")
+        except Exception:
+            break
+        fr_siguiente = await wait_results(page)
+        if fr_siguiente is None:
+            break
+        fr = fr_siguiente
+    # Dedup preservando orden: la paginación de la Plataforma puede repetir
+    # filas entre dos lecturas consecutivas (la tabla se re-renderiza en el
+    # mismo frame), y el llamador solo quiere el conjunto.
+    return list(dict.fromkeys(codigos))
+
+
+async def buscar_codigos_de_fragmentos(fragmentos: list[str]) -> dict[str, list[str]]:
+    """Punto de entrada de esta sección: una única sesión de navegador para
+    todos los fragmentos configurados. Devuelve {fragmento: [códigos]} -- el
+    llamador (`app.scraping.descubrimiento_busqueda`) decide qué hacer con
+    cada código contra la base de datos real."""
+    resultado: dict[str, list[str]] = {}
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(headless=True)
+        context = await browser.new_context(locale="es-ES")
+        page = await context.new_page()
+        page.set_default_timeout(UI_MS)
+        page.set_default_navigation_timeout(NAV_MS)
+        try:
+            for fragmento in fragmentos:
+                resultado[fragmento] = await buscar_codigos_por_fragmento(page, fragmento)
+        finally:
+            await context.close()
+            await browser.close()
+    return resultado
 
 
 # --------------------------------------------------------------------------- #

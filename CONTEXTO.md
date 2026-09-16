@@ -1741,6 +1741,35 @@ suficientes, no ahora.
   de decisión del cliente. El orden del catálogo/Excel no es total (el
   desempate por `orden_aparicion` se repite entre documentos): falta
   `LineaCatalogo.id` como último desempate.
+- **Descubrimiento por búsqueda directa en la Plataforma (sesión 2026-09-16,
+  `docs/sesion-2026-09-16-descubrimiento-por-busqueda.md`).** No faltaba
+  ningún expediente de 2026: los 15 `6.26/28510.*` que publica la Plataforma
+  son los 15 que tenemos, `0016`/`0074`/`0004` incluidos y con documentos
+  descargados. El "solo aparecen tres en el Excel" es la columna "Código de
+  expediente", que solo se rellena si el expediente cruza con el Excel de
+  códigos (10 expedientes con líneas, 274 filas; 3 con esa columna).
+  **Lo nuevo**: la sindicación cubre lo que ha tenido un evento de
+  contratación en el mes — en la práctica lo adjudicado — y deja fuera lo que
+  sigue en licitación o pendiente. El buscador sí lo lista, y su campo "Nº de
+  expediente" hace coincidencia **por subcadena** (`26/28510` devuelve los 21
+  del departamento de una vez). `app.scraping.descubrimiento_busqueda` corre
+  **dentro del ciclo de mantenimiento**, junto a la sindicación y antes del
+  bucle de frescura, con `BUSQUEDA_FRAGMENTOS` (vacía = los departamentos de
+  `SINDICACION_DEPARTAMENTOS_ADIF`, el criterio del cliente, válido para
+  cualquier año) y **cada búsqueda y cada paso de página** por el mismo
+  limitador que espacia las descargas (`esperar_turno_async`). Un
+  `sin_publicar` que la búsqueda encuentra se reabre sin esperar plazo:
+  es evidencia positiva. La pasada real con `28510` encontró **129
+  expedientes que ni la sindicación ni el Excel de SAP conocían**
+  (2013-2025), todavía sin descargar. **La guarda "los dígitos no pueden ir
+  pegados a otros dígitos" es obligatoria** sobre los resultados del buscador
+  (devolvía `PcPG/2026/828510`): extraída a `app.criterio_expediente`, una
+  sola definición para las dos vías. **Además**: la matrícula con puntos de
+  miles ("667.500.506") ya cuenta como fila de datos (`6.26/28510.0004` +1,
+  `6.23/28510.0034` +21, `6.24/28510.0048` +26), y
+  `frescura.documentos_sin_cambios` mira ya `VERSION_LOGICA_EXTRACCION` — sin
+  eso, todo arreglo de la cascada marcaba como "posible duplicación" justo a
+  los expedientes que acababa de recuperar.
 
 ---
 
@@ -1770,4 +1799,5 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `sesion-2026-09-15-expedientes-2026-presidencia.md`,
 `sesion-2026-09-15-criterio-28510-y-cuadros-sin-codigo.md`,
 `sesion-2026-09-15-unidades-y-cobertura-2026.md`,
+`sesion-2026-09-16-descubrimiento-por-busqueda.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.

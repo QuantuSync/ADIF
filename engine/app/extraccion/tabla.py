@@ -89,7 +89,19 @@ _CODIGO_PRECIO_RE = re.compile(r"^(?:P-?\d+(?-i:[A-Z])?|PN\d+|PA-\d+|L\d+-T\d+|C
 # Matrícula como identificador de fila cuando la tabla no trae ninguna
 # columna de código en absoluto (CONTEXTO.md sección 2: forma fija de 9
 # dígitos) — señal aparte, nunca se confunde con un código de precio.
-_MATRICULA_DATO_RE = re.compile(r"^\d{9}$")
+#
+# Sesión 2026-09-16 (`6.26/28510.0004`, anejo nº 1 del PPT p.7): la misma
+# matrícula escrita con puntos de miles ("667.500.506"). La normalización de
+# la línea ya la trataba como el mismo número desde la sesión 2026-09-14
+# (`app.catalogo._MATRICULA_CON_PUNTOS_RE`, mismo patrón), pero este
+# detector -- que decide si una fila es de datos y, con ello, si la tabla
+# entera es un cuadro de precios o ruido -- seguía exigiendo los 9 dígitos
+# seguidos. Efecto real: un cuadro de un solo artículo, sin ninguna columna
+# de código de precio, se descartaba entero por espurio y el expediente se
+# quedaba sin ninguna línea. Medido sobre los 117 expedientes con documentos
+# y cero líneas antes del arreglo: afecta a 3 (`6.26/28510.0004`,
+# `6.23/28510.0034`, `6.24/28510.0048`).
+_MATRICULA_DATO_RE = re.compile(r"^(?:\d{9}|\d{3}\.\d{3}\.\d{3})$")
 
 
 @dataclass(frozen=True)

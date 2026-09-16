@@ -250,6 +250,25 @@ sobreviven a `docker compose down`. Para borrarlos también: `docker compose dow
 Copiar `.env.example` a `.env` y ajustar si hace falta. `API_URL` es la
 dirección que usa la web para llamar a la API: cambia sin tocar código.
 
+### Descubrimiento de expedientes
+
+Dos vías complementarias, las dos dentro del ciclo de mantenimiento:
+
+- **Sindicación** (`app.sindicacion.descubrimiento`): el ZIP mensual de
+  licitaciones. Ve lo que ha tenido un evento de contratación en el mes —
+  en la práctica, lo ya adjudicado.
+- **Búsqueda directa en la Plataforma**
+  (`app.scraping.descubrimiento_busqueda`, sesión 2026-09-16): el buscador
+  real. Ve además lo que sigue en licitación o pendiente de resolver, que la
+  sindicación no lista todavía.
+
+| Variable | Por defecto | Qué hace |
+|---|---|---|
+| `SINDICACION_DEPARTAMENTOS_ADIF` | `28510` | Departamentos que entran solos, por las dos vías. Criterio del cliente: todo código que contenga esos dígitos, en cualquier estado. |
+| `BUSQUEDA_FRAGMENTOS` | *(vacío)* | Qué se busca en la Plataforma, separado por comas. Vacío = los departamentos de arriba. El campo "Nº de expediente" del buscador hace coincidencia **por subcadena**, así que vale cualquier fragmento: `28510` (todo el departamento, cualquier año) o `6.26/28510` (una pasada acotada). |
+| `BUSQUEDA_DESCUBRIMIENTO_ACTIVO` | `true` | Desactiva la búsqueda dentro del ciclo sin tocar código. |
+| `SCRAPING_SEPARACION_MINIMA_SEGUNDOS` | `5` | Espaciado mínimo entre peticiones a la Plataforma. Se aplica a las descargas, a cada búsqueda **y a cada paso de página** de los resultados. |
+
 ## Copias de seguridad
 
 Con un entorno que se reinicia solo varias veces al día (ver arriba), no
