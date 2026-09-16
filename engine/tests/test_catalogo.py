@@ -46,6 +46,19 @@ def test_construir_linea_catalogo_deriva_precio_adjudicado():
     assert linea["pagina"] == 11
 
 
+def test_construir_linea_catalogo_guarda_la_unidad_en_su_forma_unica_y_la_original_aparte():
+    # Sesión 2026-09-16 (noche): "UN" es "ud"; lo que decía la celda, aparte.
+    mapeo = {"codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": 3, "cantidad": 4, "precio_unitario": 5}
+    fila = ["P-001", "697500900", "GUANTE X", "UN", "30", "24,00"]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=11, documento_origen_id=7, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea["unidad_medida"] == "ud"
+    assert linea["unidad_medida_original"] == "UN"
+
+
 def test_construir_linea_catalogo_sin_baja_no_deriva_precio_adjudicado():
     mapeo = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": None, "cantidad": None, "precio_unitario": 2}
     fila = ["P-050", "PARTIDA ALZADA", "100.000,00"]
@@ -1593,7 +1606,7 @@ def test_construir_linea_catalogo_recupera_descripcion_de_celda_fundida_con_la_a
     )
 
     assert linea["descripcion"] == "EN-54"
-    assert linea["unidad_medida"] == "UD."
+    assert linea["unidad_medida"] == "ud"
     # Una celda vacía de verdad ('') con la unidad al lado no es este caso.
     vacia = construir_linea_catalogo(
         ["P-101", "618050300", "EN-54", "", "UD.", "0", "", "91.314,71 €", ""], mapeo,
@@ -2135,7 +2148,7 @@ def test_construir_linea_catalogo_no_descarta_unidad_medida_real():
     )
 
     assert linea is not None
-    assert linea["unidad_medida"] == "M"
+    assert linea["unidad_medida"] == "m"
 
 
 # Bloque 3, segunda tanda de cambios del cliente tras revisar el catálogo
@@ -2152,7 +2165,7 @@ def test_construir_linea_catalogo_recupera_unidad_embebida_en_cantidad():
     )
 
     assert linea is not None
-    assert linea["unidad_medida"] == "Kg"
+    assert linea["unidad_medida"] == "kg"
     # La cantidad y el precio ya salían bien sin este arreglo
     # (parsear_numero_es/parsear_importe_es descartan cualquier carácter
     # que no sea dígito o separador) -- este bloque es solo sobre la unidad.
@@ -2172,7 +2185,7 @@ def test_construir_linea_catalogo_recupera_unidad_embebida_en_precio_cuando_cant
     )
 
     assert linea is not None
-    assert linea["unidad_medida"] == "Kg"
+    assert linea["unidad_medida"] == "kg"
     assert linea["precio_unitario"] == Decimal("14.70")
 
 
@@ -2214,7 +2227,7 @@ def test_construir_linea_catalogo_no_pisa_unidad_ya_resuelta_en_su_columna():
     )
 
     assert linea is not None
-    assert linea["unidad_medida"] == "UD."
+    assert linea["unidad_medida"] == "ud"
 
 
 def test_construir_linea_catalogo_marca_cantidad_con_forma_de_anio():
@@ -2305,7 +2318,7 @@ def test_construir_linea_catalogo_dos_columnas_fantasma_no_desplaza_codigo_ni_un
     # precio pero rompía estos dos -- código de precio pasaba a leer la
     # matrícula, y unidad de medida pasaba a leer "Plano de Referencia".
     assert linea["codigo_precio"] == "P-001"
-    assert linea["unidad_medida"] == "UD."
+    assert linea["unidad_medida"] == "ud"
     assert linea["descripcion"] == "DS-B1-54-320/230-0,11-CR-D"
     assert linea["precio_unitario"] == Decimal("122624.14")
     assert "propia columna fantasma" in linea["motivo_revision"]
@@ -2328,7 +2341,7 @@ def test_construir_linea_catalogo_columna_fantasma_de_referencia_vacia_tambien_s
     assert linea is not None
     assert linea["codigo_precio"] == "P-015"
     assert linea["matricula"] == "611150412"
-    assert linea["unidad_medida"] == "UD."
+    assert linea["unidad_medida"] == "ud"
     assert linea["precio_unitario"] == Decimal("107198.44")
 
 
@@ -2345,7 +2358,7 @@ def test_construir_linea_catalogo_fila_i_sin_columnas_fantasma_no_se_toca():
 
     assert linea is not None
     assert linea["codigo_precio"] == "P-002"
-    assert linea["unidad_medida"] == "UD."
+    assert linea["unidad_medida"] == "ud"
     assert linea["motivo_revision"] is None
 
 
@@ -2683,7 +2696,7 @@ def test_construir_linea_catalogo_unidad_real_con_un_digito_se_conserva():
     )
     # Sin el prefijo de la base del precio (decisión del cliente, sesión
     # 2026-09-15, quinta parte).
-    assert linea["unidad_medida"] == "Ton*mes"
+    assert linea["unidad_medida"] == "t·mes"
     fila_m3 = ["P-1", "Balasto sobre camión", "m3", "22.780,516", "12,40"]
     linea_m3 = construir_linea_catalogo(
         fila_m3, mapeo, pagina=30, documento_origen_id=319, expediente_id=1, baja_lote=None, orden_aparicion=0
@@ -2933,7 +2946,7 @@ def test_unidad_sin_prefijo_de_precio_ni_llamada_de_nota():
     # `6.21/28510.0108`: unidad partida por el ancho de columna.
     fila_partida = ["P-40", "Transporte por camión especial", "€/transport\ne", "1", "900,00"]
 
-    assert construir_linea_catalogo(fila_euro, mapeo, 8, None, 1, None, 0)["unidad_medida"] == "UD"
+    assert construir_linea_catalogo(fila_euro, mapeo, 8, None, 1, None, 0)["unidad_medida"] == "ud"
     linea_nota = construir_linea_catalogo(fila_nota, mapeo, 23, None, 1, None, 0)
     assert linea_nota["unidad_medida"] == "dm3"
     assert not (linea_nota["motivo_revision"] or "").count("unidad")

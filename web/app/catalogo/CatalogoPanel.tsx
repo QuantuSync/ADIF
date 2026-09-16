@@ -32,6 +32,9 @@ type LineaCatalogo = {
   cantidad: string | null;
   precio_unitario: string | null;
   unidad_medida: string | null;
+  // La unidad tal como venía en el documento ("UD.", "Txkm"); `unidad_medida`
+  // es su forma única (sesión 2026-09-16, noche).
+  unidad_medida_original?: string | null;
   baja_lote: string | null;
   precio_adjudicado: string | null;
   comentarios: string | null;
@@ -581,6 +584,11 @@ export default function CatalogoPanel({ apiUrl }: { apiUrl: string }) {
                 <span className="muted">Sin documento de origen registrado.</span>
               )}
               {seleccion.fragmento && <code className="fragment" style={{ marginTop: "0.75rem" }}>{seleccion.fragmento}</code>}
+              {seleccion.unidad_medida_original && seleccion.unidad_medida_original !== seleccion.unidad_medida && (
+                <p className="muted" style={{ margin: "0.5rem 0 0" }}>
+                  Unidad tal como viene: {seleccion.unidad_medida_original}
+                </p>
+              )}
             </div>
 
             {seleccion.comentarios && (

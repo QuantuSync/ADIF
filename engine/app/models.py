@@ -430,6 +430,10 @@ class LineaCatalogo(Base):
     cantidad = Column(Numeric(14, 3), nullable=True)
     precio_unitario = Column(Numeric(14, 4), nullable=True)
     unidad_medida = Column(String(32), nullable=True)
+    # Sesión 2026-09-16 (noche, migración 0032): la unidad tal como venía
+    # ("UD.", "Txkm") cuando hay unidad; `unidad_medida` guarda su forma
+    # única (`app.extraccion.unidad_medida.normalizar_unidad`).
+    unidad_medida_original = Column(String(32), nullable=True)
     baja_lote = Column(Numeric(12, 6), nullable=True)
     precio_adjudicado = Column(Numeric(14, 4), nullable=True)
     codigo_interno = Column(String(64), nullable=True)
