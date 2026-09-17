@@ -18,6 +18,7 @@ from typing import Optional
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
+from app.extraccion.ocr import MARCA_FRAGMENTO
 from app.models import TrazaOrigen
 
 
@@ -32,6 +33,14 @@ def registrar_traza(
     fragmento: Optional[str],
     valor_extraido: Optional[str],
 ) -> None:
+    # Sesión 2026-09-17: la traza de un documento escaneado leído por
+    # reconocimiento óptico lo dice en su fragmento (`app.extraccion.ocr`).
+    if (
+        fragmento
+        and documento_id in db.info.get("documentos_reconocidos", ())
+        and not fragmento.startswith(MARCA_FRAGMENTO)
+    ):
+        fragmento = f"{MARCA_FRAGMENTO} {fragmento}"
     db.flush()  # una traza igual añadida antes en esta misma pasada también cuenta
     db.execute(
         delete(TrazaOrigen)

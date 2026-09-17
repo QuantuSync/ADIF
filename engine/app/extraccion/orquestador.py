@@ -76,8 +76,11 @@ from app.extraccion.normalizacion import parsear_importe_es
 from app.extraccion.pipeline_anejo import procesar_anejo
 from app.extraccion.precios_unitarios import calcular_baja_efectiva
 from app.extraccion.texto import es_documento_escaneado, extraer_texto_cacheado
+from app.extraccion.ocr import marcar_linea_reconocida, ocr_activo, reconocer_documento_cacheado
+from app.extraccion.ocr_pdf import generar_pdf_reconocido
 from app.extraccion.traza import registrar_traza
 from app.interfaces.document_storage import DocumentStorage
+from app.config import settings
 from app.interfaces.model_provider import ModelProvider
 from app.models import (
     Documento,
@@ -151,6 +154,12 @@ class _Documento:
     # clausulas administrativas" (PCAP, sin esos campos). Ver
     # `_es_documento_de_pliegos_pcsp`.
     marcador: Optional[str] = None
+    # Sesión 2026-09-17 (`app.extraccion.ocr`): documento escaneado leído por
+    # reconocimiento óptico. `paginas` trae entonces el texto reconocido y
+    # `contenido_reconocido` el PDF con capa de texto que recorre la cascada.
+    reconocido: bool = False
+    contenido_reconocido: Optional[bytes] = None
+    reconocido_completo: bool = True
 
 
 def _traza(
@@ -380,18 +389,37 @@ def _eliminar_lotes_de_hermanos(db: Session, expediente_id: int, identificadores
     db.commit()
 
 
-def _clasificar_documentos(db: Session, storage: DocumentStorage, documentos: list[Documento]) -> list[_Documento]:
+def _clasificar_documentos(
+    db: Session,
+    storage: DocumentStorage,
+    documentos: list[Documento],
+    model_provider: Optional[ModelProvider] = None,
+) -> list[_Documento]:
     resultado = []
     for doc in documentos:
         paginas = extraer_texto_cacheado(
             db, doc.hash, lambda: io.BytesIO(storage.recuperar(doc.ruta_almacenamiento))
         )
+        num_paginas = len(paginas)
         escaneado = es_documento_escaneado(paginas)
-        # Un documento escaneado no tiene marcadores de texto que buscar —
-        # clasificarlo igual lo mandaría a `otro` de forma indistinguible de
-        # un documento legible con una plantilla desconocida (CONTEXTO.md
-        # sección 3, docstring de `es_documento_escaneado`).
-        clasificacion = clasificar(paginas) if not escaneado else None
+        reconocido = None
+        if escaneado and ocr_activo() and model_provider is not None:
+            # Sesión 2026-09-17: solo un documento sin capa de texto pasa por
+            # el reconocimiento óptico, y su resultado se cachea por hash.
+            try:
+                reconocido = reconocer_documento_cacheado(
+                    db, doc.hash, lambda: storage.recuperar(doc.ruta_almacenamiento), model_provider,
+                    lambda primeras: es_pliego_sin_precios(clasificar(primeras)),
+                )
+            except NotImplementedError:
+                reconocido = None  # proveedor sin visión: el documento sigue como escaneado
+            if reconocido is not None:
+                paginas = reconocido.paginas_texto
+        # Un documento escaneado sin reconocer no tiene marcadores de texto
+        # que buscar — clasificarlo igual lo mandaría a `otro` de forma
+        # indistinguible de un documento legible con una plantilla desconocida
+        # (CONTEXTO.md sección 3, docstring de `es_documento_escaneado`).
+        clasificacion = clasificar(paginas) if (not escaneado or reconocido is not None) else None
         # El clasificador manda, nunca el nombre de fichero ni la categoría
         # que le asignó el scraper (CONTEXTO.md sección 3 y docstring de
         # app.extraccion.clasificador).
@@ -399,11 +427,17 @@ def _clasificar_documentos(db: Session, storage: DocumentStorage, documentos: li
         sin_precios = clasificacion is not None and es_pliego_sin_precios(clasificacion)
         marcador = clasificacion.marcador if clasificacion is not None else None
         doc.tipo_documento = tipo
-        doc.paginas = len(paginas)
+        doc.paginas = num_paginas
         resultado.append(
             _Documento(
                 documento=doc, tipo=tipo, paginas=paginas, escaneado=escaneado,
                 pliego_sin_precios=sin_precios, marcador=marcador,
+                reconocido=reconocido is not None,
+                contenido_reconocido=(
+                    generar_pdf_reconocido(reconocido.paginas)
+                    if reconocido is not None and not sin_precios else None
+                ),
+                reconocido_completo=reconocido.completo if reconocido is not None else True,
             )
         )
     db.commit()
@@ -1130,6 +1164,7 @@ def ejecutar_extraccion_expediente(
         lotes: list[Lote] = []
         lotes_declarados: list[LoteDeclarado] = []
         sin_documentos = not documentos
+        db.info["documentos_reconocidos"] = set()
         # Motivo específico de "caso de precios unitarios sin baja
         # declarada" (app.extraccion.precios_unitarios): se guarda aparte en
         # vez de acumularse ya en `motivo_revision` porque la herencia de
@@ -1153,7 +1188,11 @@ def ejecutar_extraccion_expediente(
             db.commit()
             lotes = [_obtener_o_crear_lote(db, expediente.id, LOTE_UNICO)]
         else:
-            items = _priorizar_por_origen(_clasificar_documentos(db, storage, list(documentos)))
+            items = _priorizar_por_origen(_clasificar_documentos(db, storage, list(documentos), model_provider))
+            # Las trazas de un documento leído por reconocimiento óptico se
+            # marcan al escribirlas (`app.extraccion.traza.registrar_traza`).
+            db.info["documentos_reconocidos"] = {item.documento.id for item in items if item.reconocido}
+            documentos_reconocidos: dict[str, int] = {}
             documentos_procesados = len(items)
             expediente.aviso_conflicto_documento_manual = _detectar_conflicto_origen(items)
 
@@ -1531,7 +1570,7 @@ def ejecutar_extraccion_expediente(
                     # revisión, así que no toca `motivo_revision`.
                     documentos_pliego_omitidos.append(item.documento.nombre_archivo)
                     continue
-                if item.escaneado:
+                if item.escaneado and not item.reconocido:
                     # Sin capa de texto no hay páginas candidatas que buscar
                     # ni cabecera que mapear (CONTEXTO.md sección 3): intentar
                     # `procesar_anejo` igual solo gastaría tiempo abriendo el
@@ -1541,7 +1580,10 @@ def ejecutar_extraccion_expediente(
                     # genérico "no se pudo extraer el cuadro de precios".
                     documentos_escaneados.append(item.documento.nombre_archivo)
                     continue
-                contenido = storage.recuperar(item.documento.ruta_almacenamiento)
+                contenido = (
+                    item.contenido_reconocido if item.reconocido
+                    else storage.recuperar(item.documento.ruta_almacenamiento)
+                )
                 # Todo el trabajo de este documento —extraer, y guardar sus
                 # líneas— vive en el mismo bloque try/except con un único commit
                 # al final (CONTEXTO.md, sesión de rodaje 2026-09-03, punto 2): un
@@ -1562,6 +1604,10 @@ def ejecutar_extraccion_expediente(
                             expediente, identidades_por_documento, item.documento.id
                         ),
                     )
+                    if resultado.lineas and item.reconocido:
+                        for linea in resultado.lineas:
+                            marcar_linea_reconocida(linea)
+                        documentos_reconocidos[item.documento.nombre_archivo] = len(resultado.lineas)
                     if resultado.lineas:
                         grupos: dict[Optional[str], list[dict]] = {}
                         for linea in resultado.lineas:
@@ -1624,6 +1670,23 @@ def ejecutar_extraccion_expediente(
                         f"{item.documento.nombre_archivo}: {resultado.lineas_con_aviso} línea(s) con un valor "
                         "que no se pudo interpretar, marcadas para revisión",
                     )
+
+            if documentos_reconocidos:
+                motivo_revision = _acumular_motivo(
+                    motivo_revision,
+                    "líneas leídas por reconocimiento óptico de documento(s) escaneado(s), a confirmar contra el "
+                    "documento: " + "; ".join(f"{nombre} ({n})" for nombre, n in documentos_reconocidos.items()),
+                )
+            incompletos = [
+                item.documento.nombre_archivo for item in items
+                if item.reconocido and not item.reconocido_completo and not item.pliego_sin_precios
+            ]
+            if incompletos:
+                motivo_revision = _acumular_motivo(
+                    motivo_revision,
+                    "documento(s) escaneado(s) demasiado largo(s) para leer entero(s) por reconocimiento óptico "
+                    f"(más de {settings.ocr_max_paginas} páginas; solo las primeras): " + "; ".join(incompletos),
+                )
 
             if documentos_con_error:
                 motivo_documentos = "no se pudo extraer el cuadro de precios de: " + "; ".join(documentos_con_error)

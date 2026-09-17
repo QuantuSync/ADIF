@@ -94,6 +94,18 @@ class Settings(BaseSettings):
     # firma en `cache_mapeo_cabecera` sigue activa siempre, es otra cosa).
     model_cache_dir: Optional[str] = None
 
+    # Reconocimiento óptico de documentos escaneados (sesión 2026-09-17,
+    # `app.extraccion.ocr`): "escaneados" (por defecto) lee con el modelo con
+    # visión solo los documentos sin capa de texto; "desactivado" lo apaga.
+    # Nunca se aplica a un documento que ya trae texto.
+    ocr_modo: str = "escaneados"
+    # Páginas leídas a la vez dentro de un documento.
+    ocr_paralelismo: int = 4
+    # Un documento escaneado más largo que esto no se lee entero (una ficha
+    # técnica de 670 páginas en el corpus real): solo sus primeras páginas,
+    # para clasificarlo, y queda anotado.
+    ocr_max_paginas: int = 150
+
     # Scraping PCSP. Siempre headless (el contenedor no tiene ventana);
     # ver engine/app/scraping/pcsp.py sección "hallazgos headless".
     scraping_navigation_timeout_ms: int = 70000
