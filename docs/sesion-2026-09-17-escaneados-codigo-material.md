@@ -305,3 +305,61 @@ en `6.24/28510.0208`, que es el arreglo de filas fundidas.
   (las dos pasadas de hoy repitieron la búsqueda en la Plataforma, 0 nuevos).
 - Los de sesiones anteriores: vigentes con remanente (falta el fichero), los
   11 de 2026 del SAP no publicados, "Código de precio" como columna, `PA`/`P`.
+
+## Reconocimiento óptico: etapa implementada y piloto (misma sesión, decisión del cliente)
+
+**Implementado** (`app.extraccion.ocr`, `app.extraccion.ocr_pdf`, migración 0035):
+- **Desactivable**: `OCR_MODO` = `escaneados` (por defecto) o `desactivado`.
+  Solo entra un documento que `es_documento_escaneado` marca como tal.
+- **Lectura**: cada página se rasteriza (`pypdfium2`, lado largo 1.568 px) y
+  el modelo configurado (`claude-haiku-4-5`) la transcribe en bloques de texto
+  y tablas con sus celdas, 4 páginas a la vez. Se leen primero 2 páginas; si
+  el clasificador dice pliego administrativo, se para ahí. Documentos de más
+  de `OCR_MAX_PAGINAS` (150) no se leen enteros.
+- **Caché por hash** (`cache_ocr_documento`, con segundos y tokens por
+  página): una segunda pasada no vuelve a llamar al modelo.
+- **Cascada sin cambios**: con lo leído se genera un PDF con capa de texto y
+  rejilla, página a página con la misma numeración, que recorre localizador,
+  tablas, lotes y mapeo como cualquier otro documento.
+- **Marcado**: `lineas_catalogo.texto_reconocido`, motivo de revisión propio
+  en cada línea y en el expediente, y prefijo `[reconocimiento óptico]` en el
+  fragmento de la línea y de las trazas del documento.
+- 6 tests nuevos (958 en total).
+
+Desplegado con `OCR_MODO=desactivado` en `.env` para que el ciclo automático
+no lea nada antes de validar el piloto; el piloto se lanzó con un script que
+lo activa solo en su proceso.
+
+**Piloto: `6.18/28510.0066` (fusibles AT) y `6.16/28510.0161` (tornillería)**, 5
+documentos escaneados, 67 páginas leídas:
+
+| Documento | Páginas leídas | Segundos de modelo | s/página | Tokens entrada / salida |
+|---|---|---|---|---|
+| `0066` CONTRATO_1 | 2 de 2 | 50,7 | 25,3 | 4.302 / 2.651 |
+| `0066` ANEJO_1 (PPT fusibles) | 10 de 10 | 74,4 | 7,4 | 21.510 / 6.581 |
+| `0066` ANEJO_2 (PCAP) | **2 de 82** (parado) | 33,3 | 16,6 | 4.302 / 2.008 |
+| `0161` ANEJO_1 (PPT tornillería) | 19 de 19 | 269,7 | 14,2 | 40.869 / 14.432 |
+| `0161` ANEJO_2 (pliego de *condiciones* administrativas) | 34 de 34 | 600,3 | 17,7 | 73.134 / 33.266 |
+| **Total** | **67** | **1.028** | **15,3** | **144.117 / 58.938** |
+
+- **Tiempo**: 15,3 s por página de modelo; con 4 en paralelo, ~5 s de reloj
+  por página. **Coste real: 0,44 $ (0,0066 $/página)**.
+- **Calidad, comprobada celda a celda contra la imagen**:
+  - Fusibles p.10: 28 filas × 8 columnas, **224 celdas, 0 errores**.
+  - Tornillería p.16 (11 filas): matrículas y precios correctos; **2 errores**
+    en celdas que no son de catálogo: "M22X265" leído "M22X266" en una
+    descripción y "99'12-R-29" leído "89'12-R-29" en la referencia del plano.
+  - Tablas leídas: 138 filas en el PPT de tornillería, 48 en el de fusibles
+    (incluidas la de índice y la de firmas).
+- **Líneas de catálogo obtenidas: 0.** No por la lectura, sino por la
+  cascada: estos cuadros de 2016-2018 **no traen código de precio, sus
+  matrículas son de 8 cifras** ("59020019", "69161624", verificado en la
+  imagen: es el formato antiguo, y no están en el maestro de SAP) y **no tienen
+  columna de cantidad** — y la etapa 4 descarta como espuria una tabla sin
+  código de precio ni matrícula de 9 cifras, salvo que su cabecera nombre
+  descripción, cantidad y precio. Es la misma regla que para un documento con
+  texto; hace falta decidir si se acepta la matrícula de 8 cifras.
+- **Parada temprana**: funcionó con el PCAP de `0066` (2 de 82 páginas), pero
+  no con el de `0161`, que se titula "Pliego de *Condiciones* Administrativas
+  Particulares" y el clasificador no lo reconoce: se leyeron las 34 páginas
+  (0,25 $ y 10 min de modelo desperdiciados).
