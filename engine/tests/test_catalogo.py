@@ -3083,3 +3083,37 @@ def test_construir_linea_catalogo_descarta_resumen_de_presupuesto_al_pie():
             pagina=19, documento_origen_id=None, expediente_id=1, baja_lote=None, orden_aparicion=0,
         )
         assert linea is None, etiqueta
+
+
+def test_construir_linea_catalogo_descarta_concepto_de_presupuesto_en_la_descripcion():
+    # Sesión 2026-09-17 (aviso del cliente): variantes reales del corpus con la
+    # etiqueta en la columna de descripción, leídas como líneas de millones.
+    mapeo = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": None, "cantidad": 2, "precio_unitario": 3}
+    for etiqueta, importe in (
+        ("Presupuesto Base de Licitación", "3.305.653,05 €"),        # 6.17/28510.0056
+        ("Suma", "2.731.944,67 €"),
+        ("IVA (21%)", "573.708,38 €"),
+        ("PRESUPUESTO DE EJECUCIÓN MATERIAL", "993.714,32 €"),         # 6.17/28510.0007
+        ("9% GASTOS GENERALES", "89.434,29 €"),
+        ("6% BENEFICIO INDUSTRIAL", "59.622,86 €"),
+        ("TOTAL PRESUPUESTO", "1.382.753,68 €"),
+        ("Suma (€ Ejecución por Contrata)", "50.713,00"),              # 3.21/28510.0052
+        ("Presupuesto Base de Licitación (€ IVA incluido)", "61.362,73"),
+        ("TOTAL PRESUPUESTO DE LICITACIÓN CON IVA", "104.233,09 €"),   # 6.17/28510.0123
+        ("Total", "70.000,00"),                                         # 6.23/28510.0105
+    ):
+        linea = construir_linea_catalogo(
+            ["", etiqueta, "", importe], mapeo,
+            pagina=20, documento_origen_id=None, expediente_id=1, baja_lote=None, orden_aparicion=0,
+        )
+        assert linea is None, etiqueta
+
+
+def test_construir_linea_catalogo_conserva_material_que_menciona_el_presupuesto():
+    mapeo = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": None, "cantidad": 2, "precio_unitario": 3}
+    for descripcion in ("Suministro de balasto según presupuesto de ejecución", "TORNILLO TOTAL M24X100", "Partida alzada total"):
+        linea = construir_linea_catalogo(
+            ["P-01", descripcion, "1", "120,00 €"], mapeo,
+            pagina=1, documento_origen_id=None, expediente_id=1, baja_lote=None, orden_aparicion=0,
+        )
+        assert linea is not None, descripcion

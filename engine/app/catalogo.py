@@ -285,6 +285,36 @@ def _es_pie_de_tabla(texto_normalizado_sin_espacios: str) -> bool:
     return texto_normalizado_sin_espacios in _ETIQUETAS_PIE_TABLA
 
 
+# Sesión 2026-09-17 (aviso del cliente): el resumen del presupuesto al pie de
+# un cuadro trae muchas variantes -- "Presupuesto de Ejecución Material",
+# "9% GASTOS GENERALES", "SUMA", "21% IVA", "TOTAL PRESUPUESTO", "Suma (€
+# Ejecución por Contrata)", "Presupuesto Base de Licitación (€ IVA
+# incluido)" --, y con la etiqueta en la columna de descripción entraban como
+# líneas con importes de millones (`6.17/28510.0056`, `6.17/28510.0007`,
+# leídos por reconocimiento óptico; `3.21/28510.0052`, `6.23/28510.0105`, con
+# texto: 22 líneas en el corpus). Una descripción que, quitadas cifras,
+# porcentajes y símbolos, solo trae palabras de concepto de presupuesto (y al
+# menos una central) no es un material. Nunca por "contiene": "Suministro de
+# ... según presupuesto" sigue siendo una línea.
+_PALABRAS_CONCEPTO_PRESUPUESTO = frozenset({
+    "presupuesto", "base", "de", "del", "la", "el", "licitacion", "ejecucion", "material", "contrata", "por",
+    "total", "totales", "suma", "sigue", "y", "subtotal", "gastos", "generales", "beneficio", "industrial",
+    "iva", "i", "v", "a", "importe", "imponible", "con", "sin", "incluido", "excluido", "adjudicacion",
+    "impuesto", "sobre", "valor", "anadido", "euros", "eur", "parcial", "global",
+})
+_PALABRAS_CENTRALES_PRESUPUESTO = frozenset({
+    "presupuesto", "total", "totales", "suma", "subtotal", "gastos", "beneficio", "iva", "importe", "imponible",
+})
+_CIFRAS_Y_SIGNOS_RE = re.compile(r"[\d.,%€()\[\]:;/*+=\-–]+")
+
+
+def _es_concepto_de_presupuesto(texto: Optional[str]) -> bool:
+    palabras = normalizar(_CIFRAS_Y_SIGNOS_RE.sub(" ", texto or "")).split()
+    return bool(palabras) and set(palabras) <= _PALABRAS_CONCEPTO_PRESUPUESTO and bool(
+        set(palabras) & _PALABRAS_CENTRALES_PRESUPUESTO
+    )
+
+
 # Sesión 2026-09-15 (cuarta parte): una tabla con varias secciones repite su
 # cabecera en mitad ("MANTENIMIENTO PREVENTIVO" y otra vez "CODIGO |
 # DESCRIPCIÓN | UNIDAD | MEDICIÓN | Precio Unitario | IMPORTE", pp. 7, 8 y 11
@@ -978,6 +1008,8 @@ def _construir_campos(
         # forma de escribirlo -- nunca un valor ambiguo.
         matricula = matricula.replace(".", "")
     descripcion = limpiar_texto_celda(_valor("descripcion")) or ""
+    if descripcion and _es_concepto_de_presupuesto(descripcion):
+        return "pie_de_tabla", None
     unidad_medida = limpiar_texto_celda(_unir_unidad_partida(_valor("unidad_medida")))
     if unidad_medida:
         unidad_medida = limpiar_unidad(unidad_medida)
@@ -1413,7 +1445,9 @@ def construir_linea_catalogo(
             fragmento_bruto = " | ".join((celda or "").strip() for celda in fila)
             if not fragmento_bruto.replace("|", "").strip():
                 return None
-            if _es_pie_de_tabla(normalizar(_CIFRAS_Y_SIMBOLOS_DE_IMPORTE_RE.sub("", fragmento_bruto)).replace(" ", "")):
+            if _es_pie_de_tabla(
+                normalizar(_CIFRAS_Y_SIMBOLOS_DE_IMPORTE_RE.sub("", fragmento_bruto)).replace(" ", "")
+            ) or _es_concepto_de_presupuesto(fragmento_bruto.replace("|", " ")):
                 # Sesión 2026-09-16 (noche): el pie de totales con la etiqueta
                 # fuera de la columna de matrícula -- en la de código
                 # ("PRESUPUESTO DE LICITACIÓN | | 59.960,00 €",
