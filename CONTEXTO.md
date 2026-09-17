@@ -1849,6 +1849,12 @@ sobre el corpus: +2.316 líneas en 54 expedientes, ~10,75 $.
   líneas (sin cuadro, o cuadro sin cantidad ni código en `6.18/28510.0071`;
   lectura mala en la tabla apaisada de `3.16/28510.0044`). Coste total real
   del reconocimiento ~12,5 $. Auditoría: solo los 11 duplicados legítimos.
+  Después, aviso del cliente: 22 filas de resumen de presupuesto ("Suma",
+  "IVA (21%)", "Presupuesto de Ejecución Material"...) entraban como líneas
+  con la etiqueta en la descripción; ahora son pie de tabla por palabras de
+  concepto (`app.catalogo._es_concepto_de_presupuesto`). Catálogo 37.638
+  líneas, Excel 18.239 filas, materiales distintos 14.980 → 17.202 (la cifra
+  9.848 → 12.003 dada antes estaba mal calculada), 0 materiales perdidos.
 
 ---
 

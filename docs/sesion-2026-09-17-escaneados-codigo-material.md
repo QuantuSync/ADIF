@@ -471,3 +471,45 @@ filas cambia**; precio unitario 15.752 → 17.981, baja 9.055 → 9.296, precio
 adjudicado 8.843 → 9.084, duplicados 11 = 11. Base de datos: 37.660 líneas en
 361 expedientes; matrícula 20.200, código del material 35.272 (93,7 %),
 trazas 2.111.
+
+## Filas de resumen de presupuesto (aviso del cliente)
+
+El cliente encontró filas de resumen de presupuesto como líneas de material,
+con importes de millones, en `6.17/28510.0056` ("Presupuesto Base de
+Licitación" 3.305.653, "Suma" 2.731.944, "Presupuesto de Ejecución Material"
+2.375.604) y `6.17/28510.0007` ("TOTAL PRESUPUESTO" 1.382.753, "SUMA"
+1.142.771, "PRESUPUESTO DE EJECUCIÓN MATERIAL" 993.714). **La corrección
+anterior de `0056` era parcial**: cubría las filas con la etiqueta fuera de la
+columna de descripción (p.19), no las que la traen dentro (p.20), y `0007` no
+estaba cubierto.
+
+**Medido en todo el catálogo antes de limpiar**: descripción que, quitadas
+cifras, porcentajes y símbolos, solo contiene palabras de concepto de
+presupuesto. **22 líneas en 6 expedientes** (18 leídas por reconocimiento, 21
+en el Excel): `6.17/28510.0007` (6), `6.17/28510.0056` (6), `6.17/28510.0123`
+(3), `6.19/28510.0064` (3), `3.21/28510.0052` (3, con texto) y
+`6.23/28510.0105` (1, "Total", con texto). Una búsqueda más amplia (descripciones
+que *empiezan* por total, suma, presupuesto, IVA, gastos generales, beneficio
+industrial, importe total, base imponible, ejecución material, valor estimado)
+no encontró ninguna más; las 22 revisadas una a una, ninguna es un material.
+
+**Arreglo** (`app.catalogo._es_concepto_de_presupuesto`): esa misma regla por
+palabras, en la descripción y en el fragmento de la fila, además de las
+etiquetas exactas de siempre. Nunca por "contiene": "Suministro de balasto
+según presupuesto de ejecución" o "Partida alzada total" siguen siendo líneas
+(test). Pasada sobre todo el catálogo antes de desplegar: caza exactamente esas
+22. Reprocesados los 6: catálogo 37.660 → **37.638 líneas**, 0 restantes;
+Excel 18.260 → **18.239 filas**, 358 expedientes con filas. 968 tests.
+
+**Rectificación de una cifra**: el script de comparación usaba la celda de
+matrícula vacía (exportada como un espacio) como clave, y los "materiales
+distintos" que se dieron más arriba (9.848 → 12.003) estaban mal. Con la clave
+corregida (expediente + matrícula, o descripción si no hay): **14.980 antes
+del reconocimiento → 17.223 tras él → 17.202 ahora**. Frente al Excel previo al
+reconocimiento, 12 claves desaparecen y ninguna es un material perdido: 9 son
+los mismos rodillos, chapas y placas nervadas de `6.20/28510.0041`/`0042`/
+`0046`/`0047`, que ahora se identifican por su matrícula de 8 cifras, y 3 son
+filas de resumen de `3.21/28510.0052`.
+
+Excel exportado a `C:\dev\ADIF\catalogo_adif_2026-09-17.xlsx` (sin subir al
+repositorio).
