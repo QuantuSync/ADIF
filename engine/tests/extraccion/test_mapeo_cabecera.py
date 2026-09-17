@@ -4,6 +4,7 @@ from app.extraccion.mapeo_cabecera import (
     corregir_confusion_precio_cantidad,
     derivar_mapeo_por_contenido,
     evaluar_coherencia_mapeo,
+    completar_columna_codigo_material,
     heredar_mapeo_por_geometria,
     intentar_mapeo_determinista,
     mapear_cabecera,
@@ -686,3 +687,20 @@ def test_evaluar_coherencia_mapeo_detecta_desplazamiento_aunque_descripcion_pase
     motivo = evaluar_coherencia_mapeo(mapeo_desplazado, filas)
     assert motivo is not None
     assert "matricula" in motivo
+
+
+def test_columna_tipo_de_traviesa_es_codigo_material_aunque_sea_la_descripcion():
+    # Sesión 2026-09-17, cabecera real de `6.24/28510.0177` p.112 (mapeada
+    # por el modelo, que nunca devuelve `codigo_material`).
+    cabecera = [
+        "CÓDIGO DE\nPRECIO", "TIPO DE TRAVIESA*", "MEDIDAS ESTÁNDAR (mm)", "USO DE LA TRAVIESA",
+        "UNIDAD\nDE\nMEDIDA", "CANTIDAD\nESTIMADA\nDE\nREFERENCIA", None, "PRECIO DE REFERENCIA DEL ELEMENTO (€)",
+    ]
+    mapeo = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": 4, "cantidad": 5, "precio_unitario": 7}
+    assert completar_columna_codigo_material(cabecera, mapeo)["codigo_material"] == 1
+
+
+def test_columna_tipo_ocupada_por_otro_campo_no_es_codigo_material():
+    cabecera = ["TIPO DE TRAVIESA", "DESCRIPCIÓN", "PRECIO"]
+    mapeo = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": None, "cantidad": None, "precio_unitario": 2}
+    assert "codigo_material" not in completar_columna_codigo_material(cabecera, mapeo)

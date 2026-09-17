@@ -58,7 +58,10 @@ from app.models import Documento, EstadoExpediente, Expediente, LineaCatalogo
 # de precios sin columna de código que solo se identificaba por matrícula se
 # descartaba entero por espurio. Recupera `6.26/28510.0004` (+1 línea),
 # `6.23/28510.0034` (+21) y `6.24/28510.0048` (+26).
-VERSION_LOGICA_EXTRACCION = "2026-09-16"
+# 2026-09-17: código del material por las siglas de aparatos de vía, por la
+# columna "TIPO DE TRAVIESA" y sin reutilizar la respuesta del modelo en
+# descripciones que no nombran esa pieza (`app.extraccion.codigo_material`).
+VERSION_LOGICA_EXTRACCION = "2026-09-17"
 
 # Sesión 2026-09-15 (expedientes de 2026 que faltaban): versión de la lógica
 # de búsqueda en la Plataforma cuyo "sin resultados" es de fiar. Hasta el

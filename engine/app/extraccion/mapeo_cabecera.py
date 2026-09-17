@@ -121,16 +121,37 @@ def intentar_mapeo_determinista(cabecera: list[Optional[str]]) -> Optional[dict[
 # su esquema invalidaría todas las respuestas ya cacheadas sin ningún
 # beneficio -- esta columna solo existe con cabecera legible).
 CAMPO_CODIGO_MATERIAL = "codigo_material"
-_NOMBRES_COLUMNA_CODIGO_MATERIAL = frozenset({"repuesto"})
+# Sesión 2026-09-17: "TIPO DE TRAVIESA*" es la segunda forma real
+# (`6.24/28510.0094`/`0175`/`0176`/`0177`, "SURFV / PRBA / PRFV"); la llamada
+# de nota ("*") no forma parte del nombre. En esa tabla la misma columna es
+# también la descripción (no hay otra), así que puede compartirla con
+# `descripcion`, nunca con otro campo.
+_NOMBRES_COLUMNA_CODIGO_MATERIAL = frozenset({"repuesto", "tipo de traviesa"})
 
 
 def _columna_codigo_material(normalizados: list[str], columnas_usadas: set[int]) -> Optional[int]:
     candidatas = [
         indice
         for indice, texto in enumerate(normalizados)
-        if texto in _NOMBRES_COLUMNA_CODIGO_MATERIAL and indice not in columnas_usadas
+        if texto.rstrip("* ") in _NOMBRES_COLUMNA_CODIGO_MATERIAL and indice not in columnas_usadas
     ]
     return candidatas[0] if len(candidatas) == 1 else None
+
+
+def completar_columna_codigo_material(
+    cabecera: list[Optional[str]], mapeo: dict[str, Optional[int]]
+) -> dict[str, Optional[int]]:
+    """La columna de tipo de pieza para un mapeo que no la trae: el de la
+    caché de antes de esta columna, o el del modelo (que nunca la ve, ver
+    arriba). No se guarda en la caché: se recalcula desde la cabecera."""
+    if mapeo.get(CAMPO_CODIGO_MATERIAL) is not None:
+        return mapeo
+    normalizados = [normalizar(c) if c else "" for c in cabecera]
+    usadas = {col for campo, col in mapeo.items() if col is not None and campo != "descripcion"}
+    columna = _columna_codigo_material(normalizados, usadas)
+    if columna is None:
+        return mapeo
+    return {**mapeo, CAMPO_CODIGO_MATERIAL: columna}
 
 
 _ESQUEMA_MAPEO = {
@@ -664,7 +685,8 @@ def mapear_cabecera(
         cacheado = obtener_mapeo_cacheado(db, firma)
         if cacheado is not None:
             return ResultadoMapeoCabecera(
-                mapeo=dict(cacheado.mapeo), firma=firma, origen="cache", llamada_modelo=False
+                mapeo=completar_columna_codigo_material(cabecera, dict(cacheado.mapeo)),
+                firma=firma, origen="cache", llamada_modelo=False,
             )
 
         mapeo_determinista = intentar_mapeo_determinista(cabecera)
@@ -682,4 +704,7 @@ def mapear_cabecera(
     mapeo_modelo = _mapear_con_modelo(cabecera, filas_ejemplo, model_provider)
     if cabecera_fiable:
         guardar_mapeo_cacheado(db, firma, cabecera, mapeo_modelo, origen="modelo")
-    return ResultadoMapeoCabecera(mapeo=mapeo_modelo, firma=firma, origen="modelo", llamada_modelo=True)
+    return ResultadoMapeoCabecera(
+        mapeo=completar_columna_codigo_material(cabecera, mapeo_modelo), firma=firma, origen="modelo",
+        llamada_modelo=True,
+    )

@@ -73,6 +73,16 @@ VOCABULARIO_CODIGO_MATERIAL = (
     "CRUZ",
     "BULÓN",
     "SEMICAMBIO",
+    # Sesión 2026-09-17: piezas y aparatos de vía que el vocabulario no
+    # tenía y que las siglas de `_SIGLAS_APARATO_VIA` también nombran.
+    "AGUJA",
+    "CONTRAAGUJA",
+    "CRUZAMIENTO",
+    "DESVÍO",
+    "ESCAPE",
+    "TRAVESÍA",
+    "PALASTRO",
+    "ENCARRILADORA",
     "CONJUNTO",
     "CERROJO",
     "JUEGO",
@@ -183,6 +193,11 @@ _EXCLUIDOS_DEL_MATERIAL = frozenset({"PARTIDA", "PRIMER", "SEGUNDO", "TERCER", "
 # palabra siguiente en vez de tratar la unidad como si fuera el material.
 _UNIDADES_A_SALTAR = frozenset({"T", "M", "UD", "U", "KM", "ML", "KG", "UN"})
 
+# Ordinales que encabezan la pieza ("SEGUNDA PLACA DE TALON", "TERCERA PLACA
+# DE TALON", `6.20/28510.0046`): el material es la palabra siguiente. Sesión
+# 2026-09-17: el modelo había cacheado "PRIMERA" -> PLACA y "SEGUNDA" -> nada.
+_ORDINALES_A_SALTAR = frozenset({"PRIMERA", "SEGUNDA", "TERCERA", "CUARTA", "QUINTA"})
+
 _PALABRA_RE = re.compile(r"[A-Za-zÁÉÍÓÚÑáéíóúñ]+")
 
 
@@ -229,14 +244,80 @@ def _termino_candidato(descripcion: str) -> Optional[str]:
         # o unida por una preposición ("T de balasto...", "m de poste...") --
         # verificado contra el corpus real, las dos formas aparecen.
         indice = 2 if palabras[1] in ("DE", "DEL") and len(palabras) > 2 else 1
+    if palabras[indice] in _ORDINALES_A_SALTAR and len(palabras) > indice + 1:
+        indice += 1
     return palabras[indice]
+
+
+# Sesión 2026-09-17 (bloque 2, `docs/sesion-2026-09-17-escaneados-codigo-
+# material.md`): las siglas de la nomenclatura de aparatos de vía de ADIF SÍ
+# nombran el tipo de pieza. Eran el 96 % de las líneas sin código (12.270 de
+# 12.754, todas con la respuesta "no es material" del modelo en caché).
+# Verificado contra el corpus, no supuesto: el mismo cuadro nombra la pieza
+# con la sigla y con la palabra, bajo la misma serie de matrículas y la misma
+# norma ("CAC-12000/SCI-A-..." junto a "CONTRAAGUJA CURVA-A-54-...", "AR-11250
+# /SCI-A-54-..." junto a "AGUJA RECTA-A-54A-11,250M"; `6.20/28510.0046` p.25 y
+# p.30); "CC 33" es el contracarril de perfil UIC-33; los `DS`/`DSH` y la
+# familia `D??D/I` sin más texto cuestan 65.000-290.000 € (el desvío entero),
+# mientras que los `SCI`/`SCV` y los `D??D/I` que dicen "Semicambio" cuestan
+# 22.700-57.000 € (`6.22/28510.0122` p.31, `6.23/28510.0051` p.117).
+# Siglas que no se pudieron verificar así (CI, CAM, ENM, CR, cables EAPSP...)
+# se quedan fuera a propósito.
+_SIGLAS_APARATO_VIA: dict[str, str] = {
+    **dict.fromkeys(("AC", "AR"), "AGUJA"),
+    **dict.fromkeys(("CAC", "CAR"), "CONTRAAGUJA"),
+    "CC": "CONTRACARRIL",
+    **dict.fromkeys(("CZ", "CZI", "CZV"), "CRUZAMIENTO"),
+    **dict.fromkeys(("SC", "SCI", "SCV", "SCVH", "SCIL"), "SEMICAMBIO"),
+    **dict.fromkeys(("DS", "DSH", "DSF", "DSFH", "DSI", "DSIH", "DSM", "DSMH"), "DESVÍO"),
+    **dict.fromkeys(("ES", "ESH", "ESF", "ESFH"), "ESCAPE"),
+    **dict.fromkeys(("TUD", "TUS", "TSU", "TUDI", "TUDL", "TUDIH", "TSUIH", "TUSIH"), "TRAVESÍA"),
+    **dict.fromkeys(("AD", "ADH", "ADF", "ADI", "ADIH", "ADM", "ADMH", "ADMDH", "ADMIH"), "APARATO"),
+    "JAE": "JUNTA",
+    **dict.fromkeys(("TR", "TRAV"), "TRAVIESA"),
+    "PL": "PLACA",
+}
+
+# Desvíos designados por su geometría ("DMRDH-G-60-500-...", "DIRD-B1-54-...").
+_DESVIO_POR_GEOMETRIA_RE = re.compile(r"D[MRI]{2}[DI][HL]?")
+
+# Pieza nombrada con palabra detrás de la sigla del aparato ("DMIDH-G-60-500-
+# 0,071-CR-I-TC Semicambio dcha (doble)"): la palabra manda sobre la sigla.
+_PIEZA_EXPLICITA_RE = re.compile(r"\b(SEMICAMBIO|CONTRACARRIL|CORAZ[OÓ]N|CRUZAMIENTO|CONTRAAGUJA|AGUJA)S?\b")
+
+# Sigla al principio: letras mayúsculas (o "J.A.E.", "T.S.U."), seguidas de un
+# separador de código, o de un espacio y algo con forma de código ("CC 33
+# para...", "CAR SCI-B1-54-..."). Nunca una palabra en minúsculas.
+_SIGLA_INICIAL_RE = re.compile(r"\s*((?:[A-Z]\.){2,}|[A-Z]{2,5})(?=[-‐(/.]|\s|$)")
+_FORMA_DE_CODIGO_RE = re.compile(r"[A-Z0-9]+[-‐][A-Z0-9]|\d")
+
+
+def _codigo_por_sigla_aparato_via(descripcion: str) -> Optional[str]:
+    m = _SIGLA_INICIAL_RE.match(descripcion)
+    if m is None:
+        return None
+    sigla = m.group(1).replace(".", "")
+    resto = descripcion[m.end():]
+    if resto[:1].isspace() and not _FORMA_DE_CODIGO_RE.search(resto):
+        return None
+    if sigla in _SIGLAS_APARATO_VIA:
+        codigo = _SIGLAS_APARATO_VIA[sigla]
+    elif _DESVIO_POR_GEOMETRIA_RE.fullmatch(sigla):
+        codigo = "DESVÍO"
+    else:
+        return None
+    if codigo == "DESVÍO":
+        explicita = _PIEZA_EXPLICITA_RE.search(_sin_acentos(resto.upper()))
+        if explicita is not None:
+            return _en_vocabulario(explicita.group(1))
+    return codigo
 
 
 def derivar_codigo_material(descripcion: str) -> Optional[str]:
     termino = _termino_candidato(descripcion)
     if termino is None:
         return None
-    return _en_vocabulario(termino)
+    return _en_vocabulario(termino) or _codigo_por_sigla_aparato_via(descripcion)
 
 
 _ESQUEMA_CODIGO_MATERIAL = {
@@ -302,11 +383,32 @@ def derivar_codigo_material_con_modelo(
 
     cacheado = obtener_codigo_material_cacheado(db, termino)
     if cacheado is not None:
-        return cacheado.codigo_material
+        return _respuesta_aplicable(termino, cacheado.codigo_material, descripcion)
 
     if model_provider is None:
         return None
 
     valor_modelo = _clasificar_con_modelo(termino, descripcion, model_provider)
     guardar_codigo_material_cacheado(db, termino, valor_modelo, origen="modelo")
-    return valor_modelo
+    return _respuesta_aplicable(termino, valor_modelo, descripcion)
+
+
+def _respuesta_aplicable(termino: str, codigo: Optional[str], descripcion: str) -> Optional[str]:
+    """Sesión 2026-09-17: la caché es por primera palabra, pero el modelo
+    contestó mirando UNA descripción concreta -- reutilizada a ciegas, "X" ->
+    BALASTO acababa en 231 líneas de equipos Ethernet y postes ("8X10/100B
+    ETHERNET", "X2B-P POSTE"), "CARGA" -> BALASTO en cargas de radiofrecuencia
+    y "SUMINISTRO" -> HERRAJE en el gasóleo. La respuesta solo vale para una
+    descripción que nombra esa pieza ("Paquete de 1 Rodillo" -> RODILLO), o
+    cuando es la propia palabra (abreviada o con una errata: "CONJ." ->
+    CONJUNTO, "ADAPATADOR" -> ADAPTADOR). Se aplica igual a la respuesta
+    recién pedida, para que un reproceso con la caché ya llena dé lo mismo."""
+    if codigo is None:
+        return None
+    t, c = _sin_acentos(termino.upper()), _sin_acentos(codigo.upper())
+    if len(t) >= 4 and (c.startswith(t[:4]) or t.startswith(c[:4])):
+        return codigo
+    raiz = c.split()[0][:5]
+    if len(raiz) >= 4 and re.search(r"\b" + re.escape(raiz), _sin_acentos(descripcion.upper())):
+        return codigo
+    return None
