@@ -2360,6 +2360,14 @@ def guardar_lineas_catalogo(
                     # mapeo de modelo equivocado, un `None` corriente nunca
                     # lo habría corregido.
                     setattr(existente, campo, None)
+                elif campo == "codigo_material" and valor is None and existente.id not in ids_vivas:
+                    # Sesión 2026-09-17: se deriva entero en cada pasada
+                    # (columna de tipo, reglas, caché del modelo). Sin esto,
+                    # un código que la regla actual ya no da ("X" -> BALASTO
+                    # en equipos Ethernet) no se borraba nunca. Si otro
+                    # documento ya escribió la línea en esta pasada, su código
+                    # se queda.
+                    setattr(existente, campo, None)
                 elif valor is not None:
                     setattr(existente, campo, valor)
             # Sesión 2026-09-15: las marcas de origen también se recalculan en
