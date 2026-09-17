@@ -1844,9 +1844,11 @@ sobre el corpus: +2.316 líneas en 54 expedientes, ~10,75 $.
   y lanzado (sección 15), matrícula de 8 cifras aceptada en todos los
   documentos, títulos "pliego de condiciones administrativas/generales" como
   pliego sin precios. Catálogo 35.332 → 37.660 líneas, expedientes con líneas
-  306 → 361, Excel 16.007 → 18.260 filas. Coste real ~10,75 $. Pendiente: 5
-  expedientes fallidos por saldo de la API agotado y `6.18/28510.0071`, a
-  relanzar tras recargar crédito.
+  306 → 361, Excel 16.007 → 18.260 filas, 0 materiales perdidos. Los 6
+  expedientes que fallaron por saldo agotado, relanzados: completan, sin
+  líneas (sin cuadro, o cuadro sin cantidad ni código en `6.18/28510.0071`;
+  lectura mala en la tabla apaisada de `3.16/28510.0044`). Coste total real
+  del reconocimiento ~12,5 $. Auditoría: solo los 11 duplicados legítimos.
 
 ---
 

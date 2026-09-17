@@ -432,3 +432,42 @@ Auditoría del ciclo: los 11 duplicados legítimos de siempre y "líneas que
 cambian sin cambiar documentos" en los expedientes que ganan líneas por el
 reconocimiento (esperado); el error "sin descripción" era el de `0056`, ya
 corregido. 966 tests.
+
+## Relanzamiento de los 6 fallidos y cierre (tras recargar crédito)
+
+Relanzados uno a uno (trabajos 21553-21558): **los 6 completan sin error**, con
+290 lecturas de página y **1,72 $**. Los 140 documentos escaneados del corpus
+quedan ya en caché (1.657 páginas; 57 marcados incompletos a propósito, casi
+todos pliegos administrativos dejados tras sus primeras páginas).
+**Ninguno de los 6 aporta líneas**, por dos motivos distintos:
+
+- `6.18/28510.0071` (señalización): la lectura es buena (p.12-15, 68 artículos
+  con designación, plano y precio), pero el cuadro **no trae código de precio,
+  matrícula ni cantidad**, y la etapa 4 solo acepta un cuadro sin código si su
+  cabecera nombra descripción, **cantidad** y precio. Es la misma regla para
+  documentos con texto: aceptar cuadros sin cantidad sería otra decisión.
+- `3.16/28510.0044`: es un presupuesto por partidas en una tabla apaisada muy
+  densa (p.17), no un cuadro de catálogo, y **ahí la lectura es mala** ("€"
+  leído "ψ", texto sin sentido). Primera página del corpus donde la calidad
+  cae de forma visible.
+- `6.15/28510.0094`, `6.17/28510.0012`, `6.15/28510.0080`, `2.19/23108.0127`:
+  sus escaneados son pliegos administrativos, contratos o anexos sin cuadro
+  (como ya decía la clasificación del bloque 1); `0080` además no identifica su
+  bloque en el anuncio multi-lote.
+
+**Coste total real del reconocimiento: ~12,5 $** (piloto 0,44 + lanzamiento
+10,30 + relanzamiento 1,72).
+
+**Auditoría** (trabajo 21560): un único error, los 11 duplicados legítimos; el
+de "sin descripción" de `6.17/28510.0056` ya no aparece. Avisos frente a la
+auditoría previa al reconocimiento: cantidad con forma de año 602 → 603,
+precios atípicos 1.941 → 2.009, líneas sin lote 19.159 → 19.234 (75 de ellas
+leídas por reconocimiento).
+
+**Comparación final** (Excel previo al reconocimiento → cierre): 16.007 →
+**18.260 filas**; expedientes con filas 303 → **358**; materiales distintos
+9.848 → 12.003, **0 perdidos**; **ninguno de los 303 expedientes que ya tenían
+filas cambia**; precio unitario 15.752 → 17.981, baja 9.055 → 9.296, precio
+adjudicado 8.843 → 9.084, duplicados 11 = 11. Base de datos: 37.660 líneas en
+361 expedientes; matrícula 20.200, código del material 35.272 (93,7 %),
+trazas 2.111.
