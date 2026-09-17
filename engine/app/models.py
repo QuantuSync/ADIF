@@ -479,6 +479,11 @@ class LineaCatalogo(Base):
     # cuál (decisión del cliente, `app.extraccion.pipeline_anejo`,
     # `lote_propio`). Mismo convenio que `lote_heredado_de_pagina_anterior`.
     lote_del_expediente = Column(Boolean, nullable=True)
+    # Sesión 2026-09-17 (migración 0035): la línea sale de un documento
+    # escaneado leído por reconocimiento óptico (`app.extraccion.ocr`), no del
+    # texto original -- menos fiable, y quien revise debe saberlo. Mismo
+    # convenio que las otras marcas de origen: `True` o ausente.
+    texto_reconocido = Column(Boolean, nullable=True)
     # Bloque 4, sesión 2026-09-09 (migración 0025): `True` únicamente cuando
     # `unidad_medida` se rellenó desde `maestro_materiales` (app.extraccion.
     # maestro_materiales.completar_unidades_desde_maestro) porque el
@@ -582,6 +587,28 @@ class CacheTextoDocumento(Base):
     num_paginas = Column(Integer, nullable=False)
     paginas = Column(JSON, nullable=False)  # [{"numero": int, "texto": str}, ...]
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class CacheOcrDocumento(Base):
+    """Sesión 2026-09-17: texto reconocido de un documento escaneado
+    (`app.extraccion.ocr`), por hash de documento como `CacheTextoDocumento`.
+    Leer una página con el modelo cuesta segundos y dinero, y el documento no
+    cambia: nunca se repite, salvo que suba `VERSION_LOGICA_OCR` o cambie el
+    modelo. `completo` es falso cuando solo se leyeron las primeras páginas
+    (pliego administrativo, o documento demasiado largo)."""
+
+    __tablename__ = "cache_ocr_documento"
+
+    documento_hash = Column(String(64), primary_key=True)
+    version_logica_ocr = Column(String(32), nullable=False)
+    modelo = Column(String(64), nullable=False)
+    num_paginas = Column(Integer, nullable=False)
+    completo = Column(Boolean, nullable=False)
+    # [{"numero": int, "texto": str, "bloques": [...], "segundos": float,
+    #   "tokens_entrada": int, "tokens_salida": int}, ...]
+    paginas = Column(JSON, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
 class CacheCodigoMaterial(Base):

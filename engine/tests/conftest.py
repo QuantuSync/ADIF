@@ -15,6 +15,7 @@ _TABLAS = [
     models.MapeoCabeceraCache.__table__,
     models.CacheCodigoMaterial.__table__,
     models.CacheTextoDocumento.__table__,
+    models.CacheOcrDocumento.__table__,
     models.TrabajoCola.__table__,
     models.SindicacionExpediente.__table__,
     models.CandidatoAcuerdoMarco.__table__,

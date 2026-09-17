@@ -119,6 +119,10 @@ services:
       # Solo si MODEL_API_KEY es una clave ligada a identidad (ver
       # docstring de APIModelProvider).
       MODEL_WORKSPACE_ID: ${MODEL_WORKSPACE_ID:-}
+      # Reconocimiento óptico de documentos escaneados (app.extraccion.ocr):
+      # "escaneados" (por defecto, solo documentos sin capa de texto) o
+      # "desactivado".
+      OCR_MODO: ${OCR_MODO:-escaneados}
       # Solo desarrollo (CachedModelProvider, ver app/config.py): bind mount
       # al host para no pagar la misma cabecera dos veces entre reinicios
       # del contenedor. Vacío en un despliegue real.

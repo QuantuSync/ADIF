@@ -1,6 +1,7 @@
 import json
 import hashlib
 import logging
+import threading
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Optional
@@ -15,6 +16,20 @@ class ModelProvider(ABC):
     @abstractmethod
     def completar(self, prompt: str, esquema: Optional[dict] = None) -> Any:
         raise NotImplementedError
+
+    def completar_con_imagen(self, prompt: str, imagen_png: bytes, esquema: Optional[dict] = None) -> Any:
+        """Reconocimiento óptico de documentos escaneados (sesión 2026-09-17,
+        `app.extraccion.ocr`): misma salida estructurada que `completar`, con
+        una imagen de página delante del texto. Una implementación sin visión
+        (un modelo autoalojado solo de texto) no la sobrescribe, y la etapa de
+        reconocimiento se desactiva sola."""
+        raise NotImplementedError(f"{type(self).__name__} no admite imágenes")
+
+    @property
+    def uso_ultima_llamada(self) -> Optional[tuple[int, int]]:
+        """(tokens de entrada, tokens de salida) de la última llamada real, si
+        la implementación lo sabe. Para medir el coste del reconocimiento."""
+        return None
 
 
 class NullModelProvider(ModelProvider):
@@ -68,6 +83,45 @@ class APIModelProvider(ModelProvider):
         self._client = anthropic.Anthropic(**kwargs)
         self._modelo = modelo
         self._max_tokens = max_tokens
+        # Por hilo: el reconocimiento óptico lee varias páginas a la vez.
+        self._local = threading.local()
+
+    @property
+    def uso_ultima_llamada(self) -> Optional[tuple[int, int]]:
+        return getattr(self._local, "uso", None)
+
+    def completar_con_imagen(self, prompt: str, imagen_png: bytes, esquema: Optional[dict] = None) -> Any:
+        import base64
+
+        kwargs: dict = {}
+        if esquema is not None:
+            kwargs["output_config"] = {"format": {"type": "json_schema", "schema": esquema}}
+        # Una página densa transcrita ocupa ~1.750 tokens (piloto de la sesión
+        # 2026-09-17); margen amplio para cuadros de 40-50 filas.
+        respuesta = self._client.messages.create(
+            model=self._modelo,
+            max_tokens=max(self._max_tokens, 16000),
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "image", "source": {
+                        "type": "base64", "media_type": "image/png",
+                        "data": base64.b64encode(imagen_png).decode("ascii"),
+                    }},
+                    {"type": "text", "text": prompt},
+                ],
+            }],
+            **kwargs,
+        )
+        self._local.uso = (respuesta.usage.input_tokens, respuesta.usage.output_tokens)
+        logger.info(
+            "APIModelProvider.completar_con_imagen: %s tokens de entrada, %s de salida (modelo %s, stop %s)",
+            respuesta.usage.input_tokens, respuesta.usage.output_tokens, self._modelo, respuesta.stop_reason,
+        )
+        if respuesta.stop_reason == "max_tokens":
+            raise RuntimeError("la transcripción de la página no cabe en max_tokens")
+        texto = next(bloque.text for bloque in respuesta.content if bloque.type == "text")
+        return json.loads(texto)
 
     def completar(self, prompt: str, esquema: Optional[dict] = None) -> Any:
         kwargs: dict = {}
@@ -112,6 +166,15 @@ class CachedModelProvider(ModelProvider):
         base = prompt + "\n---\n" + json.dumps(esquema, sort_keys=True, ensure_ascii=False) if esquema else prompt
         clave = hashlib.sha256(base.encode("utf-8")).hexdigest()
         return self._directorio / f"{clave}.json"
+
+    @property
+    def uso_ultima_llamada(self) -> Optional[tuple[int, int]]:
+        return self._interior.uso_ultima_llamada
+
+    def completar_con_imagen(self, prompt: str, imagen_png: bytes, esquema: Optional[dict] = None) -> Any:
+        # Sin caché de disco: el texto reconocido ya se cachea por hash de
+        # documento en base de datos (`cache_ocr_documento`).
+        return self._interior.completar_con_imagen(prompt, imagen_png, esquema)
 
     def completar(self, prompt: str, esquema: Optional[dict] = None) -> Any:
         ruta = self._ruta_cache(prompt, esquema)

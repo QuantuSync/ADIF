@@ -1739,7 +1739,9 @@ def construir_lineas_desde_tabla(
 
 # De dónde viene la línea o su lote, no un dato del documento: se recalculan
 # en cada pasada (ver `guardar_lineas_catalogo`).
-_MARCAS_DE_ORIGEN = ("heredado_de_matriz", "lote_heredado_de_pagina_anterior", "lote_del_expediente")
+_MARCAS_DE_ORIGEN = (
+    "heredado_de_matriz", "lote_heredado_de_pagina_anterior", "lote_del_expediente", "texto_reconocido",
+)
 
 
 @dataclass(frozen=True)

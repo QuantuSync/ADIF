@@ -7,6 +7,7 @@ determinista no puede resolver."""
 from __future__ import annotations
 
 import ast
+import threading
 import re
 from typing import Any, Optional
 
@@ -110,3 +111,35 @@ class ProveedorModeloContador(ModelProvider):
     def completar(self, prompt: str, esquema: Optional[dict] = None) -> Any:
         self.llamadas += 1
         return self._interior.completar(prompt, esquema)
+
+
+class ProveedorVisionFalso(ModelProvider):
+    """Reconocimiento óptico (sesión 2026-09-17): las primeras
+    `paginas_portada` llamadas devuelven la portada de un pliego técnico; las
+    siguientes, un cuadro de precios con códigos distintos en cada página."""
+
+    def __init__(self, paginas_portada: int = 2, portada: str = "PLIEGO DE PRESCRIPCIONES TÉCNICAS"):
+        self.llamadas_imagen = 0
+        self._paginas_portada = paginas_portada
+        self._portada = portada
+        self._lock = threading.Lock()
+
+    def completar(self, prompt: str, esquema: Optional[dict] = None) -> Any:
+        raise AssertionError("el reconocimiento óptico no debe llamar a completar")
+
+    def completar_con_imagen(self, prompt: str, imagen_png: bytes, esquema: Optional[dict] = None) -> Any:
+        with self._lock:
+            self.llamadas_imagen += 1
+            n = self.llamadas_imagen
+        if n <= self._paginas_portada:
+            return {"bloques": [{"tipo": "texto", "texto": self._portada, "filas": []}]}
+        base = n * 10
+        return {"bloques": [
+            {"tipo": "texto", "texto": "ANEJO 1. CUADRO DE PRECIOS", "filas": []},
+            {"tipo": "tabla", "texto": "", "filas": [
+                ["CÓDIGO DE PRECIO", "DESCRIPCIÓN", "UNIDAD DE MEDIDA", "CANTIDAD", "PRECIO UNITARIO"],
+                [f"P-{base + 1:04d}", "BRIDA PARA JUNTA ORDINARIA", "UD", "10", "12,50 €"],
+                [f"P-{base + 2:04d}", "TORNILLO DE VIA M22X140", "UD", "200", "3,18 €"],
+                [f"P-{base + 3:04d}", "PLACA DE ASIENTO PAE-1", "UD", "50", "41,20 €"],
+            ]},
+        ]}
