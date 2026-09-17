@@ -73,6 +73,11 @@ Sobre 45 expedientes y 187 PDFs reales. Detalle completo, cifras y
 metodología en `docs/analisis-corpus.md`; aquí solo lo que cambia cómo se
 escribe código:
 
+- **Actualizado 2026-09-17 (corpus de 1.623 documentos): 140 escaneados,
+  5.298 páginas, 113 expedientes, casi todos de 2016-2019**; 60 son pliegos
+  técnicos con ~1.800 filas de catálogo que hoy no se leen (67 expedientes
+  sin ninguna línea), ver `docs/sesion-2026-09-17-escaneados-codigo-material.md`
+  bloque 1 y sección 15. Texto original de la sesión de análisis:
 - **186 de los 187 documentos tienen capa de texto.** No hace falta OCR ni
   modelo multimodal para leerlos (ver sección 15, "Fuera de alcance"). La
   única excepción conocida, `6.20/28510.0136_ANEJO_2.pdf`, es un PDF
@@ -229,8 +234,15 @@ Para nada más.**
   amplía el vocabulario. **Excepción, decisión del cliente (sesión
   2026-09-14):** si la tabla trae su propia columna de tipo de pieza
   ("REPUESTO": "Semicambio", "Aguja", "Cruzamiento obtuso"...), su valor
-  literal manda sobre la derivación. Hoy solo existe en la familia
-  `6.21/28510.0108` (`docs/sesion-2026-09-14-revision-cliente-pliegos.md`).
+  literal manda sobre la derivación. Existe en la familia
+  `6.21/28510.0108` (`docs/sesion-2026-09-14-revision-cliente-pliegos.md`) y,
+  como "TIPO DE TRAVIESA", en `6.24/28510.0094`/`0175`-`0177` (sesión
+  2026-09-17). **Las siglas de aparatos de vía nombran la pieza** (`AC`/`AR`
+  aguja, `CAC`/`CAR` contraaguja, `CC` contracarril, `CZ*` cruzamiento, `SC*`
+  semicambio, `DS*` y `D??D/I` desvío, `ES*` escape, `TUD`/`TSU` travesía...),
+  verificado en el corpus (`app.extraccion.codigo_material._SIGLAS_APARATO_VIA`).
+  La respuesta cacheada del modelo es por primera palabra: solo vale para una
+  descripción que nombra esa pieza.
 - **El cruce con el Excel de códigos no usa modelo.** Es búsqueda por clave exacta.
 - **Caché por hash de documento.** Nunca se reprocesa lo mismo dos veces.
 
@@ -521,7 +533,11 @@ justificado. Si en el futuro aparecen más documentos escaneados con volumen
 propio, la vía prevista es rasterizar la página y pasarla a un modelo
 multimodal (coherente con la arquitectura propuesta, Qwen), no un OCR
 tradicional aparte — pero eso es una decisión para cuando haya casos
-suficientes, no ahora.
+suficientes, no ahora. **Sesión 2026-09-17: ya hay casos suficientes para
+plantearlo** (140 documentos, ~1.800 filas, 67 expedientes; piloto real con
+`claude-haiku-4-5`: una página densa, 21 filas, 1 dígito mal en una medida,
+~0,01 $; coste total estimado ~6-11 $ una vez, 2-3 sesiones de desarrollo).
+Pendiente de decisión del cliente; choca con la regla de la sección 6.
 
 ---
 
@@ -1799,6 +1815,25 @@ suficientes, no ahora.
   perdidos, auditoría con el único error de los 11 duplicados legítimos.
   **Sin hacer:** el cruce con los 83 vigentes con remanente (el fichero no
   llegó a estar en `Ejemplo/Input/`).
+- **Escaneados, código del material y pendientes antiguos (sesión
+  2026-09-17, `docs/sesion-2026-09-17-escaneados-codigo-material.md`).**
+  **Escaneados, solo análisis**: 140 documentos (5.298 páginas) en 113
+  expedientes, casi todos 2016-2019; 60 son pliegos técnicos con ~1.800 filas
+  de catálogo, todas de 67 expedientes que hoy no tienen ninguna línea (solo
+  21 con baja legible). Piloto de lectura por imagen con `claude-haiku-4-5`
+  sobre una página real: 21 filas, un dígito mal en una medida; ~6-11 $ en
+  total, 2-3 sesiones; pendiente de decisión del cliente (sección 15).
+  **Código del material 63,9 % → 94,7 %** (Excel 64,8 % → 93,6 %): las
+  siglas de aparatos de vía nombran la pieza (sección 6), "TIPO DE TRAVIESA"
+  es columna de tipo, y la respuesta cacheada del modelo ya no se reparte a
+  descripciones que no nombran esa pieza ("X" → BALASTO estaba en 231 líneas
+  de equipos Ethernet); el código se recalcula en cada pasada. **Trazas sin
+  duplicar**: 36.912 → 2.106 (migración 0034, `app.extraccion.traza`),
+  estables tras un reproceso completo. **Filas fundidas**: `6.24/28510.0208`
+  separada (6 → 15); `6.21/28510.0152` p.114 sigue fundida (su columna de
+  código es la de "CODIFICACIÓN DEL PRECIO", alias ya revertido una vez).
+  Unidades (18) y los 11 duplicados legítimos, sin cambios. Excel 15.998 →
+  16.007 filas, 0 materiales perdidos.
 
 ---
 
@@ -1830,4 +1865,5 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `sesion-2026-09-15-unidades-y-cobertura-2026.md`,
 `sesion-2026-09-16-descubrimiento-por-busqueda.md`,
 `sesion-2026-09-16-noche-ciclo-vigentes-unidades.md`,
+`sesion-2026-09-17-escaneados-codigo-material.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.

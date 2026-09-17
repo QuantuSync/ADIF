@@ -204,3 +204,104 @@ código 1.862 líneas: 442 partidas alzadas y el resto marcas, servicios
 material de las traviesas sintéticas (literal de su columna de tipo, como
 REPUESTO) o "TRAVIESA"; y "CONTRAGUJA" (264 líneas, errata literal de la
 columna REPUESTO) frente a "CONTRAAGUJA".
+
+## Bloque 3 — Unidades y duplicados
+
+Ya hechos en la sesión anterior (`docs/sesion-2026-09-16-noche-ciclo-vigentes-unidades.md`
+bloques 4 y 5); comprobado de nuevo con los datos de hoy, sin trabajo nuevo:
+
+- **Unidades**: 18 valores distintos en la base de datos (39 formas
+  originales guardadas en `unidad_medida_original`), 17 más la celda vacía en
+  el Excel. El único valor nuevo desde ayer es `l` (litro, 4 líneas).
+  `PA`, `P` y `transporte` siguen separados a la espera del cliente.
+- **Duplicados**: los mismos 11 grupos (22 filas) del Excel, en
+  `6.23/28510.0051`/`0060` y `4.25/28510.0132`: el propio pliego repite texto
+  y precio con dos códigos de precio distintos (verificado en el PDF ayer). Se
+  dejan; distinguirlos exige la columna "Código de precio" en el Excel,
+  decisión del cliente.
+
+## Bloque 4 — Pendientes antiguos
+
+### Trazas duplicadas en cada pasada: resuelto
+
+No eran solo las de lote: cada extracción volvía a añadir **todas** las
+trazas aunque fueran idénticas. Antes: **36.912 trazas** (`importe_licitacion`
+de expediente 8.360 para 374 distintas, `baja_declarada` de lote 8.294 para
+460, adjudicatario 7.129 para 324…), contra el invariante 9.
+
+- `app.extraccion.traza.registrar_traza`: una traza idéntica (entidad, campo,
+  documento, página, fragmento y valor) sustituye a la anterior; la más
+  reciente sigue siendo la de `id` mayor (la que leen la herencia de matriz y
+  la web). Una traza con otro valor u otro documento se conserva. Usada en
+  los tres sitios que escribían trazas (orquestador, herencia de matriz,
+  identidad de expediente).
+- Migración 0034: borra lo acumulado quedándose con la copia más reciente, e
+  índice por (entidad, id, campo). **36.912 → 2.106 trazas** (baja de lote
+  12.652 → 611 contando las de expediente).
+- Verificado con un reproceso completo (trabajo 20512, 516 expedientes, 25
+  min, 0 fallos): **2.106 antes y después**, y en cada campo filas = distintas.
+  Test nuevo: reextraer dos veces deja las mismas trazas (falla sin el arreglo).
+
+### Filas que `pdfplumber` funde: resuelto en lo acotado
+
+Medido en el catálogo real: 3 casos.
+
+| Caso | Qué pasaba | Resultado |
+|---|---|---|
+| `6.24/28510.0208` p.99 (módulos de telefonía) | 6 filas con 2-4 módulos fundidos cada una; la tabla no tiene precios y la división exigía precio | **separadas: 6 → 15 líneas** (+9 en catálogo y Excel), cada una con su código y descripción |
+| `6.21/28510.0152` p.114 (rodillos de aguja) | 4 artículos en una fila; columna "CODIFICACIÓN DEL PRECIO" no reconocida y 3 unidades para 4 filas | **sin resolver**: añadir ese alias ya se probó y revirtió en una sesión anterior (rompe el cuadro de balasto multi-lote, test de guarda). La división con unidades de menos queda lista para cuando la columna se mapee |
+| Contratos de `6.22/28510.0122`/`0155`/`0156` | tabla sin líneas horizontales: 28 códigos, una matrícula y una descripción en una fila | **sin tocar**: ya documentado el 15-09, sin pérdida de material (el anejo trae el mismo cuadro limpio) |
+
+Cambio en `app.catalogo._dividir_fila_multiple`: una fila sin ningún precio
+se divide solo si código, matrícula y descripción se dividen los tres en el
+mismo N; cantidad y matrícula se reparten cuando cuadran en N; si la unidad no
+cuadra, la fila se divide igual, sin unidad, y todas a revisión. Códigos de
+precio fundidos ("P-914P-2018…") en el catálogo: **0**.
+
+## Bloque 5 — Cierre
+
+Copias: `/backups/adif_20260917_antes_codigo_material.dump` y
+`/backups/adif_20260917_antes_bloque4.dump`. `VERSION_LOGICA_EXTRACCION`
+`2026-09-17.2`. 952 tests.
+
+**Base de datos, inicio de sesión → final:**
+
+| | Antes | Después |
+|---|---|---|
+| Líneas | 35.323 | 35.332 (+9, las de `0208`) |
+| codigo_material | 22.569 (63,9 %) | **33.470 (94,7 %)** |
+| codigo_precio | 25.215 | 25.224 |
+| cantidad | 17.045 | 17.056 |
+| baja_lote | 9.046 | 9.055 |
+| lote_id | 16.164 | 16.173 |
+| matricula, precio_unitario, unidad_medida, precio_adjudicado | 17.995 / 34.398 / 28.100 / 8.843 | iguales |
+| Expedientes con líneas | 306 | 306 |
+| Trazas | 35.602 | **2.106** |
+
+**Excel ("Materiales"), mañana → final:** 15.998 → **16.007 filas**;
+código del material 10.366 → **14.991 (93,6 %)**; título/objeto del
+contrato 13.638 → 13.765; motivo de celdas vacías 13.287 → 11.813 filas
+(menos celdas vacías que explicar); expedientes con filas 303 = 303; **ningún
+expediente pierde filas** (solo cambia `6.24/28510.0208`, 54 → 63); ningún
+material desaparece (las 6 filas fundidas se sustituyen por sus 15 módulos).
+Unidades: 17 + vacía. Resumen: 5.893 líneas pendientes de revisión, 13.432
+del anejo de criterios, 221 con cantidad o precio pendiente.
+
+**Auditoría** (trabajo 21031): dos errores, ambos explicados — los 11 grupos
+duplicados legítimos de siempre y "líneas que cambian sin cambiar documentos"
+en `6.24/28510.0208`, que es el arreglo de filas fundidas.
+
+## Pendiente al cerrar
+
+- **Decisión del cliente sobre los escaneados** (bloque 1): 67 expedientes,
+  ~1.800 filas, ~6-11 $ de proceso, 2-3 sesiones; choca con la regla de la
+  sección 6 de CONTEXTO.md.
+- Código del material: "SURFV / PRBA / PRFV" literal o "TRAVIESA";
+  "CONTRAGUJA" (errata literal de REPUESTO, 264 líneas); siglas sin verificar
+  (`CI`, `CAM`, `ENM`, cables `EAPSP`/`CCPSSP`).
+- `6.21/28510.0152` p.114: 4 artículos fundidos sin separar (columna
+  "CODIFICACIÓN DEL PRECIO").
+- `POST /mantenimiento/ejecutar` no reenvía `busqueda_desactivada` al ciclo
+  (las dos pasadas de hoy repitieron la búsqueda en la Plataforma, 0 nuevos).
+- Los de sesiones anteriores: vigentes con remanente (falta el fichero), los
+  11 de 2026 del SAP no publicados, "Código de precio" como columna, `PA`/`P`.
