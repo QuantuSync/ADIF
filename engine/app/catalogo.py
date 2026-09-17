@@ -1593,29 +1593,52 @@ def _dividir_fila_multiple(
     codigos = _lineas_no_vacias(indice_codigo)
     precios = _lineas_no_vacias(indice_precio)
     n = len(codigos)
-    if n < 2 or len(precios) != n:
+    if n < 2:
         return None
     if not all(_CODIGO_PRECIO_VALIDO_RE.match(limpiar_codigo_celda(c) or "") for c in codigos):
-        return None
-    if not all(_parece_precio_recuperable(p) for p in precios):
-        return None
-
-    indice_unidad = mapeo.get("unidad_medida")
-    unidades = _lineas_no_vacias(indice_unidad) if indice_unidad is not None else []
-    if unidades and len(unidades) != n:
         return None
 
     indice_descripcion = mapeo.get("descripcion")
     descripciones = _lineas_no_vacias(indice_descripcion) if indice_descripcion is not None else []
     descripcion_dividida = len(descripciones) == n
+    indice_matricula = mapeo.get("matricula")
+    matriculas = _lineas_no_vacias(indice_matricula) if indice_matricula is not None else []
+
+    if precios:
+        if len(precios) != n or not all(_parece_precio_recuperable(p) for p in precios):
+            return None
+    elif not (descripcion_dividida and len(matriculas) == n):
+        # Sesión 2026-09-17, `6.24/28510.0208` p.99: tabla de módulos sin
+        # ningún precio -- sin precio que confirme el reparto, se exige que
+        # código, matrícula y descripción se dividan los tres en N.
+        return None
+
+    # Unidad y cantidad solo se reparten si cuadran en N. Si no (sesión
+    # 2026-09-17, forma de `6.21/28510.0152` p.114: 4 artículos y 3 unidades,
+    # la partida alzada no la trae), la fila se divide igual, la unidad no se
+    # adivina, y la descripción no se da por repartida: todas a revisión.
+    indice_unidad = mapeo.get("unidad_medida")
+    unidades = _lineas_no_vacias(indice_unidad) if indice_unidad is not None else []
+    if unidades and len(unidades) != n:
+        unidades = None
+        descripcion_dividida = False
+    indice_cantidad = mapeo.get("cantidad")
+    cantidades = _lineas_no_vacias(indice_cantidad) if indice_cantidad is not None else []
 
     filas_divididas = []
     for i in range(n):
         nueva_fila = list(fila)
         nueva_fila[indice_codigo] = codigos[i]
-        nueva_fila[indice_precio] = precios[i]
-        if unidades:
+        if precios:
+            nueva_fila[indice_precio] = precios[i]
+        if unidades is None:
+            nueva_fila[indice_unidad] = None
+        elif unidades:
             nueva_fila[indice_unidad] = unidades[i]
+        if len(cantidades) == n:
+            nueva_fila[indice_cantidad] = cantidades[i]
+        if len(matriculas) == n:
+            nueva_fila[indice_matricula] = matriculas[i]
         if descripcion_dividida:
             nueva_fila[indice_descripcion] = descripciones[i]
         filas_divididas.append(nueva_fila)

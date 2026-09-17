@@ -61,7 +61,10 @@ from app.models import Documento, EstadoExpediente, Expediente, LineaCatalogo
 # 2026-09-17: código del material por las siglas de aparatos de vía, por la
 # columna "TIPO DE TRAVIESA" y sin reutilizar la respuesta del modelo en
 # descripciones que no nombran esa pieza (`app.extraccion.codigo_material`).
-VERSION_LOGICA_EXTRACCION = "2026-09-17"
+# 2026-09-17.2: filas fundidas por pdfplumber sin precio o con unidades de
+# menos (`app.catalogo._dividir_fila_multiple`) y trazas sin duplicar
+# (`app.extraccion.traza`).
+VERSION_LOGICA_EXTRACCION = "2026-09-17.2"
 
 # Sesión 2026-09-15 (expedientes de 2026 que faltaban): versión de la lógica
 # de búsqueda en la Plataforma cuyo "sin resultados" es de fiar. Hasta el

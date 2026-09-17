@@ -76,6 +76,7 @@ from app.extraccion.normalizacion import parsear_importe_es
 from app.extraccion.pipeline_anejo import procesar_anejo
 from app.extraccion.precios_unitarios import calcular_baja_efectiva
 from app.extraccion.texto import es_documento_escaneado, extraer_texto_cacheado
+from app.extraccion.traza import registrar_traza
 from app.interfaces.document_storage import DocumentStorage
 from app.interfaces.model_provider import ModelProvider
 from app.models import (
@@ -168,16 +169,9 @@ def _traza(
     por lote pasan `entidad_tipo="lote"` con `entidad_id=lote.id`."""
     if valor is None or documento_id is None:
         return
-    db.add(
-        TrazaOrigen(
-            entidad_tipo=entidad_tipo,
-            entidad_id=entidad_id,
-            campo=campo,
-            documento_id=documento_id,
-            pagina=pagina,
-            fragmento=fragmento,
-            valor_extraido=str(valor),
-        )
+    registrar_traza(
+        db, entidad_tipo=entidad_tipo, entidad_id=entidad_id, campo=campo, documento_id=documento_id,
+        pagina=pagina, fragmento=fragmento, valor_extraido=str(valor),
     )
 
 

@@ -130,6 +130,35 @@ def test_expediente_0008_completo_produce_catalogo_y_pasa_a_completado(db_sessio
     assert "baja_declarada" in campos_trazados
 
 
+def test_reextraer_no_duplica_trazas(db_session):
+    # Sesión 2026-09-17: cada pasada añadía otra vez la misma traza (35.777
+    # filas para unas 2.000 distintas en la base real), contra el invariante 9.
+    expediente = _crear_expediente_con_documentos(
+        db_session,
+        "6.24/28510.0008",
+        [
+            ("ADJUDICACION", fx.PROPUESTA_LC27_PRECIOS_UNITARIOS),
+            ("ANEJO", fx.ANEJO_PRECIOS_GUANTES),
+            ("CONTRATO", fx.CONTRATO_PRECIOS_UNITARIOS),
+        ],
+    )
+    trabajo = SimpleNamespace(expediente_id=expediente.id)
+
+    ejecutar_extraccion_expediente(db_session, _StorageDirecta(), trabajo, model_provider=None)
+    primera = sorted(
+        (t.entidad_tipo, t.entidad_id, t.campo, t.documento_id, t.pagina, t.valor_extraido)
+        for t in db_session.query(TrazaOrigen).all()
+    )
+    ejecutar_extraccion_expediente(db_session, _StorageDirecta(), trabajo, model_provider=None)
+    segunda = sorted(
+        (t.entidad_tipo, t.entidad_id, t.campo, t.documento_id, t.pagina, t.valor_extraido)
+        for t in db_session.query(TrazaOrigen).all()
+    )
+
+    assert primera
+    assert segunda == primera
+
+
 def test_expediente_sin_publicar_no_se_reprocesa(db_session):
     # CONTEXTO.md sección 22: un expediente ya confirmado sin publicar no tiene
     # nada que extraer -- un trabajo de extracción encolado por error (o a

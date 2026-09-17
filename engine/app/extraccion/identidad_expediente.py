@@ -43,7 +43,8 @@ from sqlalchemy.orm import Session
 
 from app.extraccion.campos_pcsp import extraer_campos_anuncio_pcsp
 from app.extraccion.cruce_codigos import asignar_matriz, normalizar_codigo_expediente
-from app.models import Expediente, TipoDocumento, TrazaOrigen
+from app.extraccion.traza import registrar_traza
+from app.models import Expediente, TipoDocumento
 
 
 def corregir_identidad_expediente(db: Session, expediente: Expediente, documentos: Iterable) -> Optional[str]:
@@ -117,7 +118,8 @@ def corregir_identidad_expediente(db: Session, expediente: Expediente, documento
             # (CONTEXTO.md sección 20, requisito 1).
             expediente.matriz_conflicto = True
 
-    db.add(TrazaOrigen(
+    registrar_traza(
+        db,
         entidad_tipo="expediente",
         entidad_id=expediente.id,
         campo="codigo_expediente",
@@ -125,5 +127,5 @@ def corregir_identidad_expediente(db: Session, expediente: Expediente, documento
         pagina=campo.pagina,
         fragmento=campo.fragmento,
         valor_extraido=codigo_real,
-    ))
+    )
     return None

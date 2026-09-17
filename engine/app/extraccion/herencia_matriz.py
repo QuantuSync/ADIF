@@ -36,6 +36,7 @@ from sqlalchemy.orm import Session
 
 from app.catalogo import guardar_lineas_catalogo
 from app.extraccion.cruce_codigos import normalizar_codigo_expediente
+from app.extraccion.traza import registrar_traza
 from app.models import (
     DocumentoExpediente,
     EstadoExpediente,
@@ -299,7 +300,8 @@ def intentar_heredar_de_matriz(
         # de revisión, sección 18), no hay nada real que copiar aquí. La
         # baja se hereda igual; solo la traza explícita se omite.
         if traza_matriz is not None:
-            db.add(TrazaOrigen(
+            registrar_traza(
+                db,
                 entidad_tipo="lote",
                 entidad_id=lote_pedido.id,
                 campo="baja_declarada",
@@ -307,7 +309,7 @@ def intentar_heredar_de_matriz(
                 pagina=traza_matriz.pagina,
                 fragmento=traza_matriz.fragmento,
                 valor_extraido=str(baja_efectiva),
-            ))
+            )
 
     if lote_pedido.importe_licitacion is None:
         lote_pedido.importe_licitacion = lote_matriz.importe_licitacion
