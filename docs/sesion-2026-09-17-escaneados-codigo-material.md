@@ -122,3 +122,85 @@ adjudicaciones escaneadas.
 detecta sola (el piloto acertó los 21 precios, pero es una página). Por eso
 las líneas deberían entrar marcadas como "leídas de imagen", visibles en la
 cola de revisión.
+
+## Bloque 2 — Código del material
+
+### Cómo se obtenía y dónde fallaba
+
+Tres vías, en orden: la columna "REPUESTO" del cuadro si existe (decisión
+del cliente, 2026-09-14), la primera palabra de la descripción contra el
+vocabulario, y si no casa, el modelo, una vez por palabra y cacheado.
+
+Antes: **22.569 de 35.323 líneas con código (63,9 %)**; en el Excel, 10.366
+de 15.998 filas (64,8 %). De las 12.754 líneas sin código, **12.270 tenían la
+respuesta "no es material" del modelo en caché** para su primera palabra, y
+casi todas eran **siglas de la nomenclatura de aparatos de vía** (`CZI`,
+`SCI`, `AC`, `CAC`, `CC`, `AR`, `CAR`, `DSF`, `CZV`, `ES`, `DMRDH`…), que el
+vocabulario excluía a propósito ("identifican un modelo, no una categoría").
+El resto: 442 partidas alzadas (vacías por diseño), marcas y servicios.
+
+**Las siglas sí nombran la pieza**, verificado en el propio corpus, no
+supuesto: en `6.20/28510.0046` el mismo cuadro trae "CAC-12000/SCI-A-…"
+junto a "CONTRAAGUJA CURVA-A-54-…" y "AR-11250/SCI-A-54-…" junto a "AGUJA
+RECTA-A-54A-11,250M", con la misma serie de matrículas y la misma norma; "CC
+33" es el contracarril de perfil UIC-33; y los precios separan limpiamente
+desvío de semicambio: los `DS`/`DSH` y la familia `D??D/I(H)` sin más texto
+cuestan 60.000-360.000 € (el desvío entero), y los `SCI`/`SCV` y los `D??D/I`
+cuya descripción dice "Semicambio" (`6.23/28510.0051` p.117), 22.700-57.000 €.
+
+**Columna propia de tipo de material.** Buscada en todas las cabeceras del
+corpus: además de "REPUESTO" (familia `6.21/28510.0108`) solo existe **"TIPO
+DE TRAVIESA"** (`6.24/28510.0094`/`0175`/`0176`/`0177`), que no se usaba (la
+cabecera la resolvía el modelo, que nunca devuelve esa columna). "TIPOLOGÍA
+APARATO" va en la misma tabla que REPUESTO y es el aparato, no la pieza.
+
+**Defecto de paso, más grave que un hueco**: la caché del modelo es por
+primera palabra, pero el modelo contestó mirando una descripción concreta.
+Reutilizada a ciegas, repartía códigos falsos: "X" → BALASTO en 231 líneas de
+equipos Ethernet y postes ("8X10/100B ETHERNET", "X2B-P POSTE"), "CARGA" →
+BALASTO en cargas de radiofrecuencia, "SUMINISTRO" → HERRAJE en el gasóleo,
+"L" → PROCESSOR en un jabón, "DMRIH" → RIEL en desvíos (1.049 líneas en 127
+palabras). Y como un `None` no pisaba el valor guardado, nunca se corregía.
+
+### Qué se cambió (`app.extraccion.codigo_material`, `mapeo_cabecera`, `catalogo`)
+
+- Tabla de siglas verificadas → pieza: AGUJA (`AC`, `AR`), CONTRAAGUJA
+  (`CAC`, `CAR`), CONTRACARRIL (`CC`), CRUZAMIENTO (`CZ`, `CZI`, `CZV`),
+  SEMICAMBIO (`SC`, `SCI`, `SCV`…), DESVÍO (`DS`, `DSH`, `DSF`… y la familia
+  `D??D/I(H/L)`), ESCAPE (`ES`, `ESH`, `ESF`…), TRAVESÍA (`TUD`, `TSU`, `TUS`,
+  `T.S.U.`…), APARATO (`AD`, `ADH`, `ADM`…, como ya se codificaba "APARATO DE
+  DILATACIÓN"), JUNTA (`JAE`, `J.A.E.`), TRAVIESA (`TR`, `TRAV.`), PLACA
+  (`PL.`). La sigla debe ir en mayúsculas y seguida de algo con forma de
+  código. Si detrás de un desvío la descripción nombra la pieza
+  ("Semicambio", "Corazón", "Contracarril"), manda la palabra. Siglas que no
+  se pudieron verificar igual (`CI`, `CAM`, `ENM`, cables `EAPSP`) se quedan
+  sin código.
+- Vocabulario: AGUJA, CONTRAAGUJA, CRUZAMIENTO, DESVÍO, ESCAPE, TRAVESÍA,
+  PALASTRO, ENCARRILADORA. Los ordinales ("SEGUNDA PLACA DE TALÓN") se saltan.
+- "TIPO DE TRAVIESA" es columna de código del material, con su valor literal
+  como REPUESTO ("SURFV / PRBA / PRFV"), para cualquier vía de mapeo.
+- La respuesta cacheada del modelo solo se aplica si la descripción nombra
+  esa pieza, o si es la propia palabra abreviada ("CONJ." → CONJUNTO).
+- El código del material se recalcula en cada pasada: un código que ya no
+  sale se borra, salvo que otro documento de la misma pasada lo haya escrito.
+
+`VERSION_LOGICA_EXTRACCION` = `2026-09-17`. Ciclo completo sin descargas de
+sindicación (trabajo 19992): 516 expedientes reextraídos en 21 min, 0 fallos.
+
+### Antes y después
+
+| | Antes | Después |
+|---|---|---|
+| Líneas con código del material | 22.569 (63,9 %) | **33.461 (94,7 %)** |
+| Filas del Excel con código | 10.366 (64,8 %) | **14.982 (93,6 %)** |
+| Resto de columnas y nº de líneas (35.323) | | idénticos |
+
+Los más frecuentes ahora: SEMICAMBIO 4.336, CRUZAMIENTO 3.183, CONTRACARRIL
+2.744, DESVÍO 2.038, PLACA 1.864, AGUJA 1.859, CONTRAAGUJA 1.445. Siguen sin
+código 1.862 líneas: 442 partidas alzadas y el resto marcas, servicios
+(transporte, acopio, descarga) y siglas no verificadas.
+
+**Para confirmar con el cliente**: "SURFV / PRBA / PRFV" como código del
+material de las traviesas sintéticas (literal de su columna de tipo, como
+REPUESTO) o "TRAVIESA"; y "CONTRAGUJA" (264 líneas, errata literal de la
+columna REPUESTO) frente a "CONTRAAGUJA".
