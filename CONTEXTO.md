@@ -1770,6 +1770,35 @@ suficientes, no ahora.
   `frescura.documentos_sin_cambios` mira ya `VERSION_LOGICA_EXTRACCION` — sin
   eso, todo arreglo de la cascada marcaba como "posible duplicación" justo a
   los expedientes que acababa de recuperar.
+- **Ciclo completo, vigentes con remanente, 2026 del SAP, unidades y
+  duplicados (sesión 2026-09-16, noche,
+  `docs/sesion-2026-09-16-noche-ciclo-vigentes-unidades.md`).** El espaciado
+  entre peticiones a la Plataforma es ya `SCRAPING_SEPARACION_MINIMA_SEGUNDOS`
+  (10 s en el worker). **Unidad de medida en forma única**
+  (`normalizar_unidad`: "UD."/"UN"/"Ud." → `ud`, "T"/"Ton" → `t`,
+  "Txkm"/"Ton*km" → `t·km`), con el valor tal como venía en
+  `lineas_catalogo.unidad_medida_original` (migración 0032): de 32 valores
+  distintos a 17; `PA`, `P` y `transporte` se quedan como están. **Los 11
+  grupos duplicados del Excel son legítimos**: el propio documento repite
+  texto y precio con códigos de precio distintos (`0051`/`0060`,
+  `4.25/28510.0132`), y el Excel no lleva la columna de código de precio.
+  **De los 13 expedientes de 2026 del SAP del cliente, 11 no están
+  publicados en la Plataforma** (buscados uno a uno): dados de alta como
+  `sin_publicar`, el ciclo los vuelve a buscar cada 14 días.
+  **Ciclo completo** (1 h 47 min, 10 s entre peticiones): los 129
+  expedientes del descubrimiento por búsqueda se encuentran y descargan
+  todos; 34 aportan 1.110 líneas (644 filas del Excel); de los 95 sin
+  líneas, 47 solo tienen documentos escaneados (anteriores a 2020: el límite
+  de la sección 15 deja de ser un caso aislado). Dos defectos corregidos de
+  paso: el objeto del contrato de un anuncio sin línea "Descripción" se comía
+  media página y tumbaba la extracción (`nombre_proyecto` y
+  `trazas_origen.valor_extraido` a texto, migración 0033), y una fila de
+  totales con la etiqueta fuera de la columna de matrícula entraba como línea
+  sin descripción ("21% IVA 7.350,00 €" leído como 217.350 €). Catálogo
+  34.210 → 35.323 líneas; Excel 15.351 → 15.998 filas, 0 materiales
+  perdidos, auditoría con el único error de los 11 duplicados legítimos.
+  **Sin hacer:** el cruce con los 83 vigentes con remanente (el fichero no
+  llegó a estar en `Ejemplo/Input/`).
 
 ---
 
@@ -1800,4 +1829,5 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `sesion-2026-09-15-criterio-28510-y-cuadros-sin-codigo.md`,
 `sesion-2026-09-15-unidades-y-cobertura-2026.md`,
 `sesion-2026-09-16-descubrimiento-por-busqueda.md`,
+`sesion-2026-09-16-noche-ciclo-vigentes-unidades.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.
