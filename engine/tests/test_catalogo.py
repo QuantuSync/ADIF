@@ -468,6 +468,78 @@ def test_construir_lineas_desde_tabla_separa_fila_fusionada_con_precios_iguales(
     assert all(not linea["motivo_revision"] for linea in lineas)
 
 
+def test_construir_lineas_desde_tabla_separa_fila_fusionada_sin_precio_si_matricula_y_descripcion_cuadran():
+    # Sesión 2026-09-17, `6.24/28510.0208` p.99: tabla de módulos sin ningún
+    # precio; código, matrícula y descripción se dividen los tres en 2.
+    mapeo = {"codigo_precio": 2, "matricula": 0, "descripcion": 1, "unidad_medida": None, "cantidad": 5, "precio_unitario": 3}
+    tabla = TablaExtraida(
+        cabecera=["Matrícula", "Designación", "REFERENCIA DEL FABRICANTE", "Importe Unitario", "Importe Reparación", "Cantidad Estimada"],
+        filas=[[
+            "66.452.0010\n66.452.0015",
+            'Módulo Repartidor de Línea, "REPLIN -924\nMódulo Cierre de Estación, "CIESTA", P-942',
+            "P-924\nP-942", "", "", "1",
+        ]],
+        pagina=99,
+        bbox=(0.0, 0.0, 100.0, 100.0),
+    )
+
+    lineas = construir_lineas_desde_tabla(tabla, mapeo, None, expediente_id=1, baja_lote=None, orden_inicial=0)
+
+    por_codigo = {linea["codigo_precio"]: linea for linea in lineas}
+    assert set(por_codigo) == {"P-924", "P-942"}
+    assert por_codigo["P-942"]["descripcion"] == 'Módulo Cierre de Estación, "CIESTA", P-942'
+
+
+def test_construir_lineas_desde_tabla_sin_precio_ni_matricula_repartida_no_separa():
+    mapeo = {"codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": None, "cantidad": None, "precio_unitario": 3}
+    tabla = TablaExtraida(
+        cabecera=["CÓDIGO", "MATRÍCULA", "DESCRIPCIÓN", "PRECIO"],
+        filas=[["P-244\nP-245\nP-246", "617050011", "SCV-V-60-II-1500 HORM", None]],
+        pagina=123,
+        bbox=(0.0, 0.0, 100.0, 100.0),
+    )
+
+    lineas = construir_lineas_desde_tabla(tabla, mapeo, None, expediente_id=1, baja_lote=None, orden_inicial=0)
+
+    assert len(lineas) == 1
+
+
+def test_construir_lineas_desde_tabla_separa_fila_fusionada_con_unidades_de_menos():
+    # Sesión 2026-09-17, forma real de `6.21/28510.0152` p.114: cuatro
+    # artículos fundidos, la partida alzada sin unidad (3 unidades para 4
+    # filas) y descripciones envueltas. Se separan con su precio, cantidad y
+    # matrícula; la unidad no se adivina y todas van a revisión. (En ese
+    # documento la columna "CODIFICACIÓN DEL PRECIO" sigue sin mapearse, ver
+    # `test_mapeo_determinista_no_reconoce_codificacion_del_precio`, así que
+    # allí la fila no se separa todavía.)
+    mapeo = {"codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": 3, "cantidad": 7, "precio_unitario": 8}
+    tabla = TablaExtraida(
+        cabecera=[
+            "CODIFICACIÓN DEL PRECIO", "Nº MATRÍCULA", "DESCRIPCIÓN", "UNIDADES", "", "CANTIDADES A", "",
+            "CANTIDADES ESTIMADAS DE REFERENCIA", "PRECIO UNITARIO DE REFERENCIA",
+        ],
+        filas=[[
+            "P-1\nP-2\nP-3\nP-4", "619900701\n619900702\n619900703\nPA",
+            "Rodillo de presión para\nel talón\nRodillo de presión para\nla punta\nPlaca resbaladera para\n"
+            "rodillo de presión\nPartida alzada a\njustificar para\nimprevistos",
+            "ud\nud\nud", None, "238\n68\n5", None, "600\n200\n20\n1", "366,00 €\n466,00 €\n155,00 €\n34.100,00 €",
+        ]],
+        pagina=114,
+        bbox=(0.0, 0.0, 100.0, 100.0),
+    )
+
+    lineas = construir_lineas_desde_tabla(tabla, mapeo, None, expediente_id=1, baja_lote=None, orden_inicial=0)
+
+    por_codigo = {linea["codigo_precio"]: linea for linea in lineas}
+    assert set(por_codigo) == {"P-1", "P-2", "P-3", "P-4"}
+    assert por_codigo["P-2"]["precio_unitario"] == Decimal("466.00")
+    assert por_codigo["P-2"]["cantidad"] == Decimal("200")
+    assert por_codigo["P-2"]["matricula"] == "619900702"
+    assert por_codigo["P-4"]["precio_unitario"] == Decimal("34100.00")
+    assert all(linea["unidad_medida"] is None for linea in lineas)
+    assert all(linea["motivo_revision"] for linea in lineas)
+
+
 def test_combinar_por_clave_no_funde_dos_lineas_de_la_misma_fila_fusionada():
     # Defecto encontrado verificando el arreglo de la fila fusionada contra
     # la base de datos real (expediente 18, lote 179): separar una fila

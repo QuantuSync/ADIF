@@ -8,6 +8,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -522,6 +523,9 @@ class LineaCatalogo(Base):
 
 class TrazaOrigen(Base):
     __tablename__ = "trazas_origen"
+    # Migración 0034: busca la traza igual en cada escritura
+    # (`app.extraccion.traza.registrar_traza`).
+    __table_args__ = (Index("ix_trazas_origen_entidad_campo", "entidad_tipo", "entidad_id", "campo"),)
 
     id = Column(Integer, primary_key=True)
     entidad_tipo = Column(String(32), nullable=False)
