@@ -9,6 +9,11 @@ from typing import Any, Optional
 logger = logging.getLogger(__name__)
 
 
+class RespuestaTruncada(RuntimeError):
+    """La respuesta no cabe en `max_tokens`: repetir la misma petición da lo
+    mismo, así que quien llama no debe reintentarla."""
+
+
 class ModelProvider(ABC):
     """Interfaz de acceso al modelo. CONTEXTO.md secciones 6 y 9.2:
     misma firma para la API comercial de hoy y un modelo autoalojado mañana."""
@@ -119,7 +124,7 @@ class APIModelProvider(ModelProvider):
             respuesta.usage.input_tokens, respuesta.usage.output_tokens, self._modelo, respuesta.stop_reason,
         )
         if respuesta.stop_reason == "max_tokens":
-            raise RuntimeError("la transcripción de la página no cabe en max_tokens")
+            raise RespuestaTruncada("la transcripción de la página no cabe en max_tokens")
         texto = next(bloque.text for bloque in respuesta.content if bloque.type == "text")
         return json.loads(texto)
 

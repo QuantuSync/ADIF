@@ -40,7 +40,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.extraccion.texto import PaginaTexto
-from app.interfaces.model_provider import ModelProvider
+from app.interfaces.model_provider import ModelProvider, RespuestaTruncada
 
 logger = logging.getLogger(__name__)
 
@@ -130,9 +130,27 @@ def _rasterizar(pdf: pdfium.PdfDocument, indice: int) -> bytes:
     return salida.getvalue()
 
 
+class LecturaIncompleta(RuntimeError):
+    """Alguna página no se pudo leer por un fallo transitorio (sin saldo en la
+    API, red): lo ya leído queda en la caché, y el trabajo falla para que se
+    vea y se reintente -- el siguiente intento solo relee esas páginas."""
+
+
 def _leer_pagina(imagen: bytes, numero: int, model_provider: ModelProvider) -> dict:
     inicio = time.monotonic()
-    respuesta = model_provider.completar_con_imagen(_PROMPT_PAGINA, imagen, esquema=_ESQUEMA_PAGINA)
+    try:
+        respuesta = model_provider.completar_con_imagen(_PROMPT_PAGINA, imagen, esquema=_ESQUEMA_PAGINA)
+    except NotImplementedError:
+        raise
+    except Exception as exc:  # noqa: BLE001 -- una página que falla no tira el documento
+        # Sesión 2026-09-17, lanzamiento sobre el corpus: una página de
+        # `6.18/28510.0071` que no cabía en max_tokens, y el saldo de la API
+        # agotado al final, tiraban el documento entero y lo ya leído se perdía.
+        return {
+            "numero": numero, "texto": "", "bloques": [], "segundos": round(time.monotonic() - inicio, 2),
+            "tokens_entrada": None, "tokens_salida": None,
+            "error": str(exc)[:300], "reintentar": not isinstance(exc, RespuestaTruncada),
+        }
     uso = model_provider.uso_ultima_llamada or (None, None)
     bloques = [b for b in (respuesta or {}).get("bloques") or [] if isinstance(b, dict)]
     return {
@@ -163,6 +181,10 @@ def _num_paginas(datos_pdf: bytes) -> int:
         pdf.close()
 
 
+def _pendientes(paginas: list[dict]) -> list[int]:
+    return [p["numero"] for p in paginas if p.get("error") and p.get("reintentar")]
+
+
 def reconocer_documento_cacheado(
     db: Session,
     documento_hash: str,
@@ -172,29 +194,48 @@ def reconocer_documento_cacheado(
 ) -> DocumentoReconocido:
     """El texto reconocido del documento, de la caché si está (misma versión y
     mismo modelo) o leyéndolo. `es_pliego_sin_precios` decide con las primeras
-    páginas si merece la pena seguir (el llamador le pasa el clasificador)."""
+    páginas si merece la pena seguir (el llamador le pasa el clasificador).
+
+    Una página que falla no tira el documento: se guarda con su error. Si el
+    fallo es transitorio, se guarda lo leído y se lanza `LecturaIncompleta`; la
+    siguiente pasada solo relee esas páginas. Una página que no cabe en la
+    respuesta del modelo queda anotada y no se reintenta (daría lo mismo)."""
     from app.models import CacheOcrDocumento
 
     modelo = settings.model_id or type(model_provider).__name__
     cacheado = db.get(CacheOcrDocumento, documento_hash)
-    if cacheado is not None and cacheado.version_logica_ocr == VERSION_LOGICA_OCR and cacheado.modelo == modelo:
+    vigente = (
+        cacheado is not None and cacheado.version_logica_ocr == VERSION_LOGICA_OCR and cacheado.modelo == modelo
+    )
+    if vigente and not _pendientes(cacheado.paginas):
         return DocumentoReconocido(list(cacheado.paginas), cacheado.completo, cacheado.num_paginas)
 
     contenido = obtener_pdf()
     datos = contenido if isinstance(contenido, bytes) else contenido.read()
     total = _num_paginas(datos)
-    primeras = list(range(1, min(PAGINAS_PARA_CLASIFICAR, total) + 1))
-    paginas = _leer_paginas(datos, primeras, model_provider)
-    completo = True
-    if es_pliego_sin_precios([PaginaTexto(numero=p["numero"], texto=p["texto"]) for p in paginas]):
-        completo = total <= len(primeras)
-    elif total > settings.ocr_max_paginas:
-        completo = False
-    elif total > len(primeras):
-        paginas += _leer_paginas(datos, list(range(len(primeras) + 1, total + 1)), model_provider)
+    if vigente:
+        por_numero = {p["numero"]: p for p in cacheado.paginas}
+        for releida in _leer_paginas(datos, _pendientes(cacheado.paginas), model_provider):
+            por_numero[releida["numero"]] = releida
+        paginas = [por_numero[n] for n in sorted(por_numero)]
+        planificado_entero = cacheado.completo or len(paginas) == total
+    else:
+        primeras = list(range(1, min(PAGINAS_PARA_CLASIFICAR, total) + 1))
+        paginas = _leer_paginas(datos, primeras, model_provider)
+        planificado_entero = True
+        if _pendientes(paginas):
+            planificado_entero = False  # sin las primeras páginas no se puede decidir si seguir
+        elif es_pliego_sin_precios([PaginaTexto(numero=p["numero"], texto=p["texto"]) for p in paginas]):
+            planificado_entero = total <= len(primeras)
+        elif total > settings.ocr_max_paginas:
+            planificado_entero = False
+        elif total > len(primeras):
+            paginas += _leer_paginas(datos, list(range(len(primeras) + 1, total + 1)), model_provider)
+    completo = planificado_entero and len(paginas) == total and not any(p.get("error") for p in paginas)
     logger.info(
-        "OCR %s: %d de %d páginas leídas en %.1f s (completo=%s)",
+        "OCR %s: %d de %d páginas leídas en %.1f s (completo=%s, con error=%d)",
         documento_hash[:12], len(paginas), total, sum(p["segundos"] for p in paginas), completo,
+        sum(1 for p in paginas if p.get("error")),
     )
 
     if cacheado is None:
@@ -206,6 +247,12 @@ def reconocer_documento_cacheado(
     cacheado.completo = completo
     cacheado.paginas = paginas
     db.commit()
+    pendientes = _pendientes(paginas)
+    if pendientes:
+        raise LecturaIncompleta(
+            f"reconocimiento óptico incompleto ({len(pendientes)} página(s) sin leer por un fallo transitorio, "
+            f"se reintentarán): {next(p['error'] for p in paginas if p.get('error') and p.get('reintentar'))}"
+        )
     return DocumentoReconocido(paginas, completo, total)
 
 

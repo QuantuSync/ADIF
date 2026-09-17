@@ -135,3 +135,64 @@ def test_pdf_reconocido_conserva_numeracion_texto_y_rejilla():
             ["MATRÍCULA", "DESCRIPCIÓN", "PRECIO UNITARIO"],
             ["691616560", "TORNILLO CABEZA EXAGONAL,\nM20X335", "3,18 €"],
         ]]
+
+
+class _ProveedorQueFallaUnaVez(ProveedorVisionFalso):
+    """La llamada número `fallo_en` falla con `excepcion` solo la primera vez."""
+
+    def __init__(self, fallo_en: int, excepcion: Exception, **kwargs):
+        super().__init__(**kwargs)
+        self._fallo_en = fallo_en
+        self._excepcion = excepcion
+        self.fallos = 0
+
+    def completar_con_imagen(self, prompt, imagen_png, esquema=None):
+        if self.llamadas_imagen + 1 == self._fallo_en and self.fallos == 0:
+            self.llamadas_imagen += 1
+            self.fallos += 1
+            raise self._excepcion
+        return super().completar_con_imagen(prompt, imagen_png, esquema)
+
+
+def test_fallo_transitorio_guarda_lo_leido_y_solo_relee_la_pagina_fallida(db_session, monkeypatch, tmp_path):
+    import pytest
+
+    from app.extraccion.ocr import LecturaIncompleta
+
+    monkeypatch.setattr(settings, "ocr_paralelismo", 1)
+    expediente = _crear_expediente_con_documentos(
+        db_session, "6.20/28510.0136", [("ANEJO", _pdf_escaneado(tmp_path, 4))],
+    )
+    proveedor = _ProveedorQueFallaUnaVez(fallo_en=4, excepcion=RuntimeError("credit balance is too low"))
+
+    with pytest.raises(LecturaIncompleta):
+        _extraer(db_session, expediente, proveedor)
+    db_session.rollback()
+    cache = db_session.query(CacheOcrDocumento).one()
+    assert [p["numero"] for p in cache.paginas if p.get("error")] == [4]
+    assert proveedor.llamadas_imagen == 4
+
+    _extraer(db_session, expediente, proveedor)
+
+    assert proveedor.llamadas_imagen == 5  # solo la página 4, otra vez
+    db_session.refresh(cache)
+    assert cache.completo is True
+    assert not any(p.get("error") for p in cache.paginas)
+
+
+def test_pagina_que_no_cabe_en_la_respuesta_no_se_reintenta(db_session, monkeypatch, tmp_path):
+    from app.interfaces.model_provider import RespuestaTruncada
+
+    monkeypatch.setattr(settings, "ocr_paralelismo", 1)
+    expediente = _crear_expediente_con_documentos(
+        db_session, "6.20/28510.0136", [("ANEJO", _pdf_escaneado(tmp_path, 4))],
+    )
+    proveedor = _ProveedorQueFallaUnaVez(fallo_en=3, excepcion=RespuestaTruncada("no cabe"))
+
+    resultado = _extraer(db_session, expediente, proveedor)
+    _extraer(db_session, expediente, proveedor)
+
+    assert proveedor.llamadas_imagen == 4
+    assert db_session.query(CacheOcrDocumento).one().completo is False
+    assert "sin leer entero" in resultado["motivo_revision"]
+    assert db_session.query(LineaCatalogo).filter_by(expediente_id=expediente.id).count() > 0
