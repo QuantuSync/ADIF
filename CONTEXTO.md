@@ -40,7 +40,7 @@ No lo inventes ni lo traduzcas. Usa estos términos en código y en datos.
 | **Expediente** | Procedimiento de contratación. Formato `6.24/28510.0088`. |
 | **Matriz** | Expediente del acuerdo marco del que cuelga un pedido. Un mismo código puede ser expediente en una fila y matriz en otra. |
 | **Lote** | Subdivisión de un expediente. Cada lote da lugar a un contrato independiente y **tiene su propia baja**. |
-| **Matrícula** | Código de 9 dígitos del artículo en ADIF. Presente solo en ~66% de las líneas. **No es clave.** |
+| **Matrícula** | Código de 9 dígitos del artículo en ADIF (en pliegos antiguos, de 8: "59020019", aceptado desde la sesión 2026-09-17). Presente solo en ~66% de las líneas. **No es clave.** |
 | **Código de precio** | `P-001`, `P-067`. Identificador de la línea dentro del documento. **Esta sí es clave.** |
 | **Baja** | Porcentaje de rebaja ofertado. Ver sección 4. |
 | **Partida alzada** | Línea sin matrícula ni código de material, cantidad 1, importe a tanto alzado. Es legítima, no un error. |
@@ -538,6 +538,12 @@ plantearlo** (140 documentos, ~1.800 filas, 67 expedientes; piloto real con
 `claude-haiku-4-5`: una página densa, 21 filas, 1 dígito mal en una medida,
 ~0,01 $; coste total estimado ~6-11 $ una vez, 2-3 sesiones de desarrollo).
 Pendiente de decisión del cliente; choca con la regla de la sección 6.
+**Decidido e implementado el mismo día** (`app.extraccion.ocr`): `OCR_MODO`
+("escaneados" por defecto, "desactivado"), solo para documentos sin capa de
+texto, caché por hash (`cache_ocr_documento`), líneas marcadas
+(`texto_reconocido`, motivo y prefijo "[reconocimiento óptico]" en fragmento y
+trazas). Segundo uso permitido del modelo, además del de la sección 6. Lanzado
+sobre el corpus: +2.316 líneas en 54 expedientes, ~10,75 $.
 
 ---
 
@@ -1834,6 +1840,13 @@ Pendiente de decisión del cliente; choca con la regla de la sección 6.
   código es la de "CODIFICACIÓN DEL PRECIO", alias ya revertido una vez).
   Unidades (18) y los 11 duplicados legítimos, sin cambios. Excel 15.998 →
   16.007 filas, 0 materiales perdidos.
+  **Continuación, decisión del cliente:** reconocimiento óptico implementado
+  y lanzado (sección 15), matrícula de 8 cifras aceptada en todos los
+  documentos, títulos "pliego de condiciones administrativas/generales" como
+  pliego sin precios. Catálogo 35.332 → 37.660 líneas, expedientes con líneas
+  306 → 361, Excel 16.007 → 18.260 filas. Coste real ~10,75 $. Pendiente: 5
+  expedientes fallidos por saldo de la API agotado y `6.18/28510.0071`, a
+  relanzar tras recargar crédito.
 
 ---
 

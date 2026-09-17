@@ -363,3 +363,72 @@ documentos escaneados, 67 páginas leídas:
   no con el de `0161`, que se titula "Pliego de *Condiciones* Administrativas
   Particulares" y el clasificador no lo reconoce: se leyeron las 34 páginas
   (0,25 $ y 10 min de modelo desperdiciados).
+
+## Matrícula de 8 cifras, parada en pliegos administrativos y lanzamiento sobre el corpus
+
+**Matrícula de 8 cifras (decisión del cliente: en todos los documentos).**
+Aceptada en la línea (`app.catalogo._MATRICULA_VALIDA_RE`), como identificador
+de fila en el localizador y, en la extracción de tablas, cuando la cabecera
+nombra la matrícula o al menos 3 filas la traen. **Alcance en documentos con
+texto, medido antes de cambiar nada: pequeño.** 9 líneas guardadas (4
+expedientes: rodillos de aguja de `6.20/28510.0041`, placa nervada de
+`0042`/`0046`/`0047`) a las que se les descartaba la matrícula, y un cuadro de
+carril de `6.19/28510.0113` descartado entero. Después del reproceso: 16
+líneas de documentos con texto con matrícula de 8 cifras, y `0113` pasa de 0 a
+12 líneas. En el texto plano del corpus solo aparecen 23 filas así, frente a
+9.207 con matrícula de 9.
+
+**Títulos de pliego administrativo.** Buscados en las dos primeras páginas de
+todo el corpus: "pliego de condiciones administrativas" (43 documentos) y
+"pliego de condiciones generales" se añaden, en posición de título y solo en
+las dos primeras páginas. "Cuadro de características" se probó y se descartó
+(solo lo abren notas de aclaración de una página). Con texto, cambian 3
+documentos, ninguno con líneas. En el lanzamiento, 53 de los 130 documentos
+leídos se pararon tras las primeras páginas.
+
+**Lanzamiento** (ciclo 21032, 2 h 33 min, versión `2026-09-17.3`, reproceso de
+los 516 expedientes con el reconocimiento activo):
+
+| | Antes (sin piloto) | Después |
+|---|---|---|
+| Líneas de catálogo | 35.332 | **37.660 (+2.328)** |
+| … leídas por reconocimiento óptico | 0 | **2.316** |
+| Expedientes con líneas | 306 | **361 (+55)**: 54 por reconocimiento, 1 por matrícula de 8 cifras (`6.19/28510.0113`) |
+| Filas del Excel | 16.007 | **18.260 (+2.253)** |
+| Materiales distintos en el Excel | 9.848 | 12.003 (0 perdidos) |
+| Expedientes con filas en el Excel | 303 | 358 |
+
+Las 2.316 líneas reconocidas: precio 98,5 %, matrícula 94 %, lote 97 %, código
+del material 77 %, cantidad 34 %, unidad 7 % (estos cuadros antiguos casi
+nunca las traen), baja 10 % (sin adjudicación legible en la mayoría). Las 54
+quedan en `pendiente_revision` con el motivo de reconocimiento óptico. Mayores:
+`6.18/28510.0116` 228, `6.16/28510.0042` 182, `6.19/28510.0122` 182,
+`6.16/28510.0161` 133, `6.19/28510.0152` 123. Los tres hermanos de grifas
+`6.19/28510.0135`/`0175`/`0177` (62 cada uno) no tienen ningún documento
+legible que declare sus lotes, así que cada uno se queda el cuadro entero: la
+misma limitación que para documentos con texto (~124 líneas repetidas).
+
+**Coste real**: 1.798 llamadas de lectura en el lanzamiento, 3,87 M tokens de
+entrada y 1,29 M de salida, **10,30 $** (sumado de los registros del worker),
+más 0,44 $ del piloto: **~10,75 $**. De eso, ~2,4 $ se perdieron: un documento
+(`6.18/28510.0071`, 181 páginas en dos PDF) se leyó entero tres veces porque
+una página no cabía en la respuesta y tiraba el documento. 16.919 s de modelo
+para 1.367 páginas en caché: 12,4 s por página, ~5 s de reloj leyendo 4 a la vez.
+
+**Fallos y arreglos durante el lanzamiento:**
+- **Saldo de la API agotado al final**: 5 expedientes fallidos
+  (`3.16/28510.0044`, `6.15/28510.0094`, `6.17/28510.0012`, `6.15/28510.0080`,
+  `2.19/23108.0127`). Hace falta recargar crédito y relanzarlos.
+- **Una página que falla ya no tira el documento** (commit `f6ab430`): se
+  guarda con su error; si es transitorio (saldo, red) lo leído queda en caché,
+  el trabajo falla visible y el reintento solo relee esa página; si no cabe en
+  la respuesta, queda anotada como ilegible y no se reintenta. `0071` es el
+  sexto fallido y, con el arreglo, se completará en el próximo intento.
+- **Resumen de presupuesto al pie del cuadro** (ejecución material, gastos
+  generales, beneficio industrial, suma, presupuesto base) entraba como líneas
+  sin descripción en `6.17/28510.0056`: ahora es pie de tabla (19 → 14 líneas).
+
+Auditoría del ciclo: los 11 duplicados legítimos de siempre y "líneas que
+cambian sin cambiar documentos" en los expedientes que ganan líneas por el
+reconocimiento (esperado); el error "sin descripción" era el de `0056`, ya
+corregido. 966 tests.
