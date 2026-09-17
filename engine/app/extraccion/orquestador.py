@@ -1684,8 +1684,9 @@ def ejecutar_extraccion_expediente(
             if incompletos:
                 motivo_revision = _acumular_motivo(
                     motivo_revision,
-                    "documento(s) escaneado(s) demasiado largo(s) para leer entero(s) por reconocimiento óptico "
-                    f"(más de {settings.ocr_max_paginas} páginas; solo las primeras): " + "; ".join(incompletos),
+                    "documento(s) escaneado(s) sin leer entero(s) por reconocimiento óptico (más de "
+                    f"{settings.ocr_max_paginas} páginas, o alguna página ilegible para el modelo): "
+                    + "; ".join(incompletos),
                 )
 
             if documentos_con_error:
