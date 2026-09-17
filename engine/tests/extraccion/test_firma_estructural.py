@@ -7,7 +7,9 @@ def test_matricula_partida_por_el_ancho_de_columna_tiene_forma_de_matricula():
     assert tiene_forma_de_matricula("59420000\n0")
     assert tiene_forma_de_matricula("594200000")
     assert not tiene_forma_de_matricula("P-01")
-    assert not tiene_forma_de_matricula("5942000\n0")  # 8 dígitos
+    # Sesión 2026-09-17: la matrícula antigua de 8 cifras también cuenta; 7 no.
+    assert tiene_forma_de_matricula("5942000\n0")
+    assert not tiene_forma_de_matricula("594200\n0")
 
 
 def test_firma_estructural_distingue_columna_fantasma_desplazada():

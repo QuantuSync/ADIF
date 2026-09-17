@@ -3053,3 +3053,14 @@ def test_material_llamado_como_una_etiqueta_con_precio_no_es_cabecera():
 
     assert linea is not None
     assert linea["precio_unitario"] == Decimal("12.00")
+
+
+def test_construir_linea_catalogo_acepta_matricula_antigua_de_8_cifras():
+    # Sesión 2026-09-17, decisión del cliente: `6.20/28510.0041` p.35,
+    # "71590012 RODILLO DE AGUJA ZR 1E", se guardaba sin matrícula.
+    mapeo = {"codigo_precio": None, "matricula": 0, "descripcion": 1, "unidad_medida": None, "cantidad": None, "precio_unitario": 2}
+    linea = construir_linea_catalogo(
+        ["71590012", "RODILLO DE AGUJA ZR 1E INCLUSO SOPORTE", "210,00 €"], mapeo,
+        pagina=35, documento_origen_id=None, expediente_id=1, baja_lote=None, orden_aparicion=0,
+    )
+    assert linea["matricula"] == "71590012"

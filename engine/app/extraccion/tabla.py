@@ -102,6 +102,13 @@ _CODIGO_PRECIO_RE = re.compile(r"^(?:P-?\d+(?-i:[A-Z])?|PN\d+|PA-\d+|L\d+-T\d+|C
 # y cero líneas antes del arreglo: afecta a 3 (`6.26/28510.0004`,
 # `6.23/28510.0034`, `6.24/28510.0048`).
 _MATRICULA_DATO_RE = re.compile(r"^(?:\d{9}|\d{3}\.\d{3}\.\d{3})$")
+# Sesión 2026-09-17: la matrícula antigua de 8 cifras ("59020019"). Un número
+# de 8 cifras suelto es más ambiguo, así que solo cuenta como identificador de
+# fila si la cabecera nombra la matrícula o si al menos
+# `_MIN_FILAS_MATRICULA_8` filas de la tabla traen uno (una página de
+# continuación, sin cabecera, de un cuadro de matrículas antiguas).
+_MATRICULA_8_RE = re.compile(r"^\d{8}$")
+_MIN_FILAS_MATRICULA_8 = 3
 
 
 @dataclass(frozen=True)
@@ -137,19 +144,30 @@ def _columnas_x(tabla) -> tuple[tuple[float, float] | None, ...]:
     return tuple(resultado)
 
 
-def _es_fila_de_datos(fila: FILA) -> bool:
-    for celda in fila:
-        if not celda:
-            continue
-        limpia = normalizar_guiones(re.sub(r"\s+", "", celda))
+def _celdas_limpias(fila: FILA) -> list[str]:
+    return [normalizar_guiones(re.sub(r"\s+", "", celda)) for celda in fila if celda]
+
+
+def _es_fila_de_datos(fila: FILA, admite_matricula_8: bool = False) -> bool:
+    for limpia in _celdas_limpias(fila):
         if _CODIGO_PRECIO_RE.match(limpia) or _MATRICULA_DATO_RE.match(limpia):
+            return True
+        if admite_matricula_8 and _MATRICULA_8_RE.match(limpia):
             return True
     return False
 
 
+def _admite_matricula_8(filas: list[FILA]) -> bool:
+    if any("matric" in normalizar(celda or "") for fila in filas[:3] for celda in fila):
+        return True
+    con_8 = sum(1 for fila in filas if any(_MATRICULA_8_RE.match(c) for c in _celdas_limpias(fila)))
+    return con_8 >= _MIN_FILAS_MATRICULA_8
+
+
 def _indice_primera_fila_datos(filas: list[FILA]) -> int | None:
+    admite_8 = _admite_matricula_8(filas)
     for indice, fila in enumerate(filas):
-        if _es_fila_de_datos(fila):
+        if _es_fila_de_datos(fila, admite_8):
             return indice
     return None
 

@@ -46,10 +46,18 @@ _CODIGO_PRECIO_LONGITUD_MAXIMA = LineaCatalogo.codigo_precio.type.length
 # INSERT en vez de mandarla a revisión. La longitud se lee de la propia
 # columna (`LineaCatalogo.matricula`), igual que `_CODIGO_PRECIO_LONGITUD_
 # MAXIMA` arriba, para que no puedan divergir.
+#
+# Sesión 2026-09-17, decisión del cliente: la matrícula de 8 cifras es el
+# formato antiguo real de ADIF ("59020019" fusibles, "69161624" tornillería,
+# "71590012" rodillos de aguja de `6.20/28510.0041`; verificado en la imagen
+# de los pliegos de 2016-2018, no está en el maestro de SAP actual). Se acepta
+# en todos los documentos, con o sin capa de texto.
 _MATRICULA_LONGITUD = LineaCatalogo.matricula.type.length
-_MATRICULA_VALIDA_RE = re.compile(rf"^\d{{{_MATRICULA_LONGITUD}}}$")
+_MATRICULA_VALIDA_RE = re.compile(rf"^\d{{{_MATRICULA_LONGITUD - 1},{_MATRICULA_LONGITUD}}}$")
 
 
+# Solo la de 9 cifras: dentro de ruido pegado, 8 cifras seguidas también son
+# el trozo de una de 9.
 _MATRICULA_INCRUSTADA_RE = re.compile(rf"\d{{{_MATRICULA_LONGITUD}}}")
 _MATRICULA_CON_PUNTOS_RE = re.compile(r"^\d{3}\.\d{3}\.\d{3}$")
 

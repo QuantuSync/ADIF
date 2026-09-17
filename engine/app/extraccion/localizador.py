@@ -82,14 +82,15 @@ UMBRAL_DENSIDAD_CONTINUACION = Decimal("0.20")
 # de FILA -- el código de precio o la matrícula de cada línea --, nunca
 # presentes en un párrafo de pliego. Formas de `app.extraccion.tabla` /
 # `app.catalogo` (código de precio con guion, "COD0001", "L01-T01", matrícula
-# de 9 dígitos, también con puntos "643.910.630"), más el sufijo de variante
+# de 9 dígitos, también con puntos "643.910.630", o la antigua de 8 -- sesión
+# 2026-09-17), más el sufijo de variante
 # en mayúscula verificado en esos mismos documentos ("P-39B", "P-41 A").
 # Solo formas con separador o longitud fija: "P1"/"P01" sin guion también
 # existen en el corpus, pero sueltos aparecen en prosa corriente ("tipo P o
 # P1 de radio 1500") y no bastan como prueba de fila.
 _IDENTIFICADOR_FILA_RE = re.compile(
     r"(?<![\w.\-])"
-    r"(?:(?:P|PN|PA)-\s?\d{1,4}(?:\s?[A-Z](?![a-z]))?|(?i:COD)\d{4}|L\d{1,2}-T\d{1,2}|\d{9}|\d{3}\.\d{3}\.\d{3})"
+    r"(?:(?:P|PN|PA)-\s?\d{1,4}(?:\s?[A-Z](?![a-z]))?|(?i:COD)\d{4}|L\d{1,2}-T\d{1,2}|\d{8,9}|\d{3}\.\d{3}\.\d{3})"
     r"(?![\w\-]|[.,]\d)"
 )
 
