@@ -174,3 +174,39 @@ def test_documento_vacio():
     r = clasificar([])
     assert r.tipo == TipoDocumento.otro
     assert r.pagina is None
+
+
+def test_pliego_de_condiciones_administrativas_es_pliego_sin_precios():
+    # Sesión 2026-09-17: título del PCAP escaneado de `6.16/28510.0161`, que
+    # el reconocimiento óptico leía entero (34 páginas) por no reconocerlo.
+    from app.extraccion.clasificador import clasificar, es_pliego_sin_precios
+    from app.extraccion.texto import PaginaTexto
+
+    for titulo in (
+        "PLIEGO DE CONDICIONES ADMINISTRATIVAS PARTICULARES\nCONTRATO DE SUMINISTROS",
+        "PLIEGO DE CONDICIONES GENERALES PARA LOS CONTRATOS DE SERVICIOS",
+    ):
+        assert es_pliego_sin_precios(clasificar([PaginaTexto(numero=1, texto=titulo)]))
+
+
+def test_condiciones_administrativas_citadas_a_mitad_de_pagina_no_cuentan():
+    from app.extraccion.clasificador import clasificar, es_pliego_sin_precios
+    from app.extraccion.texto import PaginaTexto
+
+    texto = (
+        "PLIEGO DE PRESCRIPCIONES TÉCNICAS. Los materiales se relacionan en el anejo nº 1, según las "
+        "condiciones que se establecen en el correspondiente pliego de condiciones administrativas."
+    )
+    assert not es_pliego_sin_precios(clasificar([PaginaTexto(numero=1, texto=texto)]))
+
+
+def test_titulo_administrativo_en_pagina_interior_no_cuenta():
+    from app.extraccion.clasificador import clasificar, es_pliego_sin_precios
+    from app.extraccion.texto import PaginaTexto
+
+    paginas = [
+        PaginaTexto(numero=1, texto="ANEJO"),
+        PaginaTexto(numero=2, texto="Relación de materiales"),
+        PaginaTexto(numero=3, texto="Pliego de condiciones generales aplicable al suministro"),
+    ]
+    assert not es_pliego_sin_precios(clasificar(paginas))

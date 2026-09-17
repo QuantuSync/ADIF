@@ -95,8 +95,25 @@ def _buscar(paginas_norm: list[tuple[int, str]], *marcadores: str) -> Optional[t
 # margen sin arriesgarse a acercarse al segundo grupo.
 _LIMITE_POSICION_TITULO = 50
 
+# Títulos de pliego administrativo, siempre en posición de título (sesión
+# 2026-09-17, al ampliar la parada del reconocimiento óptico en pliegos sin
+# precios): medido en las dos primeras páginas de los 1.623 documentos del
+# corpus, "pliego de condiciones administrativas" (43 documentos; p.ej. el
+# escaneado de `6.16/28510.0161`) y "pliego de condiciones generales" (los de
+# contratos de suministros, obras y servicios). Los únicos con líneas de
+# catálogo solo citan la frase a mitad de párrafo (posiciones 607 y 1.442).
+# "Cuadro de características" se probó y se descartó: como título solo lo
+# abren notas de aclaración de una página que lo citan.
+_TITULOS_PLIEGO_ADMINISTRATIVO = (
+    "pliego de clausulas administrativas",
+    "pliego de condiciones administrativas",
+    "pliego de condiciones generales",
+)
 
-def _buscar_titulo(paginas_norm: list[tuple[int, str]], marcador: str) -> Optional[tuple[int, str]]:
+
+def _buscar_titulo(
+    paginas_norm: list[tuple[int, str]], marcador: str, hasta_pagina: Optional[int] = None
+) -> Optional[tuple[int, str]]:
     """Como `_buscar`, pero solo cuenta si el marcador aparece cerca del
     principio de la página normalizada — la posición real de un título de
     portada, nunca de una mención de pasada en medio de un párrafo. No es el
@@ -107,6 +124,8 @@ def _buscar_titulo(paginas_norm: list[tuple[int, str]], marcador: str) -> Option
     esta restricción se aplica solo donde el corpus real confirma que hace
     falta — ver docstring del módulo."""
     for numero, texto in paginas_norm:
+        if hasta_pagina is not None and numero > hasta_pagina:
+            continue
         indice = texto.find(marcador)
         if indice != -1 and indice <= _LIMITE_POSICION_TITULO:
             return numero, marcador
@@ -165,9 +184,13 @@ def clasificar(paginas: list[PaginaTexto]) -> ResultadoClasificacion:
     # Los otros dos marcadores de esta familia no muestran ese problema en
     # el corpus real (a veces aparecen lejos del principio en un Pliego
     # real, p.ej. tras un índice) y mantienen la búsqueda normal.
-    hallazgo = _buscar_titulo(pn, "pliego de clausulas administrativas")
-    if hallazgo:
-        return ResultadoClasificacion(TipoDocumento.pliego, Decimal("0.9"), hallazgo[1], hallazgo[0])
+    for titulo in _TITULOS_PLIEGO_ADMINISTRATIVO:
+        # Los títulos nuevos, solo en portada (dos primeras páginas).
+        hallazgo = _buscar_titulo(
+            pn, titulo, hasta_pagina=None if titulo == "pliego de clausulas administrativas" else 2
+        )
+        if hallazgo:
+            return ResultadoClasificacion(TipoDocumento.pliego, Decimal("0.9"), hallazgo[1], hallazgo[0])
     for titulo in ("pliego de prescripciones tecnicas", "documento de pliegos"):
         hallazgo = _buscar(pn, titulo)
         if hallazgo:
@@ -188,7 +211,7 @@ def clasificar(paginas: list[PaginaTexto]) -> ResultadoClasificacion:
 # Administrativas Particulares ("pliego de clausulas administrativas"). El
 # tercer marcador posible, "pliego de prescripciones tecnicas", es justo el
 # que sí trae la tabla (docstring del módulo) y por eso no está en esta lista.
-_MARCADORES_PLIEGO_SIN_PRECIOS = frozenset({"documento de pliegos", "pliego de clausulas administrativas"})
+_MARCADORES_PLIEGO_SIN_PRECIOS = frozenset({"documento de pliegos", *_TITULOS_PLIEGO_ADMINISTRATIVO})
 
 
 def es_pliego_sin_precios(resultado: ResultadoClasificacion) -> bool:

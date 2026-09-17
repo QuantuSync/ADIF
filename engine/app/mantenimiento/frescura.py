@@ -64,7 +64,10 @@ from app.models import Documento, EstadoExpediente, Expediente, LineaCatalogo
 # 2026-09-17.2: filas fundidas por pdfplumber sin precio o con unidades de
 # menos (`app.catalogo._dividir_fila_multiple`) y trazas sin duplicar
 # (`app.extraccion.traza`).
-VERSION_LOGICA_EXTRACCION = "2026-09-17.2"
+# 2026-09-17.3: matrícula antigua de 8 cifras en todos los documentos,
+# reconocimiento óptico de los escaneados (`app.extraccion.ocr`) y títulos de
+# pliego administrativo ampliados en el clasificador.
+VERSION_LOGICA_EXTRACCION = "2026-09-17.3"
 
 # Sesión 2026-09-15 (expedientes de 2026 que faltaban): versión de la lógica
 # de búsqueda en la Plataforma cuyo "sin resultados" es de fiar. Hasta el

@@ -301,3 +301,18 @@ def test_un_importe_de_nueve_digitos_no_se_confunde_con_una_matricula():
     assert _es_fila_de_datos(["Presupuesto base de licitación", "1.234.567,89"]) is False
     assert _es_fila_de_datos(["Total", "1.234.567"]) is False
     assert _es_fila_de_datos(["Total", "12.345.678.901"]) is False
+
+
+def test_matricula_antigua_de_8_cifras_cuenta_como_fila_de_datos():
+    # Sesión 2026-09-17, decisión del cliente: "59020019" (fusibles AT,
+    # `6.18/28510.0066`) es el formato antiguo real de la matrícula.
+    from app.extraccion.tabla import _indice_primera_fila_datos
+
+    filas = [
+        ["MATRÍCULA", "DESIGNACIÓN", "PRECIO DE REFERENCIA"],
+        ["59020019", "FUSIBLE AT - CA", "116,15"],
+    ]
+    assert _indice_primera_fila_datos(filas) == 1
+    # Sin cabecera de matrícula, hacen falta varias filas con ella.
+    assert _indice_primera_fila_datos([["59020019", "FUSIBLE", "116,15"]]) is None
+    assert _indice_primera_fila_datos([[f"5902001{i}", "FUSIBLE", "116,15"] for i in range(3)]) == 0
