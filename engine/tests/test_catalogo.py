@@ -3064,3 +3064,22 @@ def test_construir_linea_catalogo_acepta_matricula_antigua_de_8_cifras():
         pagina=35, documento_origen_id=None, expediente_id=1, baja_lote=None, orden_aparicion=0,
     )
     assert linea["matricula"] == "71590012"
+
+
+def test_construir_linea_catalogo_descarta_resumen_de_presupuesto_al_pie():
+    # Sesión 2026-09-17, `6.17/28510.0056` p.19 (leído por reconocimiento
+    # óptico): el resumen del presupuesto bajo el cuadro entraba como cinco
+    # líneas sin descripción, con importes de millones.
+    mapeo = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": 2, "cantidad": None, "precio_unitario": 3}
+    for etiqueta, importe in (
+        ("Presupuesto de Ejecución Material", "2.975.673,96 €"),
+        ("Gastos Generales (9%)", "267.810,66 €"),
+        ("Beneficio Industrial (6%)", "178.540,44 €"),
+        ("Suma", "3.422.025,06 €"),
+        ("Presupuesto Base de Licitación", "4.140.650,32 €"),
+    ):
+        linea = construir_linea_catalogo(
+            [etiqueta, "", "", importe, ""], mapeo,
+            pagina=19, documento_origen_id=None, expediente_id=1, baja_lote=None, orden_aparicion=0,
+        )
+        assert linea is None, etiqueta

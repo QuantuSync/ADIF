@@ -271,6 +271,13 @@ _ETIQUETAS_PIE_TABLA = frozenset({
     "importetotal",
     "iva",
     "total",
+    # Sesión 2026-09-17 (`6.17/28510.0056` p.19, leído por reconocimiento
+    # óptico): el resumen del presupuesto al pie del cuadro.
+    "presupuestodeejecucionmaterial",
+    "gastosgenerales",
+    "beneficioindustrial",
+    "suma",
+    "presupuestobasedelicitacion",
 })
 
 
