@@ -2,8 +2,22 @@
 convención de marcador de texto de la web viaja al Excel -- celda vacía en
 su lugar, para no convertir una columna numérica en texto mixto."""
 import io
+from datetime import datetime, timezone
 from decimal import Decimal
 
+import pytest
+
+from app.conciliacion import (
+    APORTA_LINEAS,
+    COLUMNAS_CONCILIACION,
+    DescuadreConciliacion,
+    FilaConciliacion,
+    PENDIENTE_DE_PROCESAR,
+    PRECIOS_EN_ACUERDO_MARCO,
+    SIN_CUADRO,
+    SITUACIONES,
+    comprobar_cuadre,
+)
 from app.exportacion import (
     _CATEGORIA_DUPLICADO_SIN_PERDIDA,
     _CATEGORIAS_MOTIVO,
@@ -17,11 +31,21 @@ from app.exportacion import (
     _formato_cantidad,
     generar_excel_catalogo,
 )
-from app.models import Expediente, Lote, LineaCatalogo
+from app.models import (
+    Documento,
+    DocumentoExpediente,
+    EstadoExpediente,
+    Expediente,
+    LineaCatalogo,
+    Lote,
+    TipoDocumento,
+)
 from collections import Counter
 
 import openpyxl
 from openpyxl import Workbook
+
+_AHORA = datetime(2026, 9, 18, 12, 0, tzinfo=timezone.utc)
 
 
 def _linea(**kwargs) -> LineaCatalogo:
@@ -300,8 +324,17 @@ def _fila_unica(db_session, **campos_expediente):
 def test_codigo_de_expediente_se_rellena_aunque_no_cruce(db_session):
     fila, _ = _fila_unica(db_session, codigos_cruzados=False)
     assert fila["Código de expediente"] == "6.26/28510.0016"
-    # Y coincide con la columna que siempre trajo el dato del documento.
-    assert fila["Nº de expediente (documento)"] == "6.26/28510.0016"
+
+
+def test_no_queda_una_segunda_columna_con_el_numero_de_expediente(db_session):
+    """Bloque 1, sesión 2026-09-18 (decisión del cliente): "Nº de expediente
+    (documento)" existía porque "Código de expediente" solo se rellenaba
+    cuando el expediente cruzaba con el Excel de códigos. Desde que esa
+    puerta desapareció las dos salían del mismo campo, así que se queda una
+    sola -- y con el nombre por el que el cliente filtra."""
+    fila, _ = _fila_unica(db_session, codigos_cruzados=False)
+    assert "Nº de expediente (documento)" not in fila
+    assert [c for c in fila if "6.26/28510.0016" == fila[c]] == ["Código de expediente"]
 
 
 def test_sin_cruce_las_otras_tres_columnas_siguen_vacias(db_session):
@@ -373,3 +406,184 @@ def test_resumen_explica_por_que_comentarios_va_vacia():
     )
     assert "Comentarios" in contenido
     assert "escriba en ella quien revise" in contenido
+
+
+# --- Bloque 2, sesión 2026-09-18: el "Código interno" no se hereda de la ----
+# fila de otro expediente. La celda queda vacía y su motivo lo dice en
+# castellano llano, para quien lo busca en almacenes.
+
+
+def test_codigo_interno_vacio_por_fila_ajena_lo_explica_para_almacenes(db_session):
+    fila, _ = _fila_unica(db_session, codigos_cruzados=True, cruce_fila_propia=False)
+    assert fila["Código interno"] == " "
+    motivo = fila["Motivo de las celdas vacías"]
+    assert "Código interno: no consta (este expediente no figura por sí mismo en el listado de " \
+           "códigos de ADIF)" in motivo
+
+
+def test_codigo_interno_vacio_cruzando_por_fila_propia_dice_otra_cosa(db_session):
+    fila, _ = _fila_unica(db_session, codigos_cruzados=True, cruce_fila_propia=True)
+    motivo = fila["Motivo de las celdas vacías"]
+    assert "no trae número interno para este expediente" in motivo
+    assert "no figura por sí mismo" not in motivo
+
+
+# --- Bloque 5, sesión 2026-09-18: hoja "Conciliación" ----------------------
+
+
+def _documento_descargado(db_session, expediente_id: int, hash_documento: str) -> None:
+    """Un documento real bajado de la Plataforma: es la evidencia más fuerte
+    de que el expediente está publicado, y sin ninguno la Situación correcta
+    es "Pendiente de procesar" (no se puede afirmar qué trae)."""
+    documento = Documento(
+        tipo_documento=TipoDocumento.anejo, hash=hash_documento,
+        ruta_almacenamiento=f"{hash_documento}.pdf",
+    )
+    db_session.add(documento)
+    db_session.commit()
+    db_session.add(DocumentoExpediente(
+        documento_id=documento.id, expediente_id=expediente_id,
+        nombre_archivo=f"{hash_documento}.pdf",
+    ))
+    db_session.commit()
+
+
+def test_conciliacion_tiene_una_fila_por_expediente_publicado_y_cuadra(db_session):
+    _fila_unica(db_session)
+    # Un segundo expediente publicado que no aporta ninguna línea: la hoja
+    # existe justamente para que este no desaparezca del entregable.
+    sin_cuadro = Expediente(
+        codigo_expediente="6.25/28510.0999", nombre_proyecto="Suministro sin cuadro",
+        estado=EstadoExpediente.pendiente_revision, descargado_en=_AHORA, extraido_en=_AHORA,
+        error="no se extrajo ninguna línea de catálogo de los documentos descargados",
+    )
+    db_session.add(sin_cuadro)
+    db_session.commit()
+    _documento_descargado(db_session, sin_cuadro.id, "hash-sin-cuadro")
+    libro = openpyxl.load_workbook(io.BytesIO(generar_excel_catalogo(db_session)))
+    hoja = libro["Conciliación"]
+    filas = list(hoja.iter_rows(min_row=2, values_only=True))
+    codigos = {f[0] for f in filas}
+    assert codigos == {"6.26/28510.0016", "6.25/28510.0999"}
+    # La suma de la columna de líneas es el número de filas de "Materiales".
+    columna_lineas = COLUMNAS_CONCILIACION.index("Líneas que aporta al catálogo")
+    assert sum(f[columna_lineas] for f in filas) == libro["Materiales"].max_row - 1
+    # Ningún expediente se queda sin Situación.
+    columna_situacion = COLUMNAS_CONCILIACION.index("Situación")
+    assert all(f[columna_situacion] in SITUACIONES for f in filas)
+    por_codigo = {f[0]: f for f in filas}
+    assert por_codigo["6.26/28510.0016"][columna_situacion] == APORTA_LINEAS
+    assert por_codigo["6.25/28510.0999"][columna_situacion] == SIN_CUADRO
+
+
+def test_conciliacion_deja_fuera_lo_que_la_plataforma_confirma_que_no_publica(db_session):
+    _fila_unica(db_session)
+    db_session.add(Expediente(
+        codigo_expediente="6.25/28510.0998", estado=EstadoExpediente.sin_publicar,
+    ))
+    db_session.commit()
+    libro = openpyxl.load_workbook(io.BytesIO(generar_excel_catalogo(db_session)))
+    codigos = {f[0] for f in libro["Conciliación"].iter_rows(min_row=2, values_only=True)}
+    assert "6.25/28510.0998" not in codigos
+
+
+def test_conciliacion_incluye_un_expediente_de_otro_departamento_si_aporta_filas(db_session):
+    """Requisito duro del cliente: "todo expediente que aparezca en la hoja
+    Materiales tiene que aparecer en Conciliación" -- también la matriz de
+    otro departamento cuyo cuadro de precios sí se leyó."""
+    _fila_unica(db_session)
+    ajeno = Expediente(codigo_expediente="2.24/04110.0035", nombre_proyecto="Acuerdo marco de EPIs")
+    db_session.add(ajeno)
+    db_session.commit()
+    lote = Lote(expediente_id=ajeno.id, identificador_lote="1")
+    db_session.add(lote)
+    db_session.commit()
+    db_session.add(LineaCatalogo(
+        expediente_id=ajeno.id, lote_id=lote.id, clave_linea="P-002", orden_aparicion=0,
+        codigo_precio="P-002", descripcion="GUANTE", precio_unitario=Decimal("1.00"),
+    ))
+    db_session.commit()
+    libro = openpyxl.load_workbook(io.BytesIO(generar_excel_catalogo(db_session)))
+    filas = list(libro["Conciliación"].iter_rows(min_row=2, values_only=True))
+    assert "2.24/04110.0035" in {f[0] for f in filas}
+    columna_lineas = COLUMNAS_CONCILIACION.index("Líneas que aporta al catálogo")
+    assert sum(f[columna_lineas] for f in filas) == libro["Materiales"].max_row - 1
+
+
+def test_el_excel_no_sale_si_la_conciliacion_no_cuadra():
+    """"Si no cuadra, párate y dime la diferencia" (encargo del cliente):
+    nunca se entrega un Excel descuadrado."""
+    filas = [FilaConciliacion(
+        codigo_expediente="6.26/28510.0016", titulo=None, organo_contratacion=None,
+        estado_plataforma=None, documentos_descargados=1, documentos_reconocimiento_optico=0,
+        lineas_en_catalogo=3, baja="No", situacion=APORTA_LINEAS, motivo="",
+    )]
+    comprobar_cuadre(filas, 3)
+    with pytest.raises(DescuadreConciliacion) as exc:
+        comprobar_cuadre(filas, 5)
+    assert "diferencia de -2" in str(exc.value)
+
+
+def test_el_excel_no_sale_si_una_situacion_no_es_de_la_lista():
+    filas = [FilaConciliacion(
+        codigo_expediente="6.26/28510.0016", titulo=None, organo_contratacion=None,
+        estado_plataforma=None, documentos_descargados=1, documentos_reconocimiento_optico=0,
+        lineas_en_catalogo=0, baja="No", situacion="lo que sea", motivo="",
+    )]
+    with pytest.raises(DescuadreConciliacion):
+        comprobar_cuadre(filas, 0)
+
+
+def test_el_resumen_dice_de_que_fecha_es_el_registro_de_lo_publicado(db_session):
+    _fila_unica(db_session)
+    libro = openpyxl.load_workbook(io.BytesIO(generar_excel_catalogo(db_session)))
+    contenido = "\n".join(
+        str(c.value) for fila in libro["Resumen"].iter_rows() for c in fila if c.value is not None
+    )
+    assert "De qué fecha es el registro de lo publicado y qué cubre" in contenido
+    assert "Sindicación mensual de la Plataforma" in contenido
+    assert "Búsqueda directa en el buscador de la Plataforma" in contenido
+    # El recuento por Situación, con las seis categorías del cliente.
+    for situacion in SITUACIONES:
+        assert situacion in contenido
+
+
+def test_conciliacion_marca_pendiente_de_procesar_lo_que_no_se_ha_bajado(db_session):
+    """Un expediente que consta publicado pero del que todavía no se ha
+    descargado ningún documento no puede decir "publicado sin cuadro de
+    precios": no se sabe qué trae. Sale como trabajo pendiente."""
+    _fila_unica(db_session)
+    db_session.add(Expediente(codigo_expediente="6.25/28510.0997", descargado_en=_AHORA))
+    db_session.commit()
+    libro = openpyxl.load_workbook(io.BytesIO(generar_excel_catalogo(db_session)))
+    filas = {f[0]: f for f in libro["Conciliación"].iter_rows(min_row=2, values_only=True)}
+    columna = COLUMNAS_CONCILIACION.index("Situación")
+    assert filas["6.25/28510.0997"][columna] == PENDIENTE_DE_PROCESAR
+    assert "todavía no se ha descargado" in filas["6.25/28510.0997"][
+        COLUMNAS_CONCILIACION.index("Motivo")
+    ]
+
+
+def test_conciliacion_señala_el_acuerdo_marco_no_publicado(db_session):
+    """Uno de los seis valores que pidió el cliente, y el motivo mayoritario
+    real del corpus (49 expedientes): el pedido está publicado, pero sus
+    precios viven en los documentos de un acuerdo marco que la Plataforma no
+    publica."""
+    _fila_unica(db_session)
+    matriz = Expediente(
+        codigo_expediente="2.18/04703.0019", estado=EstadoExpediente.sin_publicar,
+    )
+    pedido = Expediente(
+        codigo_expediente="6.23/28510.0063", codigo_matriz="2.18/04703.0019",
+        estado=EstadoExpediente.pendiente_revision, descargado_en=_AHORA, extraido_en=_AHORA,
+        error="la matriz 2.18/04703.0019 no tiene ningún lote registrado (estado: sin_publicar)",
+    )
+    db_session.add_all([matriz, pedido])
+    db_session.commit()
+    _documento_descargado(db_session, pedido.id, "hash-pedido")
+    libro = openpyxl.load_workbook(io.BytesIO(generar_excel_catalogo(db_session)))
+    filas = {f[0]: f for f in libro["Conciliación"].iter_rows(min_row=2, values_only=True)}
+    assert "2.18/04703.0019" not in filas  # confirmado no publicado: no se concilia
+    fila = filas["6.23/28510.0063"]
+    assert fila[COLUMNAS_CONCILIACION.index("Situación")] == PRECIOS_EN_ACUERDO_MARCO
+    assert "2.18/04703.0019" in fila[COLUMNAS_CONCILIACION.index("Motivo")]

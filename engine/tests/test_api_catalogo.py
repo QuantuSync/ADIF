@@ -37,6 +37,12 @@ _TABLAS = [
     models.TrazaOrigen.__table__,
     models.MapeoCabeceraCache.__table__,
     models.TrabajoCola.__table__,
+    # La hoja "Conciliación" (sesión 2026-09-18, bloque 5) consulta las dos
+    # fuentes del registro de lo publicado y la caché de reconocimiento
+    # óptico: sin estas tablas, exportar el Excel falla en el test aunque
+    # funcione en producción.
+    models.SindicacionExpediente.__table__,
+    models.CacheOcrDocumento.__table__,
 ]
 
 
@@ -256,7 +262,10 @@ def test_exportar_catalogo_genera_xlsx_con_columnas_del_formato_esperado(cliente
         "Cantidad", "Precio unitario", "Lote",
         "Precio adjudicado", "Baja del lote", "Unidad de medida",
         "Estado del contrato (SAP)",
-        "Nº de expediente (documento)", "Objeto del contrato (documento)",
+        # "Nº de expediente (documento)" se quitó el 2026-09-18 (bloque 1,
+        # decisión del cliente): salía del mismo campo que "Código de
+        # expediente" y coincidía con ella en las 18.239 filas.
+        "Objeto del contrato (documento)",
         "Motivo de las celdas vacías",
         "Comentarios",
     ]
@@ -283,27 +292,27 @@ def test_exportar_catalogo_genera_xlsx_con_columnas_del_formato_esperado(cliente
     # todo, después de las dos columnas ya añadidas.
     assert fila[12] == "UN"
     # Bloque 1, sesión de comparación documento-vs-listado interno: el
-    # número de expediente y el objeto/título del documento SIEMPRE se
-    # rellenan, aunque el expediente no haya cruzado con el Excel de
-    # códigos (a diferencia de fila[0]/fila[1] de arriba, vacíos en este
-    # mismo test por la misma razón).
-    assert fila[14] == "6.24/28510.0008"
-    assert fila[15] == "SUMINISTRO DE GUANTES CONTRA RIESGO ELECTRICO."
+    # objeto/título del documento SIEMPRE se rellena, aunque el expediente no
+    # haya cruzado con el Excel de códigos (a diferencia de fila[0] de
+    # arriba, vacío en este mismo test por la misma razón). La columna
+    # hermana "Nº de expediente (documento)" se quitó el 2026-09-18: era la
+    # misma que fila[1].
+    assert fila[14] == "SUMINISTRO DE GUANTES CONTRA RIESGO ELECTRICO."
     # Sesión 2026-09-14 (continuación): la línea sembrada trae todos sus
     # datos, así que no hay ninguna celda de la LÍNEA que explicar. Bloque 2,
     # sesión 2026-09-18: las columnas del EXPEDIENTE que quedan vacías sí
     # llevan motivo ahora -- aquí, las tres que dependen del cruce, que este
     # test deja sin configurar a propósito.
-    assert "Código interno: no consta" in fila[16]
-    assert "Código matriz: no consta" in fila[16]
-    assert "Estado del contrato (SAP): no consta" in fila[16]
+    assert "Código interno: no consta" in fila[15]
+    assert "Código matriz: no consta" in fila[15]
+    assert "Estado del contrato (SAP): no consta" in fila[15]
     # El título sí está, así que no aparece; y "Código de expediente" ya no
     # puede quedar vacía, así que no aparece nunca.
-    assert "Título expediente" not in fila[16]
-    assert "Código de expediente:" not in fila[16]
+    assert "Título expediente" not in fila[15]
+    assert "Código de expediente:" not in fila[15]
     # Segunda tanda de cambios del cliente (bloque 1, sesión 2026-09-09):
     # "Comentarios" se mueve al final de todas las columnas.
-    assert fila[17] == " "
+    assert fila[16] == " "
 
 
 def test_exportar_catalogo_explica_el_hueco_de_un_valor_de_otro_lote(cliente, db_session, tmp_path, monkeypatch):
@@ -338,9 +347,9 @@ def test_exportar_catalogo_explica_el_hueco_de_un_valor_de_otro_lote(cliente, db
         "Matrícula del material: no consta; "
         "Cantidad: pendiente (el documento da una cantidad distinta para cada lote y falta saber cuál es la "
         "de este)"
-    ) in fila[16]
-    assert "Código interno: no consta" in fila[16]
-    assert "Estado del contrato (SAP): no consta" in fila[16]
+    ) in fila[15]
+    assert "Código interno: no consta" in fila[15]
+    assert "Estado del contrato (SAP): no consta" in fila[15]
     filas_resumen = [[c.value for c in f] for f in libro["Resumen"].iter_rows()]
     assert any(
         (f[0] or "").startswith("Líneas del catálogo con Cantidad o Precio unitario pendiente") and f[1] == 1

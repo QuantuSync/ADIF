@@ -136,3 +136,52 @@ def test_los_motivos_del_expediente_no_usan_jerga_interna():
     ).lower()
     for jerga in ("cruce", "cruzad", "codigos_cruzados", "índice", "payload", "null", "none", "campo"):
         assert jerga not in textos, f"jerga interna en el texto al cliente: {jerga!r}"
+
+
+# --- Bloque 2, sesión 2026-09-18: la tercera causa de "Código interno" vacío
+
+
+def test_codigo_interno_vacio_por_fila_ajena_tiene_su_propio_motivo():
+    """El expediente SÍ encuentra fila en el listado de ADIF, pero es la de
+    otro expediente de su familia: su número interno es el de ese otro, y
+    heredarlo llevaría a almacenes al expediente equivocado."""
+    motivos = {
+        c.campo: (c.motivo, c.detalle)
+        for c in celdas_vacias(
+            _linea(), "1",
+            _expediente(codigo_interno=None, codigos_cruzados=True, cruce_fila_propia=False),
+        )
+    }
+    assert motivos["codigo_interno"] == (
+        NO_CONSTA, "este expediente no figura por sí mismo en el listado de códigos de ADIF"
+    )
+
+
+def test_las_otras_dos_causas_de_codigo_interno_vacio_no_cambian():
+    sin_cruce = {
+        c.campo: c.detalle
+        for c in celdas_vacias(_linea(), "1", _expediente(codigo_interno=None, codigos_cruzados=False))
+    }
+    assert sin_cruce["codigo_interno"] == "este expediente no aparece en el listado de códigos de ADIF"
+    cruza_sin_numero = {
+        c.campo: c.detalle
+        for c in celdas_vacias(
+            _linea(), "1",
+            _expediente(codigo_interno=None, codigos_cruzados=True, cruce_fila_propia=True),
+        )
+    }
+    assert cruza_sin_numero["codigo_interno"] == (
+        "el listado de códigos de ADIF no trae número interno para este expediente"
+    )
+
+
+def test_el_motivo_de_la_fila_ajena_tampoco_usa_jerga_interna():
+    textos = " ".join(
+        c.detalle or ""
+        for c in celdas_vacias(
+            _linea(), "1",
+            _expediente(codigo_interno=None, codigos_cruzados=True, cruce_fila_propia=False),
+        )
+    ).lower()
+    for jerga in ("cruce", "cruzad", "codigos_cruzados", "índice", "payload", "null", "none", "campo"):
+        assert jerga not in textos, f"jerga interna en el texto al cliente: {jerga!r}"

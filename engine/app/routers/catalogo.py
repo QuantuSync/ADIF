@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from app.auth import Usuario, get_current_user
@@ -77,8 +77,19 @@ def exportar_catalogo(
     """CONTEXTO.md, encargo de esta sesión, punto 4: un solo catálogo
     acumulativo generado desde la base de datos a demanda, nunca la fuente
     de los datos (CONTEXTO.md sección 9.8)."""
+    # Backfill perezoso del cruce antes de generar el entregable: los que
+    # nunca se intentaron, y (sesión 2026-09-18, bloque 2) los que cruzaron
+    # antes de que existiera `cruce_fila_propia` -- sin eso no se sabe si su
+    # "Código interno" es el suyo o el de otro expediente de su familia.
+    # `asegurar_cruce_codigos` lo rehace una vez cada uno; en la siguiente
+    # exportación esta consulta ya no los devuelve.
     sin_cruzar = db.execute(
-        select(Expediente).where(Expediente.codigos_cruzados.is_(None))
+        select(Expediente).where(
+            or_(
+                Expediente.codigos_cruzados.is_(None),
+                and_(Expediente.codigos_cruzados.is_(True), Expediente.cruce_fila_propia.is_(None)),
+            )
+        )
     ).scalars().all()
     if sin_cruzar:
         for expediente in sin_cruzar:

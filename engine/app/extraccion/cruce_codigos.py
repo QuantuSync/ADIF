@@ -34,6 +34,15 @@ class CruceCodigos:
     codigo_proyecto: Optional[str]
     codigo_matriz: Optional[str]
     cruzado: bool
+    # Sesión 2026-09-18 (bloque 2, decisión del cliente): `True` solo cuando
+    # la fila encontrada es la DEL PROPIO EXPEDIENTE -- `codigo_expediente`
+    # contra la columna `Nº Expediente`, la primera de las cuatro claves que
+    # prueba `_IndiceCodigosProyecto.buscar`. Las otras tres encuentran la
+    # fila de OTRO expediente (medido sobre los 611 reales: 352 entran por la
+    # primera, 28 por las otras tres), y de esa fila salía hasta hoy el
+    # "Código interno" -- la columna por la que buscan en almacenes. Ver
+    # `asegurar_cruce_codigos`.
+    fila_propia: bool = False
 
 
 def normalizar_codigo_expediente(valor: Optional[str]) -> Optional[str]:
@@ -109,25 +118,42 @@ class _IndiceCodigosProyecto:
             if clave_matriz and clave_matriz not in self._por_matriz:
                 self._por_matriz[clave_matriz] = fila
 
-    def buscar(self, codigo_expediente: str, codigo_matriz: Optional[str]) -> Optional[tuple[dict, bool]]:
-        """Devuelve la fila encontrada junto con si el cruce fue por `Nº
-        Expediente` (`True`) o por `MATRIZ` (`False`). La distinción importa:
-        cuando `codigo_expediente` cruza por la columna MATRIZ (CONTEXTO.md
-        sección 3: "3 como MATRIZ"), significa que el propio expediente ES el
-        acuerdo marco de esa fila — su columna MATRIZ vale, trivialmente, el
-        propio `codigo_expediente` que se buscó. Devolver ese valor como "la
-        matriz de este expediente" sería inventarla por auto-referencia
-        (sección 7: "el sistema nunca inventa una matriz")."""
+    def buscar(
+        self, codigo_expediente: str, codigo_matriz: Optional[str]
+    ) -> Optional[tuple[dict, bool, bool]]:
+        """Devuelve la fila encontrada, si el cruce fue por `Nº Expediente`
+        (`True`) o por `MATRIZ` (`False`), y si la fila es la DEL PROPIO
+        EXPEDIENTE (solo la primera de las cuatro claves).
+
+        La primera distinción importa para la matriz: cuando
+        `codigo_expediente` cruza por la columna MATRIZ (CONTEXTO.md sección
+        3: "3 como MATRIZ"), significa que el propio expediente ES el acuerdo
+        marco de esa fila — su columna MATRIZ vale, trivialmente, el propio
+        `codigo_expediente` que se buscó. Devolver ese valor como "la matriz
+        de este expediente" sería inventarla por auto-referencia (sección 7:
+        "el sistema nunca inventa una matriz").
+
+        La segunda importa para el "Código interno" (sesión 2026-09-18,
+        bloque 2): las cuatro claves no son intercambiables. Solo
+        `codigo_expediente` → `Nº Expediente` garantiza que la fila hallada
+        describa a este expediente; las otras tres encuentran la fila de otro
+        (el pedido que declara a este como su matriz, o la matriz de este),
+        y su `Nº Interno` es el de ESE otro expediente."""
+        propia = True
         for clave in (codigo_expediente, codigo_matriz):
             clave_normalizada = normalizar_codigo_expediente(clave)
             if clave_normalizada is None:
+                propia = False
                 continue
             fila = self._por_nexpediente.get(clave_normalizada)
             if fila is not None:
-                return fila, True
+                return fila, True, propia
             fila = self._por_matriz.get(clave_normalizada)
             if fila is not None:
-                return fila, False
+                # Por MATRIZ, la fila es la de otro expediente incluso cuando
+                # la clave buscada fue el `codigo_expediente` propio.
+                return fila, False, False
+            propia = False
         return None
 
 
@@ -214,12 +240,20 @@ def cruzar_codigo_proyecto(
     indice = _cargar_indice(ruta_excel)
     encontrado = indice.buscar(codigo_expediente, codigo_matriz)
     if encontrado is None:
-        return CruceCodigos(codigo_interno=None, codigo_proyecto=None, codigo_matriz=None, cruzado=False)
-    fila, coincide_por_nexpediente = encontrado
+        return CruceCodigos(
+            codigo_interno=None, codigo_proyecto=None, codigo_matriz=None, cruzado=False, fila_propia=False
+        )
+    fila, coincide_por_nexpediente, fila_propia = encontrado
 
     nº_interno = fila.get("Nº Interno")
     return CruceCodigos(
-        codigo_interno=str(nº_interno).strip() if nº_interno is not None else None,
+        # Sesión 2026-09-18, bloque 2: el `Nº Interno` de una fila que no es
+        # la de este expediente pertenece a otro expediente -- no se devuelve.
+        # `cruzado` sigue siendo `True`: la fila existe y su columna MATRIZ
+        # puede seguir aportando información (ver `asegurar_cruce_codigos`).
+        codigo_interno=(
+            str(nº_interno).strip() if fila_propia and nº_interno is not None else None
+        ),
         codigo_proyecto=normalizar_codigo_expediente(fila.get("Nº Expediente")),
         # Solo cuando el cruce fue por Nº Expediente el campo MATRIZ de la
         # fila es información nueva (la matriz real de este expediente). Por
@@ -227,6 +261,7 @@ def cruzar_codigo_proyecto(
         # docstring de `buscar`): no hay matriz que devolver.
         codigo_matriz=normalizar_codigo_expediente(fila.get("MATRIZ")) if coincide_por_nexpediente else None,
         cruzado=True,
+        fila_propia=fila_propia,
     )
 
 
@@ -263,7 +298,15 @@ def asegurar_cruce_codigos(db: Session, expediente) -> Optional[str]:
     se marca `matriz_conflicto` y se explica por qué."""
     matriz_actual = normalizar_codigo_expediente(expediente.codigo_matriz)
     if expediente.codigos_cruzados is not None:
-        if expediente.codigos_cruzados or matriz_actual == expediente.codigo_matriz_en_cruce:
+        # Sesión 2026-09-18, bloque 2: un cruce que tuvo éxito antes de que
+        # existiera `cruce_fila_propia` no sabe por cuál de las cuatro claves
+        # entró, así que no se puede decidir si su "Código interno" es el
+        # suyo o el de otro expediente -- se rehace una vez (el índice ya está
+        # en memoria, no cuesta nada) y a partir de ahí vuelve a no repetirse.
+        ya_sabido = not (expediente.codigos_cruzados and expediente.cruce_fila_propia is None)
+        if ya_sabido and (
+            expediente.codigos_cruzados or matriz_actual == expediente.codigo_matriz_en_cruce
+        ):
             return None
     if not settings.codigos_proyecto_path:
         return None
@@ -275,9 +318,14 @@ def asegurar_cruce_codigos(db: Session, expediente) -> Optional[str]:
         return None
     expediente.codigos_cruzados = resultado.cruzado
     expediente.codigo_matriz_en_cruce = matriz_actual
+    expediente.cruce_fila_propia = resultado.fila_propia if resultado.cruzado else None
     if not resultado.cruzado:
         return None
 
+    # `codigo_interno` se recalcula entero en cada intento, nunca se acumula:
+    # un `None` de un cruce por fila ajena tiene que BORRAR el valor heredado
+    # en una pasada anterior, no dejarlo puesto (mismo criterio que
+    # `baja_lote`/`precio_adjudicado`, CONTEXTO.md sesión 2026-09-09 bloque 3).
     expediente.codigo_interno = resultado.codigo_interno
     if not resultado.codigo_matriz:
         return None

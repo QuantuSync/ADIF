@@ -198,7 +198,25 @@ def consultar_catalogo(
     # paginar no salte filas ni las repita: "completitud" solo antepone el
     # criterio nuevo, nunca sustituye el desempate por expediente/lote/orden
     # de aparición.
-    desempate = (Expediente.codigo_expediente, Lote.identificador_lote, LineaCatalogo.orden_aparicion)
+    #
+    # `LineaCatalogo.id` como ÚLTIMO desempate (sesión 2026-09-18, bloque 3;
+    # pendiente anotado desde la sesión 2026-09-15): los tres primeros
+    # criterios no forman un orden total -- `orden_aparicion` es la posición
+    # de la fila dentro de SU tabla, así que se repite entre dos documentos
+    # del mismo expediente y lote, y Postgres no garantiza ningún orden entre
+    # filas empatadas. Efecto real medido: tres parejas de filas contiguas
+    # (970/971, 1266/1267, 1284/1285, en `6.21/28510.0109`/`0110`/`0111`)
+    # intercambiaban posición entre dos exportaciones del mismo catálogo sin
+    # cambiar de contenido, y la comparación byte a byte de dos entregables
+    # idénticos salía con diferencias. `id` es único y nunca cambia para una
+    # línea ya guardada, así que cierra el orden sin alterar ninguno de los
+    # tres criterios anteriores.
+    desempate = (
+        Expediente.codigo_expediente,
+        Lote.identificador_lote,
+        LineaCatalogo.orden_aparicion,
+        LineaCatalogo.id,
+    )
     if orden == "alfabetico":
         criterio = desempate
     else:
