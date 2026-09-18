@@ -13,12 +13,14 @@ a `app.scraping.job.ejecutar_scraping_expediente` y a
 from __future__ import annotations
 
 import hashlib
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Iterable, Optional
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.models import Documento, EstadoExpediente, Expediente, LineaCatalogo
 
 # Sube este valor cuando un cambio en `app.extraccion.*` deba forzar el
@@ -131,24 +133,72 @@ def _con_tz(momento: datetime) -> datetime:
     return momento.replace(tzinfo=timezone.utc) if momento.tzinfo is None else momento
 
 
-def sin_publicar_reintento_desde(expediente: Expediente, plazo: timedelta) -> Optional[datetime]:
+# Sesión 2026-09-18 (tercera parte). El año va dentro del propio código del
+# expediente y se escribe de dos formas en el corpus real: `6.26/28510.0057` y
+# `19/28510` lo llevan delante de la barra (dos cifras), `28510/2023` y
+# `28510Z/2018` detrás (cuatro). Se lee de forma estructural, por la posición
+# en el código, nunca buscando "algo que parezca un año" en cualquier sitio:
+# `28510` también son cifras y no es ningún año.
+_ANIO_DELANTE = re.compile(r"^\d{1,2}\.(\d{2})$|^(\d{2})$")
+_ANIO_DETRAS = re.compile(r"^(\d{4})")
+
+
+def anio_del_codigo(codigo: Optional[str]) -> Optional[int]:
+    """El año de un código de expediente, o `None` si no se puede leer con
+    certeza. Un código que no encaje en ninguna de las dos formas conocidas no
+    se adivina: se trata como viejo, que es el comportamiento conservador (el
+    plazo largo, menos búsquedas)."""
+    if not codigo:
+        return None
+    partes = codigo.strip().split("/")
+    encaje = _ANIO_DELANTE.match(partes[0])
+    if encaje:
+        return 2000 + int(encaje.group(1) or encaje.group(2))
+    if len(partes) > 1:
+        encaje = _ANIO_DETRAS.match(partes[1])
+        if encaje:
+            return int(encaje.group(1))
+    return None
+
+
+def plazo_sin_publicar(expediente: Expediente, plazo: timedelta, ahora: datetime) -> timedelta:
+    """Cuánto espera este expediente antes de que se le vuelva a buscar. Ver
+    `settings.sin_publicar_reintento_dias_recientes` para el porqué: un
+    procedimiento del año en curso puede publicarse cualquier semana, uno de
+    hace una década no."""
+    anio = anio_del_codigo(expediente.codigo_expediente)
+    if anio is None:
+        return plazo
+    if ahora.year - anio <= max(settings.sin_publicar_anios_recientes, 0):
+        return timedelta(days=settings.sin_publicar_reintento_dias_recientes)
+    return plazo
+
+
+def sin_publicar_reintento_desde(
+    expediente: Expediente, plazo: timedelta, ahora: Optional[datetime] = None
+) -> Optional[datetime]:
     """Desde cuándo toca volver a buscar un `sin_publicar` en la Plataforma.
     Un negativo sin confirmar (ver `sin_publicar_confirmado`) toca desde que
-    se marcó, es decir, ya (sin fecha: `datetime.min`); uno confirmado,
-    `plazo` después de confirmarse -- que la Plataforma no tuviera un expediente hace dos
-    semanas no dice que siga sin tenerlo (puede publicarse después, o el
-    negativo ser un fallo que la búsqueda aún no reconoce). `None` si el
-    expediente no está `sin_publicar`."""
+    se marcó, es decir, ya (sin fecha: `datetime.min`); uno confirmado, un
+    plazo después de confirmarse -- que la Plataforma no tuviera un expediente
+    hace dos semanas no dice que siga sin tenerlo (puede publicarse después, o
+    el negativo ser un fallo que la búsqueda aún no reconoce). `None` si el
+    expediente no está `sin_publicar`.
+
+    El plazo depende del año del expediente (`plazo_sin_publicar`); `ahora`
+    solo se usa para saber en qué año estamos."""
     if expediente.estado != EstadoExpediente.sin_publicar:
         return None
     if expediente.sin_publicar_en is None:
         return datetime.min.replace(tzinfo=timezone.utc)
     marcado = _con_tz(expediente.sin_publicar_en)
-    return marcado + plazo if sin_publicar_confirmado(expediente) else marcado
+    if not sin_publicar_confirmado(expediente):
+        return marcado
+    return marcado + plazo_sin_publicar(expediente, plazo, ahora or datetime.now(timezone.utc))
 
 
 def debe_rebuscar_sin_publicar(expediente: Expediente, plazo: timedelta, ahora: datetime) -> bool:
-    desde = sin_publicar_reintento_desde(expediente, plazo)
+    desde = sin_publicar_reintento_desde(expediente, plazo, ahora)
     return desde is not None and desde <= ahora
 
 

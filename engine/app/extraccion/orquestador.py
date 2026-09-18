@@ -103,6 +103,51 @@ from app.models import (
 # (tests/extraccion/test_pipeline_anejo.py).
 LOTE_UNICO = "1"
 
+
+def _lotes_candidatos_del_cuadro(expediente, lotes, lote_propio) -> Optional[dict]:
+    """Los N lotes que el expediente DICE tener, para dejar que el propio
+    cuadro de precios los identifique (ver el comentario largo en el bucle de
+    documentos de `ejecutar_extraccion_expediente`). `None` -- no se intenta --
+    salvo que se cumpla todo esto:
+
+    - el expediente declara más de un lote (`lotes_totales_declarados`);
+    - no tiene ninguno identificado por número: solo el sentinela `LOTE_UNICO`;
+    - no es él mismo uno de los lotes (`lote_propio`), caso que ya tiene su
+      propio camino;
+    - y ese lote sentinela **no lleva ningún dato atribuido** -- ni baja, ni
+      importe de licitación, ni de adjudicación. Si lo llevara, partirlo en N
+      convertiría un dato del conjunto de la licitación en un dato del lote 1,
+      que es justo la clase de atribución equivocada que este sistema no hace
+      (CONTEXTO.md sección 26, `6.24/28510.0088`).
+    """
+    declarados = expediente.lotes_totales_declarados
+    if not declarados or declarados <= 1 or lote_propio is not None:
+        return None
+    if len(lotes) != 1 or lotes[0].identificador_lote != LOTE_UNICO:
+        return None
+    sentinela = lotes[0]
+    if (
+        sentinela.baja_lote is not None
+        or sentinela.importe_licitacion is not None
+        or sentinela.importe_adjudicacion is not None
+    ):
+        return None
+    return {str(numero): None for numero in range(1, declarados + 1)}
+
+
+def _el_cuadro_declara_todos_los_lotes(resultado, candidatos: dict) -> bool:
+    """El intento solo vale si el cuadro de precios atribuye **todas** sus
+    filas a un lote y cubre los N declarados. Con una sola fila huérfana se
+    descarta: una huérfana se queda fuera del entregable, y este cambio no
+    puede quitar ni una fila de lo que ya salía."""
+    if not resultado.lineas:
+        return False
+    identificadores = {linea.get("identificador_lote") for linea in resultado.lineas}
+    if None in identificadores:
+        return False
+    return identificadores == set(candidatos)
+
+
 # Documentos de estas plantillas declaran la baja en texto (CONTEXTO.md sección
 # 4 y docstring de app.extraccion.baja). `propuesta_dt` añadido en la sesión
 # de arreglos pequeños (docs/analisis-corpus.md hallazgo 4): sin esto, aunque
@@ -1537,6 +1582,25 @@ def ejecutar_extraccion_expediente(
             motivo_revision = _acumular_motivo(motivo_revision, asegurar_cruce_codigos(db, expediente))
             db.commit()
 
+            # Bloque 2, sesión 2026-09-18 (tercera parte): un expediente que
+            # declara N lotes y todavía no tiene ninguno identificado por
+            # número (no hay adjudicación que los desglose) se queda con el
+            # lote sentinela `LOTE_UNICO`, y con él la etapa 3.5 —la que
+            # asocia cada tabla a su cabecera "LOTE N" por geometría
+            # (`app.extraccion.lote_tabla`)— no llega a ejecutarse nunca: todas
+            # las tablas del documento caen en el mismo lote y sus filas se
+            # funden por clave. Caso real: `6.26/28510.0064` (balasto, 6
+            # lotes), cuyo ANEJO_1 trae SEIS cuadros de precios, uno por lote,
+            # con los mismos seis códigos P-1..P-6 y precios distintos.
+            #
+            # Aquí se le deja intentarlo, **sin poder perder ni una fila**: se
+            # procesa el documento con los N lotes declarados y el resultado
+            # solo se acepta si el propio cuadro de precios atribuye TODAS sus
+            # filas a un lote y cubre los N. Si una sola fila quedara huérfana
+            # —que es lo que la sacaría del entregable— se descarta el intento
+            # y se procesa como siempre. Esa garantía es la que hace que esto
+            # no necesite medirse expediente a expediente antes de activarse.
+            lotes_candidatos_del_cuadro = _lotes_candidatos_del_cuadro(expediente, lotes, lote_propio)
             lotes_por_identificador = {l.identificador_lote: l.id for l in lotes}
             # Los lotes de los hermanos siguen contando para asociar cada
             # tabla a su "LOTE N" (si no, sus tablas se leerían como de un
@@ -1558,6 +1622,9 @@ def ejecutar_extraccion_expediente(
             # extraídas de los demás — CONTEXTO.md sección 12, "lo que no cuadra
             # va a la cola de revisión", no revienta el expediente entero.
             documentos_con_error: list[str] = []
+            # Documentos cuyo cuadro de precios identificó por sí solo los N
+            # lotes declarados (ver `_lotes_candidatos_del_cuadro`).
+            lotes_del_cuadro: list[str] = []
             # Líneas guardadas en esta pasada por los documentos anteriores
             # (`guardar_lineas_catalogo(ids_vivas=...)`).
             ids_tocadas_expediente: set[int] = set()
@@ -1596,14 +1663,30 @@ def ejecutar_extraccion_expediente(
                 # otro no, dentro del mismo documento.
                 lineas_creadas_doc = lineas_actualizadas_doc = 0
                 try:
-                    resultado = procesar_anejo(
-                        io.BytesIO(contenido), item.paginas, item.documento.id, expediente.id,
-                        bajas_por_identificador, db, model_provider,
-                        lote_propio=lote_propio,
-                        documento_de_otro_lote=_es_contrato_de_otro_lote(
-                            expediente, identidades_por_documento, item.documento.id
-                        ),
+                    de_otro_lote = _es_contrato_de_otro_lote(
+                        expediente, identidades_por_documento, item.documento.id
                     )
+                    resultado = None
+                    if lotes_candidatos_del_cuadro is not None:
+                        tentativo = procesar_anejo(
+                            io.BytesIO(contenido), item.paginas, item.documento.id, expediente.id,
+                            {**bajas_por_identificador, **lotes_candidatos_del_cuadro}, db, model_provider,
+                            lote_propio=lote_propio, documento_de_otro_lote=de_otro_lote,
+                        )
+                        if _el_cuadro_declara_todos_los_lotes(tentativo, lotes_candidatos_del_cuadro):
+                            resultado = tentativo
+                            for identificador in sorted(lotes_candidatos_del_cuadro):
+                                lote_nuevo = _obtener_o_crear_lote(db, expediente.id, identificador)
+                                lotes_por_identificador[identificador] = lote_nuevo.id
+                            db.commit()
+                            lotes = list(expediente.lotes)
+                            lotes_del_cuadro.append(item.documento.nombre_archivo)
+                    if resultado is None:
+                        resultado = procesar_anejo(
+                            io.BytesIO(contenido), item.paginas, item.documento.id, expediente.id,
+                            bajas_por_identificador, db, model_provider,
+                            lote_propio=lote_propio, documento_de_otro_lote=de_otro_lote,
+                        )
                     if resultado.lineas and item.reconocido:
                         for linea in resultado.lineas:
                             marcar_linea_reconocida(linea)
@@ -1671,6 +1754,14 @@ def ejecutar_extraccion_expediente(
                         "que no se pudo interpretar, marcadas para revisión",
                     )
 
+            if lotes_del_cuadro:
+                motivo_revision = _acumular_motivo(
+                    motivo_revision,
+                    f"los {expediente.lotes_totales_declarados} lotes de este expediente se han identificado "
+                    "por las cabeceras \"LOTE N\" del propio cuadro de precios, no por un documento de "
+                    "adjudicación (no hay ninguno todavía): " + ", ".join(lotes_del_cuadro)
+                    + " — confirmar antes de dar por buena la atribución de cada precio a su lote",
+                )
             if documentos_reconocidos:
                 motivo_revision = _acumular_motivo(
                     motivo_revision,

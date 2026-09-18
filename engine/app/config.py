@@ -182,6 +182,20 @@ class Settings(BaseSettings):
     # quedan para el ciclo siguiente.
     sin_publicar_reintento_dias: float = 14.0
     sin_publicar_reintentos_por_ciclo: int = 50
+    # Sesión 2026-09-18 (tercera parte): el plazo de arriba es el de un
+    # expediente viejo. Uno del año en curso (o del anterior) es un
+    # procedimiento vivo que puede publicarse cualquier semana --
+    # `6.26/28510.0057` y `0083` se buscaron el 16/09, no estaban, y el 18/09
+    # ya estaban publicados: con catorce días se habrían encontrado el 30/09,
+    # doce días tarde. Para esos el plazo es corto, así que el ciclo semanal
+    # los vuelve a buscar SIEMPRE. Para uno de 2014, que lleva una década sin
+    # publicarse, catorce días sigue siendo lo razonable: cada búsqueda evitada
+    # cuenta contra una Plataforma lenta y frágil (CONTEXTO.md sección 14).
+    # `sin_publicar_anios_recientes` es la distancia en años, contra el año
+    # que va en el propio código del expediente; 0 lo dejaría solo en el año
+    # en curso.
+    sin_publicar_reintento_dias_recientes: float = 3.0
+    sin_publicar_anios_recientes: int = 1
 
     # Copias de seguridad automáticas (bloque de copias de seguridad,
     # sesión 2026-09-06): antes no había ninguna periódica, solo volcados

@@ -2,9 +2,12 @@
 frescura sin abrir ningún documento ni tocar la cascada de extracción."""
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from app.mantenimiento.frescura import (
     VERSION_LOGICA_BUSQUEDA,
     VERSION_LOGICA_EXTRACCION,
+    anio_del_codigo,
     contar_lineas_catalogo,
     debe_descargar,
     debe_estampar_extraccion,
@@ -15,6 +18,7 @@ from app.mantenimiento.frescura import (
     estampar_descarga_exitosa,
     estampar_extraccion,
     huella_documentos,
+    plazo_sin_publicar,
     sin_publicar_confirmado,
     sin_publicar_reintento_desde,
 )
@@ -217,28 +221,31 @@ def test_solo_se_rebusca_lo_que_esta_sin_publicar():
 
 
 def test_api_distingue_negativo_confirmado_y_de_antes(db_session):
+    # Expediente de 2024 a propósito: con uno del año en curso el plazo es el
+    # corto (`plazo_sin_publicar`) y este test dependería del año en que se
+    # ejecute. El plazo corto tiene sus propios tests, más abajo.
     confirmado = _expediente(
-        codigo_expediente="6.26/28510.0101", estado=EstadoExpediente.sin_publicar,
+        codigo_expediente="6.24/28510.0101", estado=EstadoExpediente.sin_publicar,
         sin_publicar_en=datetime(2026, 9, 15, tzinfo=timezone.utc), sin_publicar_version_busqueda=VERSION_LOGICA_BUSQUEDA,
     )
     de_antes = _expediente(
-        codigo_expediente="6.26/28510.0102", estado=EstadoExpediente.sin_publicar,
+        codigo_expediente="6.24/28510.0102", estado=EstadoExpediente.sin_publicar,
         sin_publicar_en=datetime(2026, 9, 7, 17, 17, tzinfo=timezone.utc),
     )
-    normal = _expediente(codigo_expediente="6.26/28510.0103", estado=EstadoExpediente.completado)
+    normal = _expediente(codigo_expediente="6.24/28510.0103", estado=EstadoExpediente.completado)
     db_session.add_all([confirmado, de_antes, normal])
     db_session.commit()
 
     salida = {e.codigo_expediente: ExpedienteOut.model_validate(e).model_dump() for e in (confirmado, de_antes, normal)}
 
-    assert salida["6.26/28510.0101"]["sin_publicar_confirmado"] is True
-    assert salida["6.26/28510.0101"]["sin_publicar_reintento_desde"] == datetime(2026, 9, 29, tzinfo=timezone.utc)
-    assert salida["6.26/28510.0102"]["sin_publicar_confirmado"] is False
-    assert salida["6.26/28510.0102"]["sin_publicar_reintento_desde"].replace(tzinfo=timezone.utc) == datetime(
+    assert salida["6.24/28510.0101"]["sin_publicar_confirmado"] is True
+    assert salida["6.24/28510.0101"]["sin_publicar_reintento_desde"] == datetime(2026, 9, 29, tzinfo=timezone.utc)
+    assert salida["6.24/28510.0102"]["sin_publicar_confirmado"] is False
+    assert salida["6.24/28510.0102"]["sin_publicar_reintento_desde"].replace(tzinfo=timezone.utc) == datetime(
         2026, 9, 7, 17, 17, tzinfo=timezone.utc
     )
-    assert salida["6.26/28510.0103"]["sin_publicar_confirmado"] is None
-    assert salida["6.26/28510.0103"]["sin_publicar_reintento_desde"] is None
+    assert salida["6.24/28510.0103"]["sin_publicar_confirmado"] is None
+    assert salida["6.24/28510.0103"]["sin_publicar_reintento_desde"] is None
 
 
 def test_estampar_descarga_exitosa(db_session):
@@ -339,3 +346,60 @@ def test_contar_lineas_catalogo(db_session):
     db_session.commit()
 
     assert contar_lineas_catalogo(db_session, exp.id) == 2
+
+
+# --- Sesión 2026-09-18 (tercera parte): el plazo depende del año ------------
+
+
+@pytest.mark.parametrize(
+    "codigo, esperado",
+    [
+        ("6.26/28510.0057", 2026),
+        ("2.24/04110.0036", 2024),
+        ("19/28510", 2019),          # forma inusual, año delante sin punto
+        ("28510/2023", 2023),        # forma inusual, año detrás
+        ("28510Z/2018", 2018),
+        ("2.26/28510.5002/01", 2026),
+        ("28510", None),             # sin año legible: no se adivina
+        ("", None),
+        (None, None),
+    ],
+)
+def test_anio_del_codigo(codigo, esperado):
+    assert anio_del_codigo(codigo) == esperado
+
+
+def test_el_expediente_del_anio_en_curso_se_rebusca_con_el_plazo_corto():
+    """El caso real: `6.26/28510.0057` se buscó el 16/09 y no estaba; el 18/09
+    ya estaba publicado. Con catorce días se habría encontrado el 30/09."""
+    reciente = _sin_publicar(_AHORA - timedelta(days=4), VERSION_LOGICA_BUSQUEDA)
+    reciente.codigo_expediente = "6.26/28510.0057"
+
+    assert plazo_sin_publicar(reciente, _PLAZO, _AHORA) == timedelta(days=3)
+    assert debe_rebuscar_sin_publicar(reciente, _PLAZO, _AHORA) is True
+
+
+def test_el_expediente_viejo_sigue_con_el_plazo_largo():
+    """Cada búsqueda evitada cuenta contra una Plataforma lenta: uno de 2014
+    lleva una década sin publicarse y no merece una búsqueda cada tres días."""
+    viejo = _sin_publicar(_AHORA - timedelta(days=4), VERSION_LOGICA_BUSQUEDA)
+    viejo.codigo_expediente = "6.14/28510.0126"
+
+    assert plazo_sin_publicar(viejo, _PLAZO, _AHORA) == _PLAZO
+    assert debe_rebuscar_sin_publicar(viejo, _PLAZO, _AHORA) is False
+
+
+def test_el_del_anio_anterior_tambien_cuenta_como_reciente():
+    del_anio_anterior = _sin_publicar(_AHORA - timedelta(days=4), VERSION_LOGICA_BUSQUEDA)
+    del_anio_anterior.codigo_expediente = "6.25/28510.0175"
+
+    assert plazo_sin_publicar(del_anio_anterior, _PLAZO, _AHORA) == timedelta(days=3)
+
+
+def test_un_codigo_sin_año_legible_usa_el_plazo_largo():
+    """Conservador a propósito: lo que no se sabe leer no se rebusca más a
+    menudo, se rebusca menos."""
+    raro = _sin_publicar(_AHORA - timedelta(days=4), VERSION_LOGICA_BUSQUEDA)
+    raro.codigo_expediente = "28510"
+
+    assert plazo_sin_publicar(raro, _PLAZO, _AHORA) == _PLAZO
