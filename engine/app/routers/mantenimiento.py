@@ -51,6 +51,16 @@ class CicloMantenimientoPeticion(BaseModel):
     # mes anterior, sin esperar a que vuelva a tocarle al ciclo programado.
     sindicacion_desactivada: bool = False
     sindicacion_periodo: Optional[str] = None
+    # Sesión 2026-09-18, bloque 4: el ciclo lee estas dos del payload desde
+    # que existe el descubrimiento por búsqueda (`app.mantenimiento.ciclo`),
+    # pero este endpoint nunca las reenviaba -- construye el payload campo a
+    # campo, y estas dos faltaban. Efecto real medido: cada reproceso lanzado
+    # desde aquí (o desde el botón de la web, que manda `{}`) repetía la
+    # búsqueda completa en la Plataforma aunque no hiciera ninguna falta --
+    # las dos pasadas de la sesión 2026-09-17 la repitieron para 0
+    # expedientes nuevos, a 10 s de espaciado por petición.
+    busqueda_desactivada: bool = False
+    busqueda_fragmentos: Optional[list[str]] = None
 
 
 @router.post("/mantenimiento/ejecutar", response_model=TrabajoOut)
@@ -69,6 +79,8 @@ def lanzar_ciclo_mantenimiento(
         "forzar_expedientes": peticion.forzar_expedientes,
         "sindicacion_desactivada": peticion.sindicacion_desactivada,
         "sindicacion_periodo": peticion.sindicacion_periodo,
+        "busqueda_desactivada": peticion.busqueda_desactivada,
+        "busqueda_fragmentos": peticion.busqueda_fragmentos,
         "disparado_por": DISPARADO_POR_MANUAL,
     }
     trabajo = encolar_trabajo(db, tipo=TIPO_TRABAJO, payload=payload)

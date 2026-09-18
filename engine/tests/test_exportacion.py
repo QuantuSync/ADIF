@@ -267,3 +267,109 @@ def test_generar_excel_no_confunde_huerfana_distinta_con_duplicado(db_session):
     contenido_resumen = "\n".join(textos)
     assert "duplicado" not in contenido_resumen.lower()
     assert "no indica en ningún sitio cercano a qué lote pertenece" in contenido_resumen
+
+
+# --- Bloque 1, sesión 2026-09-18: "Código de expediente" siempre relleno -----
+# El cruce con el Excel de códigos de ADIF actuaba de interruptor sobre esa
+# columna: sin cruce salía vacía aunque el número se conociera perfectamente,
+# y el cliente filtraba por ella y concluía que faltaban expedientes que sí
+# están. El cruce sigue gobernando "Código interno", "Código matriz" y
+# "Estado del contrato (SAP)".
+
+
+def _fila_unica(db_session, **campos_expediente):
+    expediente = Expediente(codigo_expediente="6.26/28510.0016", **campos_expediente)
+    db_session.add(expediente)
+    db_session.commit()
+    lote = Lote(expediente_id=expediente.id, identificador_lote="1")
+    db_session.add(lote)
+    db_session.commit()
+    db_session.add(LineaCatalogo(
+        expediente_id=expediente.id, lote_id=lote.id, clave_linea="P-001", orden_aparicion=0,
+        codigo_precio="P-001", matricula="601200010", descripcion="TORNILLO BRIDA",
+        precio_unitario=Decimal("4.29"),
+    ))
+    db_session.commit()
+    libro = openpyxl.load_workbook(io.BytesIO(generar_excel_catalogo(db_session)))
+    hoja = libro["Materiales"]
+    cabecera = [c.value for c in next(hoja.iter_rows())]
+    valores = [c.value for c in list(hoja.iter_rows())[1]]
+    return dict(zip(cabecera, valores)), libro
+
+
+def test_codigo_de_expediente_se_rellena_aunque_no_cruce(db_session):
+    fila, _ = _fila_unica(db_session, codigos_cruzados=False)
+    assert fila["Código de expediente"] == "6.26/28510.0016"
+    # Y coincide con la columna que siempre trajo el dato del documento.
+    assert fila["Nº de expediente (documento)"] == "6.26/28510.0016"
+
+
+def test_sin_cruce_las_otras_tres_columnas_siguen_vacias(db_session):
+    fila, _ = _fila_unica(db_session, codigos_cruzados=False)
+    assert fila["Código interno"] == " "
+    assert fila["Código matriz"] == " "
+    assert fila["Estado del contrato (SAP)"] == " "
+
+
+def test_con_cruce_las_cuatro_columnas_se_rellenan(db_session):
+    fila, _ = _fila_unica(
+        db_session, codigos_cruzados=True, codigo_interno="24036",
+        codigo_matriz="6.25/28510.0016", estado_contrato_sap="En ejecución",
+    )
+    assert fila["Código de expediente"] == "6.26/28510.0016"
+    assert fila["Código interno"] == "24036"
+    assert fila["Código matriz"] == "6.25/28510.0016"
+    assert fila["Estado del contrato (SAP)"] == "En ejecución"
+
+
+# --- Bloque 2: motivo para las celdas vacías de las columnas del expediente --
+
+
+def test_las_columnas_del_expediente_vacias_llevan_motivo(db_session):
+    fila, _ = _fila_unica(db_session, codigos_cruzados=False)
+    motivo = fila["Motivo de las celdas vacías"]
+    assert "Código interno: no consta" in motivo
+    assert "Código matriz: no consta" in motivo
+    assert "Estado del contrato (SAP): no consta" in motivo
+    assert "Título expediente y Objeto del contrato (documento): no consta" in motivo
+    # "Código de expediente" ya no puede quedar vacía, así que nunca aparece.
+    assert "Código de expediente:" not in motivo
+
+
+def test_expediente_completo_no_genera_motivos_de_sus_columnas(db_session):
+    fila, _ = _fila_unica(
+        db_session, codigos_cruzados=True, codigo_interno="24036",
+        codigo_matriz="6.25/28510.0016", estado_contrato_sap="En ejecución",
+        nombre_proyecto="Suministro de carril",
+    )
+    motivo = fila["Motivo de las celdas vacías"] or ""
+    for columna in ("Código interno", "Código matriz", "Estado del contrato (SAP)", "Título expediente"):
+        assert f"{columna}:" not in motivo
+
+
+# --- Bloque 3, segunda parte: la nota doble del Resumen ---------------------
+
+
+def test_resumen_explica_las_dos_formas_de_material_repetido():
+    libro = Workbook()
+    _escribir_resumen(libro, incluidas=10, excluidas_por_categoria=Counter(), incluir_pendientes_sin_lote=False)
+    contenido = "\n".join(
+        str(c.value) for fila in libro["Resumen"].iter_rows() for c in fila if c.value is not None
+    )
+    # 1) entre expedientes de la misma licitación, por compartir cuadro
+    assert "comparten el mismo" in contenido or "compartir el mismo" in contenido
+    assert "cuadro de precios" in contenido
+    # 2) dentro de un mismo expediente, por dos códigos de precio distintos
+    assert "dos códigos de" in contenido and "precio distintos" in contenido
+    # y la promesa de que no se toca nada
+    assert "no se junta ni se elimina ninguna" in contenido
+
+
+def test_resumen_explica_por_que_comentarios_va_vacia():
+    libro = Workbook()
+    _escribir_resumen(libro, incluidas=10, excluidas_por_categoria=Counter(), incluir_pendientes_sin_lote=False)
+    contenido = "\n".join(
+        str(c.value) for fila in libro["Resumen"].iter_rows() for c in fila if c.value is not None
+    )
+    assert "Comentarios" in contenido
+    assert "escriba en ella quien revise" in contenido

@@ -166,16 +166,42 @@ def _cargar_lineas(db: Session) -> list[_LineaAuditable]:
     ]
 
 
+MENSAJE_DUPLICADAS_CODIGOS_DISTINTOS = "el propio documento repite el material con códigos de precio distintos"
+
+
 def _check_duplicadas_exactas(db: Session) -> list[Hallazgo]:
     """"Líneas duplicadas exactas dentro del mismo expediente y lote":
     mismo lote, misma matrícula (o su ausencia), misma descripción, misma
     cantidad y mismo precio unitario en más de una fila -- el mismo patrón
     real que el duplicado reportado en `6.23/28510.0051` (P-0058/P-0059
-    antes del arreglo de esta sesión, ver `app.catalogo._dividir_fila_multiple`)."""
+    antes del arreglo de esta sesión, ver `app.catalogo._dividir_fila_multiple`).
+
+    **El `codigo_precio` decide la gravedad** (decisión del cliente, sesión
+    2026-09-18). Es la clave de la línea dentro del documento (CONTEXTO.md
+    sección 2: "Código de precio [...] Esta sí es clave"), así que dos filas
+    por lo demás idénticas significan cosas distintas según lo que traigan
+    ahí:
+
+    - **Mismo código de precio, o sin código**: la misma línea del documento
+      contada dos veces. Es un error de extracción -- no hay forma de que el
+      documento declare dos veces la misma línea bajo la misma clave.
+    - **Códigos de precio distintos**: el propio documento lista el material
+      dos veces, con dos claves propias (el mismo apartado repetido en dos
+      secciones del cuadro). Es legítimo: aviso, para que alguien lo confirme,
+      nunca error. Verificado contra los documentos reales de `0051`/`0060` y
+      `4.25/28510.0132` en la sesión 2026-09-16 (noche) -- son los 11 grupos
+      que esta comprobación venía marcando como error desde entonces.
+
+    En los dos casos la auditoría solo mira y avisa: no funde ni borra nunca
+    ninguna línea (docstring del módulo)."""
     filas = db.execute(
         select(
             Expediente.codigo_expediente,
             func.count(LineaCatalogo.id).label("n"),
+            func.count(func.distinct(LineaCatalogo.codigo_precio)).label("codigos_distintos"),
+            func.count(LineaCatalogo.id)
+            .filter(LineaCatalogo.codigo_precio.is_(None))
+            .label("sin_codigo"),
         )
         .join(Expediente, Expediente.id == LineaCatalogo.expediente_id)
         .where(
@@ -194,21 +220,49 @@ def _check_duplicadas_exactas(db: Session) -> list[Hallazgo]:
     ).all()
     if not filas:
         return []
-    expedientes, total_expedientes = _limitar_expedientes(f.codigo_expediente for f in filas)
-    total_lineas = sum(f.n for f in filas)
-    return [
-        Hallazgo(
-            categoria="lineas_duplicadas_exactas",
-            gravedad="error",
-            mensaje=(
-                f"{len(filas)} grupo(s) de líneas duplicadas exactas (misma matrícula, descripción, "
-                f"cantidad y precio, dentro del mismo expediente y lote) -- {total_lineas} línea(s) en total."
-            ),
-            expedientes=expedientes,
-            total_afectados=total_expedientes,
-            detalle={"grupos": len(filas), "lineas": total_lineas},
+
+    # Un grupo es legítimo solo si TODAS sus filas traen código de precio y
+    # todos son distintos entre sí. Basta una sin código, o dos que repitan
+    # código, para que el grupo sea un error de extracción.
+    legitimos = [f for f in filas if f.sin_codigo == 0 and f.codigos_distintos == f.n]
+    defectuosos = [f for f in filas if not (f.sin_codigo == 0 and f.codigos_distintos == f.n)]
+
+    hallazgos: list[Hallazgo] = []
+    if defectuosos:
+        expedientes, total_expedientes = _limitar_expedientes(f.codigo_expediente for f in defectuosos)
+        total_lineas = sum(f.n for f in defectuosos)
+        hallazgos.append(
+            Hallazgo(
+                categoria="lineas_duplicadas_exactas",
+                gravedad="error",
+                mensaje=(
+                    f"{len(defectuosos)} grupo(s) de líneas duplicadas exactas (misma matrícula, descripción, "
+                    f"cantidad y precio, dentro del mismo expediente y lote) con el mismo código de precio o "
+                    f"sin código -- {total_lineas} línea(s) en total."
+                ),
+                expedientes=expedientes,
+                total_afectados=total_expedientes,
+                detalle={"grupos": len(defectuosos), "lineas": total_lineas},
+            )
         )
-    ]
+    if legitimos:
+        expedientes, total_expedientes = _limitar_expedientes(f.codigo_expediente for f in legitimos)
+        total_lineas = sum(f.n for f in legitimos)
+        hallazgos.append(
+            Hallazgo(
+                categoria="lineas_duplicadas_codigo_precio_distinto",
+                gravedad="aviso",
+                mensaje=(
+                    f"{len(legitimos)} grupo(s) de líneas con la misma matrícula, descripción, cantidad y "
+                    f"precio dentro del mismo expediente y lote, pero con códigos de precio distintos: "
+                    f"{MENSAJE_DUPLICADAS_CODIGOS_DISTINTOS} -- {total_lineas} línea(s) en total."
+                ),
+                expedientes=expedientes,
+                total_afectados=total_expedientes,
+                detalle={"grupos": len(legitimos), "lineas": total_lineas},
+            )
+        )
+    return hallazgos
 
 
 def _check_campos_esenciales(lineas: list[_LineaAuditable]) -> list[Hallazgo]:

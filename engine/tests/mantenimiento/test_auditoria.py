@@ -6,7 +6,11 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from app.extraccion.firma_cabecera import calcular_firma_cabecera
-from app.mantenimiento.auditoria import TIPO_TRABAJO, ejecutar_auditoria
+from app.mantenimiento.auditoria import (
+    MENSAJE_DUPLICADAS_CODIGOS_DISTINTOS,
+    TIPO_TRABAJO,
+    ejecutar_auditoria,
+)
 from app.models import (
     Documento,
     DocumentoExpediente,
@@ -80,25 +84,95 @@ def test_sin_ningun_defecto_no_da_hallazgos(db_session):
     assert resultado["total_lineas"] == 2
 
 
-def test_lineas_duplicadas_exactas_dentro_del_mismo_lote(db_session):
+# --- Duplicadas exactas: el código de precio decide la gravedad -------------
+# Decisión del cliente, sesión 2026-09-18. El `codigo_precio` es la clave de
+# la línea dentro del documento (CONTEXTO.md sección 2), así que dos filas por
+# lo demás idénticas significan cosas distintas según lo que traigan ahí.
+
+
+def _duplicado(db, exp, lote, codigo_a, codigo_b):
+    for i, codigo in enumerate((codigo_a, codigo_b)):
+        _linea(
+            db, exp.id, lote.id, clave_linea=f"clave-{i}-{next(_contador_clave)}", codigo_precio=codigo,
+            matricula="123456789", descripcion="TUERCA", cantidad=Decimal("1"), precio_unitario=Decimal("5"),
+        )
+
+
+def test_duplicadas_con_el_mismo_codigo_de_precio_son_error(db_session):
+    """La misma línea del documento contada dos veces: no hay lectura posible."""
     exp = _expediente(db_session)
     lote = _lote(db_session, exp.id)
-    _linea(
-        db_session, exp.id, lote.id, clave_linea="P-1", codigo_precio="P-1",
-        matricula="123456789", descripcion="TUERCA", cantidad=Decimal("1"), precio_unitario=Decimal("5"),
-    )
-    _linea(
-        db_session, exp.id, lote.id, clave_linea="P-2", codigo_precio="P-2",
-        matricula="123456789", descripcion="TUERCA", cantidad=Decimal("1"), precio_unitario=Decimal("5"),
-    )
+    _duplicado(db_session, exp, lote, "P-1", "P-1")
+
+    resultado = ejecutar_auditoria(db_session, _trabajo(db_session))
+
+    hallazgo = next(h for h in resultado["hallazgos"] if h["categoria"] == "lineas_duplicadas_exactas")
+    assert hallazgo["gravedad"] == "error"
+    assert exp.codigo_expediente in hallazgo["expedientes"]
+
+
+def test_duplicadas_sin_codigo_de_precio_son_error(db_session):
+    exp = _expediente(db_session)
+    lote = _lote(db_session, exp.id)
+    _duplicado(db_session, exp, lote, None, None)
+
+    resultado = ejecutar_auditoria(db_session, _trabajo(db_session))
+
+    hallazgo = next(h for h in resultado["hallazgos"] if h["categoria"] == "lineas_duplicadas_exactas")
+    assert hallazgo["gravedad"] == "error"
+
+
+def test_duplicadas_con_una_sola_sin_codigo_siguen_siendo_error(db_session):
+    """Basta una fila sin código para no poder afirmar que el documento las
+    lista como dos entradas propias."""
+    exp = _expediente(db_session)
+    lote = _lote(db_session, exp.id)
+    _duplicado(db_session, exp, lote, "P-1", None)
+
+    resultado = ejecutar_auditoria(db_session, _trabajo(db_session))
+
+    hallazgo = next(h for h in resultado["hallazgos"] if h["categoria"] == "lineas_duplicadas_exactas")
+    assert hallazgo["gravedad"] == "error"
+
+
+def test_duplicadas_con_codigos_de_precio_distintos_son_aviso(db_session):
+    """Los 11 grupos reales del corpus (`0051`/`0060`, `4.25/28510.0132`):
+    el propio documento repite el material con dos claves propias."""
+    exp = _expediente(db_session)
+    lote = _lote(db_session, exp.id)
+    _duplicado(db_session, exp, lote, "P-1", "P-2")
 
     resultado = ejecutar_auditoria(db_session, _trabajo(db_session))
 
     categorias = {h["categoria"] for h in resultado["hallazgos"]}
-    assert "lineas_duplicadas_exactas" in categorias
-    hallazgo = next(h for h in resultado["hallazgos"] if h["categoria"] == "lineas_duplicadas_exactas")
-    assert hallazgo["gravedad"] == "error"
+    assert "lineas_duplicadas_exactas" not in categorias, "ya no es un error de extracción"
+    hallazgo = next(
+        h for h in resultado["hallazgos"] if h["categoria"] == "lineas_duplicadas_codigo_precio_distinto"
+    )
+    assert hallazgo["gravedad"] == "aviso"
+    assert MENSAJE_DUPLICADAS_CODIGOS_DISTINTOS in hallazgo["mensaje"]
     assert exp.codigo_expediente in hallazgo["expedientes"]
+    assert resultado["total_errores"] == 0
+
+
+def test_los_dos_tipos_de_duplicado_a_la_vez_se_separan(db_session):
+    exp_error = _expediente(db_session, codigo="6.24/28510.0001")
+    lote_error = _lote(db_session, exp_error.id)
+    _duplicado(db_session, exp_error, lote_error, "P-9", "P-9")
+
+    exp_aviso = _expediente(db_session, codigo="6.24/28510.0002")
+    lote_aviso = _lote(db_session, exp_aviso.id)
+    _duplicado(db_session, exp_aviso, lote_aviso, "P-1", "P-2")
+
+    resultado = ejecutar_auditoria(db_session, _trabajo(db_session))
+
+    error = next(h for h in resultado["hallazgos"] if h["categoria"] == "lineas_duplicadas_exactas")
+    aviso = next(
+        h for h in resultado["hallazgos"] if h["categoria"] == "lineas_duplicadas_codigo_precio_distinto"
+    )
+    assert error["expedientes"] == [exp_error.codigo_expediente]
+    assert aviso["expedientes"] == [exp_aviso.codigo_expediente]
+    assert error["detalle"]["lineas"] == 2 and aviso["detalle"]["lineas"] == 2
 
 
 def test_precio_cero_es_error(db_session):

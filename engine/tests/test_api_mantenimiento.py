@@ -93,3 +93,36 @@ def test_historial_ingesta_local_no_mezcla_otros_tipos_de_trabajo(cliente, db_se
     datos = resp.json()
     assert len(datos) == 1
     assert datos[0]["tipo"] == "ingesta_local"
+
+
+# --- Bloque 4, sesión 2026-09-18: POST /mantenimiento/ejecutar reenvía la
+# bandera de búsqueda al ciclo. El consumidor (`app.mantenimiento.ciclo`) la
+# leía desde que existe el descubrimiento por búsqueda, pero este endpoint
+# construye el payload campo a campo y esta clave faltaba -- así que cada
+# reproceso repetía la búsqueda completa en la Plataforma para nada.
+
+
+def test_ejecutar_reenvia_busqueda_desactivada_al_ciclo(cliente, db_session):
+    resp = cliente.post("/mantenimiento/ejecutar", json={"busqueda_desactivada": True})
+
+    assert resp.status_code == 200
+    trabajo = db_session.query(TrabajoCola).filter_by(tipo="mantenimiento_ciclo").one()
+    assert trabajo.payload["busqueda_desactivada"] is True
+
+
+def test_ejecutar_reenvia_los_fragmentos_de_busqueda(cliente, db_session):
+    resp = cliente.post("/mantenimiento/ejecutar", json={"busqueda_fragmentos": ["6.26/28510"]})
+
+    assert resp.status_code == 200
+    trabajo = db_session.query(TrabajoCola).filter_by(tipo="mantenimiento_ciclo").one()
+    assert trabajo.payload["busqueda_fragmentos"] == ["6.26/28510"]
+
+
+def test_ejecutar_sin_cuerpo_deja_la_busqueda_activa(cliente, db_session):
+    """El botón de la web manda `{}`: el comportamiento por defecto no cambia."""
+    resp = cliente.post("/mantenimiento/ejecutar", json={})
+
+    assert resp.status_code == 200
+    trabajo = db_session.query(TrabajoCola).filter_by(tipo="mantenimiento_ciclo").one()
+    assert trabajo.payload["busqueda_desactivada"] is False
+    assert trabajo.payload["busqueda_fragmentos"] is None

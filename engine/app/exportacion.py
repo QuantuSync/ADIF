@@ -82,6 +82,15 @@ def _celda_numero(valor) -> object:
 
 # Campo de `app.celdas_vacias` -> su columna en esta hoja.
 _COLUMNA_DE_CAMPO = {
+    # Columnas del expediente (sesión 2026-09-18, bloque 2): hasta hoy una
+    # celda vacía en cualquiera de estas cuatro no tenía motivo en ninguna
+    # parte del entregable.
+    "codigo_interno": "Código interno",
+    "codigo_matriz": "Código matriz",
+    # Un solo motivo para las dos columnas que salen del mismo campo.
+    "titulo_expediente": "Título expediente y Objeto del contrato (documento)",
+    "estado_contrato_sap": "Estado del contrato (SAP)",
+    # Columnas de la línea.
     "matricula": "Matrícula del material",
     "codigo_material": "Código del material",
     "cantidad": "Cantidad",
@@ -93,13 +102,15 @@ _COLUMNA_DE_CAMPO = {
 }
 
 
-def _texto_celdas_vacias(linea: LineaCatalogo, identificador_lote: Optional[str]) -> Optional[str]:
+def _texto_celdas_vacias(
+    linea: LineaCatalogo, identificador_lote: Optional[str], expediente=None
+) -> Optional[str]:
     """"Cantidad: pendiente (el documento da una cantidad distinta para cada
     lote...); Matrícula del material: no consta" -- `None` si la fila no
-    tiene ninguna celda de datos vacía."""
+    tiene ninguna celda vacía."""
     partes = [
         f"{_COLUMNA_DE_CAMPO[c.campo]}: {ETIQUETA_MOTIVO[c.motivo]}" + (f" ({c.detalle})" if c.detalle else "")
-        for c in celdas_vacias(linea, identificador_lote)
+        for c in celdas_vacias(linea, identificador_lote, expediente)
     ]
     return "; ".join(partes) or None
 
@@ -120,6 +131,30 @@ _LEYENDA_MOTIVOS = (
         "deja vacío en vez de mostrar el de otro lote. En Precio adjudicado: falta la baja del lote o el precio "
         "unitario del que se calcula.",
     ),
+)
+
+# "Comentarios" está vacía en todas las filas por diseño y siempre por el mismo
+# motivo (CONTEXTO.md sección 7: "Comentarios | Humano"). Repetirlo fila a fila
+# en "Motivo de las celdas vacías" añadiría la misma frase a las ~18.000 filas
+# y taparía los motivos que sí cambian de una fila a otra, que es justo lo que
+# esa columna existe para destacar -- va aquí, una vez.
+_NOTA_COMENTARIOS = (
+    "La columna \"Comentarios\" está vacía en todas las filas a propósito: es la única que no rellena el "
+    "sistema, está para que escriba en ella quien revise el catálogo. Por eso no lleva motivo fila a fila."
+)
+
+# Bloque 3, sesión 2026-09-18 (encargo del cliente): la nota doble sobre por
+# qué un mismo material puede verse más de una vez. Son dos motivos distintos
+# y los dos son legítimos -- verificados contra los documentos reales en la
+# sesión 2026-09-16 (noche) para los 11 grupos que la auditoría venía marcando
+# como error. Ninguna línea se funde ni se borra nunca por esto.
+_NOTAS_MATERIAL_REPETIDO = (
+    "Entre expedientes distintos: varios expedientes de una misma licitación pueden compartir el mismo "
+    "cuadro de precios, así que el mismo material aparece una vez por cada uno de esos expedientes. No es "
+    "una repetición por error: cada fila es la de su expediente.",
+    "Dentro de un mismo expediente: el pliego puede listar el mismo material dos veces con dos códigos de "
+    "precio distintos (por ejemplo, la misma pieza en dos apartados del cuadro). Las dos filas son las que "
+    "trae el documento y se conservan tal cual; no se junta ni se elimina ninguna.",
 )
 
 
@@ -419,16 +454,21 @@ def _escribir_resumen(
             hoja.append([explicacion, cantidad, resolucion])
     hoja.append([])
     hoja.append([
-        "Columna \"Motivo de las celdas vacías\": por qué está vacía cada celda de datos de la fila. Las "
+        "Columna \"Motivo de las celdas vacías\": por qué está vacía cada celda de la fila. Las "
         "celdas se dejan vacías (una marca de texto impediría sumar u ordenar las columnas de números); el "
         "motivo va en esta columna, con uno de estos tres valores:",
         None,
     ])
     for motivo, explicacion in _LEYENDA_MOTIVOS:
         hoja.append([f"{motivo}: {explicacion}", None])
+    hoja.append([_NOTA_COMENTARIOS, None])
     hoja.append([])
     hoja.append(["Nota sobre la columna \"Código del material\"", None])
     hoja.append([_NOTA_CODIGO_MATERIAL, None])
+    hoja.append([])
+    hoja.append(["Nota sobre los materiales que aparecen repetidos", None])
+    for nota in _NOTAS_MATERIAL_REPETIDO:
+        hoja.append([nota, None])
     for fila in hoja.iter_rows():
         for celda in fila:
             if isinstance(celda.value, str) and len(celda.value) > 60:
@@ -508,14 +548,28 @@ def generar_excel_catalogo(db: Session, incluir_pendientes_sin_lote: bool = Fals
             continue
         incluidas += 1
         # "El sistema nunca inventa una matriz. Si no cruza, se deja
-        # vacío" (CONTEXTO.md sección 7): código interno y código de
-        # proyecto solo se rellenan cuando el cruce con el Excel de
-        # códigos confirmó la fila.
+        # vacío" (CONTEXTO.md sección 7): el "Código interno" sí sale del
+        # Excel de códigos de ADIF, así que sin cruce no hay nada que
+        # escribir.
         cruzado = bool(expediente.codigos_cruzados)
         fila = hoja.max_row + 1
         hoja.append([
             _celda_texto_o_espacio(expediente.codigo_interno if cruzado else None),
-            _celda_texto_o_espacio(expediente.codigo_expediente if cruzado else None),
+            # Sesión 2026-09-18, bloque 1 (decisión del cliente). Esta columna
+            # NO sale del Excel de códigos de ADIF: es el `codigo_expediente`
+            # propio del sistema, el mismo valor que "Nº de expediente
+            # (documento)". Hasta hoy el cruce actuaba de interruptor sobre
+            # ella -- sin cruce, la celda salía vacía aunque el número se
+            # conociera perfectamente --, y el cliente filtraba por esta
+            # columna y concluía que faltaban expedientes que sí están (caso
+            # real repetido tres veces: `docs/sesion-2026-09-15-expedientes-
+            # 2026-presidencia.md`, `...-unidades-y-cobertura-2026.md`,
+            # `...-2026-09-16-descubrimiento-por-busqueda.md`). El número del
+            # expediente se rellena siempre que se conozca, venga del cruce o
+            # del propio documento. El cruce sigue gobernando en exclusiva
+            # las tres columnas que sí dependen de él: "Código interno"
+            # (arriba), "Código matriz" y "Estado del contrato (SAP)".
+            _celda_texto_o_espacio(expediente.codigo_expediente),
             _celda_texto_o_espacio(expediente.codigo_matriz),
             _celda_texto_o_espacio(expediente.nombre_proyecto),
             _celda_texto_o_espacio(_celda_matricula(linea)),
@@ -535,7 +589,9 @@ def generar_excel_catalogo(db: Session, incluir_pendientes_sin_lote: bool = Fals
             # PCSP en cuanto se lee, `app.extraccion.identidad_expediente`).
             _celda_texto_o_espacio(expediente.codigo_expediente),
             _celda_texto_o_espacio(expediente.nombre_proyecto),
-            _celda_texto_o_espacio(_texto_celdas_vacias(linea, lote.identificador_lote if lote else None)),
+            _celda_texto_o_espacio(
+                _texto_celdas_vacias(linea, lote.identificador_lote if lote else None, expediente)
+            ),
             _celda_texto_o_espacio(linea.comentarios),
         ])
         if any(
