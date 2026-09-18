@@ -68,6 +68,12 @@ class ResumenCiclo:
     sin_publicar_reintentados: int = 0
     sin_publicar_aplazados: int = 0
     sin_publicar_en_plazo: int = 0
+    # Bloque 4, sesión 2026-09-18 (sexta parte): `True` cuando esta ejecución
+    # llevaba `busqueda_desactivada` en el payload y, por tanto, **no ha
+    # abierto una sola conexión con la Plataforma**: ni sindicación, ni
+    # barrido del buscador, ni reintento de `sin_publicar`, ni descarga del
+    # bucle de frescura. Las cuatro vías, no dos.
+    sin_publicar_desactivado: bool = False
     duracion_segundos: float = 0.0
     # Resumen completo de app.sindicacion.descubrimiento.ResumenDescubrimiento
     # (o {"error": ...} si el descubrimiento falló) — None si estaba
@@ -97,6 +103,7 @@ class ResumenCiclo:
             "sin_publicar_reintentados": self.sin_publicar_reintentados,
             "sin_publicar_aplazados": self.sin_publicar_aplazados,
             "sin_publicar_en_plazo": self.sin_publicar_en_plazo,
+            "sin_publicar_desactivado": self.sin_publicar_desactivado,
             "duracion_segundos": round(self.duracion_segundos, 3),
             "descubrimiento": self.descubrimiento,
             "descubrimiento_busqueda": self.descubrimiento_busqueda,
@@ -139,7 +146,7 @@ def _documentos_por_expediente(db: Session, expedientes: list[Expediente]) -> di
     return resultado
 
 
-def _reintentar_sin_publicar(db: Session, resumen: ResumenCiclo) -> None:
+def _reintentar_sin_publicar(db: Session, resumen: ResumenCiclo, payload: dict) -> None:
     """Sesión 2026-09-15: `sin_publicar` deja de ser definitivo. Hasta ahora
     el ciclo lo excluía siempre (arriba sigue fuera del bucle normal: sin
     documentos, `debe_descargar` lo buscaría en cada ciclo), así que un
@@ -148,7 +155,25 @@ def _reintentar_sin_publicar(db: Session, resumen: ResumenCiclo) -> None:
     buscar el que ya toca (`debe_rebuscar_sin_publicar`): primero los no
     confirmados y los más antiguos, hasta `sin_publicar_reintentos_por_ciclo`.
     La descarga encadena su extracción sola si lo encuentra, y el drenaje de
-    abajo la recoge igual que cualquier otra."""
+    abajo la recoge igual que cualquier otra.
+
+    Bloque 4, sesión 2026-09-18 (sexta parte): **este reintento respeta la
+    misma bandera que el barrido del buscador**. Un `sin_publicar` no tiene
+    documentos, así que su "descarga" es literalmente una búsqueda en la
+    Plataforma por su número: es la tercera vía de red del ciclo, y hasta
+    aquí era la única que ninguna bandera apagaba. Un reproceso lanzado con
+    `sindicacion_desactivada` y `busqueda_desactivada` -- el que se usa para
+    reprocesar el corpus sin tocar la red -- salía igualmente a Internet para
+    4 expedientes (registro de la quinta parte de esta sesión, apartado 2).
+    Se apaga con `busqueda_desactivada` y no con una bandera propia porque es
+    exactamente el mismo hecho: pedirle a la Plataforma que busque un código
+    que no tenemos descargado. **Solo la bandera del payload**, no
+    `BUSQUEDA_DESCUBRIMIENTO_ACTIVO`: esa configura si el ciclo BARRE el
+    buscador en busca de expedientes nuevos, que es otra decisión -- apagarla
+    no debe dejar de reintentar los `sin_publicar` que ya se conocen."""
+    if payload.get("busqueda_desactivada"):
+        resumen.sin_publicar_desactivado = True
+        return
     plazo = timedelta(days=settings.sin_publicar_reintento_dias)
     ahora = datetime.now(timezone.utc)
     candidatos = (
@@ -228,6 +253,20 @@ def ejecutar_ciclo_mantenimiento(
             logger.warning("descubrimiento por búsqueda falló, se continúa sin él: %s", exc)
             resumen.descubrimiento_busqueda = {"error": str(exc)}
 
+    # Bloque 4, sesión 2026-09-18 (sexta parte): la bandera apaga TODA la red,
+    # no dos de las cuatro vías. Medido sobre el reproceso real de la quinta
+    # parte, que se lanzó "sin red" y aun así pidió cuatro búsquedas a la
+    # Plataforma: dos venían del reintento de `sin_publicar`
+    # (`_reintentar_sin_publicar`, abajo) y **las otras dos de este mismo
+    # bucle** -- `6.14/28510.0177` y `6.14/28510.0148`, publicados pero con
+    # cero documentos descargables en su ficha, así que `debe_descargar` los
+    # devuelve en cada ciclo y cada descarga es, literalmente, una búsqueda
+    # por su número en la Plataforma. Con la bandera puesta se cuentan como
+    # saltados, igual que cualquier otro que no toca descargar: el ciclo hace
+    # su trabajo real (reextraer lo ya descargado) sin abrir una sola
+    # conexión.
+    red_desactivada = bool(payload.get("busqueda_desactivada"))
+
     expedientes = (
         db.execute(
             select(Expediente).where(Expediente.estado != EstadoExpediente.sin_publicar).order_by(Expediente.id)
@@ -243,7 +282,7 @@ def ejecutar_ciclo_mantenimiento(
         documentos = documentos_por_expediente.get(expediente.id, [])
         tenia_documentos = bool(documentos)
 
-        if debe_descargar(expediente, documentos):
+        if debe_descargar(expediente, documentos) and not red_desactivada:
             encolar_trabajo(db, tipo="descargar_expediente", expediente_id=expediente.id)
             resumen.descargas_lanzadas += 1
         else:
@@ -263,7 +302,7 @@ def ejecutar_ciclo_mantenimiento(
         else:
             resumen.saltados_extraccion += 1
 
-    _reintentar_sin_publicar(db, resumen)
+    _reintentar_sin_publicar(db, resumen, payload)
 
     # Drenaje síncrono: ejecuta aquí mismo todo lo que se acaba de encolar
     # (y cualquier otro trabajo pendiente que hubiera quedado suelto en la

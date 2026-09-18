@@ -200,6 +200,56 @@ def test_precio_desproporcionado_frente_a_la_mediana_del_expediente(db_session):
     assert hallazgo["gravedad"] == "aviso"
 
 
+def test_la_partida_alzada_no_cuenta_como_precio_desproporcionado(db_session):
+    """Bloque 6, sesión 2026-09-18 (sexta parte). CONTEXTO.md sección 2: la
+    partida alzada es una línea legítima, no un error -- una reserva
+    presupuestaria vale por definición órdenes de magnitud más que cualquier
+    pieza del mismo cuadro. Eran 331 de las 2.005 líneas que este aviso
+    señalaba."""
+    exp = _expediente(db_session)
+    lote = _lote(db_session, exp.id)
+    for i in range(4):
+        _linea(db_session, exp.id, lote.id, clave_linea=f"P-{i}", codigo_precio=f"P-{i}",
+               precio_unitario=Decimal("10"), unidad_medida="ud")
+    _linea(db_session, exp.id, lote.id, clave_linea="P-pa", codigo_precio="P-pa",
+           descripcion="Partida alzada a justificar para imprevistos",
+           precio_unitario=Decimal("50000"), unidad_medida="ud")
+
+    resultado = ejecutar_auditoria(db_session, _trabajo(db_session))
+
+    assert not [h for h in resultado["hallazgos"] if h["categoria"] == "precio_desproporcionado"]
+
+
+def test_el_precio_se_compara_con_la_mediana_de_su_misma_unidad_de_medida(db_session):
+    """CONTEXTO.md sección 7 (aviso del cliente): un precio unitario no
+    significa nada sin su unidad. Un precio por tonelada-kilómetro comparado
+    con la mediana de un cuadro de desvíos completos da 1/7000 y no dice nada
+    -- salvo que haya suficientes líneas de esa misma unidad con las que
+    compararlo, y entonces sí."""
+    exp = _expediente(db_session)
+    lote = _lote(db_session, exp.id)
+    for i in range(4):
+        _linea(db_session, exp.id, lote.id, clave_linea=f"D-{i}", codigo_precio=f"D-{i}",
+               precio_unitario=Decimal("11000"), unidad_medida="ud")
+    # Una sola línea en t·km: no hay mediana de su unidad con la que juzgarla.
+    _linea(db_session, exp.id, lote.id, clave_linea="T-1", codigo_precio="T-1",
+           precio_unitario=Decimal("1.60"), unidad_medida="t·km")
+
+    resultado = ejecutar_auditoria(db_session, _trabajo(db_session))
+    assert not [h for h in resultado["hallazgos"] if h["categoria"] == "precio_desproporcionado"]
+
+    # Con tres compañeras de su misma unidad, una que se sale sí se señala.
+    for i in range(3):
+        _linea(db_session, exp.id, lote.id, clave_linea=f"T-{i}-b", codigo_precio=f"T-{i}-b",
+               precio_unitario=Decimal("1.60"), unidad_medida="t·km")
+    _linea(db_session, exp.id, lote.id, clave_linea="T-rara", codigo_precio="T-rara",
+           precio_unitario=Decimal("900"), unidad_medida="t·km")
+
+    resultado = ejecutar_auditoria(db_session, _trabajo(db_session))
+    hallazgo = next(h for h in resultado["hallazgos"] if h["categoria"] == "precio_desproporcionado")
+    assert hallazgo["total_afectados"] == 1
+
+
 def test_cantidad_con_forma_de_anio(db_session):
     exp = _expediente(db_session)
     lote = _lote(db_session, exp.id)

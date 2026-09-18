@@ -37,8 +37,9 @@ from app.extraccion.localizador import ResultadoLocalizacion, localizar_paginas_
 from app.extraccion.lote_tabla import MOTIVO_TABLA_DEL_CONJUNTO, asociar_lote_tabla
 from app.extraccion.mapeo_cabecera import (
     cabecera_sin_senal,
-    corregir_confusion_matricula_codigo_precio,
+    completar_codigo_precio_por_contenido,
     completar_matricula_por_contenido,
+    corregir_confusion_matricula_codigo_precio,
     corregir_confusion_precio_cantidad,
     derivar_mapeo_por_contenido,
     evaluar_coherencia_mapeo,
@@ -467,6 +468,13 @@ def procesar_anejo(
                     # cabecera nombra de otra forma ("CÓDIGO ADIF") -- ver el
                     # docstring. Antes de guardar el mapeo para heredarlo.
                     mapeo = completar_matricula_por_contenido(mapeo, tabla.filas)
+                    # Bloque 8, sesión 2026-09-18 (sexta parte): simétrica de
+                    # la anterior, para la columna que la cabecera llama
+                    # "CODIFICACIÓN DEL PRECIO" -- ver su docstring. Sin ella,
+                    # `6.21/28510.0152` p.114 deja sus cuatro rodillos de
+                    # aguja fundidos en una sola línea ilegible desde la
+                    # sesión 2026-09-15.
+                    mapeo = completar_codigo_precio_por_contenido(mapeo, tabla.filas)
                     if sin_cabecera_propia:
                         # Bloque 2, sesión 2026-09-12 (continuación): misma
                         # idea, para la confusión precio_unitario/cantidad --

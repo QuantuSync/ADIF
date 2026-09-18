@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 from app.catalogo import _CODIGO_PRECIO_VALIDO_RE
 from app.extraccion.firma_cabecera import calcular_firma_cabecera
 from app.extraccion.firma_estructural import clasificar_columnas, tiene_forma_de_matricula
+from app.extraccion.normalizacion import limpiar_codigo_celda
 from app.extraccion.texto import normalizar
 from app.interfaces.model_provider import ModelProvider
 from app.models import MapeoCabeceraCache
@@ -482,6 +483,71 @@ def completar_matricula_por_contenido(
         return mapeo
     completado = dict(mapeo)
     completado["matricula"] = candidatas[0]
+    return completado
+
+
+def _columna_parece_codigo_precio(indice: int, filas: list[list[Optional[str]]]) -> bool:
+    """Todas las líneas de todas las celdas no vacías de la columna tienen
+    forma de código de precio. Se mira línea a línea porque el caso que
+    motiva esto es justamente una celda con varias ("P-1", "P-2", "P-3" y
+    "P-4" en la misma celda: cuatro artículos que `pdfplumber` funde en una
+    sola fila). Se exige el 100 %: una columna de códigos de precio real no
+    trae nada más."""
+    lineas = [
+        trozo.strip()
+        for fila in filas
+        if indice < len(fila) and fila[indice]
+        for trozo in fila[indice].splitlines()
+        if trozo.strip()
+    ]
+    if not lineas:
+        return False
+    return all(_CODIGO_PRECIO_VALIDO_RE.match(limpiar_codigo_celda(l) or "") for l in lineas)
+
+
+def completar_codigo_precio_por_contenido(
+    mapeo: dict[str, Optional[int]], filas: list[list[Optional[str]]]
+) -> dict[str, Optional[int]]:
+    """Simétrica de `completar_matricula_por_contenido`, y el arreglo del
+    pendiente antiguo de `6.21/28510.0152` p.114 (rodillos de aguja).
+
+    Su cabecera llama a la columna de códigos **"CODIFICACIÓN DEL PRECIO"**:
+    no casa con ningún alias determinista de `codigo_precio` ("codificacion"
+    no contiene "codigo") y el modelo, que resuelve esa firma, la deja sin
+    asignar. Sin `codigo_precio`, `app.catalogo._dividir_fila_multiple` no
+    puede separar la fila que `pdfplumber` funde -- "P-1", "P-2", "P-3",
+    "P-4" en una sola celda, cuatro artículos con sus cuatro matrículas,
+    cantidades y precios -- y los
+    cuatro quedan en una sola línea ilegible.
+
+    **Por qué no se arregla con un alias**, que es lo que se probó y se
+    revirtió en la sesión de expedientes sin publicar (guarda
+    `test_mapeo_determinista_no_reconoce_codificacion_del_precio`): añadir
+    "codificacion del precio" hace que el mapeo DETERMINISTA resuelva esa
+    firma y, con ello, que el cuadro de balasto multi-lote deje de ir al
+    modelo -- y ahí el determinista se equivoca, porque solo mira la posición
+    en la cabecera y esa tabla tiene una columna fantasma desplazada de forma
+    distinta entre cabecera y datos. La corrección tenía que mirar los DATOS,
+    no el nombre de la columna; eso es lo que hace esta función, después del
+    mapeo y sin tocar por dónde se resolvió.
+
+    Con `codigo_precio` sin columna, si hay EXACTAMENTE una columna que
+    ningún otro campo reclama y en la que **todas** las líneas tienen forma
+    de código de precio, se le asigna. Con cero o más de una, no se adivina.
+    """
+    if mapeo.get("codigo_precio") is not None or not filas:
+        return mapeo
+    reclamadas = {indice for indice in mapeo.values() if indice is not None}
+    num_columnas = max(len(fila) for fila in filas)
+    candidatas = [
+        indice
+        for indice in range(num_columnas)
+        if indice not in reclamadas and _columna_parece_codigo_precio(indice, filas)
+    ]
+    if len(candidatas) != 1:
+        return mapeo
+    completado = dict(mapeo)
+    completado["codigo_precio"] = candidatas[0]
     return completado
 
 

@@ -302,17 +302,46 @@ def _lotes_en_ficha_de_otro(db: Session, por_codigo: dict[str, Expediente]) -> d
     suelto en el texto de cualquier documento. Se descarta el caso degenerado
     de un expediente que se declara lote de sí mismo."""
     enlaces: dict[str, LoteDeOtroExpediente] = {}
+
+    def anotar(codigo_lote: Optional[str], identificador: Optional[str], codigo_principal: str) -> None:
+        codigo_lote = (codigo_lote or "").strip()
+        if not codigo_lote or not identificador or codigo_lote == codigo_principal:
+            return
+        if codigo_lote not in por_codigo:
+            return
+        enlaces.setdefault(codigo_lote, LoteDeOtroExpediente(codigo_principal, identificador))
+
     for lote, codigo_principal in db.execute(
         select(Lote, Expediente.codigo_expediente).join(
             Expediente, Expediente.id == Lote.expediente_id
         )
     ).all():
-        codigo_lote = (lote.codigo_expediente_lote or "").strip()
-        if not codigo_lote or codigo_lote == codigo_principal:
-            continue
-        if codigo_lote not in por_codigo:
-            continue
-        enlaces[codigo_lote] = LoteDeOtroExpediente(codigo_principal, lote.identificador_lote)
+        anotar(lote.codigo_expediente_lote, lote.identificador_lote, codigo_principal)
+
+    # Segunda fuente, bloque 3 de la sexta parte de esta sesión (migración
+    # 0038): la identidad que el propio Contrato firmado declara en su
+    # cabecera ("Contrato nº: 6.19/28510.0213 ... LOTE 1"). Es la MISMA
+    # evidencia -- un documento publicado del principal que liga por número un
+    # lote a su expediente --, solo que hasta ahora se perdía cuando el
+    # expediente no traía además una Resolución/Propuesta que declarase lotes:
+    # `app.extraccion.orquestador._extraer_lotes` no abre candidatos con un
+    # Contrato, así que no llegaba a crearse ningún `Lote` donde guardarla.
+    # Sin esto, `4.23/28510.0081`, `6.19/28510.0213` y `6.19/28510.0216`
+    # salían del entregable como "no publicados", que es falso: su Contrato
+    # firmado está publicado en la ficha del principal y dice qué lote son.
+    # Va DESPUÉS del bucle de arriba y con `setdefault`: donde ya hay un lote
+    # registrado manda el lote, que es el camino verificado desde antes.
+    for codigo_lote, identificador, codigo_principal in db.execute(
+        select(
+            Documento.identidad_lote_codigo,
+            Documento.identidad_lote_identificador,
+            Expediente.codigo_expediente,
+        )
+        .join(DocumentoExpediente, DocumentoExpediente.documento_id == Documento.id)
+        .join(Expediente, Expediente.id == DocumentoExpediente.expediente_id)
+        .where(Documento.identidad_lote_codigo.is_not(None))
+    ).all():
+        anotar(codigo_lote, identificador, codigo_principal)
     return enlaces
 
 

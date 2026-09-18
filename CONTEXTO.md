@@ -1961,6 +1961,8 @@ sobre el corpus: +2.316 líneas en 54 expedientes, ~10,75 $.
   estables tras un reproceso completo. **Filas fundidas**: `6.24/28510.0208`
   separada (6 → 15); `6.21/28510.0152` p.114 sigue fundida (su columna de
   código es la de "CODIFICACIÓN DEL PRECIO", alias ya revertido una vez).
+  **Resuelto el 2026-09-18 (sexta parte)**, no con un alias sino mirando los
+  datos: `completar_codigo_precio_por_contenido`.
   Unidades (18) y los 11 duplicados legítimos, sin cambios. Excel 15.998 →
   16.007 filas, 0 materiales perdidos.
   **Continuación, decisión del cliente:** reconocimiento óptico implementado
@@ -2209,7 +2211,10 @@ sobre el corpus: +2.316 líneas en 54 expedientes, ~10,75 $.
   encontrar el número suelto en un texto. De los 73 no publicados, 29 se
   mencionan en un documento publicado ajeno: **14 se enlazan, 15 no** (números
   de contrato, una matriz, un anuncio de fechas y 3 lotes reales con una
-  redacción que el extractor no reconoce todavía). (5) **Los 49 de acuerdo marco
+  redacción que el extractor no reconoce todavía — **falso, corregido el
+  2026-09-18 sexta parte**: el extractor SÍ la reconoce; lo que se perdía era
+  que `_extraer_lotes` tira las identidades de Contrato cuando el expediente
+  no trae Resolución ni Propuesta). (5) **Los 49 de acuerdo marco
   se parten en 47 + 2**: situación nueva `El acuerdo marco está publicado pero no
   publica precios unitarios` para los dos pedidos de `4.23/04110.0256`, que sí
   está publicado y cuyo "cuadro" es el modelo de proposición económica en
@@ -2225,6 +2230,82 @@ sobre el corpus: +2.316 líneas en 54 expedientes, ~10,75 $.
   tests** (1.078 antes). **Auditoría: 0 errores, 6 avisos** (la del propio ciclo
   de reproceso sí dio 1 error, sobre los 15 expedientes que suben de filas, todos
   explicados uno a uno).
+
+- **Verificación del reparto por lotes y limpieza de los avisos viejos
+  (sesión 2026-09-18, sexta parte,
+  `docs/sesion-2026-09-18-verificacion-del-reparto-por-lotes.md`).** Excel
+  19.474 → **19.553 filas**, 363 expedientes, **0 materiales perdidos por
+  ninguna de las tres claves** (expediente+matrícula, +precio, +lote).
+  (1) **El reparto por lotes del cuadro cuadra, y no se ha revertido nada.**
+  Demostración aritmética sobre las **70 tablas de lote** de los 14
+  expedientes: suma de cantidad × precio contra el presupuesto de licitación
+  publicado de cada lote. **54 cuadran al céntimo**, 6 con diferencia menor del
+  0,002 %, 5 con una discrepancia **del propio documento de ADIF** (el cuadro
+  del lote 3 de `6.20/28510.0054`-`0058` se pasa 30.002,13 € de su propio
+  presupuesto), 1 por **un dígito del reconocimiento óptico** (`6.17/28510.0056`
+  `P-7`: 56.555,91 € donde la columna de importes del documento demuestra
+  56.455,91 €) y 4 que no se pueden cerrar porque el documento no publica
+  cantidad para todas sus filas. Pruebas independientes: la partida alzada es
+  el 3 % exacto del presupuesto de su lote en los seis lotes de las traviesas y
+  el 10 % en los cuatro de las poleas. De las 1.537 filas de esos 14, **1.288
+  aportan un dato propio de su lote** (cantidad o precio) y solo 102 repiten
+  material, precio y cantidad. (2) **Los candidatos que no entran**: de 238
+  expedientes multilote, 38 se descartan antes de mirar el cuadro (su lote
+  sentinela ya lleva baja o importe) y **29 lo intentan y la comprobación dura
+  los rechaza** — 16 porque el cuadro deja filas huérfanas, 7 porque no declara
+  ningún lote, 5 porque no aportan ni una línea, 1 por cobertura parcial.
+  Aflojar la garantía metería 15 expedientes y ~1.971 filas **a costa de que
+  `4.25/28510.0132` pierda 91**: no se ha tocado. (3) **Los 3 lotes que un
+  Contrato firmado sí declara** (`4.23/28510.0081`, `6.19/28510.0213`,
+  `6.19/28510.0216`) salen ya en la Conciliación como "Publicado dentro de la
+  ficha de otro expediente" (14 → **17**). El extractor SÍ reconocía esa
+  redacción; lo que se perdía era que `_extraer_lotes` tira las identidades de
+  Contrato si no hay Resolución ni Propuesta. **No se crea ningún lote** (tocaba
+  40 expedientes y podía dejar huérfanas miles de líneas): migración **0038**
+  guarda el hecho en el propio documento (`documentos.identidad_lote_codigo`,
+  `identidad_lote_identificador`) y la Conciliación lo usa como segunda fuente.
+  Los otros 12 quedan confirmados uno a uno: **ninguno de sus Contratos declara
+  identidad de lote**. (4) **`busqueda_desactivada` apaga ya las CUATRO vías de
+  red del ciclo**, no dos: sindicación, barrido, reintento de `sin_publicar` y
+  **la descarga del bucle de frescura** — esta última era la que faltaba, y
+  explicaba 2 de las 4 peticiones del reproceso anterior (`6.14/28510.0177` y
+  `0148`, publicados pero sin ningún documento descargable, así que
+  `debe_descargar` los devuelve siempre). Cuatro pruebas nuevas **revientan si
+  alguien llega a `scrape_expediente`**. (5) **Las 19.233 huérfanas**: todas en
+  expedientes multilote, **ninguna en uno de lote único**; 13.432 son el anejo
+  de criterios del conjunto y 2.438 el cuadro de un lote hermano — **15.870
+  (82,5 %) no deben tener lote**. Son solo **8.804 combinaciones distintas**
+  (el resto es el mismo cuadro leído en 2-3 documentos del mismo expediente) y
+  **6.229 son copia exacta de una fila que ya sale con su lote**. El
+  subconjunto que sí debería tenerlo son **2.752 líneas en 29 expedientes**, no
+  aplicado. (6) **Cantidades con forma de año: son reales**, verificadas contra
+  el PDF (801 de 941 son traviesas de la columna "CANTIDAD DE REFERENCIA"; las
+  140 restantes las confirma la columna de importes del propio documento).
+  **Precios atípicos 2.005 → 1.488**: quedan fuera la partida alzada (331) y la
+  comparación se hace contra la mediana de las líneas **con la misma unidad de
+  medida** (181). Y 4 errores de lectura reales: el **modelo de oferta en
+  blanco** ("Ref. | Denominación | Licitación | Oferta") de `3.16/28510.0158` y
+  `6.16/28510.0178`, que metía mediciones globales (27.500 Tn) como precios
+  unitarios — `app.extraccion.tabla` lo descarta ya por su cabecera.
+  (7) **Los 56 grupos de importe compartido son 9 familias** (el aviso cuenta
+  un grupo por documento compartido); 6 son principal + sus lotes con
+  presupuestos iguales **verificados en el documento**, 2 son la herencia de un
+  acuerdo marco, y 1 es el hallazgo real: **`19/28510` y `6.19/28510.0129` son
+  el mismo expediente**. Los 8 de importe repetido dentro del mismo expediente
+  son **los 8 legítimos**. (8) **`6.21/28510.0152` p.114 resuelto**: no con un
+  alias de cabecera (que rompía el balasto multi-lote) sino mirando los datos —
+  `completar_codigo_precio_por_contenido`. Efecto lateral medido y bueno:
+  `6.22/28510.0173` **+88 filas** y `6.25/28510.0156` **+7**, materiales que
+  colapsaban entre sí por clave. La errata CONTRAGUJA/CONTRAAGUJA **no se
+  unifica** (solo vive en la descripción literal; "Código del material" ya
+  agrupa las dos), `PA`/`P` **no se unifican** con ninguna de las 17 unidades, y
+  la columna "Código de precio" **no se añade** (la tendrían 8.911 de 19.553
+  filas). (9) **Reproceso final con la red apagada de verdad**: 518
+  expedientes, 20 min 39 s, **`descargas_lanzadas: 0`**. **1.104 tests**
+  (1.091 antes). **Auditoría: 0 errores, 6 avisos.** Las **16 filas que salen**
+  del Excel están explicadas una a una — 8 del modelo de oferta en blanco, 7
+  copias exactas de un material que ya estaba, 1 fila fundida ilegible — y
+  **ninguna es del bloque 1**.
 
 ---
 
@@ -2262,4 +2343,5 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `sesion-2026-09-18-estados-adif-y-acuerdos-marco.md`,
 `sesion-2026-09-18-barrido-no-publicados-y-glifos.md`,
 `sesion-2026-09-18-reproceso-glifos-y-conciliacion.md`,
+`sesion-2026-09-18-verificacion-del-reparto-por-lotes.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.

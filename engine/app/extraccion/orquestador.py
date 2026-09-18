@@ -205,6 +205,12 @@ class _Documento:
     reconocido: bool = False
     contenido_reconocido: Optional[bytes] = None
     reconocido_completo: bool = True
+    # Bloque 3, sesión 2026-09-18 (sexta parte): lo que este Contrato firmado
+    # declara de sí mismo ("Contrato nº: X ... LOTE N"). Se calcula una sola
+    # vez en `_clasificar_documentos` -- que además lo persiste en el propio
+    # `Documento` (migración 0038) -- y `_identidades_de_contratos` lo
+    # reutiliza en vez de volver a recorrer el documento entero.
+    identidad_contrato: Optional[IdentidadContrato] = None
 
 
 def _traza(
@@ -473,10 +479,28 @@ def _clasificar_documentos(
         marcador = clasificacion.marcador if clasificacion is not None else None
         doc.tipo_documento = tipo
         doc.paginas = num_paginas
+        # Bloque 3, sesión 2026-09-18 (sexta parte, migración 0038): la
+        # identidad que declara un Contrato firmado se guarda SIEMPRE en el
+        # documento, aunque el expediente no llegue a crear ningún lote con
+        # ella. Hasta aquí ese hecho solo sobrevivía si además había una
+        # Resolución/Propuesta que abriera candidatos en `_extraer_lotes`, y
+        # sin ella los tres expedientes que un Contrato declara por número
+        # como lote de otro (`4.23/28510.0081`, `6.19/28510.0213`,
+        # `6.19/28510.0216`) salían del entregable como "no publicados".
+        identidad_contrato = (
+            extraer_identidad_contrato(paginas) if tipo == TipoDocumento.contrato else None
+        )
+        doc.identidad_lote_codigo = (
+            identidad_contrato.codigo_expediente_lote if identidad_contrato is not None else None
+        )
+        doc.identidad_lote_identificador = (
+            identidad_contrato.identificador if identidad_contrato is not None else None
+        )
         resultado.append(
             _Documento(
                 documento=doc, tipo=tipo, paginas=paginas, escaneado=escaneado,
                 pliego_sin_precios=sin_precios, marcador=marcador,
+                identidad_contrato=identidad_contrato,
                 reconocido=reconocido is not None,
                 contenido_reconocido=(
                     generar_pdf_reconocido(reconocido.paginas)
@@ -570,7 +594,10 @@ def _identidades_de_contratos(documentos: list[_Documento]) -> list[tuple[Identi
     for item in documentos:
         if item.tipo != TipoDocumento.contrato:
             continue
-        identidad = extraer_identidad_contrato(item.paginas)
+        # Ya calculada en `_clasificar_documentos` (que la persiste, migración
+        # 0038); se recalcula solo si el llamador construyó el `_Documento`
+        # por su cuenta, como hacen algunos tests.
+        identidad = item.identidad_contrato or extraer_identidad_contrato(item.paginas)
         if identidad is not None:
             identidades.append((identidad, item.documento.id))
     lotes_por_codigo: dict[str, set[str]] = {}
@@ -1291,7 +1318,10 @@ def ejecutar_extraccion_expediente(
             # cada Contrato archivado con él.
             lote_propio: Optional[str] = None
             identidades_por_documento = {
-                item.documento.id: extraer_identidad_contrato(item.paginas)
+                # Ya calculada en `_clasificar_documentos` (migración 0038):
+                # recorrer otra vez el documento entero costaba lo mismo tres
+                # veces por expediente.
+                item.documento.id: item.identidad_contrato or extraer_identidad_contrato(item.paginas)
                 for item in items
                 if item.tipo == TipoDocumento.contrato
             }

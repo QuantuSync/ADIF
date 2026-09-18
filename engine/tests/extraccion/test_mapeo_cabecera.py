@@ -1,5 +1,6 @@
 from app.extraccion.firma_cabecera import calcular_firma_cabecera
 from app.extraccion.mapeo_cabecera import (
+    completar_codigo_precio_por_contenido,
     corregir_confusion_matricula_codigo_precio,
     corregir_confusion_precio_cantidad,
     derivar_mapeo_por_contenido,
@@ -704,3 +705,49 @@ def test_columna_tipo_ocupada_por_otro_campo_no_es_codigo_material():
     cabecera = ["TIPO DE TRAVIESA", "DESCRIPCIÓN", "PRECIO"]
     mapeo = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": None, "cantidad": None, "precio_unitario": 2}
     assert "codigo_material" not in completar_columna_codigo_material(cabecera, mapeo)
+
+
+# --- Bloque 8, sesión 2026-09-18 (sexta parte) ----------------------------
+
+
+def test_completar_codigo_precio_por_contenido_recupera_codificacion_del_precio():
+    """`6.21/28510.0152` p.114 (rodillos de aguja): la cabecera llama a la
+    columna "CODIFICACIÓN DEL PRECIO" y ni el determinista ni el modelo la
+    asignan, así que la fila que `pdfplumber` funde (cuatro artículos en una)
+    no se podía separar. La corrección mira los DATOS, no el nombre de la
+    columna -- por eso no reabre la regresión del cuadro de balasto que sí
+    causaba añadir el alias (ver el test de guarda de más arriba)."""
+    mapeo = {
+        "codigo_precio": None, "matricula": 1, "descripcion": 2,
+        "unidad_medida": 3, "cantidad": 7, "precio_unitario": 8,
+    }
+    filas = [[
+        "P-1\nP-2\nP-3\nP-4", "619900701\n619900702\n619900703\nPA",
+        "Rodillo de presión para\nel talón\nRodillo de presión para\nla punta",
+        "ud\nud\nud", "238\n68\n5", None, None, "600\n200\n20\n1",
+        "366,00 €\n466,00 €\n155,00 €\n34.100,00 €",
+    ]]
+
+    assert completar_codigo_precio_por_contenido(mapeo, filas)["codigo_precio"] == 0
+
+
+def test_completar_codigo_precio_no_toca_un_mapeo_que_ya_tiene_columna():
+    mapeo = {"codigo_precio": 0, "matricula": None, "descripcion": 1,
+             "unidad_medida": None, "cantidad": None, "precio_unitario": 2}
+    filas = [["P-1", "Rodillo", "366,00 €"]]
+    assert completar_codigo_precio_por_contenido(mapeo, filas) == mapeo
+
+
+def test_completar_codigo_precio_no_adivina_con_una_columna_que_no_lo_es():
+    """Una columna libre cuyos valores no son todos código de precio no se
+    toca: ni una matrícula, ni una referencia normativa, ni texto."""
+    mapeo = {"codigo_precio": None, "matricula": None, "descripcion": 1,
+             "unidad_medida": None, "cantidad": None, "precio_unitario": 2}
+    filas = [["03.360.571.8", "Rodillo", "366,00 €"], ["03.360.571.8", "Placa", "155,00 €"]]
+    assert completar_codigo_precio_por_contenido(mapeo, filas)["codigo_precio"] is None
+    # Y con DOS columnas libres que las dos tienen forma de código, tampoco
+    # se elige: no se adivina.
+    mapeo2 = {"codigo_precio": None, "matricula": None, "descripcion": 2,
+              "unidad_medida": None, "cantidad": None, "precio_unitario": 3}
+    filas2 = [["P-1", "P-2", "Rodillo", "366,00 €"]]
+    assert completar_codigo_precio_por_contenido(mapeo2, filas2)["codigo_precio"] is None
