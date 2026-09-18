@@ -265,14 +265,16 @@ def test_exportar_catalogo_genera_xlsx_con_columnas_del_formato_esperado(cliente
     assert fila[4] == "697500900"
     assert fila[5] == "GUANTE CONTRA RIESGO ELECTRICO"
     assert fila[8] == 24.0
-    # Sin cruce con el Excel de códigos configurado en este test: código
-    # interno y código de proyecto se dejan vacíos, no inventados
-    # (CONTEXTO.md sección 7) -- un espacio, no una celda en blanco del todo
-    # (bloque 2, segunda tanda de cambios del cliente, sesión 2026-09-09:
-    # solo en columnas de texto, para que Excel no desborde encima el texto
-    # de la celda anterior).
+    # Sin cruce con el Excel de códigos configurado en este test: el "Código
+    # interno" se deja vacío, no inventado (CONTEXTO.md sección 7) -- un
+    # espacio, no una celda en blanco del todo (bloque 2, segunda tanda de
+    # cambios del cliente, sesión 2026-09-09: solo en columnas de texto, para
+    # que Excel no desborde encima el texto de la celda anterior).
     assert fila[0] == " "
-    assert fila[1] == " "
+    # Bloque 1, sesión 2026-09-18 (decisión del cliente): "Código de
+    # expediente" ya NO depende del cruce -- es el número del expediente y se
+    # rellena siempre que se conozca, igual que fila[14].
+    assert fila[1] == "6.24/28510.0008"
     # Encargo de una sesión anterior, punto 3: precio adjudicado y baja del
     # lote, sin desplazar las once columnas de siempre.
     assert fila[10] == 11.04
@@ -288,8 +290,17 @@ def test_exportar_catalogo_genera_xlsx_con_columnas_del_formato_esperado(cliente
     assert fila[14] == "6.24/28510.0008"
     assert fila[15] == "SUMINISTRO DE GUANTES CONTRA RIESGO ELECTRICO."
     # Sesión 2026-09-14 (continuación): la línea sembrada trae todos sus
-    # datos, así que no hay ninguna celda vacía que explicar.
-    assert fila[16] == " "
+    # datos, así que no hay ninguna celda de la LÍNEA que explicar. Bloque 2,
+    # sesión 2026-09-18: las columnas del EXPEDIENTE que quedan vacías sí
+    # llevan motivo ahora -- aquí, las tres que dependen del cruce, que este
+    # test deja sin configurar a propósito.
+    assert "Código interno: no consta" in fila[16]
+    assert "Código matriz: no consta" in fila[16]
+    assert "Estado del contrato (SAP): no consta" in fila[16]
+    # El título sí está, así que no aparece; y "Código de expediente" ya no
+    # puede quedar vacía, así que no aparece nunca.
+    assert "Título expediente" not in fila[16]
+    assert "Código de expediente:" not in fila[16]
     # Segunda tanda de cambios del cliente (bloque 1, sesión 2026-09-09):
     # "Comentarios" se mueve al final de todas las columnas.
     assert fila[17] == " "
@@ -319,10 +330,17 @@ def test_exportar_catalogo_explica_el_hueco_de_un_valor_de_otro_lote(cliente, db
     libro = openpyxl.load_workbook(ruta)
     fila = [c.value for c in next(libro["Materiales"].iter_rows(min_row=2, max_row=2))]
     assert fila[7] is None  # Cantidad: vacía, no un texto en una columna numérica
-    assert fila[16] == (
+    # Los motivos de las columnas de la línea, en el orden de las columnas y
+    # con el detalle que distingue "pendiente" de "no consta". Alrededor de
+    # ellos van ahora los de las columnas del expediente (bloque 2, sesión
+    # 2026-09-18), comprobados aparte justo debajo.
+    assert (
         "Matrícula del material: no consta; "
-        "Cantidad: pendiente (el documento da una cantidad distinta para cada lote y falta saber cuál es la de este)"
-    )
+        "Cantidad: pendiente (el documento da una cantidad distinta para cada lote y falta saber cuál es la "
+        "de este)"
+    ) in fila[16]
+    assert "Código interno: no consta" in fila[16]
+    assert "Estado del contrato (SAP): no consta" in fila[16]
     filas_resumen = [[c.value for c in f] for f in libro["Resumen"].iter_rows()]
     assert any(
         (f[0] or "").startswith("Líneas del catálogo con Cantidad o Precio unitario pendiente") and f[1] == 1

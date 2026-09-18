@@ -29,6 +29,17 @@ _DETALLE_OTRO_LOTE = {
     "precio_unitario": "el documento da un precio distinto para cada lote y falta saber cuál es el de este",
 }
 
+# Sesión 2026-09-18, bloque 2: las columnas que describen el EXPEDIENTE (no la
+# línea) también pueden quedar vacías, y hasta hoy ninguna traía motivo -- el
+# cliente veía la celda en blanco sin nada que la explicara en ninguna parte
+# del entregable. Texto en castellano llano, para alguien de almacenes que no
+# sabe nada de este sistema: nada de "cruce", "índice" ni "codigos_cruzados".
+_DETALLE_SIN_CRUCE = "este expediente no aparece en el listado de códigos de ADIF"
+_DETALLE_CRUZA_SIN_INTERNO = "el listado de códigos de ADIF no trae número interno para este expediente"
+_DETALLE_SIN_MATRIZ = "no se conoce ningún acuerdo marco del que dependa este expediente"
+_DETALLE_SIN_TITULO = "no se ha encontrado el título en los documentos de este expediente"
+_DETALLE_SIN_ESTADO_SAP = "este expediente no aparece en el listado de contratos en ejecución de SAP"
+
 
 @dataclass(frozen=True)
 class CeldaVacia:
@@ -43,12 +54,40 @@ def es_partida_alzada(descripcion: Optional[str]) -> bool:
     return bool(descripcion) and descripcion.lstrip().lower().startswith("partida alzada")
 
 
-def celdas_vacias(linea: LineaCatalogo, identificador_lote: Optional[str]) -> list[CeldaVacia]:
-    """Una entrada por cada campo de datos de la línea que está vacío, en el
-    orden de las columnas del Excel."""
+def celdas_vacias(
+    linea: LineaCatalogo,
+    identificador_lote: Optional[str],
+    expediente=None,
+) -> list[CeldaVacia]:
+    """Una entrada por cada campo vacío de la fila, en el orden de las columnas
+    del Excel.
+
+    `expediente` es opcional a propósito: las columnas que describen el
+    expediente (código interno, código matriz, título, estado del contrato en
+    SAP) solo existen en el Excel, así que solo `app.exportacion` lo pasa. La
+    web (`app.catalogo_consulta`) muestra una tabla de LÍNEAS y sigue llamando
+    con dos argumentos, sin cambiar de comportamiento -- los motivos de las
+    columnas de línea se siguen decidiendo aquí, en un solo sitio, que es lo
+    que pide el docstring del módulo."""
     partida = es_partida_alzada(linea.descripcion)
     de_otro_lote = campos_vacios_por_valor_de_otro_lote(linea.motivo_revision)
     vacias: list[CeldaVacia] = []
+
+    # Columnas 1, 3 y 4 del Excel, antes de las de la línea.
+    if expediente is not None:
+        if not expediente.codigo_interno:
+            # Dos causas distintas que el cliente no puede distinguir mirando
+            # la celda: el expediente no está en el listado de ADIF, o está
+            # pero esa fila no trae número interno.
+            detalle = _DETALLE_CRUZA_SIN_INTERNO if expediente.codigos_cruzados else _DETALLE_SIN_CRUCE
+            vacias.append(CeldaVacia("codigo_interno", NO_CONSTA, detalle))
+        if not expediente.codigo_matriz:
+            vacias.append(CeldaVacia("codigo_matriz", NO_CONSTA, _DETALLE_SIN_MATRIZ))
+        if not expediente.nombre_proyecto:
+            # Un solo motivo para las dos columnas que salen de este campo
+            # ("Título expediente" y "Objeto del contrato (documento)"):
+            # repetirlo dos veces en la misma celda no aporta nada.
+            vacias.append(CeldaVacia("titulo_expediente", NO_CONSTA, _DETALLE_SIN_TITULO))
 
     def sin_dato_propio(campo: str) -> None:
         if partida:
@@ -85,4 +124,7 @@ def celdas_vacias(linea: LineaCatalogo, identificador_lote: Optional[str]) -> li
         vacias.append(CeldaVacia("baja_lote", NO_CONSTA))
     if not linea.unidad_medida:
         sin_dato_propio("unidad_medida")
+    # Columna 14, después de las de la línea.
+    if expediente is not None and not expediente.estado_contrato_sap:
+        vacias.append(CeldaVacia("estado_contrato_sap", NO_CONSTA, _DETALLE_SIN_ESTADO_SAP))
     return vacias

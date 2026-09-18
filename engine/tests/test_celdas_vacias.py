@@ -63,3 +63,76 @@ def test_es_partida_alzada_igual_que_la_web():
     assert es_partida_alzada("Partida Alzada para imprevistos")
     assert not es_partida_alzada("Tornillo de partida alzada")
     assert not es_partida_alzada(None)
+
+
+# --- Columnas del expediente (sesión 2026-09-18, bloque 2) -------------------
+# Hasta esta sesión, una celda vacía en "Código interno", "Código matriz",
+# "Título expediente" o "Estado del contrato (SAP)" no tenía motivo en ninguna
+# parte del entregable.
+
+
+def _expediente(**campos):
+    from app.models import Expediente
+
+    datos = dict(
+        codigo_expediente="6.26/28510.0016", codigo_interno="24036", codigo_matriz="6.25/28510.0016",
+        nombre_proyecto="Suministro de carril", estado_contrato_sap="En ejecución", codigos_cruzados=True,
+    )
+    datos.update(campos)
+    return Expediente(**datos)
+
+
+def test_sin_expediente_no_aparece_ningun_motivo_de_columna_de_expediente():
+    """La web llama con dos argumentos y no debe cambiar de comportamiento."""
+    assert celdas_vacias(_linea(), "1") == []
+
+
+def test_expediente_completo_no_anade_ningun_motivo():
+    assert celdas_vacias(_linea(), "1", _expediente()) == []
+
+
+def test_codigo_interno_vacio_sin_cruce_dice_que_no_esta_en_el_listado():
+    motivos = {
+        c.campo: (c.motivo, c.detalle)
+        for c in celdas_vacias(_linea(), "1", _expediente(codigo_interno=None, codigos_cruzados=False))
+    }
+    assert motivos["codigo_interno"][0] == NO_CONSTA
+    assert "no aparece en el listado de códigos de ADIF" in motivos["codigo_interno"][1]
+
+
+def test_codigo_interno_vacio_con_cruce_dice_que_el_listado_no_lo_trae():
+    motivos = {
+        c.campo: (c.motivo, c.detalle)
+        for c in celdas_vacias(_linea(), "1", _expediente(codigo_interno=None, codigos_cruzados=True))
+    }
+    assert "no trae número interno" in motivos["codigo_interno"][1]
+
+
+def test_codigo_matriz_titulo_y_estado_sap_vacios_tienen_motivo():
+    motivos = {
+        c.campo: (c.motivo, c.detalle)
+        for c in celdas_vacias(
+            _linea(), "1",
+            _expediente(codigo_matriz=None, nombre_proyecto=None, estado_contrato_sap=None),
+        )
+    }
+    assert motivos["codigo_matriz"][0] == NO_CONSTA
+    assert "acuerdo marco" in motivos["codigo_matriz"][1]
+    assert motivos["titulo_expediente"][0] == NO_CONSTA
+    assert motivos["estado_contrato_sap"][0] == NO_CONSTA
+    assert "SAP" in motivos["estado_contrato_sap"][1]
+
+
+def test_los_motivos_del_expediente_no_usan_jerga_interna():
+    """El texto lo lee alguien de almacenes: nada de nombres de campo ni de
+    vocabulario del sistema (encargo del cliente, sesión 2026-09-18)."""
+    textos = " ".join(
+        c.detalle or ""
+        for c in celdas_vacias(
+            _linea(), "1",
+            _expediente(codigo_interno=None, codigo_matriz=None, nombre_proyecto=None,
+                        estado_contrato_sap=None, codigos_cruzados=False),
+        )
+    ).lower()
+    for jerga in ("cruce", "cruzad", "codigos_cruzados", "índice", "payload", "null", "none", "campo"):
+        assert jerga not in textos, f"jerga interna en el texto al cliente: {jerga!r}"

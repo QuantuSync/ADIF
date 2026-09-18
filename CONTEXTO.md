@@ -274,7 +274,7 @@ precio por tonelada-kilómetro).
 | Columna | Origen | Modelo |
 |---|---|---|
 | Código interno | `Nº Interno` del Excel de códigos | No, cruce |
-| Código de expediente | `Nº Expediente` del Excel | No, cruce |
+| Código de expediente | `codigo_expediente` propio del sistema — **no sale del Excel de códigos** (ver aviso debajo de la tabla) | No |
 | Código matriz | `MATRIZ` del Excel | No, cruce |
 | Título expediente | *Objeto del Contrato* del anuncio | No, etiqueta fija |
 | Matrícula del material | Cuadro de precios | No |
@@ -288,6 +288,25 @@ precio por tonelada-kilómetro).
 | Baja del lote | Declarada en texto en la propuesta/contrato | No |
 | Unidad de medida | Cuadro de precios | No |
 | Motivo de las celdas vacías | Derivado (`app.celdas_vacias`): por qué falta cada dato de la fila — no aplica / no consta / pendiente | No |
+
+**"Código de expediente" no depende del cruce (corregido el 2026-09-18).**
+Este documento decía hasta esa fecha que la columna salía del `Nº Expediente`
+del Excel de códigos. **Era falso, y costó tres sesiones de confusión del
+cliente** (`docs/sesion-2026-09-15-expedientes-2026-presidencia.md`,
+`...-unidades-y-cobertura-2026.md`, `...-2026-09-16-descubrimiento-por-
+busqueda.md`, donde se anotó tres veces como "la columna solo se rellena si
+cruza" sin corregir la causa). Lo que el código escribía era el
+`codigo_expediente` propio del sistema, y el cruce actuaba solo de
+**interruptor**: sin cruce, la celda salía vacía aunque el número se conociera
+perfectamente. El cliente filtraba por esa columna y concluía que faltaban
+expedientes que sí estaban (2.381 filas de 92 expedientes, el 13 % del Excel).
+**Decisión del cliente, sesión 2026-09-18: la columna es el número del
+expediente y se rellena siempre.** El cruce sigue gobernando en exclusiva las
+tres columnas que sí dependen de él: "Código interno", "Código matriz" y
+"Estado del contrato (SAP)". Consecuencia medida: "Código de expediente" y
+"Nº de expediente (documento)" coinciden ahora en las 18.239 filas, sin una
+sola discrepancia — las dos columnas son hoy idénticas, y si mantener las dos
+merece la pena es una decisión del cliente pendiente, no del sistema.
 
 **Celdas vacías en el Excel (sesión 2026-09-14):** la celda se deja vacía
 — un marcador de texto rompería las columnas numéricas — y su motivo va en
@@ -327,6 +346,22 @@ El anuncio PCSP trae **los dos códigos escritos en campos fijos**:
 **El cruce es por clave exacta, no por similitud de nombre.** El match por
 descripción existe solo como red de seguridad para expedientes sin código legible,
 y en ese caso va con umbral y cola de revisión.
+
+**El cruce puede entrar por cuatro claves, no solo por el número de
+expediente** (medido el 2026-09-18 sobre los 611 expedientes reales).
+`_IndiceCodigosProyecto.buscar` prueba, en este orden: `codigo_expediente`
+contra la columna `Nº Expediente`, `codigo_expediente` contra `MATRIZ`,
+`codigo_matriz` contra `Nº Expediente` y `codigo_matriz` contra `MATRIZ`.
+Solo la primera garantiza que la fila encontrada sea la del propio
+expediente: **352 de los 380 que cruzan (92,6 %) entran por ahí; los otros 28
+casan con la fila de OTRO expediente** (23 + 3 + 2 por cada una de las otras
+tres claves). No es un detalle teórico: de esa fila ajena sale el "Código
+interno", que es la columna por la que el cliente agrupa. Medido también:
+**ninguno de esos 28 tiene fila propia en el Excel de códigos**, así que
+reordenar las cuatro claves no encontraría nada mejor — la única alternativa
+real sería no heredar el "Código interno" de una fila casada por MATRIZ.
+Pendiente de decisión del cliente; medición completa en
+`docs/sesion-2026-09-18-codigo-expediente-motivos-duplicados.md`.
 
 **El sistema nunca inventa una matriz.** Si no cruza, se deja vacío y se marca.
 
@@ -1855,6 +1890,48 @@ sobre el corpus: +2.316 líneas en 54 expedientes, ~10,75 $.
   concepto (`app.catalogo._es_concepto_de_presupuesto`). Catálogo 37.638
   líneas, Excel 18.239 filas, materiales distintos 14.980 → 17.202 (la cifra
   9.848 → 12.003 dada antes estaba mal calculada), 0 materiales perdidos.
+- **"Código de expediente" siempre relleno, motivo para toda celda vacía,
+  duplicados por código de precio y la bandera de búsqueda (sesión
+  2026-09-18, `docs/sesion-2026-09-18-codigo-expediente-motivos-
+  duplicados.md`).** Sin reproceso: el catálogo se queda en 37.638 líneas y
+  el Excel en 18.239 filas, 358 expedientes, 8.743 materiales distintos, **0
+  filas perdidas y 0 materiales desaparecidos**. (1) **Bloque 1**: la columna
+  "Código de expediente" dependía del cruce como interruptor y salía vacía en
+  2.381 filas de 92 expedientes (13 % del entregable) aunque el número se
+  conociera — el cliente filtraba por ahí y concluía que faltaban
+  expedientes. Ahora se rellena siempre; "Código interno", "Código matriz" y
+  "Estado del contrato (SAP)" siguen dependiendo del cruce. Corregida la
+  sección 7, que describía mal el origen de la columna. **Coincide con "Nº de
+  expediente (documento)" en las 18.239 filas, 0 discrepancias**: si mantener
+  las dos columnas merece la pena queda pendiente de decisión del cliente.
+  **Hallazgo que paró el trabajo a media sesión**: el cruce puede entrar por
+  cuatro claves distintas (ver sección 7), no solo por número de expediente
+  — 28 de los 380 que cruzan casan con la fila de otro expediente, y de esa
+  fila sale el "Código interno". Medido: ninguno de los 28 tiene fila propia
+  en el Excel de códigos, así que reordenar las claves no encontraría nada
+  mejor; la decisión real es heredar el interno ajeno o vaciarlo. (2)
+  **Bloque 2**: `app.celdas_vacias` cubría solo los 8 campos de la línea —
+  añadidos los del expediente (código interno, con dos causas distintas;
+  código matriz; título; estado SAP), en castellano llano y con un test que
+  prohíbe la jerga interna en esos textos. Ninguna celda vacía queda ya sin
+  motivo salvo "Comentarios", que lo tiene una vez en el Resumen en vez de
+  repetir la misma frase en 18.239 filas (decisión revisable). 19 motivos
+  distintos. (3) **Bloque 3**: `_check_duplicadas_exactas` agrupaba sin mirar
+  `codigo_precio`, que es la clave de la línea dentro del documento (sección
+  2) — ahora mismo código o sin código es `error`, códigos distintos es
+  `aviso` con el texto del cliente. Los 11 grupos conocidos pasan a aviso, y
+  el Resumen explica las dos formas legítimas de material repetido. (4)
+  **Bloque 4**: `POST /mantenimiento/ejecutar` no reenviaba
+  `busqueda_desactivada` ni `busqueda_fragmentos` al ciclo (el consumidor ya
+  las leía), así que cada reproceso repetía la búsqueda en la Plataforma para
+  nada; comprobado con un doble que revienta si se le llama, más su test en
+  espejo. 990 tests (968 antes). **Auditoría: 1 error, 7 avisos** — el único
+  error (`lineas_cambian_sin_cambiar_documentos` en `6.23/28510.0105`) es el
+  arrastre del arreglo del día anterior, no de esta sesión: los otros 5 de
+  aquellos 6 expedientes sí salen bajo `lineas_bajan_explicado_por_poda`.
+  Sigue pendiente `LineaCatalogo.id` como último desempate del orden (tres
+  parejas de filas contiguas intercambian posición entre dos exportaciones,
+  sin cambiar contenido).
 
 ---
 
@@ -1887,4 +1964,5 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `sesion-2026-09-16-descubrimiento-por-busqueda.md`,
 `sesion-2026-09-16-noche-ciclo-vigentes-unidades.md`,
 `sesion-2026-09-17-escaneados-codigo-material.md`,
+`sesion-2026-09-18-codigo-expediente-motivos-duplicados.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.
