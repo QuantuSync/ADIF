@@ -40,6 +40,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.criterio_expediente import departamentos_configurados, fragmento_en_codigo
+from app.extraccion.lote_declarado import extraer_expediente_principal_declarado
 from app.models import (
     CacheOcrDocumento,
     Documento,
@@ -51,17 +52,36 @@ from app.models import (
     ModeloPrecio,
     OrigenDocumento,
     SindicacionExpediente,
+    TipoDocumento,
     TrabajoCola,
     TrazaOrigen,
 )
 
-# Los seis valores de "Situación" que pidió el cliente, literales. El séptimo
-# ("Otro") obliga a explicarse en la columna "Motivo" -- no es un cajón de
-# sastre silencioso.
+# Los valores de "Situación", literales. Los seis originales son los que pidió
+# el cliente; los dos añadidos en la quinta parte de la sesión 2026-09-18
+# (bloques 3 y 4) parten en dos sendas situaciones que estaban mezclando dos
+# hechos distintos, y llevan su porqué justo encima. "Otro" obliga a
+# explicarse en la columna "Motivo" -- no es un cajón de sastre silencioso.
 APORTA_LINEAS = "Aporta líneas"
 SIN_CUADRO = "Publicado sin cuadro de precios"
 PRECIOS_EN_ACUERDO_MARCO = "Los precios están en un acuerdo marco que no está publicado"
+# Bloque 4, sesión 2026-09-18 (quinta parte). La anterior metía en el mismo
+# saco dos cosas que el cliente distingue y va a preguntar: que el acuerdo
+# marco no esté publicado (no hay de dónde leer un precio) y que sí lo esté
+# pero publique el modelo de proposición económica EN BLANCO, con la columna
+# de precio unitario vacía porque la rellena el licitador (`4.23/04110.0256`,
+# acuerdo marco de EPIs 2024-2025, verificado documento a documento en la
+# cuarta parte de esta misma sesión). En el segundo caso el documento existe y
+# se ha leído entero: lo que no existe es el precio.
+ACUERDO_MARCO_SIN_PRECIOS = "El acuerdo marco está publicado pero no publica precios unitarios"
 ESCANEADO_ILEGIBLE = "Documentos escaneados que no se han podido leer"
+# Bloque 3, sesión 2026-09-18 (quinta parte). Un expediente de lote puede no
+# devolver nada al buscarlo por su propio número y tener, aun así, su
+# adjudicación publicada dentro de la ficha del expediente principal de su
+# licitación (`6.26/28510.0003`, lote 2 de `6.25/28510.0221`). Llamarlo "no
+# publicado" a secas era falso: lo que no está publicado es su *ficha*, no sus
+# documentos.
+PUBLICADO_EN_FICHA_DE_OTRO = "Publicado dentro de la ficha de otro expediente"
 PENDIENTE_DE_PROCESAR = "Pendiente de procesar"
 OTRO = "Otro"
 
@@ -69,7 +89,9 @@ SITUACIONES = (
     APORTA_LINEAS,
     SIN_CUADRO,
     PRECIOS_EN_ACUERDO_MARCO,
+    ACUERDO_MARCO_SIN_PRECIOS,
     ESCANEADO_ILEGIBLE,
+    PUBLICADO_EN_FICHA_DE_OTRO,
     PENDIENTE_DE_PROCESAR,
     OTRO,
 )
@@ -146,6 +168,12 @@ class RegistroPublicado:
     busqueda_codigos_encontrados: Optional[int] = None
     expedientes_publicados: int = 0
     expedientes_no_publicados: int = 0
+    # Bloque 3, sesión 2026-09-18 (quinta parte): de los que la Plataforma no
+    # devuelve al buscarlos por su número, cuántos sí tienen sus documentos
+    # publicados dentro de la ficha de otro expediente (y por eso SÍ salen en
+    # la hoja). Se cuentan aparte para que la frase del registro no vuelva a
+    # llamarlos "no publicados" sin más.
+    expedientes_en_ficha_de_otro: int = 0
 
 
 def _periodo_legible(periodo: str) -> str:
@@ -184,15 +212,21 @@ def describir_registro_publicado(db: Session, filas: list[FilaConciliacion]) -> 
     # matrices de otros departamentos dadas por no publicadas, y contarlas
     # aquí daría una cifra que no cuadra con la lista que se está explicando.
     departamentos = sorted(departamentos_configurados())
-    no_publicados = sum(
-        1
+    # Bloque 3, sesión 2026-09-18 (quinta parte): los que ya salen en la hoja
+    # porque sus documentos se publican en la ficha de otro expediente no se
+    # cuentan aquí como "no publicados" -- estarían contados dos veces, y en
+    # la segunda con la etiqueta equivocada.
+    en_la_hoja = {fila.codigo_expediente for fila in filas}
+    no_publicados = [
+        codigo
         for (codigo,) in db.execute(
             select(Expediente.codigo_expediente).where(
                 Expediente.estado == EstadoExpediente.sin_publicar
             )
         ).all()
         if any(fragmento_en_codigo(codigo, d) for d in departamentos)
-    )
+    ]
+    en_ficha_de_otro = sum(1 for codigo in no_publicados if codigo in en_la_hoja)
     return RegistroPublicado(
         departamentos=departamentos,
         periodos_sindicacion=periodos,
@@ -201,7 +235,8 @@ def describir_registro_publicado(db: Session, filas: list[FilaConciliacion]) -> 
         busqueda_fragmentos=fragmentos,
         busqueda_codigos_encontrados=encontrados,
         expedientes_publicados=len(filas),
-        expedientes_no_publicados=no_publicados,
+        expedientes_no_publicados=len(no_publicados) - en_ficha_de_otro,
+        expedientes_en_ficha_de_otro=en_ficha_de_otro,
     )
 
 
@@ -241,12 +276,54 @@ def _porcentaje(valor: Optional[Decimal]) -> str:
 _MOTIVO_SIN_LINEAS_GENERICO = "no se extrajo ninguna línea de catálogo de los documentos descargados"
 
 
+@dataclass(frozen=True)
+class LoteDeOtroExpediente:
+    """Bloque 3, sesión 2026-09-18 (quinta parte): este expediente es el lote
+    `identificador` de la licitación `principal`, y quien lo declara así es un
+    documento publicado de `principal` (su Resolución de Adjudicación o su
+    Contrato), no una suposición nuestra.
+
+    Es el mismo dato que `Lote.codigo_expediente_lote` ya guardaba desde la
+    generalización de `docs/identidad-expediente.md` sección 27 -- aquí solo se
+    le da la vuelta al índice (del principal a su lote, en vez de al revés)
+    para poder contestar "¿de quién cuelga este número?"."""
+
+    principal: str
+    identificador: str
+
+
+def _lotes_en_ficha_de_otro(db: Session, por_codigo: dict[str, Expediente]) -> dict[str, LoteDeOtroExpediente]:
+    """Código de expediente -> de quién cuelga, para los expedientes cuyo
+    número aparece como el de un lote de OTRA licitación.
+
+    Certeza estructural, no coincidencia de texto: la relación sale de un
+    documento de adjudicación o de un contrato que liga, por número, un lote a
+    su expediente (`app.extraccion.lotes`), nunca de encontrar el número
+    suelto en el texto de cualquier documento. Se descarta el caso degenerado
+    de un expediente que se declara lote de sí mismo."""
+    enlaces: dict[str, LoteDeOtroExpediente] = {}
+    for lote, codigo_principal in db.execute(
+        select(Lote, Expediente.codigo_expediente).join(
+            Expediente, Expediente.id == Lote.expediente_id
+        )
+    ).all():
+        codigo_lote = (lote.codigo_expediente_lote or "").strip()
+        if not codigo_lote or codigo_lote == codigo_principal:
+            continue
+        if codigo_lote not in por_codigo:
+            continue
+        enlaces[codigo_lote] = LoteDeOtroExpediente(codigo_principal, lote.identificador_lote)
+    return enlaces
+
+
 def _situacion(
     expediente: Expediente,
     lineas: int,
     documentos: int,
     documentos_ocr: int,
     matriz_publicada: Optional[bool],
+    principal_publicado: Optional[str] = None,
+    en_ficha_de_otro: Optional[LoteDeOtroExpediente] = None,
 ) -> tuple[str, str]:
     """Devuelve `(situación, motivo)`. El orden de las ramas es el orden de
     las causas: la primera que se cumple es la que de verdad explica el caso.
@@ -260,6 +337,19 @@ def _situacion(
         return APORTA_LINEAS, (
             f"Se han leído sus documentos y ha aportado {lineas} línea(s) de material al catálogo, "
             "con su precio unitario."
+        )
+
+    if en_ficha_de_otro is not None and documentos == 0:
+        # Bloque 3, sesión 2026-09-18 (quinta parte). Va por delante de la
+        # rama de "no se ha descargado nada suyo" porque la explica: no hay
+        # nada que descargar bajo ESTE número, y no por estar pendiente.
+        return PUBLICADO_EN_FICHA_DE_OTRO, (
+            f"Este expediente es el lote {en_ficha_de_otro.identificador} de la licitación "
+            f"{en_ficha_de_otro.principal}, y así lo declara por su número un documento publicado de "
+            f"{en_ficha_de_otro.principal}. Sus documentos (adjudicación, contrato, cuadro de precios) se "
+            f"publican dentro de la ficha de {en_ficha_de_otro.principal}, no bajo su propio número: "
+            "buscarlo en la Plataforma por este número no devuelve nada, y eso no significa que no esté "
+            f"publicado. Lo que aporte al catálogo se cuenta en la fila de {en_ficha_de_otro.principal}."
         )
 
     if documentos == 0:
@@ -284,6 +374,23 @@ def _situacion(
         return PENDIENTE_DE_PROCESAR, (
             "Sus documentos están descargados, pero todavía no se han terminado de leer. Está en la "
             "lista de trabajo pendiente."
+        )
+
+    if matriz_publicada is False and principal_publicado:
+        # Bloque 4, sesión 2026-09-18 (quinta parte). El acuerdo marco que
+        # figura en el campo fijo del anuncio (`codigo_matriz`) no está
+        # publicado, pero el propio anuncio declara además el **expediente
+        # principal** de la licitación por lotes de la que cuelga, y ESE sí lo
+        # está. No es el mismo caso: hay documentos publicados y leídos, lo
+        # que no hay en ellos es un precio unitario.
+        return ACUERDO_MARCO_SIN_PRECIOS, (
+            f"Es un pedido que se hace contra el acuerdo marco {expediente.codigo_matriz}. El anuncio de "
+            f"este pedido declara además el expediente principal de ese acuerdo marco, "
+            f"{principal_publicado}, que sí está publicado y cuyos documentos se han descargado y leído "
+            "enteros. Lo que publica no es un cuadro de precios: es el modelo de proposición económica en "
+            "blanco, con las unidades puestas y la columna de precio unitario vacía, que es la que rellena "
+            "cada licitador al presentar su oferta. No hay ningún precio unitario publicado que leer. Para "
+            "completarlo haría falta que ADIF facilitara los precios adjudicados de ese acuerdo marco."
         )
 
     if matriz_publicada is False:
@@ -327,6 +434,83 @@ def _situacion(
     )
 
 
+# ---------------------------------------------------------------------------
+# Bloque 6, sesión 2026-09-18 (quinta parte): el documento manda sobre el
+# boletín cuando va por delante
+# ---------------------------------------------------------------------------
+# El caso que lo motiva es `6.25/28510.0221` (tercera parte de esta sesión):
+# su Resolución de Adjudicación está descargada de la Plataforma y leída, pero
+# la columna decía "Pendiente de adjudicación" porque el último boletín de
+# sindicación que lo lista es el de 07/2026 y ahí todavía lo estaba. Un boletín
+# refleja un evento de ese mes, no "sigue vigente" (CONTEXTO.md sección 16), así
+# que quedarse con él es quedarse con el dato más viejo de los dos.
+#
+# **Por qué esto no viola CONTEXTO.md sección 12** ("un contraste externo no
+# tiene autoridad para cambiar el estado de un expediente"). Esa regla protege
+# al documento del contraste, no al revés: aquí manda el documento firmado, que
+# es justo lo que esa sección dice que manda. Y no se cambia ningún estado del
+# sistema -- `Expediente.estado` no se toca --, solo lo que esta columna
+# informa.
+#
+# **Nunca baja de estado.** Solo se sustituye cuando el documento prueba una
+# etapa POSTERIOR a la que dice el boletín; si el boletín va por delante o
+# empatan, manda el boletín. Y "Anulada" no está en la escalera: una anulación
+# no la deshace un documento anterior a ella.
+_ESCALERA_ESTADO = {"PRE": 0, "PUB": 1, "EV": 2, "ADJ": 3, "RES": 4}
+
+# Qué prueba cada tipo de documento publicado en la Plataforma, y nada más.
+# El techo es "Resuelta": sin acceso a SAP, los estados posteriores del
+# contrato los tiene que indicar ADIF a mano (decisión de Isabel Ibáñez,
+# 18/09/2026, `docs/decisiones-cliente.md`).
+_ESTADO_QUE_PRUEBA_EL_DOCUMENTO = {
+    TipoDocumento.resolucion_adjudicacion: "ADJ",
+    TipoDocumento.propuesta_lc27: "ADJ",
+    TipoDocumento.propuesta_dt: "ADJ",
+    TipoDocumento.contrato: "RES",
+}
+
+_ORIGEN_DEL_DOCUMENTO = {
+    "ADJ": "su Resolución o Propuesta de Adjudicación",
+    "RES": "su Contrato o su Anuncio de formalización",
+}
+
+
+def _estado_publicado(
+    codigo_sindicacion: Optional[str], codigo_por_documento: Optional[str], periodo: Optional[str]
+) -> str:
+    """El texto de la columna "Estado que consta publicado en la Plataforma"."""
+    # Un código que no está en la escalera ("ANUL", o uno que la Plataforma
+    # añada mañana y todavía no conozcamos) **no se compara**: manda el
+    # boletín. Sin esta condición, `.get(..., -1)` haría que cualquier
+    # documento pasara por delante de una anulación, que es justo lo contrario
+    # de lo que hay que hacer.
+    if codigo_por_documento is not None and (
+        codigo_sindicacion is None
+        or (
+            codigo_sindicacion in _ESCALERA_ESTADO
+            and _ESCALERA_ESTADO[codigo_por_documento] > _ESCALERA_ESTADO[codigo_sindicacion]
+        )
+    ):
+        texto = _ESTADO_PLATAFORMA[codigo_por_documento]
+        origen = _ORIGEN_DEL_DOCUMENTO[codigo_por_documento]
+        if codigo_sindicacion is None:
+            return (
+                f"{texto} (lo prueba {origen}, que el sistema ha descargado de la Plataforma; la "
+                "sindicación mensual no ha listado todavía este expediente)"
+            )
+        anterior = _ESTADO_PLATAFORMA.get(codigo_sindicacion, codigo_sindicacion)
+        cuando = f" de {_periodo_legible(periodo)}" if periodo else ""
+        return (
+            f"{texto} (lo prueba {origen}, que el sistema ha descargado de la Plataforma; el último "
+            f"boletín de sindicación"
+            f"{cuando} todavía decía “{anterior}”, y un boletín refleja el mes en que se publicó, "
+            "no lo que sigue vigente)"
+        )
+    if codigo_sindicacion is not None:
+        return _ESTADO_PLATAFORMA.get(codigo_sindicacion, codigo_sindicacion)
+    return _SIN_ESTADO_PUBLICADO
+
+
 _ESTADOS_EN_CURSO = (
     EstadoExpediente.pendiente,
     EstadoExpediente.descargando,
@@ -355,13 +539,27 @@ def construir_conciliacion(
     # mano (`app.ingesta_local`) no prueba que el expediente esté publicado
     # -- justamente existe para los que no lo están.
     con_documento_de_plataforma: set[int] = set()
-    for expediente_id, hash_documento, origen in db.execute(
-        select(DocumentoExpediente.expediente_id, Documento.hash, Documento.origen)
-        .join(Documento, Documento.id == DocumentoExpediente.documento_id)
+    # Bloque 6: qué etapa prueba el documento más avanzado que la Plataforma
+    # publica de cada expediente (ver `_estado_publicado`). Solo cuentan los
+    # descargados de la Plataforma: un documento aportado a mano no prueba
+    # nada sobre lo que la Plataforma publica.
+    estado_por_documento: dict[int, str] = {}
+    for expediente_id, hash_documento, origen, tipo in db.execute(
+        select(
+            DocumentoExpediente.expediente_id,
+            Documento.hash,
+            Documento.origen,
+            Documento.tipo_documento,
+        ).join(Documento, Documento.id == DocumentoExpediente.documento_id)
     ).all():
         documentos.setdefault(expediente_id, []).append(hash_documento)
         if origen == OrigenDocumento.plataforma:
             con_documento_de_plataforma.add(expediente_id)
+            prueba = _ESTADO_QUE_PRUEBA_EL_DOCUMENTO.get(tipo)
+            if prueba is not None:
+                anterior = estado_por_documento.get(expediente_id)
+                if anterior is None or _ESCALERA_ESTADO[prueba] > _ESCALERA_ESTADO[anterior]:
+                    estado_por_documento[expediente_id] = prueba
 
     hashes_ocr = {h for (h,) in db.execute(select(CacheOcrDocumento.documento_hash)).all()}
     sindicacion = {
@@ -397,12 +595,23 @@ def construir_conciliacion(
             return True
         return expediente.descargado_en is not None
 
+    # Bloque 3: los que no devuelven nada al buscarlos por su número pero
+    # tienen sus documentos publicados dentro de la ficha de otro expediente.
+    # Entran en la hoja: sí están publicados, solo que no bajo su número.
+    en_ficha_de_otro = {
+        codigo: enlace
+        for codigo, enlace in _lotes_en_ficha_de_otro(db, por_codigo).items()
+        if not consta_publicado(por_codigo[codigo])
+        and (principal := por_codigo.get(enlace.principal)) is not None
+        and consta_publicado(principal)
+    }
+
     seleccionados = [
         e
         for e in expedientes.values()
         if (
             any(fragmento_en_codigo(e.codigo_expediente, d) for d in departamentos)
-            and consta_publicado(e)
+            and (consta_publicado(e) or e.codigo_expediente in en_ficha_de_otro)
         )
         # Requisito duro: nada de lo que está en "Materiales" puede faltar
         # aquí, cumpla o no el criterio de departamento (p. ej. la matriz de
@@ -419,23 +628,41 @@ def construir_conciliacion(
         if expediente.codigo_matriz:
             matriz = por_codigo.get(expediente.codigo_matriz)
             matriz_publicada = matriz is not None and consta_publicado(matriz)
+        # Bloque 4: el expediente principal del acuerdo marco que el propio
+        # anuncio del pedido declara en su título, cuando ESE sí está
+        # publicado. Nunca se escribe en `codigo_matriz` (CONTEXTO.md sección
+        # 7: el sistema no inventa matrices); aquí solo se usa para saber cuál
+        # de las dos situaciones de acuerdo marco es la de verdad.
+        principal_publicado: Optional[str] = None
+        if matriz_publicada is False:
+            declarado = extraer_expediente_principal_declarado(expediente.nombre_proyecto)
+            if declarado and declarado != expediente.codigo_matriz:
+                principal = por_codigo.get(declarado)
+                if principal is not None and consta_publicado(principal):
+                    principal_publicado = declarado
         situacion, motivo = _situacion(
             expediente,
             lineas=lineas,
             documentos=len(hashes),
             documentos_ocr=sum(1 for h in hashes if h in hashes_ocr),
             matriz_publicada=matriz_publicada,
+            principal_publicado=principal_publicado,
+            en_ficha_de_otro=en_ficha_de_otro.get(expediente.codigo_expediente),
         )
         traza, nombre_documento = traza_baja.get(expediente.id, (None, None))
-        estado = None
-        if entrada is not None and entrada.estado_pcsp:
-            estado = _ESTADO_PLATAFORMA.get(entrada.estado_pcsp, entrada.estado_pcsp)
+        # Bloque 6: el documento publicado manda sobre el boletín de
+        # sindicación cuando prueba una etapa posterior. Ver `_estado_publicado`.
+        estado = _estado_publicado(
+            entrada.estado_pcsp if entrada is not None else None,
+            estado_por_documento.get(expediente.id),
+            entrada.periodo_zip if entrada is not None else None,
+        )
         filas.append(
             FilaConciliacion(
                 codigo_expediente=expediente.codigo_expediente,
                 titulo=expediente.nombre_proyecto or (entrada.titulo if entrada else None),
                 organo_contratacion=entrada.organo_contratacion if entrada else None,
-                estado_plataforma=estado or _SIN_ESTADO_PUBLICADO,
+                estado_plataforma=estado,
                 # Dato de ADIF, no de la Plataforma (columna aparte, ver
                 # `COLUMNAS_CONCILIACION`). Se escribe tal cual viene en su
                 # listado: no se traduce ni se normaliza, es su vocabulario.

@@ -413,16 +413,32 @@ _NOTA_CODIGO_MATERIAL = (
 # origen, no por falta de lectura.
 _NOTA_CONCILIACION = (
     "La hoja \"Conciliación\" lleva una fila por cada expediente del departamento que consta publicado en "
-    "la Plataforma, aporte líneas al catálogo o no, con cuántos documentos se le descargaron, cuántos se "
+    "la Plataforma -- bajo su propio número o dentro de la ficha del expediente principal de su "
+    "licitación, cuando es uno de sus lotes --, aporte líneas al catálogo o no, con cuántos documentos se le descargaron, cuántos se "
     "leyeron con reconocimiento óptico, cuántas líneas aporta y, cuando no aporta ninguna, por qué. Sirve "
     "para comprobar que no falta nada por leer sin tener que suponerlo: la suma de su columna de líneas es "
     "exactamente el número de filas de la hoja \"Materiales\"."
 )
 _NOTA_CONCILIACION_HUECOS = (
-    "En esa hoja, \"Órgano de contratación\" y \"Estado que consta publicado en la Plataforma\" solo se "
-    "rellenan para los expedientes que ha listado la sindicación mensual, que es la vía que trae esos dos "
-    "datos. Los que se conocen solo por la búsqueda directa en el buscador de la Plataforma salen con esas "
-    "dos celdas explicadas: el buscador devuelve el número de expediente, no su ficha."
+    "En esa hoja, \"Órgano de contratación\" solo se rellena para los expedientes que ha listado la "
+    "sindicación mensual, que es la vía que trae ese dato. Los que se conocen solo por la búsqueda directa "
+    "en el buscador de la Plataforma salen con esa celda explicada: el buscador devuelve el número de "
+    "expediente, no su ficha."
+)
+# Bloque 6, sesión 2026-09-18 (quinta parte): la columna de estado ya no sale
+# solo de la sindicación, y el cliente ya tiene esa columna delante -- el
+# cambio tiene que estar escrito en el propio Excel, no solo en el registro de
+# la sesión.
+_NOTA_ESTADO_PUBLICADO = (
+    "La columna \"Estado que consta publicado en la Plataforma\" sale del boletín mensual de sindicación "
+    "y, cuando el sistema ya tiene descargado de la Plataforma un documento que prueba una etapa "
+    "posterior (la Resolución de Adjudicación, o el Contrato/Anuncio de formalización), de ese documento: "
+    "un boletín refleja el evento del mes en que se publicó, no lo que sigue vigente, así que quedarse "
+    "con él sería quedarse con el dato más viejo de los dos. Cuando manda el documento, la celda lo dice "
+    "y dice también lo que decía el último boletín. Nunca al revés: la columna solo avanza de etapa, "
+    "jamás retrocede, y una \"Anulada\" del boletín no la deshace ningún documento. El último estado al "
+    "que puede llegar esta columna es \"Resuelta\": sin acceso a SAP no hay nada publicado de lo que leer "
+    "un estado posterior del contrato, y esos los indica ADIF (decisión de ADIF del 18/09/2026)."
 )
 # Bloque 3, sesión 2026-09-18 (continuación). La columna "Estado según ADIF"
 # es de OTRA fuente, y eso tiene que estar dicho en el Excel, no solo sabido:
@@ -473,6 +489,7 @@ def _escribir_bloque_conciliacion(hoja, filas: list, registro: RegistroPublicado
     hoja.append([_NOTA_CONCILIACION, None])
     hoja.append([_NOTA_CONCILIACION_HUECOS, None])
     hoja.append([_NOTA_ESTADO_ADIF, None])
+    hoja.append([_NOTA_ESTADO_PUBLICADO, None])
     hoja.append([])
     hoja.append(["De qué fecha es el registro de lo publicado y qué cubre", None])
     departamentos = ", ".join(registro.departamentos) or "(sin departamento configurado)"
@@ -516,6 +533,18 @@ def _escribir_bloque_conciliacion(hoja, filas: list, registro: RegistroPublicado
         "Plataforma confirmó que no publica: no salen en la hoja, porque no hay nada que leer de ellos.",
         None,
     ])
+    if registro.expedientes_en_ficha_de_otro:
+        # Bloque 3, sesión 2026-09-18 (quinta parte): antes de este cambio
+        # estos caían en la frase de arriba, contados como "la Plataforma
+        # confirmó que no publica". Es falso: lo que no publica es su ficha.
+        hoja.append([
+            f"De los que la Plataforma no devuelve al buscarlos por su número, "
+            f"{registro.expedientes_en_ficha_de_otro} SÍ están publicados: son lotes de otra licitación "
+            "y sus documentos se publican dentro de la ficha del expediente principal, no bajo su propio "
+            "número. Esos sí salen en la hoja, con la situación \"Publicado dentro de la ficha de otro "
+            "expediente\" y el número de quién los publica.",
+            None,
+        ])
     hoja.append([])
     hoja.append(["Situación", "Expedientes", None])
     recuento = Counter(fila.situacion for fila in filas)

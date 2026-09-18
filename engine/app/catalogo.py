@@ -7,7 +7,11 @@ from typing import Callable, Optional
 from sqlalchemy.orm import Session
 
 from app.extraccion.codigo_material import derivar_codigo_material
-from app.extraccion.glifos_cid import descodificar_fila
+from app.extraccion.glifos_cid import (
+    confirmar_con_precio_conocido,
+    descodificar_fila,
+    tiene_glifos_cid,
+)
 from app.extraccion.invalidado import INVALIDADO
 from app.extraccion.normalizacion import (
     limpiar_codigo_celda,
@@ -1307,6 +1311,11 @@ def _construir_campos(
         "cantidad": cantidad,
         "precio_unitario": precio_unitario,
         "motivo_revision": motivo_revision,
+        # La celda de precio tal cual la trae el documento. Solo la usa
+        # `construir_linea_catalogo` para dejar constancia de una celda en
+        # glifos que la aritmética de su propia fila no ha podido confirmar
+        # (bloque 5, sesión 2026-09-18, quinta parte).
+        "precio_bruto": precio_bruto,
     }
 
 
@@ -1513,6 +1522,17 @@ def construir_linea_catalogo(
         "pagina": pagina,
         "fragmento": marca_glifos + " | ".join((celda or "").strip() for celda in fila_literal),
         "motivo_revision": campos["motivo_revision"],
+        # Transitorio, nunca llega a la base de datos: la celda de precio tal
+        # cual, con sus identificadores de glifo, cuando la aritmética de la
+        # propia fila no ha podido confirmarlos (bloque 5, sesión 2026-09-18,
+        # quinta parte). `app.extraccion.pipeline_anejo` intenta con ella la
+        # segunda vía -- el mismo código de precio en otro lote del mismo
+        # cuadro -- y la quita de la línea antes de guardar.
+        "precio_glifos_sin_confirmar": (
+            campos.get("precio_bruto")
+            if precio_unitario is None and tiene_glifos_cid(campos.get("precio_bruto"))
+            else None
+        ),
     }
 
 
@@ -1715,6 +1735,92 @@ def _dividir_fila_multiple(
             nueva_fila[indice_descripcion] = descripciones[i]
         filas_divididas.append(nueva_fila)
     return filas_divididas, descripcion_dividida
+
+
+# Bloque 5, sesión 2026-09-18 (quinta parte). El caso real: el cuadro de
+# precios de `6.26/28510.0064` trae una tabla por lote y todas menos la del
+# LOTE 3 publican columna de totales, así que en cinco de los seis lotes la
+# aritmética de cada fila confirma sola la descodificación de sus glifos
+# (`app.extraccion.glifos_cid.descodificar_fila`) y en el sexto no hay con qué
+# comprobar nada.
+_MOTIVO_GLIFOS_SIN_DESCODIFICAR = "precio unitario no interpretable"
+
+
+def resolver_glifos_con_precio_de_otro_lote(lineas: list[dict]) -> int:
+    """Segunda vía para las celdas en glifos que la aritmética de su propia
+    fila no pudo confirmar: el mismo código de precio, ya resuelto, en otra
+    tabla del mismo documento.
+
+    **No copia ningún precio.** El número que se escribe sale de los glifos de
+    la propia celda; la otra fila solo confirma con qué desplazamiento hay que
+    leerlos, que es exactamente lo que a una tabla sin columna de totales le
+    falta (ver `app.extraccion.glifos_cid.confirmar_con_precio_conocido`, que
+    exige además que ese desplazamiento sea el único que da un precio
+    conocido). La línea resuelta conserva un motivo que dice de dónde salió la
+    confirmación, porque no es la misma prueba que la aritmética de la fila.
+
+    Devuelve cuántas líneas se resolvieron. Quita siempre de todas las líneas
+    la marca transitoria, resuelvan o no: nunca llega a la base de datos."""
+    conocidos: dict[str, set[Decimal]] = {}
+    # De qué lote sale cada precio conocido, solo para poder decirlo en el
+    # motivo: quien revise tiene que poder ir a esa tabla y mirarla.
+    lote_del_precio: dict[tuple[str, Decimal], str] = {}
+    for linea in lineas:
+        codigo = linea.get("codigo_precio")
+        precio = linea.get("precio_unitario")
+        if isinstance(codigo, str) and isinstance(precio, Decimal):
+            conocidos.setdefault(codigo, set()).add(precio)
+            lote = linea.get("identificador_lote")
+            if isinstance(lote, str):
+                lote_del_precio.setdefault((codigo, precio), lote)
+
+    resueltas = 0
+    for linea in lineas:
+        bruto = linea.pop("precio_glifos_sin_confirmar", None)
+        if not bruto or linea.get("precio_unitario") is not None:
+            continue
+        codigo = linea.get("codigo_precio")
+        if not isinstance(codigo, str):
+            continue
+        # El propio precio de esta línea no está en `conocidos` (no tiene): no
+        # hace falta excluirla del conjunto.
+        confirmado = confirmar_con_precio_conocido(bruto, conocidos.get(codigo, set()))
+        if confirmado is None:
+            continue
+        linea["precio_unitario"] = confirmado.precio
+        baja = linea.get("baja_lote")
+        if baja is not None:
+            linea["precio_adjudicado"] = confirmado.precio * (Decimal("1") - baja)
+        lote_origen = lote_del_precio.get((codigo, confirmado.referencia))
+        donde = f"del lote {lote_origen}" if lote_origen else "de otro lote"
+        linea["motivo_revision"] = _acumular_motivo(
+            _sin_motivo_de_glifos(linea.get("motivo_revision")),
+            "precio unitario descodificado de identificadores de glifo (el PDF no trae tabla de "
+            "caracteres) y esta tabla no publica columna de totales con la que comprobarlo: "
+            f"confirmado porque el mismo código de precio ({codigo}) vale "
+            f"{_importe_es(confirmado.referencia)} en la tabla {donde} del mismo cuadro, y es la única "
+            "lectura posible de esta celda que coincide con él — confirmar contra el documento antes de "
+            "darlo por bueno",
+        )
+        resueltas += 1
+    return resueltas
+
+
+def _sin_motivo_de_glifos(motivo: Optional[str]) -> Optional[str]:
+    """Quita del motivo el trozo que decía que el precio no era interpretable:
+    ya no es verdad, y dejarlo junto a la explicación nueva se contradice."""
+    if not motivo:
+        return motivo
+    partes = [
+        parte
+        for parte in motivo.split("; ")
+        if not parte.startswith(_MOTIVO_GLIFOS_SIN_DESCODIFICAR)
+    ]
+    return "; ".join(partes) or None
+
+
+def _importe_es(valor: Decimal) -> str:
+    return f"{valor:.2f}".replace(".", ",") + " €"
 
 
 def construir_lineas_desde_tabla(
@@ -2314,6 +2420,11 @@ def guardar_lineas_catalogo(
         # abajo (ver docstring de esta función).
         clave_huerfana_hipotetica = datos.pop("clave_huerfana_hipotetica", None)
         datos.pop("tabla_origen", None)  # transitorio, ver `_combinar_por_clave`
+        # Transitorio también (bloque 5, sesión 2026-09-18, quinta parte):
+        # `app.extraccion.pipeline_anejo` ya lo quita al intentar la segunda
+        # vía de los glifos, pero se quita aquí igualmente -- es una marca de
+        # trabajo, nunca una columna, y ningún llamador debe poder colarla.
+        datos.pop("precio_glifos_sin_confirmar", None)
         existente = (
             db.query(LineaCatalogo)
             .filter_by(lote_id=lote_id, expediente_id=datos["expediente_id"], clave_linea=datos["clave_linea"])

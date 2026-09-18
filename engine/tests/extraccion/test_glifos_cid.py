@@ -123,3 +123,116 @@ def test_la_linea_de_catalogo_sale_con_su_precio_y_la_evidencia_literal():
     assert "359.100" in linea["fragmento"]
     # Y no se manda a revisión: la fila se ha confirmado a sí misma.
     assert linea["motivo_revision"] is None
+
+
+# ---------------------------------------------------------------------------
+# Bloque 5, sesión 2026-09-18 (quinta parte): la tabla del LOTE 3 del mismo
+# cuadro no publica columna de totales. Cadenas literales de su p.25.
+# ---------------------------------------------------------------------------
+
+# "11,9700 €" (el mismo P-1 que los demás lotes) sin ninguna celda de total.
+_PRECIO_P1_LOTE3 = "(cid:1005)(cid:1005),(cid:1013)(cid:1011)(cid:1004)(cid:1004) €"
+# "20,8800 €": el transporte, que vale distinto en cada lote.
+_PRECIO_P2_LOTE3 = "(cid:1006)(cid:1004),(cid:1012)(cid:1012)(cid:1004)(cid:1004) €"
+# "1,0000 €": solo dos identificadores distintos, diez desplazamientos posibles.
+_PRECIO_P5_LOTE3 = "(cid:1005),(cid:1004)(cid:1004)(cid:1004)(cid:1004) €"
+
+
+def test_sin_columna_de_totales_la_aritmetica_de_la_fila_no_puede_confirmar_nada():
+    from app.extraccion.glifos_cid import descodificar_fila
+
+    fila = ["P-1", "Balasto sobre camión en cantera", "t", "30.000", None, _PRECIO_P1_LOTE3]
+
+    assert descodificar_fila(fila, 3, 5) is None
+
+
+def test_el_mismo_codigo_en_otro_lote_confirma_el_desplazamiento():
+    from app.extraccion.glifos_cid import confirmar_con_precio_conocido
+
+    confirmado = confirmar_con_precio_conocido(_PRECIO_P1_LOTE3, {Decimal("11.9700")})
+
+    assert confirmado is not None
+    assert confirmado.precio == Decimal("11.9700")
+    assert confirmado.desplazamiento == 1004
+
+
+def test_confirma_aunque_la_celda_admita_diez_desplazamientos():
+    from app.extraccion.glifos_cid import confirmar_con_precio_conocido
+
+    # "1,0000": solo dos identificadores distintos, así que por sí sola la
+    # celda admite nueve lecturas. Solo una da un precio ya conocido.
+    assert len(desplazamientos_posibles([_PRECIO_P5_LOTE3])) == 9
+    confirmado = confirmar_con_precio_conocido(_PRECIO_P5_LOTE3, {Decimal("1.0000")})
+
+    assert confirmado is not None
+    assert confirmado.precio == Decimal("1.0000")
+
+
+def test_un_precio_que_varia_por_lote_no_se_confirma_con_el_de_otro():
+    from app.extraccion.glifos_cid import confirmar_con_precio_conocido
+
+    # Los P-2 reales de los otros cinco lotes del cuadro. Ninguno es el de
+    # este, y ninguna lectura posible de esta celda coincide con ellos.
+    otros = {Decimal("13.5000"), Decimal("28.8000"), Decimal("16.2000"),
+             Decimal("33.3000"), Decimal("21.6000")}
+
+    assert confirmar_con_precio_conocido(_PRECIO_P2_LOTE3, otros) is None
+
+
+def test_sin_precios_conocidos_no_confirma_nada():
+    from app.extraccion.glifos_cid import confirmar_con_precio_conocido
+
+    assert confirmar_con_precio_conocido(_PRECIO_P1_LOTE3, set()) is None
+    assert confirmar_con_precio_conocido("11,97 €", {Decimal("11.97")}) is None
+
+
+def test_no_elige_cuando_dos_desplazamientos_dan_precios_conocidos():
+    from app.extraccion.glifos_cid import confirmar_con_precio_conocido
+
+    # "0,1800" con desplazamiento 1004; "1,2911" con 1003. Si los dos
+    # estuvieran verificados no habría forma de elegir, y no se elige.
+    celda = "(cid:1004),(cid:1005)(cid:1012)(cid:1004)(cid:1004) €"
+    assert confirmar_con_precio_conocido(celda, {Decimal("0.18")}) is not None
+    assert confirmar_con_precio_conocido(celda, {Decimal("0.18"), Decimal("1.2911")}) is None
+
+
+def test_la_pasada_por_documento_resuelve_el_lote_sin_totales_y_deja_el_resto():
+    from app.catalogo import resolver_glifos_con_precio_de_otro_lote
+
+    mapeo = {"codigo_precio": 0, "matricula": None, "descripcion": 1, "unidad_medida": 2,
+             "cantidad": 3, "precio_unitario": 4}
+    lineas = []
+    # Lote 1: con columna de totales, se confirma sola por aritmética.
+    for fila in (_fila(_PRECIO_P1, _TOTAL_P1), _fila(_PRECIO_P2, _TOTAL_P2, cantidad="27.000")):
+        linea = _construir(fila, mapeo)
+        linea["identificador_lote"] = "1"
+        lineas.append(linea)
+    lineas[1]["codigo_precio"] = "P-2"
+    # Lote 3: sin totales. P-1 comparte precio con el lote 1; P-2 no.
+    for codigo, precio in (("P-1", _PRECIO_P1_LOTE3), ("P-2", _PRECIO_P2_LOTE3)):
+        linea = _construir([codigo, "Balasto", "t", "30.000", precio], mapeo)
+        linea["identificador_lote"] = "3"
+        lineas.append(linea)
+
+    resueltas = resolver_glifos_con_precio_de_otro_lote(lineas)
+
+    assert resueltas == 1
+    assert lineas[2]["precio_unitario"] == Decimal("11.9700")
+    assert "confirmado porque el mismo código de precio (P-1)" in lineas[2]["motivo_revision"]
+    assert "en la tabla del lote 1 del mismo cuadro" in lineas[2]["motivo_revision"]
+    # El motivo viejo ("no interpretable") ya no está: sería mentira.
+    assert "no interpretable" not in lineas[2]["motivo_revision"]
+    # El transporte, que vale distinto en cada lote, se queda como estaba.
+    assert lineas[3]["precio_unitario"] is None
+    assert "precio unitario no interpretable" in lineas[3]["motivo_revision"]
+    # Y la marca transitoria nunca sobrevive a la pasada.
+    assert all("precio_glifos_sin_confirmar" not in linea for linea in lineas)
+
+
+def _construir(fila, mapeo):
+    from app.catalogo import construir_linea_catalogo
+
+    return construir_linea_catalogo(
+        fila, mapeo, pagina=25, documento_origen_id=None, expediente_id=1,
+        baja_lote=None, orden_aparicion=0,
+    )

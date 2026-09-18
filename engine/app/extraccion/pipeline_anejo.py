@@ -24,7 +24,12 @@ from typing import Optional
 import pdfplumber
 from sqlalchemy.orm import Session
 
-from app.catalogo import MOTIVO_MAPEO_INCOHERENTE, _acumular_motivo, construir_lineas_desde_tabla
+from app.catalogo import (
+    MOTIVO_MAPEO_INCOHERENTE,
+    _acumular_motivo,
+    construir_lineas_desde_tabla,
+    resolver_glifos_con_precio_de_otro_lote,
+)
 from app.extraccion.codigo_material import derivar_codigo_material_con_modelo
 from app.extraccion.firma_estructural import calcular_firma_estructural
 from app.extraccion.invalidado import INVALIDADO
@@ -67,6 +72,11 @@ class ResultadoProcesamientoAnejo:
     # sepa si tiene que avisar a nivel de expediente sin releer todas las
     # líneas.
     lineas_con_aviso: int = 0
+    # Bloque 5, sesión 2026-09-18 (quinta parte): líneas cuyo precio en glifos
+    # no lo confirmó la aritmética de su propia fila (tabla sin columna de
+    # totales) sino el mismo código de precio en otra tabla del mismo cuadro.
+    # Se cuentan aparte porque la prueba es distinta y más débil.
+    glifos_confirmados_por_otro_lote: int = 0
 
 
 # Sesión 2026-09-14 (`6.23/28510.0051_ANEJO_3_9d725c710163f3db.pdf`, "NOTA DE
@@ -644,6 +654,15 @@ def procesar_anejo(
     if _es_nota_de_subsanacion(paginas_texto):
         lineas = _quedarse_con_la_correccion(lineas)
 
+    # Bloque 5, sesión 2026-09-18 (quinta parte): las celdas en glifos que la
+    # aritmética de su propia fila no pudo confirmar, resueltas -- si se puede
+    # -- con el mismo código de precio ya resuelto en otra tabla del MISMO
+    # documento. Va aquí, con el documento entero ya leído, porque la tabla que
+    # confirma es otra tabla (otro lote) del mismo cuadro. La llamada quita
+    # siempre la marca transitoria `precio_glifos_sin_confirmar`, resuelva o
+    # no: nunca puede llegar a `guardar_lineas_catalogo`.
+    glifos_confirmados_por_otro_lote = resolver_glifos_con_precio_de_otro_lote(lineas)
+
     # `Código del material`, vía de modelo (CONTEXTO.md sección 6, bloque 5 de
     # la sesión de vocabulario): `construir_lineas_desde_tabla` (dentro de
     # `construir_linea_catalogo`) ya intentó el vocabulario determinista sin
@@ -664,4 +683,5 @@ def procesar_anejo(
         firmas_cabecera=firmas_cabecera,
         tablas_sin_lote=tablas_sin_lote,
         lineas_con_aviso=lineas_con_aviso,
+        glifos_confirmados_por_otro_lote=glifos_confirmados_por_otro_lote,
     )

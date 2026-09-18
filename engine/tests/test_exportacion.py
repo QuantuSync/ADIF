@@ -8,7 +8,9 @@ from decimal import Decimal
 import pytest
 
 from app.conciliacion import (
+    ACUERDO_MARCO_SIN_PRECIOS,
     APORTA_LINEAS,
+    PUBLICADO_EN_FICHA_DE_OTRO,
     COLUMNAS_CONCILIACION,
     DescuadreConciliacion,
     FilaConciliacion,
@@ -725,3 +727,182 @@ def test_sin_anejo_ni_pliego_es_publicado_sin_cuadro_aunque_haya_un_escaneado(db
     libro = openpyxl.load_workbook(io.BytesIO(generar_excel_catalogo(db_session)))
     filas = {f[0]: f for f in libro["Conciliación"].iter_rows(min_row=2, values_only=True)}
     assert filas["6.18/28510.0050"][COLUMNAS_CONCILIACION.index("Situación")] == SIN_CUADRO
+
+
+# --- Bloques 3, 4 y 6, sesión 2026-09-18 (quinta parte) --------------------
+
+
+def test_un_lote_publicado_en_la_ficha_de_otro_no_se_llama_no_publicado(db_session):
+    """Bloque 3. `6.26/28510.0003` es el lote 2 de `6.25/28510.0221`: buscarlo
+    en la Plataforma por su número no devuelve nada, pero su adjudicación está
+    publicada dentro de la ficha del expediente principal. Antes caía fuera de
+    la hoja, contado como "la Plataforma confirmó que no publica"."""
+    _fila_unica(db_session)
+    principal = Expediente(
+        codigo_expediente="6.25/28510.0221", nombre_proyecto="Traviesas de madera. 2 LOTES",
+        estado=EstadoExpediente.pendiente_revision, descargado_en=_AHORA, extraido_en=_AHORA,
+        error="no se extrajo ninguna línea de catálogo de los documentos descargados",
+    )
+    lote_aparte = Expediente(
+        codigo_expediente="6.26/28510.0003", estado=EstadoExpediente.sin_publicar,
+    )
+    db_session.add_all([principal, lote_aparte])
+    db_session.commit()
+    _documento_descargado(db_session, principal.id, "hash-principal")
+    db_session.add(Lote(
+        expediente_id=principal.id, identificador_lote="2",
+        codigo_expediente_lote="6.26/28510.0003",
+    ))
+    db_session.commit()
+
+    libro = openpyxl.load_workbook(io.BytesIO(generar_excel_catalogo(db_session)))
+    filas = {f[0]: f for f in libro["Conciliación"].iter_rows(min_row=2, values_only=True)}
+
+    fila = filas["6.26/28510.0003"]
+    assert fila[COLUMNAS_CONCILIACION.index("Situación")] == PUBLICADO_EN_FICHA_DE_OTRO
+    motivo = fila[COLUMNAS_CONCILIACION.index("Motivo")]
+    assert "lote 2" in motivo and "6.25/28510.0221" in motivo
+    # Y el registro deja de contarlo entre los que la Plataforma no publica.
+    registro = "\n".join(
+        str(c.value) for f in libro["Resumen"].iter_rows() for c in f if c.value is not None
+    )
+    assert "SÍ están publicados" in registro
+
+
+def test_sin_enlace_estructural_no_se_fuerza_nada(db_session):
+    """Bloque 3, la otra mitad: mencionar el número en el texto de un
+    documento ajeno no basta. Sin un lote que lo declare por número, el
+    expediente sigue fuera de la hoja."""
+    _fila_unica(db_session)
+    otro = Expediente(
+        codigo_expediente="6.25/28510.0221", estado=EstadoExpediente.pendiente_revision,
+        descargado_en=_AHORA, extraido_en=_AHORA,
+    )
+    db_session.add_all([
+        otro, Expediente(codigo_expediente="6.26/28510.0002", estado=EstadoExpediente.sin_publicar),
+    ])
+    db_session.commit()
+    _documento_descargado(db_session, otro.id, "hash-otro")
+
+    libro = openpyxl.load_workbook(io.BytesIO(generar_excel_catalogo(db_session)))
+    codigos = {f[0] for f in libro["Conciliación"].iter_rows(min_row=2, values_only=True)}
+
+    assert "6.26/28510.0002" not in codigos
+
+
+def test_acuerdo_marco_publicado_sin_precios_es_una_situacion_aparte(db_session):
+    """Bloque 4. `4.23/04110.0256` sí está publicado; lo que publica es el
+    modelo de proposición económica en blanco. No es lo mismo que un acuerdo
+    marco que no está publicado, y el cliente lo va a preguntar."""
+    _fila_unica(db_session)
+    principal = Expediente(
+        codigo_expediente="4.23/04110.0256", nombre_proyecto="Acuerdo Marco de EPIs (8 lotes)",
+        estado=EstadoExpediente.pendiente_revision, descargado_en=_AHORA, extraido_en=_AHORA,
+    )
+    matriz = Expediente(codigo_expediente="4.24/04110.0187", estado=EstadoExpediente.sin_publicar)
+    pedido = Expediente(
+        codigo_expediente="6.26/28510.0073", codigo_matriz="4.24/04110.0187",
+        nombre_proyecto=(
+            "Pedido del acuerdo marco de EPIs, expediente principal 4.23/04110.0256 lote 4: "
+            "guantes de protección contra riesgos mecánicos"
+        ),
+        estado=EstadoExpediente.pendiente_revision, descargado_en=_AHORA, extraido_en=_AHORA,
+        error="la matriz 4.24/04110.0187 no tiene ningún lote registrado (estado: sin_publicar)",
+    )
+    db_session.add_all([principal, matriz, pedido])
+    db_session.commit()
+    _documento_descargado(db_session, principal.id, "hash-am")
+    _documento_descargado(db_session, pedido.id, "hash-pedido-am")
+
+    libro = openpyxl.load_workbook(io.BytesIO(generar_excel_catalogo(db_session)))
+    filas = {f[0]: f for f in libro["Conciliación"].iter_rows(min_row=2, values_only=True)}
+
+    fila = filas["6.26/28510.0073"]
+    assert fila[COLUMNAS_CONCILIACION.index("Situación")] == ACUERDO_MARCO_SIN_PRECIOS
+    assert "4.23/04110.0256" in fila[COLUMNAS_CONCILIACION.index("Motivo")]
+
+
+def test_el_acuerdo_marco_no_publicado_sigue_siendo_su_propia_situacion(db_session):
+    """Bloque 4: partir en dos no puede mover a los que no tienen ningún
+    expediente principal publicado detrás -- son 47 de los 49."""
+    _fila_unica(db_session)
+    matriz = Expediente(codigo_expediente="2.18/04703.0019", estado=EstadoExpediente.sin_publicar)
+    pedido = Expediente(
+        codigo_expediente="6.20/28510.0018", codigo_matriz="2.18/04703.0019",
+        nombre_proyecto="Pedido nº 1 acuerdo marco de EPIs. Lote 3. Pantalones.",
+        estado=EstadoExpediente.pendiente_revision, descargado_en=_AHORA, extraido_en=_AHORA,
+        error="la matriz 2.18/04703.0019 no tiene ningún lote registrado (estado: sin_publicar)",
+    )
+    db_session.add_all([matriz, pedido])
+    db_session.commit()
+    _documento_descargado(db_session, pedido.id, "hash-epi")
+
+    libro = openpyxl.load_workbook(io.BytesIO(generar_excel_catalogo(db_session)))
+    filas = {f[0]: f for f in libro["Conciliación"].iter_rows(min_row=2, values_only=True)}
+
+    assert filas["6.20/28510.0018"][COLUMNAS_CONCILIACION.index("Situación")] == PRECIOS_EN_ACUERDO_MARCO
+
+
+def test_el_documento_de_adjudicacion_manda_sobre_un_boletin_mas_viejo(db_session):
+    """Bloque 6. `6.25/28510.0221`: el último boletín que lo lista es el de
+    07/2026, con "Pendiente de adjudicación"; su Resolución de Adjudicación
+    está descargada de la Plataforma y leída. La columna decía el dato viejo."""
+    _fila_unica(db_session)
+    expediente = db_session.execute(
+        select(Expediente).where(Expediente.codigo_expediente == "6.26/28510.0016")
+    ).scalar_one()
+    db_session.add(SindicacionExpediente(
+        codigo_expediente="6.26/28510.0016", expediente_id=expediente.id,
+        actualizado_en=_AHORA, estado_pcsp="EV", periodo_zip="202607",
+    ))
+    adjudicacion = Documento(
+        tipo_documento=TipoDocumento.resolucion_adjudicacion, hash="hash-adjudicacion",
+        ruta_almacenamiento="hash-adjudicacion.pdf",
+    )
+    db_session.add(adjudicacion)
+    db_session.commit()
+    db_session.add(DocumentoExpediente(
+        documento_id=adjudicacion.id, expediente_id=expediente.id,
+        nombre_archivo="ADJUDICACION_1.pdf",
+    ))
+    db_session.commit()
+
+    libro = openpyxl.load_workbook(io.BytesIO(generar_excel_catalogo(db_session)))
+    fila = next(libro["Conciliación"].iter_rows(min_row=2, values_only=True))
+    celda = fila[COLUMNAS_CONCILIACION.index("Estado que consta publicado en la Plataforma")]
+
+    assert celda.startswith("Adjudicada")
+    assert "07/2026" in celda
+    assert "Pendiente de adjudicación" in celda
+
+
+def test_la_columna_de_estado_nunca_baja_de_etapa(db_session):
+    """Bloque 6: solo se sustituye cuando el documento prueba una etapa
+    POSTERIOR. "Anulada" no está en la escalera y no se deshace nunca con un
+    documento anterior a ella."""
+    _fila_unica(db_session)
+    expediente = db_session.execute(
+        select(Expediente).where(Expediente.codigo_expediente == "6.26/28510.0016")
+    ).scalar_one()
+    db_session.add(SindicacionExpediente(
+        codigo_expediente="6.26/28510.0016", expediente_id=expediente.id,
+        actualizado_en=_AHORA, estado_pcsp="ANUL", periodo_zip="202609",
+    ))
+    adjudicacion = Documento(
+        tipo_documento=TipoDocumento.resolucion_adjudicacion, hash="hash-adj-anulada",
+        ruta_almacenamiento="hash-adj-anulada.pdf",
+    )
+    db_session.add(adjudicacion)
+    db_session.commit()
+    db_session.add(DocumentoExpediente(
+        documento_id=adjudicacion.id, expediente_id=expediente.id,
+        nombre_archivo="ADJUDICACION_1.pdf",
+    ))
+    db_session.commit()
+
+    libro = openpyxl.load_workbook(io.BytesIO(generar_excel_catalogo(db_session)))
+    fila = next(libro["Conciliación"].iter_rows(min_row=2, values_only=True))
+
+    assert fila[COLUMNAS_CONCILIACION.index(
+        "Estado que consta publicado en la Plataforma"
+    )] == "Anulada"

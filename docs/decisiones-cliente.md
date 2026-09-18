@@ -5,6 +5,46 @@ Ver `CONTEXTO.md` para el contexto vivo del proyecto.
 
 ---
 
+## 27. Hasta dónde puede llegar el sistema con el estado del contrato (18/09/2026)
+
+**Quién lo dijo y dónde.** **Isabel Ibáñez (ADIF)**, por escrito en el grupo de
+trabajo, el **18/09/2026**.
+
+**Qué dijo, literal en su contenido.** Sin acceso a SAP, **el último estado que
+la herramienta puede conocer de un expediente es "Resuelta" o "adjudicado"**.
+Los estados posteriores del contrato (los que solo existen dentro de SAP: en
+ejecución, recepcionado, facturado, cerrado…) **los tendrán que indicar ellos
+manualmente**.
+
+**Lo damos por aceptado.** No hay nada que discutir ni que verificar contra el
+corpus: es una afirmación sobre qué publica la Plataforma y qué no, y coincide
+con lo que ya se venía midiendo. Un anuncio de la Plataforma llega como mucho
+hasta la adjudicación y la formalización del contrato; lo que le pase al
+contrato después no se publica ahí.
+
+**Qué cambia en el sistema.**
+
+1. **Es el techo de la columna "Estado que consta publicado en la Plataforma"**
+   de la hoja "Conciliación". El bloque 6 de la sesión 2026-09-18 (quinta
+   parte) hace que esa columna use el documento descargado cuando prueba una
+   etapa posterior a la del último boletín de sindicación — y la escalera de
+   estados termina en "Resuelta" justo por esta decisión, no por falta de
+   ganas de seguir: no hay ningún documento publicado del que se pueda leer un
+   estado posterior.
+2. **No cambia nada de la columna "Estado según ADIF"**, que es la otra mitad
+   de la respuesta: ahí es donde caben esos estados posteriores, porque salen
+   del listado que ADIF nos envía sacado de su SAP. Las dos columnas siguen
+   separadas justamente por esto (sesión 2026-09-18, continuación, bloque 3):
+   una dice lo que publica la Plataforma, la otra lo que sabe ADIF.
+3. **No se intenta deducir un estado posterior de ningún documento.** Si algún
+   día aparece un PDF que parezca decir "en ejecución", no se usa: el acuerdo
+   es que eso lo indican ellos.
+
+Ver también CONTEXTO.md sección 7, "Qué puede y qué no puede saber el sistema
+sobre el estado de un expediente".
+
+---
+
 ## 26. Criterios de alcance del cliente, y su contraste contra el corpus real (sesión 2026-09-04)
 
 Tres criterios que llegan **del cliente**, no de nuestro propio análisis —
