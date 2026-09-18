@@ -2098,6 +2098,56 @@ sobre el corpus: +2.316 líneas en 54 expedientes, ~10,75 $.
   el arreglo de herencia; la regla "cualquier subida es error, sin excepción"
   se deja intacta a propósito.
 
+- **Barrido de los no publicados, cifras en glifos y los lotes que declara el
+  propio cuadro de precios (sesión 2026-09-18, cuarta parte,
+  `docs/sesion-2026-09-18-barrido-no-publicados-y-glifos.md`).** Catálogo 37.705
+  → **37.735 líneas**; Excel 18.293 → **18.323 filas**, 362 expedientes, **0
+  filas perdidas y 0 materiales desaparecidos**. (1) **Barrido de los 73 que la
+  Conciliación da por no publicados**, uno a uno contra la Plataforma: **0
+  aparecen**, los 73 devuelven "no encontrado ni por matriz ni por expediente".
+  No hay ninguna marca falsa entre ellos. `6.26/28510.0057` y `0083` tampoco lo
+  eran: su "Documento de Pliegos" dice "Publicado en la Plataforma el
+  18-09-2026", dos días después del negativo. (2) **La marca ya caducaba**
+  (`sin_publicar_reintento_dias`, 14, desde 2026-09-15) — lo que faltaba era que
+  caducara antes para lo reciente: `plazo_sin_publicar`
+  (`app.mantenimiento.frescura`) usa ahora **3 días para los expedientes del año
+  en curso y el anterior** (`SIN_PUBLICAR_REINTENTO_DIAS_RECIENTES`,
+  `SIN_PUBLICAR_ANIOS_RECIENTES`) y 14 para el resto; el año se lee por su
+  posición en el código (`anio_del_codigo`: `6.26/...`, `19/28510`,
+  `28510/2023`, `28510Z/2018`), y un código que no encaje se trata como viejo.
+  (3) **Cifras que llegan como identificadores de glifo** porque la fuente del
+  PDF no trae tabla `ToUnicode` (`app.extraccion.glifos_cid`): se descodifican
+  como una traslación `cid → cid − desplazamiento`, con el desplazamiento
+  acotado por los propios identificadores y **confirmado por la aritmética de la
+  propia fila** (`cantidad × precio = el importe que trae la fila`). Sin esa
+  cuenta no se escribe ningún número. El `fragmento` conserva el texto literal
+  con sus `(cid:...)` y lleva delante la marca y la comprobación. Medido en el
+  corpus: 178 documentos de 197 expedientes traen cifras en glifos, pero solo
+  llegaban al catálogo en 1 (las páginas afectadas casi nunca son cuadro de
+  precios); el arreglo actúa al reextraer cada expediente. (4) **Los lotes que
+  declara el propio cuadro de precios** (`_lotes_candidatos_del_cuadro`,
+  `app.extraccion.orquestador`): un expediente que declara N>1 lotes y no tiene
+  ninguno identificado por número se quedaba con el sentinela `LOTE_UNICO`, y
+  con él la etapa 3.5 —la que asocia cada tabla a su cabecera "LOTE N" **por
+  geometría**, `app.extraccion.lote_tabla`— no llegaba a ejecutarse nunca. Ahora
+  se le deja intentarlo, y **el resultado solo se acepta si el cuadro atribuye
+  TODAS sus filas a un lote y cubre los N**: con una sola huérfana se descarta
+  el intento entero, así que este cambio no puede quitar ni una fila del
+  entregable. No se aplica a un lote sentinela que ya lleve baja o importe
+  (sería atribuir un dato del conjunto al lote 1). **`6.26/28510.0064` pasa de 6
+  líneas sin precio a 36 en 6 lotes, 30 con precio verificado y 6 a revisión**
+  (su lote 3 es el único cuya tabla no publica columna de totales, así que no
+  hay con qué comprobar la descodificación). 91 expedientes cumplen la primera
+  condición; cuántos pasan la dura solo se sabrá al reprocesarlos. (5)
+  **`6.25/28510.0221`**: no hay ningún documento publicado que no tengamos (6 de
+  6, `enlaces_nuevos: 0`), y entre ellos su Resolución de Adjudicación, que
+  leemos bien (lote 2, `6.26/28510.0003`, MADERAS TORREIRA SL, baja 5,51 %). El
+  desfase es de la columna de estado, que sale de la sindicación y se quedó en
+  el boletín de 07/2026. **1.078 tests** (1.046 antes). **Auditoría: 1 error, 6
+  avisos** — el error es la subida de `6.26/28510.0064` sin cambio de
+  documentos, explicada por los dos arreglos; la regla "cualquier subida es
+  error" se deja intacta.
+
 ---
 
 El registro histórico de hallazgos y decisiones de cada sesión vive en
@@ -2132,4 +2182,5 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `sesion-2026-09-18-codigo-expediente-motivos-duplicados.md`,
 `sesion-2026-09-18-conciliacion-plataforma.md`,
 `sesion-2026-09-18-estados-adif-y-acuerdos-marco.md`,
+`sesion-2026-09-18-barrido-no-publicados-y-glifos.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.

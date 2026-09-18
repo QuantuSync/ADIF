@@ -87,6 +87,8 @@ services:
       # Sesión 2026-09-15: la API muestra desde cuándo se vuelve a buscar un
       # `sin_publicar` -- mismo plazo que el servicio "worker".
       SIN_PUBLICAR_REINTENTO_DIAS: ${SIN_PUBLICAR_REINTENTO_DIAS:-14}
+      SIN_PUBLICAR_REINTENTO_DIAS_RECIENTES: ${SIN_PUBLICAR_REINTENTO_DIAS_RECIENTES:-3}
+      SIN_PUBLICAR_ANIOS_RECIENTES: ${SIN_PUBLICAR_ANIOS_RECIENTES:-1}
       # Copias de seguridad automáticas (sesión 2026-09-06): mismo motivo
       # que las dos variables de arriba -- solo el worker decide cuándo
       # lanzar la copia, pero la API también las lee para que
@@ -165,6 +167,11 @@ services:
       # confirmados, en seguida), hasta este tope por ciclo.
       SIN_PUBLICAR_REINTENTO_DIAS: ${SIN_PUBLICAR_REINTENTO_DIAS:-14}
       SIN_PUBLICAR_REINTENTOS_POR_CICLO: ${SIN_PUBLICAR_REINTENTOS_POR_CICLO:-50}
+      # Sesión 2026-09-18 (tercera parte): plazo corto para los expedientes
+      # del año en curso y el anterior, que son procedimientos vivos y pueden
+      # publicarse cualquier semana. Ver app/config.py.
+      SIN_PUBLICAR_REINTENTO_DIAS_RECIENTES: ${SIN_PUBLICAR_REINTENTO_DIAS_RECIENTES:-3}
+      SIN_PUBLICAR_ANIOS_RECIENTES: ${SIN_PUBLICAR_ANIOS_RECIENTES:-1}
       # Copias de seguridad automáticas (sesión 2026-09-06): volcado
       # completo de la base de datos, diario por defecto -- ver
       # `app.mantenimiento.copia_seguridad`. BACKUP_DIR apunta al volumen

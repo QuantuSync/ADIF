@@ -158,7 +158,7 @@ def _reintentar_sin_publicar(db: Session, resumen: ResumenCiclo) -> None:
     )
     pendientes = sorted(
         (e for e in candidatos if debe_rebuscar_sin_publicar(e, plazo, ahora)),
-        key=lambda e: (sin_publicar_confirmado(e), sin_publicar_reintento_desde(e, plazo), e.id),
+        key=lambda e: (sin_publicar_confirmado(e), sin_publicar_reintento_desde(e, plazo, ahora), e.id),
     )
     tope = max(settings.sin_publicar_reintentos_por_ciclo, 0)
     for expediente in pendientes[:tope]:

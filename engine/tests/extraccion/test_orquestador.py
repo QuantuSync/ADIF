@@ -18,9 +18,11 @@ from app.extraccion.orquestador import (
     _detectar_contrato_obra,
     _detectar_documento_adjudicacion_no_relacionado,
     _detectar_numero_lotes_pcsp,
+    _el_cuadro_declara_todos_los_lotes,
     _extraer_campos_expediente,
     _extraer_lotes_declarados_del_expediente,
     _lote_propio,
+    _lotes_candidatos_del_cuadro,
     ejecutar_extraccion_expediente,
 )
 from app.extraccion.invalidado import INVALIDADO
@@ -1415,3 +1417,76 @@ def test_sin_documento_de_lotes_el_contrato_propio_da_el_importe_de_su_lote(db_s
         entidad_tipo="lote", entidad_id=lote.id, campo="importe_adjudicacion"
     ).one()
     assert traza.pagina == 2
+
+
+# --- Bloque 2, sesión 2026-09-18 (tercera parte): los lotes que declara el
+# --- propio cuadro de precios -------------------------------------------
+
+
+class _LoteFalso:
+    def __init__(self, identificador, baja=None, licitacion=None, adjudicacion=None):
+        self.identificador_lote = identificador
+        self.baja_lote = baja
+        self.importe_licitacion = licitacion
+        self.importe_adjudicacion = adjudicacion
+
+
+class _ExpedienteFalso:
+    def __init__(self, declarados):
+        self.lotes_totales_declarados = declarados
+
+
+class _ResultadoFalso:
+    def __init__(self, identificadores):
+        self.lineas = [{"identificador_lote": i} for i in identificadores]
+
+
+def test_se_intenta_cuando_declara_n_lotes_y_no_conoce_ninguno():
+    """`6.26/28510.0064`: declara 6 lotes, no tiene adjudicación que los
+    desglose y su cuadro de precios trae las seis cabeceras "LOTE N"."""
+    candidatos = _lotes_candidatos_del_cuadro(
+        _ExpedienteFalso(6), [_LoteFalso(LOTE_UNICO)], lote_propio=None
+    )
+    assert candidatos == {"1": None, "2": None, "3": None, "4": None, "5": None, "6": None}
+
+
+def test_no_se_intenta_con_un_solo_lote_declarado():
+    assert _lotes_candidatos_del_cuadro(_ExpedienteFalso(1), [_LoteFalso(LOTE_UNICO)], None) is None
+    assert _lotes_candidatos_del_cuadro(_ExpedienteFalso(None), [_LoteFalso(LOTE_UNICO)], None) is None
+
+
+def test_no_se_intenta_si_ya_hay_lotes_identificados_por_numero():
+    lotes = [_LoteFalso("1"), _LoteFalso("2")]
+    assert _lotes_candidatos_del_cuadro(_ExpedienteFalso(2), lotes, None) is None
+
+
+def test_no_se_intenta_si_el_expediente_es_uno_de_los_lotes():
+    assert _lotes_candidatos_del_cuadro(_ExpedienteFalso(6), [_LoteFalso(LOTE_UNICO)], "3") is None
+
+
+def test_no_se_parte_un_lote_que_ya_lleva_datos_atribuidos():
+    """Partir en N un lote que ya tiene baja o importe convertiría un dato del
+    conjunto de la licitación en un dato del lote 1."""
+    from decimal import Decimal as _D
+
+    con_baja = [_LoteFalso(LOTE_UNICO, baja=_D("0.10"))]
+    con_licitacion = [_LoteFalso(LOTE_UNICO, licitacion=_D("1000"))]
+    con_adjudicacion = [_LoteFalso(LOTE_UNICO, adjudicacion=_D("900"))]
+    assert _lotes_candidatos_del_cuadro(_ExpedienteFalso(6), con_baja, None) is None
+    assert _lotes_candidatos_del_cuadro(_ExpedienteFalso(6), con_licitacion, None) is None
+    assert _lotes_candidatos_del_cuadro(_ExpedienteFalso(6), con_adjudicacion, None) is None
+
+
+def test_el_intento_solo_vale_si_ninguna_fila_queda_huerfana():
+    """La garantía que hace que esto no pueda quitar filas del entregable: una
+    sola huérfana y se descarta el intento entero."""
+    candidatos = {"1": None, "2": None}
+    assert _el_cuadro_declara_todos_los_lotes(_ResultadoFalso(["1", "2", "1"]), candidatos) is True
+    assert _el_cuadro_declara_todos_los_lotes(_ResultadoFalso(["1", None]), candidatos) is False
+
+
+def test_el_intento_solo_vale_si_cubre_todos_los_lotes_declarados():
+    candidatos = {"1": None, "2": None, "3": None}
+    assert _el_cuadro_declara_todos_los_lotes(_ResultadoFalso(["1", "2"]), candidatos) is False
+    assert _el_cuadro_declara_todos_los_lotes(_ResultadoFalso(["1", "2", "3"]), candidatos) is True
+    assert _el_cuadro_declara_todos_los_lotes(_ResultadoFalso([]), candidatos) is False

@@ -7,6 +7,7 @@ from typing import Callable, Optional
 from sqlalchemy.orm import Session
 
 from app.extraccion.codigo_material import derivar_codigo_material
+from app.extraccion.glifos_cid import descodificar_fila
 from app.extraccion.invalidado import INVALIDADO
 from app.extraccion.normalizacion import (
     limpiar_codigo_celda,
@@ -1362,6 +1363,28 @@ def construir_linea_catalogo(
     `fragmento` sí trae una descripción y un precio reales, solo
     desplazados de columna respecto al mapeo, la línea se conserva con
     `motivo_revision` en vez de perderse — no toda fila vacía es relleno."""
+    # Bloque 2, sesión 2026-09-18 (tercera parte): cifras que llegan como
+    # identificadores de glifo porque la fuente del PDF no trae tabla
+    # `ToUnicode` (`app.extraccion.glifos_cid`). Se descodifican ANTES de
+    # aplicar el mapeo, y solo si la aritmética de la propia fila lo confirma
+    # (cantidad × precio unitario = el importe que trae la fila). Si no
+    # cuadra, la fila sigue exactamente como estaba y acaba en revisión con
+    # el motivo de siempre: nunca se escribe un número que el documento no
+    # confirme.
+    # El `fragmento` sigue siendo el texto LITERAL del documento, con sus
+    # identificadores de glifo: es la evidencia (CONTEXTO.md sección 9.10), y
+    # lo descodificado lleva delante la marca de que lo es, igual que hace el
+    # reconocimiento óptico con "[reconocimiento óptico]".
+    fila_literal = fila
+    descodificada = descodificar_fila(fila, mapeo.get("cantidad"), mapeo.get("precio_unitario"))
+    marca_glifos = ""
+    if descodificada is not None:
+        fila = descodificada.celdas
+        marca_glifos = (
+            f"[cifras descodificadas de identificadores de glifo; el PDF no trae tabla de caracteres. "
+            f"Comprobado: {descodificada.comprobacion}] "
+        )
+
     estado, campos = _construir_campos(fila, mapeo)
     if estado in ("pie_de_tabla", "cabecera_repetida"):
         return None
@@ -1488,7 +1511,7 @@ def construir_linea_catalogo(
         "precio_adjudicado": precio_adjudicado,
         "documento_origen_id": documento_origen_id,
         "pagina": pagina,
-        "fragmento": " | ".join((celda or "").strip() for celda in fila),
+        "fragmento": marca_glifos + " | ".join((celda or "").strip() for celda in fila_literal),
         "motivo_revision": campos["motivo_revision"],
     }
 
