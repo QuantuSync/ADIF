@@ -111,14 +111,14 @@ _COLUMNA_DE_CAMPO = {
 
 
 def _texto_celdas_vacias(
-    linea: LineaCatalogo, identificador_lote: Optional[str], expediente=None
+    linea: LineaCatalogo, identificador_lote: Optional[str], expediente=None, modelo_precio=None
 ) -> Optional[str]:
     """"Cantidad: pendiente (el documento da una cantidad distinta para cada
     lote...); Matrícula del material: no consta" -- `None` si la fila no
     tiene ninguna celda vacía."""
     partes = [
         f"{_COLUMNA_DE_CAMPO[c.campo]}: {ETIQUETA_MOTIVO[c.motivo]}" + (f" ({c.detalle})" if c.detalle else "")
-        for c in celdas_vacias(linea, identificador_lote, expediente)
+        for c in celdas_vacias(linea, identificador_lote, expediente, modelo_precio)
     ]
     return "; ".join(partes) or None
 
@@ -424,6 +424,19 @@ _NOTA_CONCILIACION_HUECOS = (
     "datos. Los que se conocen solo por la búsqueda directa en el buscador de la Plataforma salen con esas "
     "dos celdas explicadas: el buscador devuelve el número de expediente, no su ficha."
 )
+# Bloque 3, sesión 2026-09-18 (continuación). La columna "Estado según ADIF"
+# es de OTRA fuente, y eso tiene que estar dicho en el Excel, no solo sabido:
+# quien lo abra tiene que poder distinguir de un vistazo qué columna viene de
+# la Plataforma y cuál nos la ha dado ADIF.
+_NOTA_ESTADO_ADIF = (
+    "La columna \"Estado según ADIF\" de esa hoja NO sale de la Plataforma: es el estado de contratación "
+    "que ADIF nos envió el 18/09/2026 en un listado de 358 expedientes del departamento, sacado por ellos "
+    "de una transacción de SAP y facilitado con su autorización expresa. Se escribe tal cual viene en su "
+    "listado, sin traducir. La columna de al lado, \"Estado que consta publicado en la Plataforma\", es "
+    "otra cosa y de otra fuente: el estado del anuncio en la Plataforma. Las dos se dejan separadas a "
+    "propósito. Ese listado no interviene en ningún momento en decidir si un expediente consta publicado "
+    "o no -- eso lo decide solo la Plataforma."
+)
 
 
 def _escribir_conciliacion(libro: Workbook, filas: list) -> None:
@@ -435,6 +448,7 @@ def _escribir_conciliacion(libro: Workbook, filas: list) -> None:
             _celda_texto_o_espacio(fila.titulo),
             _celda_texto_o_espacio(fila.organo_contratacion),
             _celda_texto_o_espacio(fila.estado_plataforma),
+            _celda_texto_o_espacio(fila.estado_adif),
             fila.documentos_descargados,
             fila.documentos_reconocimiento_optico,
             fila.lineas_en_catalogo,
@@ -442,7 +456,7 @@ def _escribir_conciliacion(libro: Workbook, filas: list) -> None:
             _celda_texto_o_espacio(fila.situacion),
             _celda_texto_o_espacio(fila.motivo),
         ])
-    for columna, ancho in zip("ABCDEFGHIJ", (22, 55, 32, 30, 12, 14, 12, 55, 30, 80)):
+    for columna, ancho in zip("ABCDEFGHIJK", (22, 55, 32, 30, 24, 12, 14, 12, 55, 30, 80)):
         hoja.column_dimensions[columna].width = ancho
     for fila_hoja in hoja.iter_rows(min_row=2):
         for celda in fila_hoja:
@@ -458,6 +472,7 @@ def _escribir_bloque_conciliacion(hoja, filas: list, registro: RegistroPublicado
     hoja.append(["Conciliación con lo publicado en la Plataforma", None])
     hoja.append([_NOTA_CONCILIACION, None])
     hoja.append([_NOTA_CONCILIACION_HUECOS, None])
+    hoja.append([_NOTA_ESTADO_ADIF, None])
     hoja.append([])
     hoja.append(["De qué fecha es el registro de lo publicado y qué cubre", None])
     departamentos = ", ".join(registro.departamentos) or "(sin departamento configurado)"
@@ -718,7 +733,10 @@ def generar_excel_catalogo(db: Session, incluir_pendientes_sin_lote: bool = Fals
             _celda_texto_o_espacio(expediente.estado_contrato_sap),
             _celda_texto_o_espacio(expediente.nombre_proyecto),
             _celda_texto_o_espacio(
-                _texto_celdas_vacias(linea, lote.identificador_lote if lote else None, expediente)
+                _texto_celdas_vacias(
+                    linea, lote.identificador_lote if lote else None, expediente,
+                    lote.modelo_precio if lote else None,
+                )
             ),
             _celda_texto_o_espacio(linea.comentarios),
         ])

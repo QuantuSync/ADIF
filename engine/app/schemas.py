@@ -375,6 +375,24 @@ class EstadoSapCargaOut(BaseModel):
     expedientes_sin_cambios: int = 0
 
 
+class EstadosAdifCargaOut(BaseModel):
+    """Resumen de `POST /mantenimiento/estados-adif/cargar` (bloque 1, sesión
+    2026-09-18 continuación): mismo criterio que `EstadoSapCargaOut` --
+    `configurado=False` significa que `ESTADOS_ADIF_PATH` no tiene ninguna
+    ruta montada. No hay `expedientes_nuevos` a propósito: esta carga **no da
+    de alta ningún expediente** (ver docstring de `app.extraccion.estados_adif`),
+    los códigos que no casan salen en `codigos_sin_expediente`."""
+
+    configurado: bool
+    filas_leidas: int = 0
+    filas_sin_codigo: int = 0
+    codigos_distintos: int = 0
+    expedientes_actualizados: int = 0
+    expedientes_sin_cambios: int = 0
+    sin_expediente_en_el_sistema: int = 0
+    codigos_sin_expediente: list[str] = []
+
+
 class SapDesglosecargaOut(BaseModel):
     """Resumen de `POST /mantenimiento/sap-desglose/cargar` (bloque 6,
     cambios del cliente tras revisar el catálogo): mismo criterio que

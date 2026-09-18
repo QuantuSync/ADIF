@@ -273,6 +273,22 @@ class Expediente(Base):
     # documentado y una exportación futura puede traer otros.
     estado_contrato_sap = Column(String(64), nullable=True)
     estado_contrato_sap_actualizado_en = Column(DateTime(timezone=True), nullable=True)
+    # Migración 0037 (sesión 2026-09-18, continuación): estado de
+    # contratación del listado que ADIF envió el 18/09/2026, sacado por ellos
+    # de una transacción de SAP y autorizado expresamente para su uso
+    # (`app.extraccion.estados_adif`). Campo propio y NO `estado_contrato_sap`
+    # de arriba aunque las dos fuentes sean SAP: son dos volcados distintos y
+    # con selecciones distintas de expedientes (212 códigos en común, 155 solo
+    # en el anterior, 146 solo en este), así que compartir campo impediría
+    # decir de cuál vino cada valor. **Nunca decide si un expediente está
+    # publicado**: esa lógica se apoya solo en la Plataforma
+    # (`app.conciliacion.consta_publicado`), y este listado es fuente de
+    # contraste y de relleno de columnas, nada más.
+    estado_adif = Column(String(64), nullable=True)
+    # "Fecha de creación" del propio listado de ADIF -- su dato, no una fecha
+    # de este sistema.
+    estado_adif_creado_en = Column(DateTime(timezone=True), nullable=True)
+    estado_adif_actualizado_en = Column(DateTime(timezone=True), nullable=True)
     # Migración 0031 (sesión 2026-09-15): cuándo y con qué versión de la
     # lógica de búsqueda (`app.mantenimiento.frescura.VERSION_LOGICA_BUSQUEDA`)
     # confirmó la Plataforma que no tiene este expediente. Solo con

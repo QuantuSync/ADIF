@@ -11,6 +11,7 @@ from app.db import get_db
 from app.extraccion.candidatos_matricula import calcular_candidatos
 from app.extraccion.descubrimiento_matriz import TIPO_TRABAJO as TIPO_TRABAJO_DESCUBRIMIENTO_PEDIDOS
 from app.extraccion.estado_sap import cargar_estado_sap
+from app.extraccion.estados_adif import cargar_estados_adif
 from app.extraccion.maestro_materiales import cargar_maestro_materiales, completar_unidades_desde_maestro
 from app.extraccion.sap_desglose import cargar_sap_desglose
 from app.ingesta_local import TIPO_TRABAJO as TIPO_TRABAJO_INGESTA_LOCAL
@@ -28,6 +29,7 @@ from app.models import TrabajoCola
 from app.queue import encolar_trabajo
 from app.schemas import (
     EstadoMantenimientoOut,
+    EstadosAdifCargaOut,
     EstadoSapCargaOut,
     MaestroMaterialesCargaOut,
     ResumenCandidatosMatriculaOut,
@@ -336,6 +338,19 @@ def cargar_estado_contrato_sap(
     filas, sin red ni PDFs de por medio -- del mismo orden de coste que
     `POST /expedientes`, no del ciclo de mantenimiento."""
     return cargar_estado_sap(db, settings.estado_sap_path)
+
+
+@router.post("/mantenimiento/estados-adif/cargar", response_model=EstadosAdifCargaOut)
+def cargar_estados_de_adif(
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    """Bloque 1, sesión 2026-09-18 (continuación): recarga `estado_adif` desde
+    `ESTADOS_ADIF_PATH` (`app.extraccion.estados_adif`). Mismo mecanismo,
+    mismo coste y mismas garantías que `/mantenimiento/estado-sap/cargar`, con
+    una diferencia deliberada: **no da de alta ningún expediente**. Ver el
+    docstring del módulo."""
+    return cargar_estados_adif(db, settings.estados_adif_path)
 
 
 @router.post("/mantenimiento/sap-desglose/cargar", response_model=SapDesglosecargaOut)

@@ -185,3 +185,34 @@ def test_el_motivo_de_la_fila_ajena_tampoco_usa_jerga_interna():
     ).lower()
     for jerga in ("cruce", "cruzad", "codigos_cruzados", "índice", "payload", "null", "none", "campo"):
         assert jerga not in textos, f"jerga interna en el texto al cliente: {jerga!r}"
+
+
+# --- Bloque 7, sesión 2026-09-18 (continuación): segunda familia de precio ---
+
+
+def test_precio_indexado_por_pedido_no_es_un_dato_que_falte():
+    """`6.26/28510.0014` y los demás pedidos de los acuerdos marco de carril
+    (CONTEXTO.md sección 16). No tienen una baja única **por diseño del
+    contrato**: decir "no consta" manda al cliente a buscar en la Plataforma
+    un número que nunca se publicó."""
+    from app.models import ModeloPrecio
+
+    motivos = {
+        c.campo: (c.motivo, c.detalle)
+        for c in celdas_vacias(
+            _linea(baja_lote=None, precio_adjudicado=None), "1",
+            modelo_precio=ModeloPrecio.indexado_por_pedido,
+        )
+    }
+    assert motivos["baja_lote"][0] == NO_APLICA
+    assert motivos["precio_adjudicado"][0] == NO_APLICA
+    assert "fuera de la Plataforma" in motivos["baja_lote"][1]
+
+
+def test_sin_modelo_indexado_la_baja_vacia_sigue_siendo_no_consta():
+    motivos = {
+        c.campo: (c.motivo, c.detalle)
+        for c in celdas_vacias(_linea(baja_lote=None, precio_adjudicado=None), "1")
+    }
+    assert motivos["baja_lote"][0] == NO_CONSTA
+    assert motivos["precio_adjudicado"] == (PENDIENTE, "falta la baja del lote")

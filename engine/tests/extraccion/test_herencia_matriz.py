@@ -310,6 +310,87 @@ def test_matriz_multilote_va_a_revision_ambigua(db_session):
     assert "multi-lote" in resultado.motivo_revision
 
 
+def test_matriz_sin_publicar_deja_dicho_el_expediente_principal_declarado(db_session):
+    """Bloque 6, sesión 2026-09-18 (continuación). El acuerdo marco del pedido
+    no está publicado, pero su propio anuncio dice de qué licitación por lotes
+    cuelga. Ese número no se escribe como matriz -- manda el campo fijo del
+    anuncio --, pero se dice en el motivo para no tener que abrir el PDF."""
+    matriz = _crear_expediente(db_session, "4.24/04110.0187", estado=EstadoExpediente.sin_publicar)
+    pedido = _crear_expediente(
+        db_session, "6.26/28510.0073", codigo_matriz="4.24/04110.0187",
+        nombre_proyecto=(
+            "Pedido nº 1 acuerdo marco 4.24/04110.0187 para el suministro de equipos de protección "
+            "individual 2024-2025 (8 lotes). expediente principal 4.23/04110.0256 lote 4: guantes"
+        ),
+    )
+    lote_pedido = _crear_lote(db_session, pedido.id)
+
+    resultado = intentar_heredar_de_matriz(db_session, pedido, matriz, lote_pedido, total_lineas_propias=0)
+
+    assert "4.23/04110.0256" in resultado.motivo_revision
+    assert "lote 4" in resultado.motivo_revision
+    db_session.refresh(pedido)
+    assert pedido.codigo_matriz == "4.24/04110.0187"  # no se inventa una matriz nueva
+
+
+def test_matriz_multilote_hereda_el_lote_que_el_pedido_declara(db_session):
+    """Bloque 6, sesión 2026-09-18 (continuación). El pedido declara su lote en
+    el "Objeto del Contrato" que publica la Plataforma: eso es una declaración
+    del órgano de contratación, no un parecido de texto, y basta para elegir el
+    lote de la matriz sin adivinar. Caso real: `6.25/28510.0081`, "Lote 2: Base
+    en Sanchidrián", contra la matriz de balasto de 6 lotes."""
+    matriz = _crear_expediente(db_session, "6.25/28510.0028", estado=EstadoExpediente.completado)
+    lote_1 = _crear_lote(db_session, matriz.id, identificador_lote="1", baja_lote=Decimal("0.0602"))
+    lote_2 = _crear_lote(db_session, matriz.id, identificador_lote="2", baja_lote=Decimal("0.001"))
+    for lote, precio in ((lote_1, "10.00"), (lote_2, "20.00")):
+        db_session.add(LineaCatalogo(
+            lote_id=lote.id, expediente_id=matriz.id, clave_linea=f"P-{lote.identificador_lote}",
+            orden_aparicion=0, codigo_precio=f"P-{lote.identificador_lote}", descripcion="BALASTO",
+            precio_unitario=Decimal(precio),
+        ))
+    db_session.commit()
+
+    pedido = _crear_expediente(
+        db_session, "6.25/28510.0081", codigo_matriz="6.25/28510.0028",
+        nombre_proyecto=(
+            "Suministro de balasto para las necesidades de obras y mantenimiento en la red "
+            "ferroviaria de interés general (zona norte). Lote 2: Base en Sanchidrián."
+        ),
+    )
+    lote_pedido = _crear_lote(db_session, pedido.id)
+
+    resultado = intentar_heredar_de_matriz(db_session, pedido, matriz, lote_pedido, total_lineas_propias=0)
+
+    assert resultado.motivo_revision is None
+    assert resultado.lineas_creadas == 1
+    linea = db_session.query(LineaCatalogo).filter_by(lote_id=lote_pedido.id).one()
+    # El lote 2, no el 1: se hereda el declarado, nunca el primero que haya.
+    assert linea.precio_unitario == Decimal("20.00")
+    db_session.refresh(lote_pedido)
+    assert lote_pedido.baja_lote == Decimal("0.001")
+
+
+def test_matriz_multilote_con_un_lote_declarado_que_no_existe_va_a_revision(db_session):
+    """Un número declarado que no casa con ningún lote de la matriz no se
+    aproxima al más parecido: se para y se dice qué lotes hay."""
+    matriz = _crear_expediente(db_session, "2.18/04703.0019", estado=EstadoExpediente.completado)
+    _crear_lote(db_session, matriz.id, identificador_lote="1", baja_lote=Decimal("0.10"))
+    _crear_lote(db_session, matriz.id, identificador_lote="2", baja_lote=Decimal("0.20"))
+
+    pedido = _crear_expediente(
+        db_session, "6.24/28510.0103", codigo_matriz="2.18/04703.0019",
+        nombre_proyecto="Pedido nº 1 del acuerdo marco. Lote 7: guantes",
+    )
+    lote_pedido = _crear_lote(db_session, pedido.id)
+
+    resultado = intentar_heredar_de_matriz(db_session, pedido, matriz, lote_pedido, total_lineas_propias=0)
+
+    assert resultado.motivo_revision is not None
+    assert "declara el lote 7" in resultado.motivo_revision
+    assert "1, 2" in resultado.motivo_revision
+    assert db_session.query(LineaCatalogo).filter_by(lote_id=lote_pedido.id).count() == 0
+
+
 def test_matriz_sin_datos_va_a_revision_citando_su_propio_motivo(db_session):
     matriz = _crear_expediente(
         db_session, "2.18/04703.0019", estado=EstadoExpediente.fallido, error="no se encontró en la Plataforma",
