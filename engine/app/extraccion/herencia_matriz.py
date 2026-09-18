@@ -36,6 +36,10 @@ from sqlalchemy.orm import Session
 
 from app.catalogo import guardar_lineas_catalogo
 from app.extraccion.cruce_codigos import normalizar_codigo_expediente
+from app.extraccion.lote_declarado import (
+    extraer_expediente_principal_declarado,
+    extraer_lote_declarado,
+)
 from app.extraccion.traza import registrar_traza
 from app.models import (
     DocumentoExpediente,
@@ -218,20 +222,58 @@ def intentar_heredar_de_matriz(
     decidir")."""
     lotes_matriz = matriz.lotes
     if not lotes_matriz:
+        # Bloque 6, sesión 2026-09-18 (continuación): cuando el acuerdo marco
+        # del pedido no está publicado, su propio anuncio a veces declara el
+        # **expediente principal** de la licitación por lotes de la que cuelga
+        # ("expediente principal 4.23/04110.0256 lote 4: guantes..."). Ese
+        # número no se escribe nunca en `codigo_matriz` -- el campo fijo del
+        # anuncio manda, y el sistema no inventa matrices (CONTEXTO.md sección
+        # 7) --, pero decirlo en el motivo ahorra abrir el PDF para saber
+        # dónde mirar.
+        principal = extraer_expediente_principal_declarado(pedido.nombre_proyecto)
+        pista = ""
+        if principal and principal != matriz.codigo_expediente:
+            lote_declarado = extraer_lote_declarado(pedido.nombre_proyecto)
+            detalle_lote = f", lote {lote_declarado}" if lote_declarado else ""
+            pista = (
+                f"; el anuncio de este pedido declara además el expediente principal "
+                f"{principal}{detalle_lote}"
+            )
         return ResultadoHerencia(
             motivo_revision=(
                 f"la matriz {matriz.codigo_expediente} no tiene ningún lote registrado "
-                f"(estado: {matriz.estado.value})"
+                f"(estado: {matriz.estado.value}){pista}"
             )
         )
     if len(lotes_matriz) > 1:
-        return ResultadoHerencia(
-            motivo_revision=(
-                f"la matriz {matriz.codigo_expediente} es multi-lote ({len(lotes_matriz)} lotes) y este "
-                "pedido no declara a cuál pertenece; no se puede heredar sin adivinar"
+        # Bloque 6, sesión 2026-09-18 (continuación): una matriz multi-lote ya
+        # no es un callejón sin salida cuando el pedido **declara** su lote en
+        # el "Objeto del Contrato" que publica la Plataforma
+        # (`app.extraccion.lote_declarado`). Es una declaración estructural del
+        # órgano de contratación, no un parecido de texto entre descripciones:
+        # emparejar por parecido sigue prohibido, y si el número declarado no
+        # casa con ningún lote de la matriz esto se va a revisión igual que
+        # antes, diciendo qué se leyó.
+        declarado = extraer_lote_declarado(pedido.nombre_proyecto)
+        candidatos = [l for l in lotes_matriz if l.identificador_lote == declarado] if declarado else []
+        if len(candidatos) != 1:
+            identificadores = ", ".join(sorted(l.identificador_lote or "?" for l in lotes_matriz))
+            if declarado is None:
+                detalle = "y este pedido no declara a cuál pertenece"
+            else:
+                detalle = (
+                    f"y este pedido declara el lote {declarado}, que no está entre los suyos "
+                    f"({identificadores})"
+                )
+            return ResultadoHerencia(
+                motivo_revision=(
+                    f"la matriz {matriz.codigo_expediente} es multi-lote ({len(lotes_matriz)} lotes) "
+                    f"{detalle}; no se puede heredar sin adivinar"
+                )
             )
-        )
-    lote_matriz = lotes_matriz[0]
+        lote_matriz = candidatos[0]
+    else:
+        lote_matriz = lotes_matriz[0]
 
     # Ajuste 4 del encargo (descubrimiento inverso, hallazgo de paso): un
     # pedido heredado de una matriz de segunda familia (CONTEXTO.md sección

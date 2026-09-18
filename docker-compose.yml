@@ -40,6 +40,12 @@ services:
       # contrato SAP (app.extraccion.estado_sap). Solo lo lee la API
       # (POST /mantenimiento/estado-sap/cargar), el worker no la necesita.
       ESTADO_SAP_PATH: ${ESTADO_SAP_PATH:-}
+      # Bloque 1, sesión 2026-09-18 (continuación): listado de estados de
+      # contratación enviado por ADIF el 18/09/2026, sacado por ellos de una
+      # transacción de SAP y autorizado expresamente (app.extraccion.
+      # estados_adif). Mismo mecanismo que ESTADO_SAP_PATH de arriba. Solo lo
+      # lee la API (POST /mantenimiento/estados-adif/cargar).
+      ESTADOS_ADIF_PATH: ${ESTADOS_ADIF_PATH:-}
       # Bloque 6, cambios del cliente tras revisar el catálogo: desglose de
       # SAP con las matrículas concretas de cada contrato
       # (app.extraccion.sap_desglose) -- mismo mecanismo que las dos rutas

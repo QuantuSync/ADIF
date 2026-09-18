@@ -385,6 +385,40 @@ ese backfill. Medición completa en
 
 **El sistema nunca inventa una matriz.** Si no cruza, se deja vacío y se marca.
 
+### Listado de estados de contratación de ADIF (18/09/2026)
+
+**Procedencia, tal cual, porque no es un fichero cualquiera.** ADIF nos envió
+el **18/09/2026** el fichero `Ejemplo/Input/estados_expedientes_28510_20260918.xlsx`
+(358 expedientes del departamento 28510 con su estado de contratación). **Su
+origen es una transacción de SAP ejecutada por ellos; nosotros no lo hemos
+sacado de ningún sistema.** En su día se nos indicó no utilizar volcados de
+SAP, así que **preguntamos expresamente en el grupo si podíamos usarlo y nos
+autorizaron a usarlo.**
+
+Cuatro columnas: `Título del expediente`, `Expediente ADIF`, `Fecha de
+creación`, `Descripción del estado`. **No trae presupuesto de licitación ni
+órgano de contratación** — ninguna de las dos cosas se puede rellenar desde
+aquí.
+
+Fuente de entrada permanente, igual que el Excel de códigos y el de ejecución
+SAP: `ESTADOS_ADIF_PATH`, `app.extraccion.estados_adif`,
+`POST /mantenimiento/estados-adif/cargar`, repetible. Migración **0037**
+(`expedientes.estado_adif`, `estado_adif_creado_en`,
+`estado_adif_actualizado_en`). Tres reglas duras, y son la razón de que tenga
+módulo y campo propios en vez de reutilizar `estado_sap`:
+
+1. **Nunca decide si un expediente está publicado.** Eso se apoya solo en la
+   Plataforma (`app.conciliacion.consta_publicado`). Es fuente de contraste y
+   de relleno de columnas, nada más — criterio explícito del cliente.
+2. **Nunca da de alta un expediente.** A diferencia de `cargar_estado_sap`, que
+   sí debe hacerlo. Crear aquí lo que no tenemos haría que la pregunta "¿cuáles
+   de los suyos nos faltan?" se contestara sola y en falso.
+3. **Nunca escribe en `estado_contrato_sap`.** Los dos son volcados de SAP y
+   comparten vocabulario, pero son volcados **distintos**: 212 códigos en
+   común, 155 solo en el anterior, 146 solo en este (en los 212 comunes el
+   estado coincide en los 212). Compartir campo dejaría cada valor sin
+   procedencia.
+
 ### Clave del catálogo
 
 `expediente + lote + codigo_precio`
@@ -2002,6 +2036,68 @@ sobre el corpus: +2.316 líneas en 54 expedientes, ~10,75 $.
   expedientes distintos vienen del propio listado de ADIF. 1.012 tests (990
   antes).
 
+- **Listado de estados de ADIF, los 3 expedientes del 6.26 que faltaban, los
+  acuerdos marco de equipos de protección individual y la validación por
+  contraste (sesión 2026-09-18, tercera parte,
+  `docs/sesion-2026-09-18-estados-adif-y-acuerdos-marco.md`).** Catálogo 37.638
+  → **37.705 líneas**; Excel 18.239 → **18.293 filas**, 358 → **362
+  expedientes**, **0 filas perdidas y 0 materiales desaparecidos**. (1)
+  **Listado de estados de ADIF** incorporado como fuente de entrada permanente
+  (sección 7, con su procedencia escrita: transacción de SAP ejecutada por
+  ADIF, autorizada expresamente). **358 filas, 358 códigos distintos, todos del
+  28510.** **No trae presupuesto de licitación ni órgano de contratación**, así
+  que la validación de importes que se ofreció al cliente **no se pudo hacer**
+  y se sustituyó, con su visto bueno, por un contraste de estados. (2) **Cruce
+  de sus 358 contra los nuestros: las tres listas del encargo salen vacías
+  porque los dos conjuntos son idénticos** (`md5` de las dos listas ordenadas:
+  `016a98f7…`). **Eso no es una buena noticia sin más**: un volcado de SAP no
+  tiene por qué coincidir expediente a expediente con "de cuáles hemos podido
+  extraer líneas", así que o el fichero se generó de nuestro catálogo o es una
+  coincidencia extraordinaria — **confirmarlo con ADIF antes de presentar el "0
+  discrepancias" como prueba de cobertura**. (3) **"Estado según ADIF"**,
+  columna 11 de "Conciliación", separada siempre de "Estado que consta
+  publicado en la Plataforma" y atribuida en el Resumen. 358 de 518 filas con
+  estado de ADIF, 124 con el de la Plataforma, **138 sin ninguno de los dos**.
+  (4) **Reclasificación de la hoja**: `_situacion` metía en "Documentos
+  escaneados que no se han podido leer" a cualquier expediente con un solo
+  documento pasado por reconocimiento óptico, tapando la causa real que el
+  propio sistema ya había escrito — **el grupo baja de 31 a 15** (6 pasan a
+  "Publicado sin cuadro de precios", 10 a "Otro"), y **"Pendiente de procesar"
+  queda en 0** porque "cero documentos" distingue ya "nunca se ha buscado" de
+  "se buscó y su ficha no publica ninguno" (`6.14/28510.0148` y `0177`, seis
+  búsquedas, cero documentos). (5) **Los 3 expedientes 6.26 que faltaban**
+  (`0057`, `0083`, `0096`) buscados, descargados y procesados: **+48 filas**, y
+  la hoja tiene ya **los 18 expedientes `6.26/28510`** que ve el cliente.
+  **Ninguno estaba marcado en falso**: el negativo del 16/09 era correcto (su
+  anuncio se envió al DOUE el 14/09 y se publicó después). De los 75 dados por
+  no publicados quedan **73**; relanzados uno a uno los 9 de 2026 con ese mismo
+  negativo, **ninguno se encuentra todavía**. (6) **Acuerdos marco de EPIs**:
+  de los seis expedientes implicados **solo `4.23/04110.0256` está publicado**,
+  y **no publica cuadro de precios** — lo que trae su PCAP es el modelo de
+  proposición económica en blanco. **Los 5 pedidos siguen aportando 0 líneas y
+  0 de los 49 "precios en acuerdo marco no publicado" se resuelven.** El lote
+  sí queda determinado con certeza estructural para `0068` (lote 6) y `0073`
+  (lote 4); **`0047`, `0048` y `0049` NO cuelgan de `0256`** (sus objetos no
+  casan con sus lotes 1-3 y ningún documento publicado nombra su principal):
+  quedan a revisión, sin asociar. Lo que sí se gana:
+  `app.extraccion.lote_declarado` + herencia desde matriz multi-lote **cuando
+  el pedido declara su lote en el "Objeto del Contrato" publicado** — nunca por
+  parecido de texto; desbloquea `6.25/28510.0081` (6 líneas, baja 0,10 %). (7)
+  **`6.26/28510.0014`**: no hay baja que leer y es **por diseño** (segunda
+  familia de precio, sección 16); lo que estaba mal era decir "no consta" y
+  "pendiente" en sus 14 filas — `app.celdas_vacias` dice ahora **"no aplica"**
+  con la explicación real. **`6.26/28510.0064`**: las 6 líneas **no son los 6
+  lotes leídos como materiales**, son los 6 conceptos de precio que el cuadro
+  repite en cada uno de sus 6 lotes; los precios están en el PDF pero salen
+  como `(cid:NNNN)` (fuente sin `ToUnicode`) — **analizado y no tocado**, como
+  pedía el encargo. **Contraste de estados**: de los 102 expedientes con los
+  dos estados, **92 coinciden de fase, 10 van desfasados una fase y 0 se
+  contradicen**; el único donde SAP va por delante es `6.25/28510.0221`.
+  **1.046 tests** (1.012 antes). **Auditoría: 1 error, 6 avisos** — el error es
+  la subida de `6.25/28510.0081` sin cambio de documentos, real y explicada por
+  el arreglo de herencia; la regla "cualquier subida es error, sin excepción"
+  se deja intacta a propósito.
+
 ---
 
 El registro histórico de hallazgos y decisiones de cada sesión vive en
@@ -2035,4 +2131,5 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `sesion-2026-09-17-escaneados-codigo-material.md`,
 `sesion-2026-09-18-codigo-expediente-motivos-duplicados.md`,
 `sesion-2026-09-18-conciliacion-plataforma.md`,
+`sesion-2026-09-18-estados-adif-y-acuerdos-marco.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.

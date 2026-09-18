@@ -47,6 +47,15 @@ class Settings(BaseSettings):
     # ella, `POST /mantenimiento/estado-sap/cargar` no tiene nada que leer).
     estado_sap_path: Optional[str] = None
 
+    # Bloque 1, sesión 2026-09-18 (continuación): listado de estados de
+    # contratación que ADIF envió el 18/09/2026 (358 expedientes del 28510),
+    # sacado por ellos de una transacción de SAP y autorizado expresamente
+    # (`app.extraccion.estados_adif`, ver su docstring para la procedencia).
+    # Mismo mecanismo que las rutas de arriba -- una ruta montada por
+    # bind-mount, vacía por defecto. Fuente de contraste y de relleno de
+    # columnas: NUNCA decide si un expediente está publicado.
+    estados_adif_path: Optional[str] = None
+
     # Bloque 6, cambios del cliente tras revisar el catálogo: desglose de
     # SAP con las matrículas concretas de cada contrato (app.extraccion.
     # sap_desglose) -- mismo mecanismo que las dos rutas de arriba. Solo lo

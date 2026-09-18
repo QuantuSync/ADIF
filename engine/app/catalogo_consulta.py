@@ -270,6 +270,9 @@ def fila_a_dict(
         # mismo (`app.celdas_vacias`).
         "celdas_vacias": {
             c.campo: {"motivo": c.motivo, "detalle": c.detalle}
-            for c in celdas_vacias(linea, lote.identificador_lote if lote else None)
+            for c in celdas_vacias(
+                linea, lote.identificador_lote if lote else None,
+                modelo_precio=lote.modelo_precio if lote else None,
+            )
         },
     }

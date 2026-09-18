@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from app.catalogo import campos_vacios_por_valor_de_otro_lote
-from app.models import LineaCatalogo
+from app.models import LineaCatalogo, ModeloPrecio
 
 # Mismos códigos que `MotivoVacio` de la web.
 NO_APLICA = "na"
@@ -46,6 +46,19 @@ _DETALLE_SIN_FILA_PROPIA = "este expediente no figura por sí mismo en el listad
 _DETALLE_SIN_MATRIZ = "no se conoce ningún acuerdo marco del que dependa este expediente"
 _DETALLE_SIN_TITULO = "no se ha encontrado el título en los documentos de este expediente"
 _DETALLE_SIN_ESTADO_SAP = "este expediente no aparece en el listado de contratos en ejecución de SAP"
+# Bloque 7, sesión 2026-09-18 (continuación), caso `6.26/28510.0014`. En la
+# segunda familia de precio (CONTEXTO.md sección 16: los acuerdos marco de
+# carril, `P(t) = Precio ofertado × Kt × Coeficiente de baja`) no hay una baja
+# única de lote **por diseño del propio contrato**, no porque no se haya
+# sabido leer. Decir "no consta" ahí es decir que falta un dato que no
+# existe, y deja al cliente buscando en la Plataforma algo que nunca se
+# publicó. Verificado en la sesión 2026-09-07 contra los documentos reales de
+# los 9 pedidos de las 3 matrices conocidas: el coeficiente no está publicado
+# en ninguno -- ADIF y el adjudicatario lo pactan fuera de la Plataforma.
+_DETALLE_PRECIO_INDEXADO = (
+    "este contrato no tiene una baja única: su precio se revisa pedido a pedido con un coeficiente que "
+    "ADIF pacta con el proveedor fuera de la Plataforma"
+)
 
 
 @dataclass(frozen=True)
@@ -65,6 +78,7 @@ def celdas_vacias(
     linea: LineaCatalogo,
     identificador_lote: Optional[str],
     expediente=None,
+    modelo_precio: Optional[ModeloPrecio] = None,
 ) -> list[CeldaVacia]:
     """Una entrada por cada campo vacío de la fila, en el orden de las columnas
     del Excel.
@@ -124,17 +138,23 @@ def celdas_vacias(
         valor_de_lote("precio_unitario")
     if identificador_lote is None:
         vacias.append(CeldaVacia("lote", NO_CONSTA))
+    indexado = modelo_precio == ModeloPrecio.indexado_por_pedido
     if linea.precio_adjudicado is None:
         # Siempre derivado (precio unitario × (1 − baja del lote), CONTEXTO.md
         # sección 4): vacío solo porque le falta uno de los dos.
-        if linea.precio_unitario is None:
+        if indexado:
+            vacias.append(CeldaVacia("precio_adjudicado", NO_APLICA, _DETALLE_PRECIO_INDEXADO))
+        elif linea.precio_unitario is None:
             vacias.append(CeldaVacia("precio_adjudicado", PENDIENTE, "falta el precio unitario"))
         elif linea.baja_lote is None:
             vacias.append(CeldaVacia("precio_adjudicado", PENDIENTE, "falta la baja del lote"))
         else:
             vacias.append(CeldaVacia("precio_adjudicado", NO_CONSTA))
     if linea.baja_lote is None:
-        vacias.append(CeldaVacia("baja_lote", NO_CONSTA))
+        if indexado:
+            vacias.append(CeldaVacia("baja_lote", NO_APLICA, _DETALLE_PRECIO_INDEXADO))
+        else:
+            vacias.append(CeldaVacia("baja_lote", NO_CONSTA))
     if not linea.unidad_medida:
         sin_dato_propio("unidad_medida")
     # Columna 14, después de las de la línea.

@@ -15,6 +15,8 @@ from app.conciliacion import (
     PENDIENTE_DE_PROCESAR,
     PRECIOS_EN_ACUERDO_MARCO,
     SIN_CUADRO,
+    ESCANEADO_ILEGIBLE,
+    OTRO,
     SITUACIONES,
     comprobar_cuadre,
 )
@@ -32,18 +34,21 @@ from app.exportacion import (
     generar_excel_catalogo,
 )
 from app.models import (
+    CacheOcrDocumento,
     Documento,
     DocumentoExpediente,
     EstadoExpediente,
     Expediente,
     LineaCatalogo,
     Lote,
+    SindicacionExpediente,
     TipoDocumento,
 )
 from collections import Counter
 
 import openpyxl
 from openpyxl import Workbook
+from sqlalchemy import select
 
 _AHORA = datetime(2026, 9, 18, 12, 0, tzinfo=timezone.utc)
 
@@ -515,7 +520,8 @@ def test_el_excel_no_sale_si_la_conciliacion_no_cuadra():
     nunca se entrega un Excel descuadrado."""
     filas = [FilaConciliacion(
         codigo_expediente="6.26/28510.0016", titulo=None, organo_contratacion=None,
-        estado_plataforma=None, documentos_descargados=1, documentos_reconocimiento_optico=0,
+        estado_plataforma=None, estado_adif=None, documentos_descargados=1,
+        documentos_reconocimiento_optico=0,
         lineas_en_catalogo=3, baja="No", situacion=APORTA_LINEAS, motivo="",
     )]
     comprobar_cuadre(filas, 3)
@@ -527,7 +533,8 @@ def test_el_excel_no_sale_si_la_conciliacion_no_cuadra():
 def test_el_excel_no_sale_si_una_situacion_no_es_de_la_lista():
     filas = [FilaConciliacion(
         codigo_expediente="6.26/28510.0016", titulo=None, organo_contratacion=None,
-        estado_plataforma=None, documentos_descargados=1, documentos_reconocimiento_optico=0,
+        estado_plataforma=None, estado_adif=None, documentos_descargados=1,
+        documentos_reconocimiento_optico=0,
         lineas_en_catalogo=0, baja="No", situacion="lo que sea", motivo="",
     )]
     with pytest.raises(DescuadreConciliacion):
@@ -548,12 +555,18 @@ def test_el_resumen_dice_de_que_fecha_es_el_registro_de_lo_publicado(db_session)
         assert situacion in contenido
 
 
-def test_conciliacion_marca_pendiente_de_procesar_lo_que_no_se_ha_bajado(db_session):
-    """Un expediente que consta publicado pero del que todavía no se ha
-    descargado ningún documento no puede decir "publicado sin cuadro de
-    precios": no se sabe qué trae. Sale como trabajo pendiente."""
+def test_conciliacion_marca_pendiente_de_procesar_lo_que_no_se_ha_buscado(db_session):
+    """Un expediente que consta publicado (lo listó la sindicación) pero que
+    todavía no se ha ido a buscar a la Plataforma no puede decir "publicado sin
+    cuadro de precios": no se sabe qué trae. Sale como trabajo pendiente."""
     _fila_unica(db_session)
-    db_session.add(Expediente(codigo_expediente="6.25/28510.0997", descargado_en=_AHORA))
+    pendiente = Expediente(codigo_expediente="6.25/28510.0997")
+    db_session.add(pendiente)
+    db_session.commit()
+    db_session.add(SindicacionExpediente(
+        codigo_expediente="6.25/28510.0997", periodo_zip="202609", estado_pcsp="PUB",
+        actualizado_en=_AHORA,
+    ))
     db_session.commit()
     libro = openpyxl.load_workbook(io.BytesIO(generar_excel_catalogo(db_session)))
     filas = {f[0]: f for f in libro["Conciliación"].iter_rows(min_row=2, values_only=True)}
@@ -562,6 +575,22 @@ def test_conciliacion_marca_pendiente_de_procesar_lo_que_no_se_ha_bajado(db_sess
     assert "todavía no se ha descargado" in filas["6.25/28510.0997"][
         COLUMNAS_CONCILIACION.index("Motivo")
     ]
+
+
+def test_conciliacion_no_llama_pendiente_a_una_ficha_que_no_publica_documentos(db_session):
+    """Bloque 4, sesión 2026-09-18 (continuación). `6.14/28510.0148` y `0177`
+    se buscaron cinco veces en la Plataforma: las dos veces su ficha aparece y
+    las cinco devuelve cero documentos descargables. Llamarlos "Pendiente de
+    procesar" promete un trabajo que no existe -- no falta leerlos, no hay
+    nada publicado que leer."""
+    _fila_unica(db_session)
+    db_session.add(Expediente(codigo_expediente="6.14/28510.0148", descargado_en=_AHORA))
+    db_session.commit()
+    libro = openpyxl.load_workbook(io.BytesIO(generar_excel_catalogo(db_session)))
+    filas = {f[0]: f for f in libro["Conciliación"].iter_rows(min_row=2, values_only=True)}
+    fila = filas["6.14/28510.0148"]
+    assert fila[COLUMNAS_CONCILIACION.index("Situación")] == SIN_CUADRO
+    assert "no publica ningún documento" in fila[COLUMNAS_CONCILIACION.index("Motivo")]
 
 
 def test_conciliacion_señala_el_acuerdo_marco_no_publicado(db_session):
@@ -587,3 +616,112 @@ def test_conciliacion_señala_el_acuerdo_marco_no_publicado(db_session):
     fila = filas["6.23/28510.0063"]
     assert fila[COLUMNAS_CONCILIACION.index("Situación")] == PRECIOS_EN_ACUERDO_MARCO
     assert "2.18/04703.0019" in fila[COLUMNAS_CONCILIACION.index("Motivo")]
+
+
+# --- Bloque 3 y 4, sesión 2026-09-18 (continuación) ------------------------
+
+
+def test_conciliacion_trae_el_estado_segun_adif_en_columna_propia(db_session):
+    """El estado que manda ADIF en su listado y el que publica la Plataforma
+    son dos hechos distintos, de dos fuentes distintas. Van en dos columnas,
+    nunca mezclados en una."""
+    _fila_unica(db_session)
+    expediente = db_session.execute(
+        select(Expediente).where(Expediente.codigo_expediente == "6.26/28510.0016")
+    ).scalar_one()
+    expediente.estado_adif = "En ejecución"
+    db_session.commit()
+    libro = openpyxl.load_workbook(io.BytesIO(generar_excel_catalogo(db_session)))
+    hoja = libro["Conciliación"]
+    cabecera = [c.value for c in hoja[1]]
+    assert cabecera == COLUMNAS_CONCILIACION
+    assert "Estado según ADIF" in cabecera
+    assert cabecera.index("Estado según ADIF") != cabecera.index(
+        "Estado que consta publicado en la Plataforma"
+    )
+    fila = next(hoja.iter_rows(min_row=2, values_only=True))
+    assert fila[cabecera.index("Estado según ADIF")] == "En ejecución"
+
+
+def test_conciliacion_explica_el_hueco_del_estado_de_adif(db_session):
+    _fila_unica(db_session)
+    libro = openpyxl.load_workbook(io.BytesIO(generar_excel_catalogo(db_session)))
+    hoja = libro["Conciliación"]
+    fila = next(hoja.iter_rows(min_row=2, values_only=True))
+    celda = fila[COLUMNAS_CONCILIACION.index("Estado según ADIF")]
+    assert "no figura en el listado de estados que ADIF envió" in celda
+
+
+def test_el_resumen_atribuye_el_estado_de_adif_a_adif_y_no_a_la_plataforma(db_session):
+    _fila_unica(db_session)
+    libro = openpyxl.load_workbook(io.BytesIO(generar_excel_catalogo(db_session)))
+    contenido = "\n".join(
+        str(c.value) for fila in libro["Resumen"].iter_rows() for c in fila if c.value is not None
+    )
+    assert "\"Estado según ADIF\" de esa hoja NO sale de la Plataforma" in contenido
+    assert "no interviene en ningún momento en decidir si un expediente consta publicado" in contenido
+
+
+def _expediente_leido(db_session, codigo: str, error: str) -> Expediente:
+    expediente = Expediente(
+        codigo_expediente=codigo, estado=EstadoExpediente.pendiente_revision,
+        descargado_en=_AHORA, extraido_en=_AHORA, error=error,
+    )
+    db_session.add(expediente)
+    db_session.commit()
+    return expediente
+
+
+def _documento_con_reconocimiento_optico(db_session, expediente_id: int, hash_documento: str) -> None:
+    _documento_descargado(db_session, expediente_id, hash_documento)
+    db_session.add(CacheOcrDocumento(
+        documento_hash=hash_documento, version_logica_ocr="1", modelo="m",
+        num_paginas=1, completo=True, paginas=[],
+    ))
+    db_session.commit()
+
+
+def test_escaneado_ilegible_solo_cuando_es_la_unica_explicacion(db_session):
+    """Bloque 4, sesión 2026-09-18 (continuación): la etiqueta significa "hubo
+    documentos que leer, alguno hubo que leerlo por imagen y no salió nada de
+    ellos". Ni más ni menos."""
+    _fila_unica(db_session)
+    expediente = _expediente_leido(
+        db_session, "6.17/28510.0012",
+        "no se extrajo ninguna línea de catálogo de los documentos descargados",
+    )
+    _documento_con_reconocimiento_optico(db_session, expediente.id, "hash-escaneado")
+    libro = openpyxl.load_workbook(io.BytesIO(generar_excel_catalogo(db_session)))
+    filas = {f[0]: f for f in libro["Conciliación"].iter_rows(min_row=2, values_only=True)}
+    assert filas["6.17/28510.0012"][COLUMNAS_CONCILIACION.index("Situación")] == ESCANEADO_ILEGIBLE
+
+
+def test_un_documento_escaneado_no_tapa_la_causa_real_del_expediente(db_session):
+    """El caso que motivó el arreglo: `3.18/28510.0047` tiene un anejo
+    escaneado, pero lo que le pasa está escrito en su propio motivo y es otra
+    cosa. Antes, cualquier documento pasado por reconocimiento óptico lo
+    mandaba al cajón de los escaneados y tapaba la explicación real."""
+    _fila_unica(db_session)
+    expediente = _expediente_leido(
+        db_session, "3.18/28510.0047",
+        "cobertura parcial: 1 de 8 lotes declarados tienen baja/importe (con datos: 8)",
+    )
+    _documento_con_reconocimiento_optico(db_session, expediente.id, "hash-anejo-escaneado")
+    libro = openpyxl.load_workbook(io.BytesIO(generar_excel_catalogo(db_session)))
+    filas = {f[0]: f for f in libro["Conciliación"].iter_rows(min_row=2, values_only=True)}
+    fila = filas["3.18/28510.0047"]
+    assert fila[COLUMNAS_CONCILIACION.index("Situación")] == OTRO
+    assert "cobertura parcial" in fila[COLUMNAS_CONCILIACION.index("Motivo")]
+
+
+def test_sin_anejo_ni_pliego_es_publicado_sin_cuadro_aunque_haya_un_escaneado(db_session):
+    _fila_unica(db_session)
+    expediente = _expediente_leido(
+        db_session, "6.18/28510.0050",
+        "no se extrajo ninguna línea de catálogo: el expediente no trae ningún Anejo ni Pliego "
+        "técnico con posible cuadro de precios, solo contrato, resolucion_adjudicacion",
+    )
+    _documento_con_reconocimiento_optico(db_session, expediente.id, "hash-contrato-escaneado")
+    libro = openpyxl.load_workbook(io.BytesIO(generar_excel_catalogo(db_session)))
+    filas = {f[0]: f for f in libro["Conciliación"].iter_rows(min_row=2, values_only=True)}
+    assert filas["6.18/28510.0050"][COLUMNAS_CONCILIACION.index("Situación")] == SIN_CUADRO

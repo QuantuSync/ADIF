@@ -79,6 +79,14 @@ COLUMNAS_CONCILIACION = [
     "Título",
     "Órgano de contratación",
     "Estado que consta publicado en la Plataforma",
+    # Bloque 3, sesión 2026-09-18 (continuación): columna aparte, nunca
+    # mezclada con la anterior. La de la izquierda es lo que publica la
+    # PLATAFORMA; esta es lo que dice el listado que ADIF nos envió el
+    # 18/09/2026, sacado por ellos de SAP. Son dos hechos distintos (el
+    # estado del anuncio frente al estado del contrato) y de dos fuentes
+    # distintas: juntarlos en una sola columna haría imposible saber cuál
+    # de las dos se está leyendo.
+    "Estado según ADIF",
     "Documentos descargados",
     "Documentos leídos con reconocimiento óptico",
     "Líneas que aporta al catálogo",
@@ -99,6 +107,10 @@ _ESTADO_PLATAFORMA = {
     "ANUL": "Anulada",
 }
 
+_SIN_ESTADO_ADIF = (
+    "no consta (este expediente no figura en el listado de estados que ADIF envió el 18/09/2026)"
+)
+
 _SIN_ESTADO_PUBLICADO = (
     "no consta (este expediente se conoce por la búsqueda directa en la Plataforma, que devuelve el "
     "número pero no el estado; la sindicación mensual, que sí lo trae, no lo ha listado todavía)"
@@ -111,6 +123,7 @@ class FilaConciliacion:
     titulo: Optional[str]
     organo_contratacion: Optional[str]
     estado_plataforma: Optional[str]
+    estado_adif: Optional[str]
     documentos_descargados: int
     documentos_reconocimiento_optico: int
     lineas_en_catalogo: int
@@ -220,6 +233,14 @@ def _porcentaje(valor: Optional[Decimal]) -> str:
     return f"{valor * 100:.2f} %".replace(".", ",")
 
 
+# El motivo exacto que deja `app.extraccion.orquestador` cuando el expediente
+# SÍ traía documentos con posible cuadro de precios y no salió ninguna línea de
+# ellos. Se compara por igualdad, no por subcadena: los motivos que empiezan
+# igual pero siguen ("...: el expediente no trae ningún Anejo ni Pliego
+# técnico...") dicen otra cosa y tienen su propia rama.
+_MOTIVO_SIN_LINEAS_GENERICO = "no se extrajo ninguna línea de catálogo de los documentos descargados"
+
+
 def _situacion(
     expediente: Expediente,
     lineas: int,
@@ -242,9 +263,22 @@ def _situacion(
         )
 
     if documentos == 0:
-        return PENDIENTE_DE_PROCESAR, (
-            "Consta publicado en la Plataforma, pero todavía no se ha descargado ningún documento suyo. "
-            "Está en la lista de trabajo pendiente."
+        # Corrección de la sesión 2026-09-18 (continuación, bloque 4): "no
+        # tiene ningún documento" tenía dos causas muy distintas metidas en la
+        # misma frase. Si el expediente nunca se ha buscado, es trabajo
+        # pendiente de verdad; si ya se buscó y la Plataforma lo encontró pero
+        # su ficha no publica ningún documento descargable, no hay nada
+        # pendiente que hacer y llamarlo "pendiente" promete un trabajo que no
+        # existe (`6.14/28510.0148` y `0177`: cinco búsquedas, cero documentos).
+        if expediente.descargado_en is None:
+            return PENDIENTE_DE_PROCESAR, (
+                "Consta publicado en la Plataforma, pero todavía no se ha descargado ningún documento "
+                "suyo. Está en la lista de trabajo pendiente."
+            )
+        return SIN_CUADRO, (
+            "Se ha buscado en la Plataforma y su ficha aparece, pero no publica ningún documento que "
+            "se pueda descargar: ni anuncio, ni contrato, ni anejo de precios. No es que falte leerlo, "
+            "es que no hay nada publicado que leer."
         )
     if expediente.extraido_en is None or expediente.estado in _ESTADOS_EN_CURSO:
         return PENDIENTE_DE_PROCESAR, (
@@ -260,7 +294,18 @@ def _situacion(
             "falta que ADIF facilitara el cuadro de precios del acuerdo marco."
         )
 
-    if documentos_ocr > 0 or "escaneado" in motivo_tecnico.lower():
+    # Corrección de la sesión 2026-09-18 (continuación, bloque 4): antes
+    # bastaba con que UN documento cualquiera del expediente hubiera pasado por
+    # reconocimiento óptico, o con que la palabra "escaneado" apareciera en
+    # cualquier punto del motivo, para clasificarlo aquí -- y esta rama iba por
+    # delante de todas las demás. Eso metía en el mismo cajón 16 expedientes
+    # cuya causa real estaba escrita en su propio motivo y era otra (cobertura
+    # parcial de lotes, baja en un documento compartido con un hermano,
+    # documento equivocado del scraper, expediente sin ningún anejo). Ahora se
+    # exige lo que de verdad significa la etiqueta: que hubiera documentos que
+    # leer, que alguno de ELLOS hiciera falta leerlo por imagen, y que el
+    # sistema no tenga ninguna otra explicación que dar.
+    if documentos_ocr > 0 and motivo_tecnico == _MOTIVO_SIN_LINEAS_GENERICO:
         return ESCANEADO_ILEGIBLE, (
             f"Sus documentos son copias escaneadas (imágenes, sin texto). Se han pasado por "
             f"reconocimiento óptico {documentos_ocr} documento(s), pero no se ha podido recomponer de "
@@ -268,7 +313,7 @@ def _situacion(
             "en formato electrónico, o revisarlo a mano."
         )
 
-    if "no se extrajo ninguna línea de catálogo" in motivo_tecnico:
+    if motivo_tecnico.startswith("no se extrajo ninguna línea de catálogo"):
         return SIN_CUADRO, (
             "Se han descargado y leído sus documentos, y ninguno trae un cuadro de precios unitarios: "
             "la Plataforma publica de este expediente la adjudicación y el contrato, pero no el anejo "
@@ -391,6 +436,10 @@ def construir_conciliacion(
                 titulo=expediente.nombre_proyecto or (entrada.titulo if entrada else None),
                 organo_contratacion=entrada.organo_contratacion if entrada else None,
                 estado_plataforma=estado or _SIN_ESTADO_PUBLICADO,
+                # Dato de ADIF, no de la Plataforma (columna aparte, ver
+                # `COLUMNAS_CONCILIACION`). Se escribe tal cual viene en su
+                # listado: no se traduce ni se normaliza, es su vocabulario.
+                estado_adif=expediente.estado_adif or _SIN_ESTADO_ADIF,
                 documentos_descargados=len(hashes),
                 documentos_reconocimiento_optico=sum(1 for h in hashes if h in hashes_ocr),
                 lineas_en_catalogo=lineas,
