@@ -30,11 +30,16 @@ cantidad × precio unitario = importe total
 Si la cuenta no sale, no hay descodificación: la fila se queda como estaba y
 va a revisión. Nunca se escribe un número que el propio documento no confirme.
 
-**Qué NO hace este módulo.** No mira el contenido de otras filas ni de otros
-documentos, no compara descripciones, y no tiene ninguna tabla de
-desplazamientos "conocidos" que aplicar a ciegas: cada fila se descodifica con
-lo que esa misma fila demuestra. Dos filas del mismo documento pueden salir
-una verificada y la otra a revisión, y eso es correcto.
+**Qué NO hace este módulo.** No compara descripciones y no tiene ninguna tabla
+de desplazamientos "conocidos" que aplicar a ciegas. Dos filas del mismo
+documento pueden salir una verificada y la otra a revisión, y eso es correcto.
+
+**Segunda vía, para las tablas sin columna de totales** (bloque 5, sesión
+2026-09-18, quinta parte): `confirmar_con_precio_conocido`, al final del
+módulo. Sigue sin copiarse ningún precio de ninguna parte -- el número que se
+escribe es el de los glifos de la propia celda; lo único que aporta otra fila
+es confirmar el desplazamiento, que es justo lo que a una tabla sin totales le
+falta. Ver el comentario largo que la precede.
 """
 from __future__ import annotations
 
@@ -202,3 +207,65 @@ def _es(valor: Decimal) -> str:
         entero, decimales = texto, ""
     miles = f"{int(entero):,}".replace(",", ".")
     return f"{miles},{decimales}" if decimales else miles
+
+
+# ---------------------------------------------------------------------------
+# Segunda vía de comprobación: el precio del mismo código en otro lote
+# ---------------------------------------------------------------------------
+# Bloque 5, sesión 2026-09-18 (quinta parte). Hay cuadros de precios que no
+# publican columna de totales -- la tabla del LOTE 3 de `6.26/28510.0064` es
+# el caso real que lo motiva --, así que la aritmética de la propia fila
+# (`descodificar_fila`, arriba) no tiene con qué comprobar nada y la celda se
+# queda sin descodificar.
+#
+# **Lo que NO se hace aquí, y es lo importante.** No se copia el precio de
+# otra fila. El número que se escribe sigue siendo el de los glifos de ESTA
+# celda; lo único que aporta la otra fila es **confirmar cuál es el
+# desplazamiento**, que es justo lo que a esta fila le falta por no tener
+# totales. Se exige que un único desplazamiento de los posibles produzca un
+# número que ya esté verificado para el MISMO código de precio en otro lote
+# del mismo cuadro: si dos desplazamientos distintos dan cada uno un precio
+# conocido, o si ninguno lo da, no se escribe nada y la fila se queda como
+# estaba.
+#
+# Consecuencia medida en `6.26/28510.0064`: los cinco conceptos cuyo precio es
+# el mismo en los seis lotes (P-1, P-3, P-4, P-5, P-6) se resuelven; P-2, el
+# transporte, que vale distinto en cada lote, no se resuelve con ninguno de
+# sus dos desplazamientos posibles y se queda a revisión. Es el resultado
+# correcto: un precio que varía por lote no se puede confirmar con el de otro.
+
+
+@dataclass(frozen=True)
+class PrecioConfirmado:
+    """El precio que sale de descodificar la celda con el desplazamiento que
+    confirmó otra fila, y el valor de referencia que lo confirmó."""
+
+    precio: Decimal
+    desplazamiento: int
+    referencia: Decimal
+
+
+def confirmar_con_precio_conocido(
+    texto_precio: Optional[str], precios_conocidos: set[Decimal]
+) -> Optional[PrecioConfirmado]:
+    """Descodifica una celda de precio en glifos usando como prueba que el
+    resultado coincida con un precio ya verificado.
+
+    Devuelve `None` si la celda no trae glifos, si no hay desplazamiento
+    posible, si ninguno da un precio de `precios_conocidos`, o si más de uno
+    lo da (ambigüedad: no se elige)."""
+    if not tiene_glifos_cid(texto_precio) or not precios_conocidos:
+        return None
+    assert texto_precio is not None
+    validos: list[PrecioConfirmado] = []
+    for desplazamiento in desplazamientos_posibles([texto_precio]):
+        precio = _numero(descodificar(texto_precio, desplazamiento))
+        if precio is None or precio <= 0:
+            continue
+        for conocido in precios_conocidos:
+            if precio == conocido:
+                validos.append(PrecioConfirmado(precio, desplazamiento, conocido))
+                break
+        if len(validos) > 1:
+            return None
+    return validos[0] if len(validos) == 1 else None

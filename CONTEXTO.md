@@ -419,6 +419,40 @@ módulo y campo propios en vez de reutilizar `estado_sap`:
    estado coincide en los 212). Compartir campo dejaría cada valor sin
    procedencia.
 
+### Qué puede y qué no puede saber el sistema sobre el estado de un expediente
+
+**Decisión del cliente, 18/09/2026, Isabel Ibáñez (ADIF), por escrito en el
+grupo de trabajo. Aceptada** (`docs/decisiones-cliente.md` sección 27):
+
+> Sin acceso a SAP, el último estado que la herramienta puede conocer es
+> **Resuelta o adjudicado**. Los estados posteriores del contrato los
+> indicarán ellos manualmente.
+
+Esto fija el techo de lo que se puede afirmar, y de dónde sale cada cosa:
+
+| Hecho | ¿Lo puede saber el sistema? | De dónde |
+|---|---|---|
+| Anuncio previo, en plazo, pendiente de adjudicación | **Sí** | boletín mensual de sindicación (`estado_pcsp` del XML CODICE) |
+| **Adjudicada** | **Sí** | el boletín, **o** una Resolución/Propuesta de Adjudicación descargada de la Plataforma |
+| **Resuelta** (contrato formalizado) | **Sí** | el boletín, **o** un Contrato / Anuncio de formalización descargado de la Plataforma |
+| Anulada | **Sí** | solo el boletín — una anulación no la deshace un documento anterior a ella |
+| En ejecución, recepcionado, facturado, cerrado… | **No** | solo SAP: lo indica ADIF a mano, y llega por el listado de arriba (columna "Estado según ADIF") |
+
+Dos consecuencias que no se rompen:
+
+1. **Las dos columnas de estado de la hoja "Conciliación" no se juntan nunca.**
+   "Estado que consta publicado en la Plataforma" solo puede llegar hasta
+   *Resuelta*; "Estado según ADIF" es donde caben los posteriores. Mezclarlas
+   haría imposible saber cuál de las dos se está leyendo.
+2. **El documento manda sobre el boletín cuando prueba una etapa posterior**
+   (sesión 2026-09-18, quinta parte, `app.conciliacion._estado_publicado`): un
+   boletín refleja el evento de su mes, no "sigue vigente" (sección 16), así
+   que si el sistema ya tiene descargada de la Plataforma la Resolución de
+   Adjudicación, sabe más que el último boletín. **Nunca a la inversa**: la
+   columna solo sube de etapa, jamás baja. Y no se toca `Expediente.estado`;
+   esto es lo que informa la columna, no un cambio de estado del sistema —
+   sección 12 sigue intacta.
+
 ### Clave del catálogo
 
 `expediente + lote + codigo_precio`
@@ -2148,6 +2182,50 @@ sobre el corpus: +2.316 líneas en 54 expedientes, ~10,75 $.
   documentos, explicada por los dos arreglos; la regla "cualquier subida es
   error" se deja intacta.
 
+- **Reproceso completo, expedientes que cuelgan de la ficha de otro y la columna
+  de estado (sesión 2026-09-18, quinta parte,
+  `docs/sesion-2026-09-18-reproceso-glifos-y-conciliacion.md`).** Excel 18.323 →
+  **19.474 filas**, 363 expedientes, **0 filas perdidas, 0 materiales
+  desaparecidos, 0 expedientes desaparecidos**. (1) **Decisión del cliente**
+  (Isabel Ibáñez, ADIF, 18/09/2026, `docs/decisiones-cliente.md` sección 27):
+  sin SAP, el último estado que la herramienta puede conocer es **Resuelta o
+  adjudicado**; los posteriores los indica ADIF a mano. Reflejado en la sección
+  7 de este documento. (2) **Reproceso completo forzado, sin sindicación ni
+  búsqueda: 518 expedientes en 21 min 46 s** (~2,5 s por expediente; eran 4-5 h
+  antes de la caché de texto). Salvedad medida: el reintento de `sin_publicar`
+  es un tercer mecanismo y sí tocó la red para 4 expedientes, sin encontrar
+  nada nuevo. **De los 197 expedientes con documentos que traen cifras en
+  glifos, 0 nuevos aportan una sola línea por esa vía**: el único sigue siendo
+  `6.26/28510.0064` (35 líneas con precio, 1 a revisión). Los 196 restantes eran
+  un techo, no una previsión. (3) **El reparto por lotes del propio cuadro de
+  precios entra en 14 de los 91 candidatos** — es el origen de 1.133 de las
+  1.151 filas nuevas (las otras 18 son `6.20/28510.0040`, que hereda de su
+  acuerdo marco). Ninguno pierde filas, y las huérfanas sin lote siguen siendo
+  **19.233, la misma cifra exacta**. (4) **`6.26/28510.0003` y 13 más constan
+  "no publicados" por su número y tienen sus documentos publicados dentro de la
+  ficha de otro expediente**: situación nueva de la Conciliación (`Publicado
+  dentro de la ficha de otro expediente`, `_lotes_en_ficha_de_otro`), enlazada
+  solo por certeza estructural (`Lote.codigo_expediente_lote`), nunca por
+  encontrar el número suelto en un texto. De los 73 no publicados, 29 se
+  mencionan en un documento publicado ajeno: **14 se enlazan, 15 no** (números
+  de contrato, una matriz, un anuncio de fechas y 3 lotes reales con una
+  redacción que el extractor no reconoce todavía). (5) **Los 49 de acuerdo marco
+  se parten en 47 + 2**: situación nueva `El acuerdo marco está publicado pero no
+  publica precios unitarios` para los dos pedidos de `4.23/04110.0256`, que sí
+  está publicado y cuyo "cuadro" es el modelo de proposición económica en
+  blanco. (6) **La columna de estado usa el documento cuando prueba una etapa
+  posterior al boletín** (`_estado_publicado`, sección 7): **252 filas cambian**,
+  247 de ellas rellenando una celda que decía "no consta". Solo sube de etapa,
+  nunca baja, y "Anulada" no se deshace. (7) **Las 6 filas del lote 3 de
+  `6.26/28510.0064`: 5 resueltas, 1 no.** `confirmar_con_precio_conocido` no
+  copia ningún precio — descodifica los glifos de la propia celda y usa el mismo
+  código de precio en otra tabla del cuadro solo para **confirmar el
+  desplazamiento**, exigiendo que sea el único que cuadra. `P-2`, el transporte,
+  vale distinto en cada lote y **se queda sin precio**, con su motivo. **1.091
+  tests** (1.078 antes). **Auditoría: 0 errores, 6 avisos** (la del propio ciclo
+  de reproceso sí dio 1 error, sobre los 15 expedientes que suben de filas, todos
+  explicados uno a uno).
+
 ---
 
 El registro histórico de hallazgos y decisiones de cada sesión vive en
@@ -2183,4 +2261,5 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `sesion-2026-09-18-conciliacion-plataforma.md`,
 `sesion-2026-09-18-estados-adif-y-acuerdos-marco.md`,
 `sesion-2026-09-18-barrido-no-publicados-y-glifos.md`,
+`sesion-2026-09-18-reproceso-glifos-y-conciliacion.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.
