@@ -306,3 +306,139 @@ def test_drenaje_no_recoge_otro_ciclo_pendiente(db_session):
     assert resumen["trabajos_drenados"] == 1
     db_session.refresh(otro_ciclo)
     assert otro_ciclo.estado == EstadoTrabajo.pendiente
+
+
+def _red_que_no_debe_tocarse(monkeypatch) -> list:
+    """Bloque 4, sesión 2026-09-18 (sexta parte). El doble se pone en el
+    único punto por el que el reintento de un `sin_publicar` sale de verdad
+    a Internet -- `app.scraping.job` llama a `scrape_expediente`, que abre el
+    navegador contra la Plataforma -- y **revienta** si alguien llega ahí.
+    No se comprueba "no se encoló el trabajo" sino "nadie tocó la red": si
+    mañana el reintento se lanzara por otra vía, este test seguiría
+    cazándolo."""
+    llamadas = []
+
+    async def jamas(codigo, codigo_matriz=None):
+        llamadas.append(codigo)
+        raise AssertionError(
+            f"se pidió a la Plataforma con la búsqueda desactivada: {codigo!r}"
+        )
+
+    monkeypatch.setattr("app.scraping.job.scrape_expediente", jamas)
+    return llamadas
+
+
+def _sin_publicar_que_toca_rebuscar(db, sufijo="0001") -> Expediente:
+    return _crear_expediente(
+        db, sufijo=sufijo, estado=EstadoExpediente.sin_publicar,
+        sin_publicar_en=datetime.now(timezone.utc) - timedelta(days=30),
+        sin_publicar_version_busqueda=VERSION_LOGICA_BUSQUEDA,
+    )
+
+
+def test_con_busqueda_desactivada_el_reintento_de_sin_publicar_no_toca_la_red(db_session, monkeypatch):
+    """La bandera `busqueda_desactivada` apaga las TRES vías de red del
+    ciclo, no solo dos. Hasta la sexta parte de esta sesión el reintento de
+    los `sin_publicar` era la excepción: un reproceso completo lanzado
+    "sin red" salía igualmente a buscar 4 expedientes en la Plataforma."""
+    from app.scraping.job import ejecutar_scraping_expediente
+
+    llamadas = _red_que_no_debe_tocarse(monkeypatch)
+    expediente = _sin_publicar_que_toca_rebuscar(db_session)
+
+    trabajo = _trabajo_ciclo(db_session, payload={"busqueda_desactivada": True})
+    resumen = ejecutar_ciclo_mantenimiento(
+        db_session, storage=None, model_provider=None,
+        manejadores={
+            "descargar_expediente": lambda db, t: ejecutar_scraping_expediente(db, None, t),
+            **_AUDITORIA,
+        },
+        trabajo=trabajo,
+    )
+
+    assert llamadas == [], "el reintento de sin_publicar salió a la Plataforma"
+    assert resumen["sin_publicar_desactivado"] is True
+    assert resumen["sin_publicar_reintentados"] == 0
+    assert _descargas_por_expediente(db_session) == []
+    # Y el expediente sigue exactamente como estaba: no se le toca el estado.
+    db_session.refresh(expediente)
+    assert expediente.estado == EstadoExpediente.sin_publicar
+
+
+def test_con_busqueda_desactivada_tampoco_descarga_un_publicado_sin_documentos(db_session, monkeypatch):
+    """La cuarta vía de red del ciclo, medida sobre el reproceso real de la
+    quinta parte: `6.14/28510.0177` y `6.14/28510.0148` constan publicados
+    pero su ficha no publica ningún documento descargable, así que
+    `debe_descargar` los devuelve en CADA ciclo -- y su "descarga" es una
+    búsqueda por su número en la Plataforma. Con la bandera puesta se cuentan
+    como saltados, como cualquier otro que no toca descargar."""
+    from app.scraping.job import ejecutar_scraping_expediente
+
+    llamadas = _red_que_no_debe_tocarse(monkeypatch)
+    # Publicado (se le buscó y apareció) pero sin un solo documento.
+    _crear_expediente(
+        db_session, sufijo="0177", estado=EstadoExpediente.pendiente_revision,
+        descargado_en=datetime.now(timezone.utc) - timedelta(days=1),
+    )
+
+    trabajo = _trabajo_ciclo(db_session, payload={"busqueda_desactivada": True})
+    resumen = ejecutar_ciclo_mantenimiento(
+        db_session, storage=None, model_provider=None,
+        manejadores={
+            "descargar_expediente": lambda db, t: ejecutar_scraping_expediente(db, None, t),
+            **_AUDITORIA,
+        },
+        trabajo=trabajo,
+    )
+
+    assert llamadas == [], "el bucle de frescura salió a la Plataforma"
+    assert resumen["descargas_lanzadas"] == 0
+    assert resumen["saltados_descarga"] == 1
+    assert _descargas_por_expediente(db_session) == []
+
+
+def test_sin_la_bandera_un_publicado_sin_documentos_si_se_descarga(db_session, monkeypatch):
+    """La otra mitad: sin bandera, el mismo expediente sí se vuelve a buscar."""
+    from app.scraping.job import ejecutar_scraping_expediente
+
+    llamadas = _red_que_no_debe_tocarse(monkeypatch)
+    expediente = _crear_expediente(
+        db_session, sufijo="0177", estado=EstadoExpediente.pendiente_revision,
+        descargado_en=datetime.now(timezone.utc) - timedelta(days=1),
+    )
+
+    trabajo = _trabajo_ciclo(db_session)
+    resumen = ejecutar_ciclo_mantenimiento(
+        db_session, storage=None, model_provider=None,
+        manejadores={
+            "descargar_expediente": lambda db, t: ejecutar_scraping_expediente(db, None, t),
+            **_AUDITORIA,
+        },
+        trabajo=trabajo,
+    )
+
+    assert llamadas == [expediente.codigo_expediente]
+    assert resumen["descargas_lanzadas"] == 1
+
+
+def test_sin_la_bandera_el_reintento_de_sin_publicar_si_sale_a_la_red(db_session, monkeypatch):
+    """La otra mitad: sin la bandera, el mismo montaje SÍ llega al punto de
+    red -- si no, el test de arriba pasaría por un motivo equivocado."""
+    from app.scraping.job import ejecutar_scraping_expediente
+
+    llamadas = _red_que_no_debe_tocarse(monkeypatch)
+    expediente = _sin_publicar_que_toca_rebuscar(db_session)
+
+    trabajo = _trabajo_ciclo(db_session)
+    resumen = ejecutar_ciclo_mantenimiento(
+        db_session, storage=None, model_provider=None,
+        manejadores={
+            "descargar_expediente": lambda db, t: ejecutar_scraping_expediente(db, None, t),
+            **_AUDITORIA,
+        },
+        trabajo=trabajo,
+    )
+
+    assert llamadas == [expediente.codigo_expediente]
+    assert resumen["sin_publicar_desactivado"] is False
+    assert resumen["sin_publicar_reintentados"] == 1

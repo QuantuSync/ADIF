@@ -769,6 +769,76 @@ def test_un_lote_publicado_en_la_ficha_de_otro_no_se_llama_no_publicado(db_sessi
     assert "SÍ están publicados" in registro
 
 
+def test_un_contrato_firmado_basta_para_saber_de_quien_cuelga_un_lote(db_session):
+    """Bloque 3, sesión 2026-09-18 (sexta parte). `6.19/28510.0213` es el lote
+    1 de `6.19/28510.0196` y lo dice su propio Contrato firmado ("Contrato nº:
+    6.19/28510.0213 ... LOTE 1"), publicado en la ficha del principal. Ese
+    expediente no trae ninguna Resolución de Adjudicación ni Propuesta que
+    declare lotes, así que nunca llegó a crearse un `Lote` donde guardar esa
+    identidad y el expediente salía del entregable como "no publicado".
+    Ahora el hecho se guarda en el propio documento (migración 0038) y la
+    hoja lo dice, sin crear ningún lote ni mover ninguna línea."""
+    _fila_unica(db_session)
+    principal = Expediente(
+        codigo_expediente="6.19/28510.0196", nombre_proyecto="Baterías para SAIS. 2 LOTES",
+        estado=EstadoExpediente.pendiente_revision, descargado_en=_AHORA, extraido_en=_AHORA,
+        error="no se extrajo ninguna línea de catálogo de los documentos descargados",
+    )
+    lote_aparte = Expediente(codigo_expediente="6.19/28510.0213", estado=EstadoExpediente.sin_publicar)
+    db_session.add_all([principal, lote_aparte])
+    db_session.commit()
+    contrato = Documento(
+        tipo_documento=TipoDocumento.contrato, hash="hash-contrato-lote",
+        ruta_almacenamiento="hash-contrato-lote.pdf",
+        identidad_lote_codigo="6.19/28510.0213", identidad_lote_identificador="1",
+    )
+    db_session.add(contrato)
+    db_session.commit()
+    db_session.add(DocumentoExpediente(
+        documento_id=contrato.id, expediente_id=principal.id, nombre_archivo="CONTRATO_2.pdf",
+    ))
+    db_session.commit()
+
+    libro = openpyxl.load_workbook(io.BytesIO(generar_excel_catalogo(db_session)))
+    filas = {f[0]: f for f in libro["Conciliación"].iter_rows(min_row=2, values_only=True)}
+
+    fila = filas["6.19/28510.0213"]
+    assert fila[COLUMNAS_CONCILIACION.index("Situación")] == PUBLICADO_EN_FICHA_DE_OTRO
+    motivo = fila[COLUMNAS_CONCILIACION.index("Motivo")]
+    assert "lote 1" in motivo and "6.19/28510.0196" in motivo
+    # No se ha creado ningún lote a partir de esa identidad: la hoja dice la
+    # verdad sobre el expediente sin tocar la atribución de ninguna línea.
+    assert db_session.query(Lote).filter_by(expediente_id=principal.id).count() == 0
+
+
+def test_el_contrato_de_uno_mismo_no_lo_convierte_en_lote_de_otro(db_session):
+    """La otra mitad: el Contrato firmado del propio expediente declara su
+    propio número. Eso no lo hace "lote de otro" -- el caso degenerado se
+    descarta igual que en el camino del lote."""
+    _fila_unica(db_session)
+    propio = Expediente(
+        codigo_expediente="6.24/28510.0017", estado=EstadoExpediente.sin_publicar,
+    )
+    db_session.add(propio)
+    db_session.commit()
+    contrato = Documento(
+        tipo_documento=TipoDocumento.contrato, hash="hash-contrato-propio",
+        ruta_almacenamiento="hash-contrato-propio.pdf",
+        identidad_lote_codigo="6.24/28510.0017", identidad_lote_identificador="1",
+    )
+    db_session.add(contrato)
+    db_session.commit()
+    db_session.add(DocumentoExpediente(
+        documento_id=contrato.id, expediente_id=propio.id, nombre_archivo="CONTRATO_1.pdf",
+    ))
+    db_session.commit()
+
+    libro = openpyxl.load_workbook(io.BytesIO(generar_excel_catalogo(db_session)))
+    codigos = {f[0] for f in libro["Conciliación"].iter_rows(min_row=2, values_only=True)}
+
+    assert "6.24/28510.0017" not in codigos
+
+
 def test_sin_enlace_estructural_no_se_fuerza_nada(db_session):
     """Bloque 3, la otra mitad: mencionar el número en el texto de un
     documento ajeno no basta. Sin un lote que lo declare por número, el

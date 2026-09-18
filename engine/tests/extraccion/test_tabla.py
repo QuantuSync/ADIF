@@ -1,6 +1,6 @@
 import pdfplumber
 
-from app.extraccion.tabla import extraer_tablas_pagina
+from app.extraccion.tabla import _es_modelo_de_oferta_en_blanco, extraer_tablas_pagina
 from app.extraccion.texto import normalizar
 from tests import fixtures as fx
 
@@ -316,3 +316,35 @@ def test_matricula_antigua_de_8_cifras_cuenta_como_fila_de_datos():
     # Sin cabecera de matrícula, hacen falta varias filas con ella.
     assert _indice_primera_fila_datos([["59020019", "FUSIBLE", "116,15"]]) is None
     assert _indice_primera_fila_datos([[f"5902001{i}", "FUSIBLE", "116,15"] for i in range(3)]) == 0
+
+
+# --- Bloque 6, sesión 2026-09-18 (sexta parte) ----------------------------
+
+
+def test_el_modelo_de_oferta_en_blanco_no_es_un_cuadro_de_precios():
+    """`3.16/28510.0158` y `6.16/28510.0178` imprimen, debajo del cuadro de
+    precios real, la tabla que el licitador rellena: "Ref. | Denominación |
+    Licitación | Oferta". Sus filas M1/M2 no son artículos sino **mediciones
+    globales** ("Cantidad global de balasto ... 27.500,00 Tn"), y entraban al
+    catálogo como si 27.500 fueran euros por unidad."""
+    filas = [
+        ["OFERTA Ref.", "Denominación", "Licitación", "Oferta", None],
+        ["P1", "Precio unitario de la tn producida...", "8,11 €", "P10f", None],
+        ["M1", "Cantidad global de balasto (fijo para todas las ofertas)", "27.500,00 Tn", "27.500,00 Tn", None],
+    ]
+    assert _es_modelo_de_oferta_en_blanco(filas) is True
+
+
+def test_un_cuadro_de_precios_normal_no_se_confunde_con_el_modelo_de_oferta():
+    """La otra mitad: el cuadro de precios real de ese mismo pliego, y uno con
+    columna de importe, siguen entrando."""
+    cuadro_real = [
+        ["CUADRO DE PRECIOS UNITARIOS Ref.", "ud", "Denominación", "Precio"],
+        ["P-1", "Tn", "Tn de balasto producido...", "8,11 €"],
+    ]
+    assert _es_modelo_de_oferta_en_blanco(cuadro_real) is False
+    con_importe = [
+        ["Nº", "Matrícula", "Descripción", "Cantidad", "Precio unitario", "Importe"],
+        ["P-1", "607000000", "TRAVIESA AI-VE", "2000", "73,15 €", "146.300,00 €"],
+    ]
+    assert _es_modelo_de_oferta_en_blanco(con_importe) is False

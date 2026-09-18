@@ -292,9 +292,40 @@ def _filas_cuadro_sin_codigo(filas: list[FILA]) -> Optional[list[FILA]]:
     return datos or None
 
 
+# Bloque 6, sesión 2026-09-18 (sexta parte): el **modelo de oferta en blanco**
+# que algunos pliegos de balasto imprimen justo debajo del cuadro de precios
+# de verdad. Su cabecera es "Ref. | Denominación | Licitación | Oferta": la
+# columna "Licitación" repite el precio de referencia que el cuadro de arriba
+# ya trae, y la columna "Oferta" es la que rellena el licitador (viene con el
+# hueco marcado, "P10f", "M20f"). Sus filas no son artículos: mezclan esos
+# precios repetidos con **mediciones globales** ("M1 Cantidad global de
+# balasto ... 27.500,00 Tn"), que entraban al catálogo como si 27.500 fueran
+# euros por unidad. Es la misma familia que el "modelo de proposición
+# económica en blanco" del acuerdo marco de EPIs (sesión 2026-09-18, quinta
+# parte, bloque 4): una tabla para rellenar, no una tabla de datos.
+#
+# La señal es que la cabecera nombra las dos columnas a la vez, en columnas
+# distintas: un cuadro de precios real nunca tiene una columna "Oferta"
+# enfrentada a otra "Licitación" -- si las tuviera, sería precisamente eso,
+# un formulario de oferta.
+_COLUMNA_LICITACION = ("licitacion",)
+_COLUMNA_OFERTA = ("oferta",)
+
+
+def _es_modelo_de_oferta_en_blanco(filas: list[FILA]) -> bool:
+    for fila in filas[:2]:
+        licitacion = _columna_con(fila, _COLUMNA_LICITACION)
+        oferta = _columna_con(fila, _COLUMNA_OFERTA)
+        if licitacion is not None and oferta is not None and licitacion != oferta:
+            return True
+    return False
+
+
 def _tabla_extraida(tabla, pagina) -> Optional[TablaExtraida]:
     filas = tabla.extract()
     if not filas:
+        return None
+    if _es_modelo_de_oferta_en_blanco(filas):
         return None
     indice_datos = _indice_primera_fila_datos(filas)
     if indice_datos is None:

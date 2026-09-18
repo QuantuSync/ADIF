@@ -407,6 +407,19 @@ class Documento(Base):
         server_default=OrigenDocumento.plataforma.value,
     )
     procesado_en = Column(DateTime(timezone=True), nullable=True)
+    # Bloque 3, sesión 2026-09-18 (sexta parte, migración 0038): lo que ESTE
+    # Contrato firmado dice de sí mismo en su cabecera -- "Contrato nº:
+    # 6.19/28510.0213 ... LOTE 1" (`app.extraccion.lotes.
+    # extraer_identidad_contrato`). Se guarda aquí, en el documento, porque
+    # es una propiedad del fichero, igual que `tipo_documento`, y porque
+    # hasta ahora ese hecho se perdía entero cuando el expediente no traía
+    # además una Resolución/Propuesta que declarase lotes (`_extraer_lotes`
+    # no abre candidatos con un Contrato). Lo usa `app.conciliacion.
+    # _lotes_en_ficha_de_otro` para no llamar "no publicado" a un expediente
+    # que un documento publicado de otro declara como lote suyo. **No crea
+    # ningún lote**: un lote nuevo movería líneas ya atribuidas.
+    identidad_lote_codigo = Column(String(64), nullable=True)
+    identidad_lote_identificador = Column(String(64), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     expediente_links = relationship("DocumentoExpediente", back_populates="documento")

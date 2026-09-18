@@ -20,6 +20,7 @@ familia (u otra parecida) lo señale un informe, no una revisión manual.
 """
 from __future__ import annotations
 
+import re
 import statistics
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -312,9 +313,26 @@ def _check_campos_esenciales(lineas: list[_LineaAuditable]) -> list[Hallazgo]:
     return hallazgos
 
 
+# Bloque 6, sesión 2026-09-18 (sexta parte): las redacciones reales con que
+# el corpus nombra una partida alzada, verificadas sobre las 331 líneas que el
+# aviso de precio desproporcionado señalaba por esta causa ("Partida alzada a
+# justificar para imprevistos", "PA a justificar de una o varias superficies
+# de acopio", "P.A. a justificar por adquisición..."). CONTEXTO.md sección 2:
+# es una línea legítima, no un error.
+_PARTIDA_ALZADA_RE = re.compile(
+    r"partida\s+alzada|a\s+justificar|imprevistos|^p\.?\s?a\.?[\s.]", re.IGNORECASE
+)
+
+
+def _es_partida_alzada(linea: _LineaAuditable) -> bool:
+    return bool(_PARTIDA_ALZADA_RE.search(linea.descripcion or ""))
+
+
 def _check_precios(lineas: list[_LineaAuditable]) -> list[Hallazgo]:
     """"Precios a cero, negativos o desproporcionados frente a la mediana de
-    su expediente"."""
+    las líneas de su expediente con la misma unidad de medida" (ver el
+    comentario largo de más abajo para por qué la mediana es esa y no la del
+    expediente entero, y por qué la partida alzada queda fuera)."""
     hallazgos: list[Hallazgo] = []
 
     cero_o_negativo = [l for l in lineas if l.precio_unitario is not None and l.precio_unitario <= 0]
@@ -330,16 +348,40 @@ def _check_precios(lineas: list[_LineaAuditable]) -> list[Hallazgo]:
             )
         )
 
-    por_expediente: dict[str, list[Decimal]] = {}
+    # Bloque 6, sesión 2026-09-18 (sexta parte). Las dos exclusiones de abajo
+    # no aflojan la comprobación: quitan de ella las dos familias que el
+    # propio aviso ya reconocía como legítimas en su texto y que, medidas
+    # sobre el corpus real, eran **512 de las 2.005 líneas señaladas**. Un
+    # aviso del que ya se sabe de antemano que una cuarta parte es correcta no
+    # se mira; la comprobación solo vale si lo que señala hay que mirarlo.
+    #
+    # 1. **La partida alzada.** CONTEXTO.md sección 2 la define como línea
+    #    legítima, no un error: es una reserva presupuestaria, no un artículo,
+    #    y por definición vale órdenes de magnitud más que cualquier pieza del
+    #    mismo cuadro (250.000 € frente a una mediana de 16,09 € en
+    #    `6.24/28510.0064`). Compararla con la mediana de los artículos no
+    #    contesta ninguna pregunta.
+    # 2. **La mediana es la de las líneas con la MISMA unidad de medida.**
+    #    CONTEXTO.md sección 7, aviso del cliente: "una Cantidad de 2000 o un
+    #    Precio unitario de 0,142 no significan nada por sí solos" sin su
+    #    unidad. Comparar un precio por tonelada-kilómetro (1,60 €) con la
+    #    mediana de un cuadro de desvíos completos (11.241 €) da 1/7000 y no
+    #    dice nada del precio. Si el expediente no tiene al menos
+    #    `_MINIMO_LINEAS_PARA_MEDIANA` líneas con esa misma unidad, la línea
+    #    **no se juzga**: no hay vara de medir, y usar la del expediente
+    #    entero es usar una vara de otra magnitud.
+    por_unidad: dict[tuple[str, Optional[str]], list[Decimal]] = {}
     for l in lineas:
-        if l.precio_unitario is not None and l.precio_unitario > 0:
-            por_expediente.setdefault(l.codigo_expediente, []).append(l.precio_unitario)
+        if l.precio_unitario is not None and l.precio_unitario > 0 and not _es_partida_alzada(l):
+            por_unidad.setdefault((l.codigo_expediente, l.unidad_medida), []).append(l.precio_unitario)
 
     atipicas: list[str] = []
     for l in lineas:
         if l.precio_unitario is None or l.precio_unitario <= 0:
             continue
-        precios = por_expediente.get(l.codigo_expediente) or []
+        if _es_partida_alzada(l):
+            continue
+        precios = por_unidad.get((l.codigo_expediente, l.unidad_medida)) or []
         if len(precios) < _MINIMO_LINEAS_PARA_MEDIANA:
             continue
         mediana = statistics.median(precios)
@@ -356,9 +398,10 @@ def _check_precios(lineas: list[_LineaAuditable]) -> list[Hallazgo]:
                 gravedad="aviso",
                 mensaje=(
                     f"{len(atipicas)} línea(s) con precio unitario a más de {_RATIO_PRECIO_ATIPICO}x o "
-                    f"menos de 1/{_RATIO_PRECIO_ATIPICO}x la mediana de su propio expediente -- puede "
-                    "ser legítimo (partida alzada, precio por unidad de medida distinta dentro del "
-                    "mismo lote, CONTEXTO.md sesión 2026-09-06 bloque 3), confirmar caso a caso."
+                    f"menos de 1/{_RATIO_PRECIO_ATIPICO}x la mediana de las líneas de su propio "
+                    "expediente con la MISMA unidad de medida (las partidas alzadas quedan fuera: son "
+                    "reservas presupuestarias, no artículos) -- puede seguir siendo legítimo, un mismo "
+                    "cuadro mezcla un tornillo y un desvío completo, confirmar caso a caso."
                 ),
                 expedientes=expedientes,
                 total_afectados=total,
