@@ -52,6 +52,14 @@ from sqlalchemy.orm import Session
 from app.catalogo import MOTIVO_MAPEO_INCOHERENTE
 from app.catalogo_consulta import consultar_catalogo
 from app.celdas_vacias import ETIQUETA_MOTIVO, PENDIENTE, celdas_vacias
+from app.conciliacion import (
+    COLUMNAS_CONCILIACION,
+    RegistroPublicado,
+    SITUACIONES,
+    comprobar_cuadre,
+    construir_conciliacion,
+    describir_registro_publicado,
+)
 from app.models import LineaCatalogo
 
 
@@ -185,15 +193,17 @@ COLUMNAS = [
     # las tres anteriores.
     "Estado del contrato (SAP)",
     # Bloque 1, sesión de comparación documento-vs-listado interno: el
-    # número de expediente y el objeto/título tal como los declara el propio
-    # documento de la Plataforma, siempre rellenos con independencia de si
-    # el expediente cruzó con el Excel de códigos de ADIF -- a diferencia de
-    # "Código de expediente"/"Código interno" (arriba, gated por
-    # `expediente.codigos_cruzados`), para que el cliente pueda comparar lo
-    # que dice el documento contra lo que dice su listado interno y detectar
-    # errores de cualquiera de las dos fuentes. Añadidas al final, sin
-    # desplazar ninguna columna existente -- "Comentarios" se queda última.
-    "Nº de expediente (documento)",
+    # objeto/título tal como lo declara el propio documento de la Plataforma.
+    #
+    # **"Nº de expediente (documento)" se quitó el 2026-09-18 (bloque 1,
+    # decisión del cliente).** Existía porque "Código de expediente" solo se
+    # rellenaba cuando el expediente cruzaba con el Excel de códigos, y hacía
+    # falta una columna que trajera el número siempre. Desde que esa puerta
+    # desapareció (bloque 1 de la sesión anterior, mismo fichero) las dos
+    # columnas salían del mismo `expediente.codigo_expediente` y coincidían
+    # en las 18.239 filas, sin una sola discrepancia: eran literalmente la
+    # misma columna dos veces. Se queda "Código de expediente", que es el
+    # nombre por el que el cliente filtra.
     "Objeto del contrato (documento)",
     # Sesión 2026-09-14 (continuación), encargo del cliente: por qué está
     # vacía cada celda de datos de la fila, con los tres motivos de la web
@@ -397,6 +407,119 @@ _NOTA_CODIGO_MATERIAL = (
 )
 
 
+# Bloque 5, sesión 2026-09-18 (encargo del cliente). Lo que la hoja
+# "Conciliación" contesta, dicho una vez en el Resumen: por qué existe, qué
+# lista es, y las dos cosas que en ella se quedan en blanco por falta de
+# origen, no por falta de lectura.
+_NOTA_CONCILIACION = (
+    "La hoja \"Conciliación\" lleva una fila por cada expediente del departamento que consta publicado en "
+    "la Plataforma, aporte líneas al catálogo o no, con cuántos documentos se le descargaron, cuántos se "
+    "leyeron con reconocimiento óptico, cuántas líneas aporta y, cuando no aporta ninguna, por qué. Sirve "
+    "para comprobar que no falta nada por leer sin tener que suponerlo: la suma de su columna de líneas es "
+    "exactamente el número de filas de la hoja \"Materiales\"."
+)
+_NOTA_CONCILIACION_HUECOS = (
+    "En esa hoja, \"Órgano de contratación\" y \"Estado que consta publicado en la Plataforma\" solo se "
+    "rellenan para los expedientes que ha listado la sindicación mensual, que es la vía que trae esos dos "
+    "datos. Los que se conocen solo por la búsqueda directa en el buscador de la Plataforma salen con esas "
+    "dos celdas explicadas: el buscador devuelve el número de expediente, no su ficha."
+)
+
+
+def _escribir_conciliacion(libro: Workbook, filas: list) -> None:
+    hoja = libro.create_sheet("Conciliación")
+    hoja.append(COLUMNAS_CONCILIACION)
+    for fila in filas:
+        hoja.append([
+            _celda_texto_o_espacio(fila.codigo_expediente),
+            _celda_texto_o_espacio(fila.titulo),
+            _celda_texto_o_espacio(fila.organo_contratacion),
+            _celda_texto_o_espacio(fila.estado_plataforma),
+            fila.documentos_descargados,
+            fila.documentos_reconocimiento_optico,
+            fila.lineas_en_catalogo,
+            _celda_texto_o_espacio(fila.baja),
+            _celda_texto_o_espacio(fila.situacion),
+            _celda_texto_o_espacio(fila.motivo),
+        ])
+    for columna, ancho in zip("ABCDEFGHIJ", (22, 55, 32, 30, 12, 14, 12, 55, 30, 80)):
+        hoja.column_dimensions[columna].width = ancho
+    for fila_hoja in hoja.iter_rows(min_row=2):
+        for celda in fila_hoja:
+            if isinstance(celda.value, str) and len(celda.value) > 60:
+                celda.alignment = Alignment(wrap_text=True, vertical="top")
+
+
+def _escribir_bloque_conciliacion(hoja, filas: list, registro: RegistroPublicado) -> None:
+    """El recuento por Situación y, como pidió el cliente, **de qué fecha es
+    el registro de lo publicado y qué cubre**, escrito en el propio Excel
+    "para que nadie tenga que suponerlo"."""
+    hoja.append([])
+    hoja.append(["Conciliación con lo publicado en la Plataforma", None])
+    hoja.append([_NOTA_CONCILIACION, None])
+    hoja.append([_NOTA_CONCILIACION_HUECOS, None])
+    hoja.append([])
+    hoja.append(["De qué fecha es el registro de lo publicado y qué cubre", None])
+    departamentos = ", ".join(registro.departamentos) or "(sin departamento configurado)"
+    hoja.append([f"Departamento(s) que cubre esta lista: {departamentos}. Entra todo expediente cuyo "
+                 "código contenga esos dígitos, de cualquier año, en cualquier estado y de cualquier tipo "
+                 "de procedimiento.", None])
+    if registro.periodos_sindicacion:
+        primero = _periodo_legible(registro.periodos_sindicacion[0])
+        ultimo = _periodo_legible(registro.periodos_sindicacion[-1])
+        hoja.append([
+            f"Sindicación mensual de la Plataforma: leídos {len(registro.periodos_sindicacion)} "
+            f"boletín(es) mensual(es), de {primero} a {ultimo}."
+            + (
+                f" El dato más reciente que traen es del {registro.sindicacion_actualizado_hasta:%d/%m/%Y}."
+                if registro.sindicacion_actualizado_hasta
+                else ""
+            ),
+            None,
+        ])
+    else:
+        hoja.append(["Sindicación mensual de la Plataforma: todavía no se ha leído ningún boletín.", None])
+    if registro.busqueda_ejecutada_en:
+        fragmentos = ", ".join(registro.busqueda_fragmentos) or "(los departamentos de arriba)"
+        encontrados = (
+            f" Devolvió {registro.busqueda_codigos_encontrados} expediente(s)."
+            if registro.busqueda_codigos_encontrados is not None
+            else ""
+        )
+        hoja.append([
+            f"Búsqueda directa en el buscador de la Plataforma: última ejecución el "
+            f"{registro.busqueda_ejecutada_en:%d/%m/%Y a las %H:%M} (UTC), buscando \"{fragmentos}\" en el "
+            f"campo \"Nº de expediente\".{encontrados}",
+            None,
+        ])
+    else:
+        hoja.append(["Búsqueda directa en el buscador de la Plataforma: sin ninguna ejecución registrada.",
+                     None])
+    hoja.append([
+        f"Expedientes que constan publicados y salen en \"Conciliación\": {registro.expedientes_publicados}. "
+        f"Además, {registro.expedientes_no_publicados} expediente(s) que se buscaron uno a uno y la "
+        "Plataforma confirmó que no publica: no salen en la hoja, porque no hay nada que leer de ellos.",
+        None,
+    ])
+    hoja.append([])
+    hoja.append(["Situación", "Expedientes", None])
+    recuento = Counter(fila.situacion for fila in filas)
+    for situacion in SITUACIONES:
+        hoja.append([situacion, recuento.get(situacion, 0), None])
+    hoja.append(["Total", sum(recuento.values()), None])
+    hoja.append([
+        "Líneas que suman entre todos (tiene que ser el número de filas de \"Materiales\")",
+        sum(fila.lineas_en_catalogo for fila in filas),
+        None,
+    ])
+
+
+def _periodo_legible(periodo: str) -> str:
+    if len(periodo) == 6 and periodo.isdigit():
+        return f"{periodo[4:]}/{periodo[:4]}"
+    return periodo
+
+
 def _escribir_resumen(
     libro: Workbook,
     incluidas: int,
@@ -404,6 +527,8 @@ def _escribir_resumen(
     incluir_pendientes_sin_lote: bool,
     con_valor_de_otro_lote: int = 0,
     del_anejo_de_criterios: int = 0,
+    filas_conciliacion: Optional[list] = None,
+    registro_publicado: Optional[RegistroPublicado] = None,
 ) -> None:
     hoja = libro.create_sheet("Resumen")
     hoja.append(["Concepto", "Valor"])
@@ -469,6 +594,8 @@ def _escribir_resumen(
     hoja.append(["Nota sobre los materiales que aparecen repetidos", None])
     for nota in _NOTAS_MATERIAL_REPETIDO:
         hoja.append([nota, None])
+    if filas_conciliacion is not None and registro_publicado is not None:
+        _escribir_bloque_conciliacion(hoja, filas_conciliacion, registro_publicado)
     for fila in hoja.iter_rows():
         for celda in fila:
             if isinstance(celda.value, str) and len(celda.value) > 60:
@@ -488,6 +615,12 @@ def generar_excel_catalogo(db: Session, incluir_pendientes_sin_lote: bool = Fals
     con_valor_de_otro_lote = 0
     del_anejo_de_criterios = 0
     excluidas_por_categoria: Counter[str] = Counter()
+    # Bloque 5, sesión 2026-09-18: las filas que de verdad se escriben en
+    # "Materiales", por expediente. La hoja "Conciliación" se construye con
+    # este recuento, nunca con una consulta propia -- si las dos cifras
+    # pudieran discrepar, la hoja dejaría de servir para lo único que existe
+    # (docstring de `app.conciliacion`).
+    lineas_por_expediente: Counter[int] = Counter()
 
     # Bloque de medición del hallazgo de sesión (ver comentario de
     # `_CATEGORIA_DUPLICADO_SIN_PERDIDA` más arriba): antes de decidir qué
@@ -547,6 +680,7 @@ def generar_excel_catalogo(db: Session, incluir_pendientes_sin_lote: bool = Fals
                 excluidas_por_categoria[categoria] += 1
             continue
         incluidas += 1
+        lineas_por_expediente[expediente.id] += 1
         # "El sistema nunca inventa una matriz. Si no cruza, se deja
         # vacío" (CONTEXTO.md sección 7): el "Código interno" sí sale del
         # Excel de códigos de ADIF, así que sin cruce no hay nada que
@@ -582,12 +716,6 @@ def generar_excel_catalogo(db: Session, incluir_pendientes_sin_lote: bool = Fals
             _celda_numero(linea.baja_lote),
             _celda_texto_o_espacio(linea.unidad_medida),
             _celda_texto_o_espacio(expediente.estado_contrato_sap),
-            # Siempre el dato del documento, nunca gated por `cruzado`
-            # (ver comentario de `COLUMNAS` arriba) -- `codigo_expediente`
-            # no es nullable (CONTEXTO.md sección 20: se corrige en el
-            # sitio con el "Número de Expediente" propio del Anuncio
-            # PCSP en cuanto se lee, `app.extraccion.identidad_expediente`).
-            _celda_texto_o_espacio(expediente.codigo_expediente),
             _celda_texto_o_espacio(expediente.nombre_proyecto),
             _celda_texto_o_espacio(
                 _texto_celdas_vacias(linea, lote.identificador_lote if lote else None, expediente)
@@ -604,9 +732,19 @@ def generar_excel_catalogo(db: Session, incluir_pendientes_sin_lote: bool = Fals
             hoja.cell(row=fila, column=columna).number_format = _FORMATO_IMPORTE
         hoja.cell(row=fila, column=_COLUMNA_PORCENTAJE).number_format = _FORMATO_PORCENTAJE
 
+    # Bloque 5, sesión 2026-09-18 (encargo del cliente). `comprobar_cuadre`
+    # revienta si la suma no da el número de filas de "Materiales" o si algún
+    # expediente se queda sin Situación: nunca se entrega un Excel
+    # descuadrado, que es justo la clase de dato que esta hoja existe para
+    # descartar.
+    filas_conciliacion = construir_conciliacion(db, dict(lineas_por_expediente))
+    comprobar_cuadre(filas_conciliacion, incluidas)
+    registro = describir_registro_publicado(db, filas_conciliacion)
+    _escribir_conciliacion(libro, filas_conciliacion)
+
     _escribir_resumen(
         libro, incluidas, excluidas_por_categoria, incluir_pendientes_sin_lote, con_valor_de_otro_lote,
-        del_anejo_de_criterios,
+        del_anejo_de_criterios, filas_conciliacion, registro,
     )
 
     buffer = io.BytesIO()

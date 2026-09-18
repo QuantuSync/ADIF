@@ -45,11 +45,32 @@ def test_recorta_espacios_sobrantes_antes_de_comparar(excel_codigos):
     assert resultado.codigo_matriz == "6.25/28510.0028"
 
 
+def test_cruza_por_numero_de_expediente_marca_la_fila_como_propia(excel_codigos):
+    assert cruzar_codigo_proyecto(excel_codigos, "6.24/28510.0128").fila_propia is True
+
+
 def test_cruza_por_matriz_cuando_no_hay_por_numero_de_expediente(excel_codigos):
+    """Bloque 2, sesión 2026-09-18 (decisión del cliente): la fila se sigue
+    encontrando -- su columna MATRIZ puede aportar información y `cruzado`
+    sigue siendo `True` --, pero su `Nº Interno` es el de OTRO expediente y
+    ya no se devuelve. Un código interno ajeno es peor que la celda vacía:
+    en almacenes lo usan para buscar."""
     resultado = cruzar_codigo_proyecto(excel_codigos, "codigo-inexistente", codigo_matriz="6.25/28510.0028")
 
     assert resultado.cruzado is True
-    assert resultado.codigo_interno == "24038"
+    assert resultado.fila_propia is False
+    assert resultado.codigo_interno is None
+
+
+def test_expediente_que_es_matriz_de_otra_fila_no_hereda_su_codigo_interno(excel_codigos):
+    """Mismo bloque, la otra clave: `codigo_expediente` contra la columna
+    MATRIZ. La fila encontrada es la del pedido que cuelga de este acuerdo
+    marco, no la de este expediente."""
+    resultado = cruzar_codigo_proyecto(excel_codigos, "6.25/28510.0028")
+
+    assert resultado.cruzado is True
+    assert resultado.fila_propia is False
+    assert resultado.codigo_interno is None
 
 
 def test_expediente_que_es_matriz_de_otra_fila_no_se_pone_su_propia_matriz(excel_codigos):
@@ -65,7 +86,6 @@ def test_expediente_que_es_matriz_de_otra_fila_no_se_pone_su_propia_matriz(excel
     resultado = cruzar_codigo_proyecto(excel_codigos, "6.25/28510.0028")
 
     assert resultado.cruzado is True
-    assert resultado.codigo_interno == "24038"
     assert resultado.codigo_matriz is None
 
 
@@ -85,7 +105,8 @@ def test_no_cruza_no_inventa_nada(excel_codigos):
 
 def _expediente(**kwargs):
     base = dict(codigo_expediente=None, codigo_matriz=None, codigos_cruzados=None,
-                codigo_interno=None, matriz_conflicto=None, codigo_matriz_en_cruce=None)
+                codigo_interno=None, matriz_conflicto=None, codigo_matriz_en_cruce=None,
+                cruce_fila_propia=None)
     base.update(kwargs)
     return SimpleNamespace(**base)
 
@@ -179,7 +200,11 @@ def test_reintenta_el_cruce_cuando_aparece_una_matriz_nueva(excel_codigos, monke
     expediente.codigo_matriz = "6.25/28510.0028"
     assert asegurar_cruce_codigos(None, expediente) is None
     assert expediente.codigos_cruzados is True
-    assert expediente.codigo_interno == "24038"
+    # Bloque 2, sesión 2026-09-18: cruza, pero por la fila de otro
+    # expediente -- el `Nº Interno` de esa fila (24038) es el de ese otro, y
+    # ya no se hereda.
+    assert expediente.cruce_fila_propia is False
+    assert expediente.codigo_interno is None
     assert expediente.codigo_matriz_en_cruce == "6.25/28510.0028"
 
 
@@ -206,11 +231,36 @@ def test_cruce_exitoso_nunca_se_reintenta_aunque_cambie_la_matriz(excel_codigos,
     expediente = _expediente(
         codigo_expediente="6.24/28510.0128", codigo_matriz=None,
         codigos_cruzados=True, codigo_interno="24001", codigo_matriz_en_cruce=None,
+        cruce_fila_propia=True,
     )
 
     expediente.codigo_matriz = "cualquier-cosa-nueva"
     assert asegurar_cruce_codigos(None, expediente) is None
     assert expediente.codigo_interno == "24001"
+
+
+def test_un_cruce_anterior_a_la_columna_se_rehace_una_sola_vez(excel_codigos, monkeypatch):
+    """Bloque 2, sesión 2026-09-18: un expediente que cruzó antes de que
+    existiera `cruce_fila_propia` no sabe por cuál de las cuatro claves
+    entró, así que no se puede decidir si su "Código interno" es el suyo o
+    el de otro expediente. Se rehace una vez -- y solo una."""
+    monkeypatch.setattr(settings, "codigos_proyecto_path", excel_codigos)
+    expediente = _expediente(
+        codigo_expediente="6.25/28510.0028", codigo_matriz=None,
+        codigos_cruzados=True, codigo_interno="24038", codigo_matriz_en_cruce=None,
+        cruce_fila_propia=None,
+    )
+
+    assert asegurar_cruce_codigos(None, expediente) is None
+    assert expediente.cruce_fila_propia is False
+    assert expediente.codigo_interno is None
+
+    # Segunda pasada: ya se sabe, no se vuelve a entrar en el Excel (si
+    # entrara, fallaría por ruta no configurada).
+    monkeypatch.setattr(settings, "codigos_proyecto_path", None)
+    expediente.codigo_interno = "no-lo-toca"
+    assert asegurar_cruce_codigos(None, expediente) is None
+    assert expediente.codigo_interno == "no-lo-toca"
 
 
 # --- `validar_ruta_codigos_proyecto` (encargo de esta sesión: fallar de

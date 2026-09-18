@@ -394,6 +394,102 @@ def test_bajada_de_lineas_no_explicada_por_poda_sigue_siendo_error(db_session):
     assert exp.codigo_expediente in hallazgo["expedientes"]
 
 
+def test_bajada_explicada_por_el_filtro_de_extraccion_es_aviso_no_error(db_session):
+    """Bloque 4, sesión 2026-09-18 (caso real `6.23/28510.0105`). La sesión
+    anterior enseñó a la cascada a tratar las filas de resumen de presupuesto
+    ("Suma", "IVA (21%)") como pie de tabla en vez de como material, y ese
+    expediente perdió su única fila de ese tipo: 36 líneas -> 35. La quitó el
+    FILTRO DE EXTRACCIÓN, no el podador, y la reextracción podó 32 y creó 31
+    (quitar una fila corre el `orden_aparicion` de las siguientes, y con él
+    su clave). `lineas_podadas` (32) no cuadra con la bajada (1), así que
+    salía como `error` un cambio perfectamente explicado; el balance
+    `podadas - creadas` sí cuadra."""
+    exp = _expediente(db_session, huella_documentos="hash-estable")
+    lote = _lote(db_session, exp.id)
+    for i in range(5):
+        _linea(db_session, exp.id, lote.id, clave_linea=f"P-{i}", codigo_precio=f"P-{i}",
+               precio_unitario=Decimal("10"))
+
+    hace_una_hora = datetime.now(timezone.utc) - timedelta(hours=1)
+    primera = ejecutar_auditoria(db_session, _trabajo(db_session))
+    trabajo1 = TrabajoCola(
+        tipo=TIPO_TRABAJO, resultado=primera, estado=EstadoTrabajo.completado, created_at=hace_una_hora
+    )
+    db_session.add(trabajo1)
+    db_session.commit()
+
+    # La reextracción borra las 5 viejas y escribe 4 nuevas: neto -1.
+    for linea in db_session.query(LineaCatalogo).all():
+        db_session.delete(linea)
+    db_session.commit()
+    for i in range(4):
+        _linea(db_session, exp.id, lote.id, clave_linea=f"Q-{i}", codigo_precio=f"Q-{i}",
+               precio_unitario=Decimal("10"))
+    db_session.add(TrabajoCola(
+        tipo="extraer_expediente",
+        expediente_id=exp.id,
+        estado=EstadoTrabajo.completado,
+        resultado={"lineas_podadas": 5, "lineas_creadas": 4},
+        created_at=hace_una_hora + timedelta(minutes=10),
+    ))
+    db_session.commit()
+
+    segundo_trabajo = TrabajoCola(tipo=TIPO_TRABAJO, created_at=datetime.now(timezone.utc))
+    db_session.add(segundo_trabajo)
+    db_session.commit()
+    resultado = ejecutar_auditoria(db_session, segundo_trabajo)
+
+    categorias = {h["categoria"] for h in resultado["hallazgos"]}
+    assert "lineas_cambian_sin_cambiar_documentos" not in categorias
+    hallazgo = next(
+        h for h in resultado["hallazgos"] if h["categoria"] == "lineas_bajan_explicado_por_reextraccion"
+    )
+    assert hallazgo["gravedad"] == "aviso"
+    assert exp.codigo_expediente in hallazgo["expedientes"]
+
+
+def test_una_subida_sigue_siendo_error_aunque_la_reextraccion_creara_lineas(db_session):
+    """La atribución nueva no puede convertirse en una puerta de atrás: una
+    SUBIDA de recuento sin que cambien los documentos es el síntoma que
+    motivó esta comprobación, y el balance de la reextracción nunca la
+    excusa."""
+    exp = _expediente(db_session, huella_documentos="hash-estable")
+    lote = _lote(db_session, exp.id)
+    for i in range(3):
+        _linea(db_session, exp.id, lote.id, clave_linea=f"P-{i}", codigo_precio=f"P-{i}",
+               precio_unitario=Decimal("10"))
+
+    hace_una_hora = datetime.now(timezone.utc) - timedelta(hours=1)
+    primera = ejecutar_auditoria(db_session, _trabajo(db_session))
+    db_session.add(TrabajoCola(
+        tipo=TIPO_TRABAJO, resultado=primera, estado=EstadoTrabajo.completado, created_at=hace_una_hora
+    ))
+    db_session.commit()
+
+    for i in range(2):
+        _linea(db_session, exp.id, lote.id, clave_linea=f"Q-{i}", codigo_precio=f"Q-{i}",
+               precio_unitario=Decimal("10"))
+    db_session.add(TrabajoCola(
+        tipo="extraer_expediente",
+        expediente_id=exp.id,
+        estado=EstadoTrabajo.completado,
+        resultado={"lineas_podadas": 0, "lineas_creadas": 2},
+        created_at=hace_una_hora + timedelta(minutes=10),
+    ))
+    db_session.commit()
+
+    segundo_trabajo = TrabajoCola(tipo=TIPO_TRABAJO, created_at=datetime.now(timezone.utc))
+    db_session.add(segundo_trabajo)
+    db_session.commit()
+    resultado = ejecutar_auditoria(db_session, segundo_trabajo)
+
+    hallazgo = next(
+        h for h in resultado["hallazgos"] if h["categoria"] == "lineas_cambian_sin_cambiar_documentos"
+    )
+    assert hallazgo["gravedad"] == "error"
+    assert exp.codigo_expediente in hallazgo["expedientes"]
+
+
 def test_columna_vacia_crece_mucho_respecto_a_la_ejecucion_anterior(db_session):
     exp = _expediente(db_session)
     lote = _lote(db_session, exp.id)

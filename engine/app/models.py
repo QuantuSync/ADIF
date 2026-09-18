@@ -153,6 +153,19 @@ class Expediente(Base):
     # `codigo_matriz` actual). `None` si nunca se intentó el cruce, o si se
     # intentó cuando el expediente todavía no tenía ninguna matriz.
     codigo_matriz_en_cruce = Column(String(64), nullable=True)
+    # Migración 0036 (sesión 2026-09-18, bloque 2, decisión del cliente): por
+    # cuál de las cuatro claves de `_IndiceCodigosProyecto.buscar` entró el
+    # cruce. `True` = la fila encontrada es la de este expediente
+    # (`codigo_expediente` contra `Nº Expediente`); `False` = es la de OTRO
+    # expediente (por `MATRIZ`, o por el `codigo_matriz` propio), y entonces
+    # su `Nº Interno` no es el de este expediente y `codigo_interno` se queda
+    # vacío con su motivo -- un código interno ajeno es peor que la celda
+    # vacía, porque en almacenes lo usan para buscar (28 expedientes reales,
+    # 2.379 líneas de catálogo; `20012` llegó a estar en `6.26/28510.0032` y
+    # `6.26/28510.0071` a la vez). `None` = no cruzó, o cruzó antes de que
+    # existiera esta columna y todavía no se ha rehecho (`asegurar_cruce_
+    # codigos` lo rehace la primera vez que pasa por él).
+    cruce_fila_propia = Column(Boolean, nullable=True)
     importe_licitacion = Column(Numeric(14, 4), nullable=True)
     importe_adjudicacion = Column(Numeric(14, 4), nullable=True)
     baja_global = Column(Numeric(12, 6), nullable=True)

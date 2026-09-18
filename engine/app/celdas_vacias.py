@@ -36,6 +36,13 @@ _DETALLE_OTRO_LOTE = {
 # sabe nada de este sistema: nada de "cruce", "índice" ni "codigos_cruzados".
 _DETALLE_SIN_CRUCE = "este expediente no aparece en el listado de códigos de ADIF"
 _DETALLE_CRUZA_SIN_INTERNO = "el listado de códigos de ADIF no trae número interno para este expediente"
+# Sesión 2026-09-18, bloque 2 (decisión del cliente). Tercera causa, hasta hoy
+# invisible: el expediente encuentra fila en el listado de ADIF, pero es la
+# fila de OTRO expediente de la misma familia (la encuentra por la columna de
+# acuerdo marco, no por su propio número). El número interno de esa fila es el
+# de ese otro expediente, y escribirlo aquí es peor que dejar la celda vacía:
+# en almacenes lo usan para buscar, y les llevaría al expediente equivocado.
+_DETALLE_SIN_FILA_PROPIA = "este expediente no figura por sí mismo en el listado de códigos de ADIF"
 _DETALLE_SIN_MATRIZ = "no se conoce ningún acuerdo marco del que dependa este expediente"
 _DETALLE_SIN_TITULO = "no se ha encontrado el título en los documentos de este expediente"
 _DETALLE_SIN_ESTADO_SAP = "este expediente no aparece en el listado de contratos en ejecución de SAP"
@@ -76,10 +83,16 @@ def celdas_vacias(
     # Columnas 1, 3 y 4 del Excel, antes de las de la línea.
     if expediente is not None:
         if not expediente.codigo_interno:
-            # Dos causas distintas que el cliente no puede distinguir mirando
-            # la celda: el expediente no está en el listado de ADIF, o está
-            # pero esa fila no trae número interno.
-            detalle = _DETALLE_CRUZA_SIN_INTERNO if expediente.codigos_cruzados else _DETALLE_SIN_CRUCE
+            # Tres causas distintas que el cliente no puede distinguir mirando
+            # la celda: el expediente no está en el listado de ADIF, está pero
+            # esa fila no trae número interno, o la única fila que se le
+            # encuentra es la de otro expediente de su familia.
+            if not expediente.codigos_cruzados:
+                detalle = _DETALLE_SIN_CRUCE
+            elif getattr(expediente, "cruce_fila_propia", None) is False:
+                detalle = _DETALLE_SIN_FILA_PROPIA
+            else:
+                detalle = _DETALLE_CRUZA_SIN_INTERNO
             vacias.append(CeldaVacia("codigo_interno", NO_CONSTA, detalle))
         if not expediente.codigo_matriz:
             vacias.append(CeldaVacia("codigo_matriz", NO_CONSTA, _DETALLE_SIN_MATRIZ))

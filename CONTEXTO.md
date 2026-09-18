@@ -304,9 +304,13 @@ expedientes que sí estaban (2.381 filas de 92 expedientes, el 13 % del Excel).
 expediente y se rellena siempre.** El cruce sigue gobernando en exclusiva las
 tres columnas que sí dependen de él: "Código interno", "Código matriz" y
 "Estado del contrato (SAP)". Consecuencia medida: "Código de expediente" y
-"Nº de expediente (documento)" coinciden ahora en las 18.239 filas, sin una
-sola discrepancia — las dos columnas son hoy idénticas, y si mantener las dos
-merece la pena es una decisión del cliente pendiente, no del sistema.
+"Nº de expediente (documento)" coincidían en las 18.239 filas, sin una sola
+discrepancia — eran literalmente la misma columna dos veces. **Decisión del
+cliente, misma fecha: se quita "Nº de expediente (documento)"** y se queda
+"Código de expediente", que es el nombre por el que el cliente filtra.
+Comprobado antes de quitarla: ninguna pantalla de la web ni ninguna ruta de
+la API dependía de ella (solo `app/exportacion.py` y dos tests). El Excel
+pasa de 18 columnas a 17.
 
 **Celdas vacías en el Excel (sesión 2026-09-14):** la celda se deja vacía
 — un marcador de texto rompería las columnas numéricas — y su motivo va en
@@ -358,10 +362,26 @@ casan con la fila de OTRO expediente** (23 + 3 + 2 por cada una de las otras
 tres claves). No es un detalle teórico: de esa fila ajena sale el "Código
 interno", que es la columna por la que el cliente agrupa. Medido también:
 **ninguno de esos 28 tiene fila propia en el Excel de códigos**, así que
-reordenar las cuatro claves no encontraría nada mejor — la única alternativa
-real sería no heredar el "Código interno" de una fila casada por MATRIZ.
-Pendiente de decisión del cliente; medición completa en
-`docs/sesion-2026-09-18-codigo-expediente-motivos-duplicados.md`.
+reordenar las cuatro claves no encontraría nada mejor.
+
+**Resuelto el 2026-09-18 (decisión del cliente): el "Código interno" ya no se
+hereda de una fila ajena.** `CruceCodigos.fila_propia` (y
+`expedientes.cruce_fila_propia`, migración 0036) marcan si la fila encontrada
+es la del propio expediente; solo entonces se escribe `codigo_interno`. En los
+28 restantes la celda queda vacía con su motivo, escrito para almacenes: *"no
+consta (este expediente no figura por sí mismo en el listado de códigos de
+ADIF)"*. Un código interno que pertenece a otro expediente es peor que la celda
+vacía, porque en almacenes lo usan para buscar. `cruzado` sigue siendo `True`
+(la fila existe) y "Código matriz" y "Estado del contrato (SAP)" no cambian de
+comportamiento. Efecto: 1.404 filas del Excel, 24 expedientes. **Comprobado
+que los 42 internos que siguen repitiéndose entre expedientes distintos no
+llegan por esta vía**: todos cruzan por su fila propia y es el propio listado
+de ADIF el que asigna un `Nº Interno` por familia de expedientes (lo que ya
+decía "Clave del catálogo", debajo). Un expediente ya cruzado se vuelve a
+cruzar **una sola vez** para rellenar la columna nueva; el exportador dispara
+ese backfill. Medición completa en
+`docs/sesion-2026-09-18-codigo-expediente-motivos-duplicados.md` y
+`docs/sesion-2026-09-18-conciliacion-plataforma.md`.
 
 **El sistema nunca inventa una matriz.** Si no cruza, se deja vacío y se marca.
 
@@ -1931,7 +1951,56 @@ sobre el corpus: +2.316 líneas en 54 expedientes, ~10,75 $.
   aquellos 6 expedientes sí salen bajo `lineas_bajan_explicado_por_poda`.
   Sigue pendiente `LineaCatalogo.id` como último desempate del orden (tres
   parejas de filas contiguas intercambian posición entre dos exportaciones,
-  sin cambiar contenido).
+  sin cambiar contenido) — cerrado en la entrada siguiente.
+- **Columna duplicada fuera, código interno que no se hereda, orden total,
+  atribución de la auditoría y hoja de conciliación con la Plataforma (sesión
+  2026-09-18, continuación,
+  `docs/sesion-2026-09-18-conciliacion-plataforma.md`).** Sin reproceso: el
+  catálogo se queda en 37.638 líneas y el Excel en 18.239 filas, 358
+  expedientes, **0 filas perdidas y 0 materiales desaparecidos**. (1) **Se
+  quita "Nº de expediente (documento)"** (sección 7): comprobado antes de
+  tocarla que ni la web ni la API ni la base de datos dependían de ella, solo
+  el generador del Excel y dos tests. 18 columnas → 17. (2) **El "Código
+  interno" deja de heredarse de la fila de otro expediente** (sección 7): 28
+  expedientes, 1.404 filas del entregable, celda vacía con su motivo en
+  castellano llano. Medido antes de aplicarlo, como pidió el cliente: en 23 de
+  los 28 "Código matriz" está vacía **y debe seguir estándolo** — cruzar por la
+  columna MATRIZ significa que la fila hallada es la de un pedido que declara a
+  NUESTRO expediente como su acuerdo marco, la relación va al revés; en los 5
+  restantes "Código matriz" ya lleva el código correcto. No se pierde ningún
+  código de matriz. (3) **`LineaCatalogo.id` como último desempate**
+  (`app.catalogo_consulta`): dos exportaciones seguidas dan las 11 entradas del
+  `.xlsx` idénticas byte a byte salvo `docProps/core.xml`, que es la fecha de
+  creación de openpyxl; el par de filas 813/814 de `6.21/28510.0108` que se
+  intercambiaba ya no se mueve. (4) **La auditoría atribuye bien el caso de
+  `6.23/28510.0105`**: comparaba `lineas_podadas` contra la diferencia neta, y
+  eso solo cuadra si la pasada no crea líneas — ahí podó 32 y creó 31 para una
+  bajada de 1, porque la fila la quitó el filtro de extracción y correr el
+  `orden_aparicion` cambió la clave de las siguientes. Ahora una bajada que
+  cuadre con `podadas − creadas` es `lineas_bajan_explicado_por_reextraccion`
+  (aviso); una subida sigue siendo error siempre. Replay sobre los snapshots
+  reales: `0105` pasa de error a aviso y los otros 5 no cambian. **Auditoría: 0
+  errores, 6 avisos.** (5) **Hoja "Conciliación"** (`app.conciliacion`), lo más
+  importante del encargo: una fila por cada uno de los **515 expedientes del
+  28510 que constan publicados** en la Plataforma (de 590 con ese departamento;
+  los otros 75 los confirmó no publicados el propio buscador), aporten líneas o
+  no, con título, órgano, estado publicado, documentos descargados, documentos
+  leídos con reconocimiento óptico, líneas que aporta, baja y de dónde sale,
+  Situación y motivo en castellano llano. **La columna de líneas la cuenta
+  `app.exportacion` mientras escribe "Materiales", nunca una consulta aparte**,
+  y `comprobar_cuadre` revienta la exportación si la suma no da o si algún
+  expediente se queda sin Situación. Recuento: 358 aportan líneas, 56
+  publicados sin cuadro de precios, 49 con los precios en un acuerdo marco no
+  publicado, 31 con documentos escaneados ilegibles, 19 "Otro" (todos
+  explicados uno a uno) y 2 pendientes de procesar. El Resumen dice de qué
+  fecha es el registro y qué cubre: 25 boletines de sindicación (08/2024 a
+  09/2026, dato más reciente del 15/09/2026) y la última búsqueda directa del
+  17/09/2026 con el fragmento "28510", 368 expedientes devueltos. **Pendiente
+  de decisión del cliente**: "Órgano de contratación" y "Estado publicado" solo
+  existen para los 124 que ha listado la sindicación — la búsqueda directa
+  devuelve el número, no la ficha; y los 42 internos que siguen repetidos entre
+  expedientes distintos vienen del propio listado de ADIF. 1.012 tests (990
+  antes).
 
 ---
 
@@ -1965,4 +2034,5 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `sesion-2026-09-16-noche-ciclo-vigentes-unidades.md`,
 `sesion-2026-09-17-escaneados-codigo-material.md`,
 `sesion-2026-09-18-codigo-expediente-motivos-duplicados.md`,
+`sesion-2026-09-18-conciliacion-plataforma.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.

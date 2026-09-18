@@ -658,17 +658,23 @@ def _snapshot_expedientes(db: Session) -> dict[str, dict]:
     return {f[0]: {"lineas": f[2], "huella_documentos": f[1]} for f in filas}
 
 
-def _lineas_podadas_por_expediente(
+def _movimiento_de_extracciones(
     db: Session, codigos: list[str], desde, hasta
-) -> dict[str, int]:
-    """Suma `lineas_podadas` (`app.extraccion.orquestador`, Bloque 4 de la
-    sesión del maestro de materiales, 2026-09-10) de todos los trabajos
-    `extraer_expediente` completados de cada expediente entre dos
+) -> dict[str, tuple[int, int]]:
+    """`{codigo: (lineas_podadas, lineas_creadas)}` sumadas sobre todos los
+    trabajos `extraer_expediente` completados de cada expediente entre dos
     ejecuciones de esta auditoría (`desde` exclusive, `hasta` inclusive --
     los propios `created_at` de la auditoría anterior y de la actual). Varias
     extracciones del mismo expediente pueden haber corrido entre dos
     auditorías (reintentos, un ciclo con varias pasadas): se suman todas, no
-    solo la última."""
+    solo la última.
+
+    Las dos cifras salen del resumen de `app.extraccion.orquestador`:
+    `lineas_podadas` son las que borró `podar_lineas_obsoletas_de_documento`
+    (Bloque 4 de la sesión del maestro de materiales, 2026-09-10) y
+    `lineas_creadas` las que la misma pasada dio de alta. Hasta la sesión
+    2026-09-18 solo se leía la primera, y eso dejaba sin atribuir el caso de
+    `6.23/28510.0105` (ver `_check_crecimiento_sin_cambios`)."""
     if not codigos:
         return {}
     filas = db.execute(
@@ -682,11 +688,13 @@ def _lineas_podadas_por_expediente(
             TrabajoCola.created_at <= hasta,
         )
     ).all()
-    podadas: dict[str, int] = {}
+    movimiento: dict[str, tuple[int, int]] = {}
     for codigo, resultado in filas:
-        n = (resultado or {}).get("lineas_podadas") or 0
-        podadas[codigo] = podadas.get(codigo, 0) + n
-    return podadas
+        podadas = (resultado or {}).get("lineas_podadas") or 0
+        creadas = (resultado or {}).get("lineas_creadas") or 0
+        antes = movimiento.get(codigo, (0, 0))
+        movimiento[codigo] = (antes[0] + podadas, antes[1] + creadas)
+    return movimiento
 
 
 def _check_crecimiento_sin_cambios(
@@ -714,7 +722,28 @@ def _check_crecimiento_sin_cambios(
     se diseñó -- aviso informativo, no error. Una SUBIDA nunca la explica la
     poda (que solo borra) -- sigue siendo error siempre. Una bajada que la
     poda no explica del todo (poda insuficiente, o ninguna poda registrada)
-    también sigue siendo error: solo se degrada lo que de verdad cuadra."""
+    también sigue siendo error: solo se degrada lo que de verdad cuadra.
+
+    Bloque 4, sesión 2026-09-18: **la poda no es el único camino por el que
+    una reextracción baja el recuento sin que cambien los documentos.** Caso
+    real que este bloque arregla, `6.23/28510.0105`: la sesión anterior
+    enseñó a la cascada a tratar las filas de resumen de presupuesto ("Suma",
+    "IVA (21%)", "Presupuesto de Ejecución Material") como pie de tabla en
+    vez de como línea de catálogo (`app.catalogo._es_concepto_de_presupuesto`),
+    y ese expediente perdió su única fila de ese tipo. La quitó el FILTRO DE
+    EXTRACCIÓN, no el podador, así que `lineas_podadas` no la cuenta -- y
+    salía como `error` un cambio perfectamente explicado. La regla anterior
+    comparaba `lineas_podadas` contra la diferencia neta, que solo cuadra
+    cuando la pasada no creó ninguna línea; aquí la pasada podó 32 y creó 31
+    (quitar una fila corre el `orden_aparicion` de todas las siguientes, y
+    con él su clave), neto -1.
+
+    La atribución correcta es el balance completo de las extracciones del
+    intervalo: `podadas - creadas`. Cuando cuadra exactamente con la bajada,
+    el recuento cambió por lo que hicieron esas extracciones y no por otra
+    cosa -- aviso explicado, no error. Sigue siendo error una bajada que ese
+    balance no explica (nadie reextrajo, o la cuenta no sale) y **cualquier
+    subida**, que es el síntoma que motivó la comprobación."""
     if not snapshot_anterior:
         return []
     actual = _snapshot_expedientes(db)
@@ -734,17 +763,25 @@ def _check_crecimiento_sin_cambios(
         return []
 
     decrecientes = [codigo for codigo, diferencia in afectados if diferencia < 0]
-    podadas = (
-        _lineas_podadas_por_expediente(db, decrecientes, creado_en_anterior, creado_en_actual)
+    movimiento = (
+        _movimiento_de_extracciones(db, decrecientes, creado_en_anterior, creado_en_actual)
         if creado_en_anterior is not None
         else {}
     )
 
     sin_explicar = []
     explicados_por_poda = []
+    explicados_por_reextraccion = []
     for codigo, diferencia in afectados:
-        if diferencia < 0 and podadas.get(codigo, 0) == -diferencia:
+        podadas, creadas = movimiento.get(codigo, (0, 0))
+        if diferencia >= 0:
+            # Una subida nunca la explica ni la poda ni el filtro: los dos
+            # solo quitan líneas.
+            sin_explicar.append(codigo)
+        elif creadas == 0 and podadas == -diferencia:
             explicados_por_poda.append(codigo)
+        elif podadas - creadas == -diferencia and (podadas or creadas):
+            explicados_por_reextraccion.append(codigo)
         else:
             sin_explicar.append(codigo)
 
@@ -766,6 +803,25 @@ def _check_crecimiento_sin_cambios(
                 total_afectados=total,
             )
         )
+    if explicados_por_reextraccion:
+        expedientes, total = _limitar_expedientes(explicados_por_reextraccion)
+        hallazgos.append(
+            Hallazgo(
+                categoria="lineas_bajan_explicado_por_reextraccion",
+                gravedad="aviso",
+                mensaje=(
+                    f"{total} expediente(s) cuyo número de líneas bajó respecto a la ejecución anterior "
+                    "de esta auditoría sin cambiar su huella de documentos, explicado exactamente por el "
+                    "balance de sus reextracciones en ese intervalo (`lineas_podadas` menos "
+                    "`lineas_creadas`) -- los mismos documentos dan menos líneas porque cambió una regla "
+                    "de la cascada de extracción, no porque se haya perdido nada. Caso típico: las filas "
+                    "de resumen de presupuesto (\"Suma\", \"IVA (21%)\") pasaron a leerse como pie de "
+                    "tabla en vez de como material (CONTEXTO.md, sesión 2026-09-17)."
+                ),
+                expedientes=expedientes,
+                total_afectados=total,
+            )
+        )
     if sin_explicar:
         expedientes, total = _limitar_expedientes(sin_explicar)
         hallazgos.append(
@@ -775,8 +831,9 @@ def _check_crecimiento_sin_cambios(
                 mensaje=(
                     f"{total} expediente(s) cuyo número de líneas de catálogo cambió respecto a la "
                     "ejecución anterior de esta auditoría sin que cambiara su huella de documentos, y sin "
-                    "que la poda de huérfanas obsoletas explique la diferencia (subida siempre es "
-                    "sospechosa; una bajada solo se descarta si `lineas_podadas` la explica exactamente) "
+                    "que sus reextracciones de ese intervalo expliquen la diferencia (una subida siempre "
+                    "es sospechosa; una bajada solo se descarta si `lineas_podadas`, o el balance "
+                    "`lineas_podadas` menos `lineas_creadas`, la explica exactamente) "
                     "-- mismo síntoma que motivó la comprobación de integridad de "
                     "`app.mantenimiento.frescura.detectar_crecimiento_sin_cambios` (auditoría 2026-09-05)."
                 ),
