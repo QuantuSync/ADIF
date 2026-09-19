@@ -400,6 +400,51 @@ class EstadosAdifCargaOut(BaseModel):
     expedientes_sin_cambios: int = 0
     sin_expediente_en_el_sistema: int = 0
     codigos_sin_expediente: list[str] = []
+    # Bloque 2, sesión 2026-09-19 (sexta parte): si el listado llegó con la
+    # columna de presupuesto de licitación y cuántas filas la traían. Hoy es
+    # siempre `False`/`0`: el fichero que tenemos no la trae.
+    trae_presupuesto: bool = False
+    presupuestos_leidos: int = 0
+
+
+class VigentesRemanenteCruceOut(BaseModel):
+    """Resumen de `POST /mantenimiento/vigentes-remanente/cruzar` (bloque 2,
+    sesión 2026-09-19 sexta parte). `configurado=False` significa que
+    `VIGENTES_REMANENTE_PATH` no tiene ninguna ruta montada;
+    `formato_reconocido=False`, que el fichero está pero no se ha podido
+    localizar en él ninguna columna de códigos de expediente -- y entonces no
+    se toca nada."""
+
+    configurado: bool
+    formato_reconocido: bool = False
+    columna_localizada_por: str = "no encontrada"
+    hoja: Optional[str] = None
+    filas_leidas: int = 0
+    codigos_distintos: int = 0
+    en_la_conciliacion: int = 0
+    fuera_de_la_conciliacion: int = 0
+    dados_de_alta: int = 0
+    busquedas_encoladas: int = 0
+    por_situacion: dict[str, int] = {}
+    filas: list[dict] = []
+
+
+class CatalogoAntiguoResumenOut(BaseModel):
+    """Resumen de `GET /mantenimiento/catalogo-antiguo/resumen` (bloque 2,
+    misma sesión). El informe en sí es un `.xlsx` aparte, nunca parte del
+    entregable."""
+
+    configurado: bool
+    formato_reconocido: bool = False
+    hojas_leidas: list[str] = []
+    columnas: dict[str, Optional[int]] = {}
+    materiales_suyos: int = 0
+    materiales_nuestros: int = 0
+    emparejados_por_matricula: int = 0
+    emparejados_por_descripcion: int = 0
+    solo_en_el_suyo: int = 0
+    solo_en_el_nuestro: int = 0
+    con_precio_distinto: int = 0
 
 
 class SapDesglosecargaOut(BaseModel):
