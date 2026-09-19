@@ -289,6 +289,15 @@ class Expediente(Base):
     # de este sistema.
     estado_adif_creado_en = Column(DateTime(timezone=True), nullable=True)
     estado_adif_actualizado_en = Column(DateTime(timezone=True), nullable=True)
+    # Bloque 2, sesión 2026-09-19 (sexta parte, migración 0041): el
+    # presupuesto de licitación que ADIF publique en su listado de estados,
+    # **cuando lo mande** -- hoy el fichero que tenemos no trae esa columna
+    # (CONTEXTO.md sección 7) y este campo queda `NULL` en las 612 filas. Es
+    # un dato de contraste, nunca una fuente de importes: `importe_licitacion`
+    # (arriba) sigue saliendo solo de los documentos publicados, y la
+    # comparación entre los dos es la hoja "Presupuestos ADIF" del Excel
+    # (`app.presupuestos_adif`).
+    presupuesto_licitacion_adif = Column(Numeric(14, 4), nullable=True)
     # Migración 0031 (sesión 2026-09-15): cuándo y con qué versión de la
     # lógica de búsqueda (`app.mantenimiento.frescura.VERSION_LOGICA_BUSQUEDA`)
     # confirmó la Plataforma que no tiene este expediente. Solo con
@@ -533,6 +542,12 @@ class LineaCatalogo(Base):
     # porque las dos condiciones del cliente se cumplen a la vez. Mismo
     # convenio que `texto_reconocido`: `True` o ausente.
     precio_corregido_desde_importe = Column(Boolean, nullable=True)
+    # Bloque 1, decisión 5 del cliente (sesión 2026-09-19 sexta parte,
+    # migración 0040): la `descripcion` de esta línea es la referencia que el
+    # documento imprime para el artículo, no una designación -- su cuadro no
+    # publica ninguna otra columna de texto (`app.extraccion.
+    # referencia_como_descripcion`). Mismo convenio: `True` o ausente.
+    descripcion_desde_referencia = Column(Boolean, nullable=True)
     # Bloque 4, sesión 2026-09-09 (migración 0025): `True` únicamente cuando
     # `unidad_medida` se rellenó desde `maestro_materiales` (app.extraccion.
     # maestro_materiales.completar_unidades_desde_maestro) porque el

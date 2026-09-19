@@ -46,6 +46,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import Optional
 
@@ -54,12 +55,28 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.extraccion.cruce_codigos import normalizar_codigo_expediente
+from app.extraccion.normalizacion import parsear_importe_es
+from app.extraccion.texto import normalizar
 from app.models import Expediente
 
 COLUMNA_EXPEDIENTE = "Expediente ADIF"
 COLUMNA_TITULO = "Título del expediente"
 COLUMNA_FECHA = "Fecha de creación"
 COLUMNA_ESTADO = "Descripción del estado"
+
+# Bloque 2, sesión 2026-09-19 (sexta parte): la columna que ADIF tiene que
+# añadir a este mismo listado. **El fichero de hoy no la trae** (se comprobó
+# columna a columna, CONTEXTO.md sección 7), así que su nombre exacto no se
+# puede saber: se reconoce por contenido del encabezado, normalizado, en vez
+# de por igualdad. "Presupuesto", "Presupuesto de licitación", "Presupuesto
+# base de licitación", "Importe de licitación" y "PBL" caen todas aquí. Si el
+# listado llega sin ninguna, el campo se queda vacío y no pasa nada más: la
+# carga sigue funcionando igual que hasta hoy.
+_ENCABEZADOS_PRESUPUESTO = ("presupuesto", "importe de licitacion", "pbl")
+# Deliberadamente fuera: un importe de adjudicación no es el presupuesto de
+# licitación, y confundirlos haría que la comparación de la hoja
+# "Presupuestos ADIF" contrastara dos cosas distintas.
+_ENCABEZADOS_PRESUPUESTO_EXCLUIDOS = ("adjudicacion", "adjudicado", "iva")
 
 # Cuántos códigos sin expediente en el sistema se devuelven en el resumen.
 # La lista completa es el bloque 2 del encargo y se mide aparte; aquí es una
@@ -102,6 +119,10 @@ class ResumenCargaEstadosAdif:
     # de alta** (ver punto 2 del docstring del módulo): se cuentan y se
     # devuelven para que quien lo pidió decida.
     sin_expediente_en_el_sistema: int = 0
+    # Bloque 2, sesión 2026-09-19 (sexta parte): cuántas filas traían
+    # presupuesto de licitación, y si el listado llegó con esa columna.
+    trae_presupuesto: bool = False
+    presupuestos_leidos: int = 0
     codigos_sin_expediente: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -113,6 +134,8 @@ class ResumenCargaEstadosAdif:
             "expedientes_actualizados": self.expedientes_actualizados,
             "expedientes_sin_cambios": self.expedientes_sin_cambios,
             "sin_expediente_en_el_sistema": self.sin_expediente_en_el_sistema,
+            "trae_presupuesto": self.trae_presupuesto,
+            "presupuestos_leidos": self.presupuestos_leidos,
             "codigos_sin_expediente": self.codigos_sin_expediente,
         }
 
@@ -122,6 +145,36 @@ def _texto(valor: object) -> Optional[str]:
         return None
     texto = str(valor).strip()
     return texto or None
+
+
+def _indice_presupuesto(cabecera: list[str]) -> Optional[int]:
+    """La columna de presupuesto de licitación, si el listado la trae. Con dos
+    o más candidatas no se adivina: se devuelve `None` y el campo se queda
+    vacío, que es lo mismo que pasa hoy con el fichero que no la trae."""
+    candidatas = [
+        indice
+        for indice, texto in enumerate(normalizar(c) for c in cabecera)
+        if any(p in texto for p in _ENCABEZADOS_PRESUPUESTO)
+        and not any(p in texto for p in _ENCABEZADOS_PRESUPUESTO_EXCLUIDOS)
+    ]
+    return candidatas[0] if len(candidatas) == 1 else None
+
+
+def _importe(valor: object) -> Optional[Decimal]:
+    """El presupuesto, venga como número de Excel o como texto en formato
+    español ("1.234.567,89 €"). Lo que no se pueda interpretar se deja vacío:
+    nunca se guarda una cifra a medias."""
+    if valor is None:
+        return None
+    if isinstance(valor, (int, float, Decimal)):
+        try:
+            return Decimal(str(valor))
+        except (ValueError, ArithmeticError):
+            return None
+    try:
+        return parsear_importe_es(str(valor))
+    except (ValueError, ArithmeticError):
+        return None
 
 
 def _fecha(valor: object) -> Optional[datetime]:
@@ -173,6 +226,8 @@ def cargar_estados_adif(db: Session, ruta_excel: Optional[str]) -> ResumenCargaE
             i_estado = cabecera.index(COLUMNA_ESTADO)
             i_titulo = cabecera.index(COLUMNA_TITULO) if COLUMNA_TITULO in cabecera else None
             i_fecha = cabecera.index(COLUMNA_FECHA) if COLUMNA_FECHA in cabecera else None
+            i_presupuesto = _indice_presupuesto(cabecera)
+            resumen.trae_presupuesto = resumen.trae_presupuesto or i_presupuesto is not None
 
             def _celda(fila, indice):
                 if indice is None or indice >= len(fila):
@@ -189,6 +244,7 @@ def cargar_estados_adif(db: Session, ruta_excel: Optional[str]) -> ResumenCargaE
                 estado = _texto(_celda(fila, i_estado))
                 titulo = _texto(_celda(fila, i_titulo))
                 creado_en = _fecha(_celda(fila, i_fecha))
+                presupuesto = _importe(_celda(fila, i_presupuesto))
 
                 expediente = db.execute(
                     select(Expediente).where(Expediente.codigo_expediente == codigo)
@@ -207,6 +263,12 @@ def cargar_estados_adif(db: Session, ruta_excel: Optional[str]) -> ResumenCargaE
                     resumen.expedientes_sin_cambios += 1
                 else:
                     resumen.expedientes_actualizados += 1
+                # El presupuesto del listado nunca pisa `importe_licitacion`
+                # (que sale de los documentos publicados): campo propio, y
+                # `None` no borra lo que ya hubiera de una carga anterior.
+                if presupuesto is not None:
+                    expediente.presupuesto_licitacion_adif = presupuesto
+                    resumen.presupuestos_leidos += 1
                 expediente.estado_adif = estado
                 expediente.estado_adif_creado_en = creado_en
                 expediente.estado_adif_actualizado_en = ahora

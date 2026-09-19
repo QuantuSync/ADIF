@@ -30,6 +30,7 @@ from app.catalogo import (
     construir_lineas_desde_tabla,
     corregir_descripcion_desplazada_entre_tablas,
     corregir_precio_con_importe_del_documento,
+    resolver_cuadros_sin_precio_propio,
     importes_de_pie_de_tabla,
     resolver_glifos_con_precio_de_otro_lote,
 )
@@ -46,11 +47,14 @@ from app.extraccion.mapeo_cabecera import (
     corregir_confusion_matricula_codigo_precio,
     corregir_confusion_precio_cantidad,
     completar_cantidad_por_contenido,
+    corregir_columna_importe_tomada_por_precio,
+    liberar_unidad_que_son_solo_cifras,
     derivar_mapeo_por_contenido,
     evaluar_coherencia_mapeo,
     heredar_mapeo_por_geometria,
     mapear_cabecera,
 )
+from app.extraccion.referencia_como_descripcion import marcar_descripcion_desde_referencia
 from app.extraccion.tabla import extraer_tablas_pagina
 from app.extraccion.texto import PaginaTexto, normalizar
 from app.interfaces.model_provider import ModelProvider
@@ -678,6 +682,42 @@ def procesar_anejo(
                 # calcula sobre el mapeo YA final (con sus correcciones), y
                 # nunca se cachea: la columna sale de la cabecera cada vez.
                 mapeo = completar_columna_importe(tabla.cabecera, mapeo)
+                # Bloque 1, decisión 1 del cliente (sesión 2026-09-19, sexta
+                # parte): el cuadro cuya única columna de dinero se llama
+                # "IMPORTE" en su propia cabecera no publica precio unitario
+                # -- ver `corregir_columna_importe_tomada_por_precio`. La
+                # tabla se queda sin precio y solo la regla ya aprobada de
+                # "precio desde importe" puede escribir uno, con la suma del
+                # lote como prueba.
+                mapeo, importe_tomado_por_precio = corregir_columna_importe_tomada_por_precio(
+                    tabla.cabecera, mapeo
+                )
+                if importe_tomado_por_precio:
+                    mapeo = liberar_unidad_que_son_solo_cifras(mapeo, tabla.filas)
+                    # El total contra el que se comprueba: ese cuadro no
+                    # declara ningún pie de totales (si lo declarara, la vía de
+                    # siempre ya lo recogería abajo), así que el único total
+                    # publicado de ese lote es su presupuesto de licitación.
+                    presupuesto = (
+                        presupuestos_por_lote.get(identificador_lote)
+                        if identificador_lote is not None
+                        else None
+                    )
+                    if presupuesto is not None:
+                        totales_por_lote.setdefault(identificador_lote, []).append(
+                            Decimal(presupuesto)
+                        )
+                # Bloque 1, decisión 5 del cliente: la referencia de la
+                # herramienta hace de Descripción del material en los cuadros
+                # cuya única columna de texto es esa (ver
+                # `app.extraccion.tabla.ColumnaDeTexto`). Solo si el mapeo no
+                # ha encontrado ninguna columna de descripción por su cuenta:
+                # una descripción de verdad manda siempre.
+                referencia_como_descripcion = (
+                    tabla.columna_referencia is not None and mapeo.get("descripcion") is None
+                )
+                if referencia_como_descripcion:
+                    mapeo = {**mapeo, "descripcion": tabla.columna_referencia}
                 totales_por_lote.setdefault(identificador_lote, []).extend(
                     importes_de_pie_de_tabla(tabla.filas, mapeo)
                 )
@@ -685,6 +725,12 @@ def procesar_anejo(
                     tabla, mapeo, documento_origen_id, expediente_id, baja_lote,
                     orden_inicial=len(lineas),
                 )
+                if importe_tomado_por_precio:
+                    for linea in lineas_tabla:
+                        linea["precio_solo_en_la_columna_de_importe"] = True
+                if referencia_como_descripcion:
+                    for linea in lineas_tabla:
+                        marcar_descripcion_desde_referencia(linea)
                 # Bloque 3, sesión 2026-09-11: cuando el mapeo viene de
                 # `derivar_mapeo_por_contenido`, la ausencia de `codigo_precio`
                 # no es "esta pasada no lo capturó" (el `None` corriente que
@@ -847,6 +893,14 @@ def procesar_anejo(
     # prueba aritmética del reparto por lotes para lo que recupera la partición
     # de un cuadro en bloques de lote. Va aquí, con el documento entero leído,
     # porque el cuadro de un lote puede ocupar varios bloques y páginas.
+    # Bloque 1, decisión 1 del cliente (sesión 2026-09-19, sexta parte): los
+    # cuadros sin precio unitario propio se resuelven ANTES de la guarda de
+    # abajo, que juzga un bloque de lote por la suma de cantidad x precio
+    # unitario -- sin esto, esas líneas llegan ahí sin precio y su suma de
+    # cero descarta el bloque entero (ver el docstring de
+    # `resolver_cuadros_sin_precio_propio`).
+    precios_sin_columna_propia = resolver_cuadros_sin_precio_propio(lineas, totales_por_lote)
+
     lineas, motivos_bloques = descartar_bloques_de_lote_que_no_cuadran(lineas, presupuestos_por_lote)
     tablas_sin_lote.extend(motivos_bloques)
 
@@ -878,6 +932,7 @@ def procesar_anejo(
     precios_corregidos, precios_sin_cerrar_el_lote = corregir_precio_con_importe_del_documento(
         lineas, totales_por_lote
     )
+    precios_corregidos += precios_sin_columna_propia
 
     # `Código del material`, vía de modelo (CONTEXTO.md sección 6, bloque 5 de
     # la sesión de vocabulario): `construir_lineas_desde_tabla` (dentro de
