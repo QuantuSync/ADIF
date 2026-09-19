@@ -276,3 +276,18 @@ def fila_a_dict(
             )
         },
     }
+
+
+def filtros_del_entregable(stmt: Select) -> Select:
+    """Bloque 5, sesión 2026-09-19 (quinta parte): los filtros que definen
+    "esto entra en el entregable" -- línea no descartada en la cola de
+    revisión y expediente que no esté en ninguna de las dos listas de
+    exclusión --, para una consulta que solo necesita contar
+    (`app.exportacion.contar_filas_de_materiales`). Es el MISMO
+    `_aplicar_filtros` que usa `consultar_catalogo`, sin filtros de usuario:
+    si esto se escribiera aparte, la web y el Excel podrían discrepar, que es
+    exactamente lo que la hoja "Conciliación" existe para descartar."""
+    return _aplicar_filtros(
+        stmt.join(Expediente, LineaCatalogo.expediente_id == Expediente.id),
+        expediente=None, lote=None, matricula=None, q=None, excluir_descartadas=True,
+    )

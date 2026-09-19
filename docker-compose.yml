@@ -131,6 +131,15 @@ services:
       # "escaneados" (por defecto, solo documentos sin capa de texto) o
       # "desactivado".
       OCR_MODO: ${OCR_MODO:-escaneados}
+      # Bloque 1, sesión 2026-09-19 (quinta parte): modelo con el que se
+      # **relee** un puñado de páginas concretas cuya lectura con MODEL_ID no
+      # es usable (`app.extraccion.ocr_relectura`, trabajo de cola
+      # `ocr_relectura`). Vacío por defecto y sin efecto ninguno: la relectura
+      # no se dispara sola, solo cuando alguien pide unas páginas concretas, y
+      # el modelo se puede indicar también en el payload de ese trabajo. Sin
+      # este valor y sin `modelo` en el payload, el trabajo falla en vez de
+      # releer con el modelo de siempre (que daría el mismo resultado).
+      OCR_MODELO_RELECTURA: ${OCR_MODELO_RELECTURA:-}
       # Solo desarrollo (CachedModelProvider, ver app/config.py): bind mount
       # al host para no pagar la misma cabecera dos veces entre reinicios
       # del contenedor. Vacío en un despliegue real.

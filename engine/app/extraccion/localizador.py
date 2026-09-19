@@ -49,7 +49,7 @@ import re
 from dataclasses import dataclass
 from decimal import Decimal
 
-from app.extraccion.normalizacion import normalizar_guiones
+from app.extraccion.normalizacion import normalizar_guiones, parsear_numero_es
 from app.extraccion.texto import PaginaTexto, normalizar
 
 UMBRAL_DENSIDAD_NUMERICA = Decimal("0.025")
@@ -113,6 +113,9 @@ _IMPORTE_EN_LINEA_RE = re.compile(r"(?<![\d.,])(?:\d{1,3}(?:\.\d{3})+|\d+),\d{2}
 # puede ser una frase de pliego que cita un precio concreto.
 MIN_FILAS_DATO_SIN_CABECERA = 3
 
+# Letras de verdad dentro de una línea ya normalizada (sin acentos, minúsculas).
+_LETRAS_LINEA_RE = re.compile(r"[a-z]{3,}")
+
 
 # Sesión 2026-09-15 (`3.24/28510.0132`, `3.25/28510.0012`): el cuadro de
 # precios de un solo equipo ("Concepto Unidades Importe" y una fila) en una
@@ -166,6 +169,81 @@ def _tiene_linea_cabecera_cuadro(texto: str) -> bool:
     ):
         return True
     return any(_linea_parece_cabecera(linea, _CABECERA_CUADRO_SIN_CANTIDAD) for linea in lineas)
+
+
+# Bloque 1, sesión 2026-09-19 (quinta parte), relectura de `3.16/28510.0044`
+# con un modelo mejor: su presupuesto (ANEJO_1 p.17-19) es un cuadro de precios
+# real —"MEDICIÓN PRESUPUESTADA | P.UNITARIO | TOTAL"— que **ningún marcador de
+# esta etapa reconoce**: "P.UNITARIO" no contiene "precio", "MEDICIÓN" no está
+# entre los alias de cantidad, y la columna de descripción lleva por rótulo el
+# título del propio cuadro ("PRESUPUESTO. SUSTITUCIÓN DE EQUIPOS DE
+# TRANSMISIÓN SAN..."). Sus páginas 18 y 19 ni siquiera repiten cabecera.
+#
+# La señal que sí trae, y que es la que el cliente puso como condición para
+# aceptar estas líneas, es **la aritmética de sus propias filas**: cada línea
+# termina en cantidad, precio unitario e importe, y cantidad × precio = importe
+# al céntimo. Eso no lo produce un párrafo de pliego ni una tabla de resumen:
+# es la firma de una fila de cuadro de precios, verificada contra sí misma.
+# Se exigen `MIN_FILAS_CUADRAN` líneas así en la misma página (una sola puede
+# ser una frase que cite un precio y su importe), o una sola si la página
+# anterior ya es candidata -- el mismo criterio de continuación que ya vale
+# para un identificador de fila.
+#
+# Abrir la página no mete nada en el catálogo: quien decide sigue siendo la
+# etapa 4 (`app.extraccion.tabla`).
+MIN_FILAS_CUADRAN = 3
+_TOLERANCIA_CUADRE = Decimal("0.01")
+_NUMERO_ES_RE = re.compile(r"^\d{1,3}(?:\.\d{3})*(?:,\d+)?$|^\d+(?:,\d+)?$")
+
+
+def _numeros_de_linea(linea: str) -> list[tuple[Decimal, bool]]:
+    """Los números que trae la línea, en orden, con si llevan parte decimal.
+    Un token solo cuenta si es un número español completo después de quitarle
+    el símbolo de moneda y la puntuación de final de frase -- "STM-4.",
+    "630A/20kA" o "27.500/v3" no son números."""
+    numeros: list[tuple[Decimal, bool]] = []
+    for token in linea.split():
+        limpio = token.strip("€ \t").rstrip(".;:)").lstrip("(")
+        if not _NUMERO_ES_RE.match(limpio):
+            continue
+        try:
+            numeros.append((parsear_numero_es(limpio), "," in limpio))
+        except ValueError:
+            continue
+    return numeros
+
+
+def _linea_cuadra_consigo_misma(linea: str) -> bool:
+    # Criba barata primero: una fila de cuadro trae al menos DOS cifras con
+    # céntimos (el precio y el importe). Esto corre sobre cada línea de cada
+    # página del corpus, así que la inmensa mayoría tiene que descartarse sin
+    # tokenizar nada.
+    if len(_IMPORTE_EN_LINEA_RE.findall(linea)) < 2:
+        return False
+    if not _LETRAS_LINEA_RE.search(normalizar(linea)):
+        return False  # sin descripción no es una fila de cuadro, es un pie de cifras
+    numeros = _numeros_de_linea(linea)
+    if len(numeros) < 3:
+        return False
+    (cantidad, cantidad_decimal), (precio, _), (importe, importe_decimal) = numeros[-3:]
+    if cantidad_decimal or cantidad < 1 or precio <= 0 or importe <= 0:
+        return False
+    if not importe_decimal:
+        return False  # un importe de cuadro de precios lleva céntimos
+    return abs(cantidad * precio - importe) <= _TOLERANCIA_CUADRE
+
+
+def _lineas_que_cuadran(texto: str, tope: int = MIN_FILAS_CUADRAN) -> int:
+    """Cuántas líneas de la página cuadran consigo mismas, hasta `tope`: a
+    quien llama solo le importa si llega al mínimo, y una página de cuadro
+    entera tiene decenas."""
+    cuentan = 0
+    for linea in texto.splitlines():
+        if _linea_cuadra_consigo_misma(linea):
+            cuentan += 1
+            if cuentan >= tope:
+                break
+    return cuentan
 
 
 def _identificadores_fila(texto: str) -> int:
@@ -261,6 +339,14 @@ def _grupos_presentes(texto_normalizado: str) -> frozenset[str]:
     )
 
 
+def _cuadra_lo_bastante(texto: str, anterior_es_candidata: bool) -> bool:
+    """Ver el comentario de `MIN_FILAS_CUADRAN`: tres filas que cuadran
+    consigo mismas abren una página por sí solas; una basta si la página
+    anterior ya estaba abierta, porque es la continuación del mismo cuadro."""
+    cuadran = _lineas_que_cuadran(texto)
+    return cuadran >= MIN_FILAS_CUADRAN or (anterior_es_candidata and cuadran >= 1)
+
+
 def localizar_paginas_candidatas(paginas: list[PaginaTexto]) -> ResultadoLocalizacion:
     """Bloque 5, cambios del cliente tras revisar el catálogo (sesión
     2026-09-09): dato verificado por el cliente contra la Plataforma --
@@ -317,6 +403,10 @@ def localizar_paginas_candidatas(paginas: list[PaginaTexto]) -> ResultadoLocaliz
                 grupos = _grupos_presentes(normalizar(pagina.texto))
                 candidatas.append(PaginaCandidata(pagina.numero, densidad, grupos, sin_cabecera_legible=True))
                 anterior_es_candidata = True
+            elif _cuadra_lo_bastante(pagina.texto, anterior_es_candidata):
+                grupos = _grupos_presentes(normalizar(pagina.texto))
+                candidatas.append(PaginaCandidata(pagina.numero, densidad, grupos, sin_cabecera_legible=True))
+                anterior_es_candidata = True
             elif _tiene_linea_cabecera_cuadro(pagina.texto):
                 grupos = _grupos_presentes(normalizar(pagina.texto))
                 candidatas.append(PaginaCandidata(pagina.numero, densidad, grupos))
@@ -344,6 +434,9 @@ def localizar_paginas_candidatas(paginas: list[PaginaTexto]) -> ResultadoLocaliz
             candidatas.append(PaginaCandidata(pagina.numero, densidad, grupos, continuacion=True))
             # anterior_es_candidata ya es True: se deja igual, la cadena sigue.
         elif _lineas_con_fila_de_datos(pagina.texto) >= MIN_FILAS_DATO_SIN_CABECERA:
+            candidatas.append(PaginaCandidata(pagina.numero, densidad, grupos, sin_cabecera_legible=True))
+            anterior_es_candidata = True
+        elif _cuadra_lo_bastante(pagina.texto, anterior_es_candidata):
             candidatas.append(PaginaCandidata(pagina.numero, densidad, grupos, sin_cabecera_legible=True))
             anterior_es_candidata = True
         else:

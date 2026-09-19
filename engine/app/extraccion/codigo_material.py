@@ -37,6 +37,7 @@ import re
 import unicodedata
 from typing import Optional
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.interfaces.model_provider import ModelProvider
@@ -357,9 +358,23 @@ def obtener_codigo_material_cacheado(db: Session, termino: str) -> Optional[Cach
 def guardar_codigo_material_cacheado(
     db: Session, termino: str, codigo_material: Optional[str], origen: str
 ) -> CacheCodigoMaterial:
+    """Bloque 3, sesión 2026-09-19 (quinta parte): tolera que el término ya
+    esté en la caché. `termino` es `UNIQUE`, y una segunda inserción del mismo
+    reventaba la extracción del documento entero con una `UniqueViolation`
+    (`3.22/28510.0009`, término "CEPILLO", destapado al empezar a leerse su
+    cuadro por bloques de lote). El valor cacheado no se pisa: la primera
+    respuesta del modelo para un término es la que vale, y esta función solo
+    existe para no volver a preguntarla."""
     entrada = CacheCodigoMaterial(termino=termino, codigo_material=codigo_material, origen=origen)
     db.add(entrada)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existente = obtener_codigo_material_cacheado(db, termino)
+        if existente is None:
+            raise
+        return existente
     db.refresh(entrada)
     return entrada
 

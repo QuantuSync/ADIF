@@ -846,6 +846,28 @@ def _parece_cantidad_recuperable(texto: Optional[str]) -> bool:
     return True
 
 
+# Sesión 2026-09-19 (quinta parte): `_parece_cantidad_recuperable` se apoya en
+# `parsear_numero_es`, que extrae el número aunque la celda traiga texto
+# alrededor ("Ancho 1668" -> 1668). Para las vías de recuperación que esta
+# sesión añade eso no vale: la celda tiene que ser **solo** el número, sin una
+# letra. No se toca el predicado de siempre -- cambiarlo quitaría cantidades ya
+# guardadas por las vías anteriores, que es un cambio de datos que nadie ha
+# pedido; se anota y se usa el estricto solo donde es nuevo.
+_SIN_LETRAS_RE = re.compile(r"^[\d\s.,]+$")
+
+
+def _parece_cantidad_limpia(texto: Optional[str]) -> bool:
+    if not texto or not _SIN_LETRAS_RE.match(texto.strip()):
+        return False
+    return _parece_cantidad_recuperable(texto)
+
+
+# Una celda que es solo una cifra, con o sin símbolo de moneda y con o sin
+# denominador ("5.200,00 €", "1,2020 €/L", "70.000"): nunca es una
+# descripción de material. Ver el uso en `construir_linea_catalogo`.
+_DESCRIPCION_SOLO_CIFRA_RE = re.compile(r"^\d[\d.,]*\s*(?:EUR|€)?(?:\s*/\s*\w+)?$", re.IGNORECASE)
+
+
 def _parece_matricula_recuperable(texto: Optional[str]) -> bool:
     return bool(texto) and bool(_MATRICULA_VALIDA_RE.match(re.sub(r"\s+", "", texto)))
 
@@ -974,6 +996,40 @@ def _recuperar_descripcion_y_precio_columna_fantasma(
         "descripción y precio unitario recuperados cada uno de su propia columna fantasma, sin "
         "desplazar el resto del mapeo -- confirmar antes de dar por buena",
     )
+    # Bloque 1, sesión 2026-09-19 (quinta parte): la CANTIDAD de esta misma
+    # fila también cae en su propia columna fantasma, y hasta aquí se perdía
+    # por puro orden de ejecución. `_construir_campos` recupera la cantidad
+    # (`_recuperar_cantidad_columna_fantasma`) solo si `descripcion` ya está
+    # resuelta -- guard deliberado, para no confundir un desplazamiento de una
+    # celda con uno de la fila entera --, y en estas filas la descripción no
+    # se resuelve hasta aquí, después. Caso real medido, `6.24/28510.0173`
+    # `ANEJO_1.pdf` p.9 (5 filas): cabecera "PARTIDA | MATRÍCULA | [fantasma]
+    # | DESIGNACIÓN | [fantasma] | [fantasma] | PRECIO ADQUISICIÓN |
+    # [fantasma] | CANTIDAD ESTIMADA", y en esas cinco filas la descripción
+    # cae en la 4, el precio en la 5 y la cantidad en la 7 -- las tres
+    # desplazadas un sitio a la izquierda de la columna que la cabecera
+    # etiqueta. Se reutiliza tal cual la recuperación de una sola columna,
+    # con sus mismas guardas (solo la vecina, nunca una columna que otro
+    # campo del mapeo reclame, y el valor tiene que ser un número): si no
+    # hay nada recuperable, la cantidad se queda vacía como antes.
+    if nuevos.get("cantidad") is None:
+        cantidad_recuperada = _recuperar_columna_fantasma(
+            fila, mapeo, "cantidad", _parece_cantidad_limpia
+        )
+        if cantidad_recuperada is not None:
+            cantidad = parsear_numero_es(cantidad_recuperada)
+            nuevos["cantidad"] = cantidad
+            nuevos["motivo_revision"] = _acumular_motivo(
+                nuevos["motivo_revision"],
+                "cantidad recuperada de una columna fantasma sin etiquetar junto a \"cantidad\" en la "
+                "cabecera de esta tabla, confirmar antes de dar por buena",
+            )
+            # La misma comprobación de plausibilidad que aplica
+            # `_construir_campos` a una cantidad leída de su propia columna:
+            # esta vía no puede ser una puerta trasera que se la salte.
+            motivo_cantidad = _cantidad_parece_implausible(cantidad)
+            if motivo_cantidad is not None:
+                nuevos["motivo_revision"] = _acumular_motivo(nuevos["motivo_revision"], motivo_cantidad)
     return nuevos
 
 
@@ -1004,8 +1060,59 @@ def _intentar_recuperar_desalineacion(
             f"cabecera desalineada con los datos (columnas desplazadas {offset:+d}): "
             "mapeo corregido automáticamente, confirmar antes de dar por buena",
         )
+        campos = _cantidad_del_borde_derecho(fila, mapeo, desplazado, campos)
         return campos
     return None
+
+
+# Bloque 2, sesión 2026-09-19 (quinta parte): al desplazar el mapeo entero,
+# `_mapeo_desplazado` deja en `None` el campo cuya columna se sale de la fila
+# -- correcto para leer, pero eso apaga también la recuperación de columna
+# fantasma, que exige que el mapeo declare el campo. Caso real medido,
+# `6.21/28510.0135` `ANEJO_1.pdf` p.3 (5 filas, la misma partida alzada de
+# 20.000,00 € repetida en cada lote): la cabecera es "MATRICULA | ... |
+# DESIGNACION | ... | PRECIO | ... | CANTIDAD DE REFERENCIA" (10 columnas), la
+# fila de la partida alzada ocupa menos columnas y va desplazada +1 en
+# descripción y precio, pero su **última** columna, la de cantidad, sigue en
+# su sitio con el "1" que imprime el documento. Desplazada, la cantidad
+# apuntaría a la columna 10, que no existe.
+#
+# La regla: si el desplazamiento saca a `cantidad` de la fila, se lee en su
+# columna SIN desplazar, y solo si (1) ese índice existe en la fila, (2)
+# ningún campo del mapeo desplazado lo reclama y (3) el valor tiene forma de
+# cantidad. Por construcción no hay otro sitio donde pueda estar: una columna
+# que el desplazamiento empuja más allá del borde derecho de la fila es la no
+# desplazada o no es nada. Solo se aplica a `cantidad` -- el único campo en el
+# que el corpus lo produce, y el único cuyo valor se puede validar sin
+# ambigüedad.
+def _cantidad_del_borde_derecho(
+    fila: list[Optional[str]],
+    mapeo: dict[str, Optional[int]],
+    desplazado: dict[str, Optional[int]],
+    campos: dict,
+) -> dict:
+    if campos.get("cantidad") is not None or desplazado.get("cantidad") is not None:
+        return campos
+    indice = mapeo.get("cantidad")
+    if indice is None or indice >= len(fila):
+        return campos
+    if indice in {i for i in desplazado.values() if i is not None}:
+        return campos
+    bruto = _valor_en(fila, indice)
+    if not _parece_cantidad_limpia(bruto):
+        return campos
+    cantidad = parsear_numero_es(limpiar_texto_celda(bruto))
+    nuevos = dict(campos)
+    nuevos["cantidad"] = cantidad
+    nuevos["motivo_revision"] = _acumular_motivo(
+        nuevos["motivo_revision"],
+        "cantidad leída en su columna sin desplazar (el desplazamiento de la cabecera la sacaría "
+        "fuera de la fila), confirmar antes de dar por buena",
+    )
+    motivo_cantidad = _cantidad_parece_implausible(cantidad)
+    if motivo_cantidad is not None:
+        nuevos["motivo_revision"] = _acumular_motivo(nuevos["motivo_revision"], motivo_cantidad)
+    return nuevos
 
 
 def calcular_clave_linea(codigo_precio, matricula, descripcion, orden_aparicion):
@@ -1507,6 +1614,39 @@ def construir_linea_catalogo(
                 return None
             campos = recuperados
 
+    # Sesión 2026-09-19 (quinta parte): **una descripción que es solo una cifra
+    # no es una descripción.** Misma familia que la validación de unidad de
+    # medida de 2026-09-07 ("una unidad que es solo dígitos nunca es una
+    # unidad real"): si la columna que el mapeo cree que es la descripción
+    # trae un importe, ese mapeo está mal para esta fila y guardarlo produce
+    # una línea de catálogo que en almacenes no dice nada. Caso real medido,
+    # `2.22/28510.0075` p.96: la tabla es "código | servicio | PRECIO |
+    # CANTIDAD | IMPORTE" y su cabecera es `['PRESUPUESTO', None, None, None,
+    # None]` -- no hay nada que mapear, así que el mapeo cayó entero un sitio
+    # a la izquierda: `descripcion = "5.200,00 €"`, `cantidad = "SERVICIO DE
+    # DESMONTAJE..."` y `precio_unitario = 1`. Cuatro filas en todo el corpus.
+    #
+    # **No se inventa una descripción, y la fila no llega a ser línea**: que la
+    # columna de descripción traiga un importe demuestra que el mapeo de esa
+    # cabecera está mal, y entonces tampoco valen ni el precio ni la cantidad
+    # ni el código de precio de esa misma fila -- publicar un precio de 1,00 €
+    # para un servicio de 5.200,00 € es peor que no publicarlo. Se distingue
+    # del caso de 2026-09-14/16 (fila sin descripción que SÍ se conserva para
+    # revisión) justo en eso: allí la fila no dice qué material es; aquí dice
+    # algo y es falso.
+    descripcion_era_una_cifra = bool(
+        campos["descripcion"] and _DESCRIPCION_SOLO_CIFRA_RE.match(campos["descripcion"].strip())
+    )
+    if descripcion_era_una_cifra:
+        campos = dict(campos)
+        campos["motivo_revision"] = _acumular_motivo(
+            campos["motivo_revision"],
+            f"descripción descartada por ser solo una cifra ({campos['descripcion']!r}): la columna que "
+            "el mapeo da por descripción trae un importe, no una designación -- revisar el mapeo de "
+            "esta cabecera",
+        )
+        campos["descripcion"] = ""
+
     precio_unitario = campos["precio_unitario"]
     precio_adjudicado = None
     if precio_unitario is not None and baja_lote is not None:
@@ -1529,6 +1669,10 @@ def construir_linea_catalogo(
                 "(probable partida alzada con columnas intermedias ausentes en esta fila), "
                 "confirmar antes de dar por buena",
             )
+        elif descripcion_era_una_cifra:
+            # Ver el bloque de arriba: el mapeo de esta cabecera está
+            # demostrado mal, no hay nada de esta fila que se pueda publicar.
+            return None
         else:
             # Encargo de esta sesión (limpieza del Excel al cliente,
             # 2026-09-06): sin descripción NI matrícula, ninguna otra columna

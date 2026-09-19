@@ -114,6 +114,14 @@ class Settings(BaseSettings):
     # técnica de 670 páginas en el corpus real): solo sus primeras páginas,
     # para clasificarlo, y queda anotado.
     ocr_max_paginas: int = 150
+    # Bloque 1, sesión 2026-09-19 (quinta parte): modelo con el que se
+    # **reelee** un puñado de páginas concretas cuya lectura con `MODEL_ID` no
+    # es usable (`app.extraccion.ocr_relectura`, trabajo de cola
+    # `ocr_relectura`). Nunca relee un documento entero ni se dispara solo:
+    # solo cuando alguien pide expresamente esas páginas. Vacío por defecto
+    # -- sin este valor y sin `modelo` en el payload, el trabajo falla en vez
+    # de releer en silencio con el modelo de siempre.
+    ocr_modelo_relectura: Optional[str] = None
 
     # Scraping PCSP. Siempre headless (el contenedor no tiene ventana);
     # ver engine/app/scraping/pcsp.py sección "hallazgos headless".

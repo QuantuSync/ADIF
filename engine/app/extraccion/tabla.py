@@ -132,6 +132,15 @@ class TablaExtraida:
     # sus columnas caen en las MISMAS posiciones -- nunca por número de
     # columnas, que ya falló una vez (docstring retirado en `mapeo_cabecera`).
     columnas_x: tuple[tuple[float, float] | None, ...] = ()
+    # Bloque 3, sesión 2026-09-19 (quinta parte): texto propio de esta tabla
+    # que NO forma parte de su cabecera de columnas y que la etapa 3.5 debe
+    # ver para asociarla a su lote -- la fila "LOTE N" que el cuadro imprime
+    # por encima de cada bloque, dentro de la misma caja de tabla (ver
+    # `_bloques_por_fila_de_lote`). Se pasa aparte de `cabecera` a propósito:
+    # la firma de cabecera (y con ella la caché del mapeo, CONTEXTO.md sección
+    # 6) tiene que seguir siendo la misma para los N bloques de un cuadro que
+    # repite la misma cabecera de columnas en cada lote.
+    titulo_propio: str = ""
 
 
 def _columnas_x(tabla) -> tuple[tuple[float, float] | None, ...]:
@@ -331,7 +340,82 @@ def _fila_cuadra_con_su_importe(
     return abs(valor_cantidad * valor_precio - valor_importe) <= _TOLERANCIA_IMPORTE
 
 
-def _filas_cuadro_sin_codigo(filas: list[FILA]) -> Optional[list[FILA]]:
+# Bloque 1, sesión 2026-09-19 (quinta parte), condición del cliente sobre
+# `6.17/28510.0116`: **un precio escrito sin decimales y sin símbolo --
+# "5.400" -- solo se acepta si la aritmética del propio documento lo
+# demuestra.**
+#
+# `_es_importe` lo rechaza a propósito y con razón: "5.400" no se distingue
+# por sí solo de una cantidad, de una referencia de plano o de una medición.
+# El cuadro de ese expediente ("MATRÍCULA | DESIGNACIÓN | PRECIO DE
+# REFERENCIA € / ud", 3 artículos, leído por reconocimiento óptico) no
+# publica ni columna de cantidad ni columna de importe, así que no hay nada
+# DENTRO de la tabla con lo que contrastar cada fila -- lo que sí hay es el
+# total del conjunto: su propio `ANEJO_1` declara en la p.3 las cantidades a
+# suministrar ("2 CELDAS DE LÍNEA, 2 CELDAS DE MEDIDA Y 2 CELDAS DE LÍNEA CON
+# TRANSFORMADOR") y el presupuesto ("se eleva a un total de 49.560 € sIn
+# IVA"), y 2 × (5.400 + 9.480 + 9.900) = 49.560,00 € **al céntimo**.
+#
+# La regla, por tanto: los precios sin decimales de un cuadro solo entran si
+# existe **exactamente un** presupuesto publicado de los que el sistema ya
+# tiene trazados (el importe de licitación del lote o del expediente, ver
+# `app.extraccion.orquestador`) que sea un múltiplo entero exacto de la suma
+# de esos precios, con el multiplicador dentro de
+# `_MAX_UNIDADES_DEMOSTRACION`. Es el mismo patrón de prueba que la
+# verificación del reparto por lotes (sesión 2026-09-18, sexta parte): suma
+# del cuadro contra el presupuesto publicado. Tres cautelas:
+#
+# - **La tabla no puede mezclar.** Si unas filas traen importe de verdad y
+#   otras una cifra pelada, la cifra pelada no es un precio sin demostrar: es
+#   otra cosa (una medición, un plano), y la tabla entera se descarta.
+# - **Sin presupuesto publicado no hay demostración**, y el cuadro se queda
+#   fuera -- literalmente lo que pidió el cliente.
+# - **Dos presupuestos que cuadren a la vez no demuestran nada**: si la suma
+#   divide exactamente a más de uno, el multiplicador es ambiguo y se
+#   descarta.
+_CIFRA_SIN_DECIMALES_RE = re.compile(r"^\d{1,3}(?:\.\d{3})+$")
+_MAX_UNIDADES_DEMOSTRACION = 100
+
+
+def _cifra_sin_decimales(celda: CELDA) -> Optional[Decimal]:
+    """La celda es una cifra con separador de miles, sin parte decimal y sin
+    símbolo de moneda ("5.400"). Se exige al menos un grupo de miles: un
+    entero corto y suelto ("16", "2") es indistinguible de una cantidad y
+    nunca entra por esta vía."""
+    if not celda:
+        return None
+    texto = celda.strip()
+    if not _CIFRA_SIN_DECIMALES_RE.match(texto):
+        return None
+    try:
+        valor = parsear_importe_es(texto)
+    except ValueError:
+        return None
+    return valor if valor > 0 else None
+
+
+def _precios_demostrados_por_un_total(
+    precios: list[Decimal], presupuestos: tuple[Decimal, ...]
+) -> bool:
+    suma = sum(precios, Decimal("0"))
+    if suma <= 0:
+        return False
+    cuadran = set()
+    for presupuesto in presupuestos:
+        if presupuesto is None or presupuesto <= 0:
+            continue
+        unidades = Decimal(presupuesto) / suma
+        if unidades != unidades.to_integral_value():
+            continue
+        if not (1 <= unidades <= _MAX_UNIDADES_DEMOSTRACION):
+            continue
+        cuadran.add(int(unidades))
+    return len(cuadran) == 1
+
+
+def _filas_cuadro_sin_codigo(
+    filas: list[FILA], presupuestos_declarados: tuple[Decimal, ...] = ()
+) -> Optional[list[FILA]]:
     cabecera = filas[0]
     descripcion = _columna_con(cabecera, _COLUMNA_DESCRIPCION)
     cantidad = _columna_con(cabecera, _COLUMNA_CANTIDAD, _COLUMNA_CANTIDAD_EXACTA)
@@ -349,15 +433,26 @@ def _filas_cuadro_sin_codigo(filas: list[FILA]) -> Optional[list[FILA]]:
     if importe is not None and importe in (descripcion, precio, cantidad):
         importe = None
     datos: list[FILA] = []
+    # Precios aceptados por la vía "cifra sin decimales" (ver el comentario de
+    # arriba): si hay alguno, al final se exige la demostración aritmética.
+    sin_decimales: list[Decimal] = []
     for fila in filas[1:]:
         texto = _texto_celda(fila[descripcion]) if descripcion < len(fila) else ""
         if not _LETRAS_RE.search(texto) or _ETIQUETA_PIE_RE.match(texto):
             break
         if not (precio < len(fila) and _es_importe(fila[precio])):
-            break
+            pelada = _cifra_sin_decimales(fila[precio]) if precio < len(fila) else None
+            if pelada is None:
+                break
+            sin_decimales.append(pelada)
         if not _fila_cuadra_con_su_importe(fila, cantidad, precio, importe):
             break
         datos.append(fila)
+    if sin_decimales:
+        if len(sin_decimales) != len(datos):
+            return None  # tabla mixta: la cifra pelada no es un precio
+        if not _precios_demostrados_por_un_total(sin_decimales, presupuestos_declarados):
+            return None
     # Sin columna de cantidad la señal es más débil, así que se exige un
     # mínimo de filas: un cuadro de precios de verdad lista artículos, y con
     # una o dos filas de "descripción + importe" no se distingue de un
@@ -397,17 +492,365 @@ def _es_modelo_de_oferta_en_blanco(filas: list[FILA]) -> bool:
     return False
 
 
-def _tabla_extraida(tabla, pagina) -> Optional[TablaExtraida]:
+# Bloque 1, sesión 2026-09-19 (quinta parte), relectura de `3.16/28510.0044`:
+# un cuadro de precios real **sin ningún identificador de fila y con rótulos de
+# columna que no están en el vocabulario de esta etapa** ("MEDICIÓN
+# PRESUPUESTADA | P.UNITARIO | TOTAL", y la columna de descripción rotulada con
+# el título del propio cuadro). `_indice_primera_fila_datos` no ve ninguna fila
+# de datos y `_filas_cuadro_sin_codigo` no encuentra ni descripción ni precio,
+# así que la tabla se descartaba entera como espuria aunque esté intacta.
+#
+# La evidencia que sí trae es la que el cliente puso como condición: **la
+# aritmética de sus propias filas**. Si existen tres columnas (cantidad,
+# precio, importe), en ese orden de izquierda a derecha, tales que TODA fila
+# que las trae rellenas cumple cantidad × precio = importe al céntimo, y hay al
+# menos `_MIN_FILAS_CUADRAN_TABLA` de esas filas, la tabla es un cuadro de
+# precios: ninguna tabla de resumen, de criterios ni de plazos produce esa
+# identidad fila a fila.
+#
+# Cinco guardas, y son las que hacen que esto no pueda tragarse otra cosa:
+#
+# - **Una sola tripleta.** Si dos combinaciones distintas de columnas cumplen
+#   la identidad, el mapeo es ambiguo y no se adivina: se descarta.
+# - **Ni una fila que la contradiga.** Una fila con las tres celdas rellenas
+#   que no cuadra invalida la tripleta entera (no se ignora la fila: se
+#   descarta la tripleta).
+#   La tripleta NO dice cuál columna es la cantidad y cuál el precio: la
+#   multiplicación es conmutativa, y el corpus trae las dos formas ("Concepto |
+#   Precio unitario | Cantidad | Presupuesto" en `2.19/28510.0214`, y "Concepto
+#   | Unidades | Precio | Importe" en la mayoría). Eso lo decide la etapa 5 con
+#   la cabecera, no esta comprobación: aquí solo se decide si la tabla es un
+#   cuadro de precios. Exigir el orden se probó y se retiró: quitaba 9 líneas
+#   buenas para excluir 4 dudosas.
+# - **Al menos una fila con cantidad distinta de 1.** Sin esta guarda la
+#   identidad es gratis: "1 × X = X" la cumple cualquier tabla de conceptos a
+#   tanto alzado, y también un resumen de presupuesto de dos líneas. Con ella,
+#   lo que se exige es una multiplicación de verdad -- que es lo que un cuadro
+#   de precios hace y un resumen no.
+# - **Alguna columna tiene que ser una descripción de verdad.** Ver
+#   `_tiene_columna_de_descripcion`: sin ella entraban líneas de catálogo sin
+#   descripción, que es lo que nunca debe pasar.
+# - **La tabla se devuelve por el camino NORMAL**, con su cabecera y sus filas,
+#   no con un mapeo inventado aquí: la etapa 5 sigue siendo la que traduce
+#   "P.UNITARIO" a `precio_unitario`, con su caché de firma de cabecera. Esto
+#   solo decide que la tabla no es espuria.
+_MIN_FILAS_CUADRAN_TABLA = 2
+
+
+def _numero_de_celda(celda: CELDA) -> Optional[Decimal]:
+    if not celda:
+        return None
+    texto = celda.replace("\n", " ").replace("€", "").strip()
+    if not texto:
+        return None
+    try:
+        return parsear_importe_es(texto)
+    except (ValueError, ArithmeticError):
+        return None
+
+
+def _tripleta_que_cuadra(filas: list[FILA]) -> Optional[tuple[int, int, int]]:
+    columnas = max((len(f) for f in filas), default=0)
+    if columnas < 3:
+        return None
+    # Los números de la tabla, una sola vez: probar cada combinación de tres
+    # columnas vuelve a mirar las mismas celdas cientos de veces, y parsear un
+    # importe no es gratis (esto corre sobre cada tabla de cada página
+    # candidata de todo el corpus).
+    numeros = [[_numero_de_celda(_valor_celda(fila, i)) for i in range(columnas)] for fila in filas]
+    numericas = [i for i in range(columnas) if any(fila[i] is not None for fila in numeros)]
+    validas: list[tuple[int, int, int]] = []
+    for pos_q, q in enumerate(numericas):
+        for pos_p, p in enumerate(numericas[pos_q + 1:], start=pos_q + 1):
+            for t in numericas[pos_p + 1:]:
+                cuadran = 0
+                multiplicacion_real = False
+                for fila in numeros:
+                    cantidad, precio, importe = fila[q], fila[p], fila[t]
+                    if cantidad is None or precio is None or importe is None:
+                        continue
+                    if cantidad <= 0 or precio <= 0 or importe <= 0:
+                        cuadran = -1
+                        break
+                    if abs(cantidad * precio - importe) > _TOLERANCIA_IMPORTE:
+                        cuadran = -1
+                        break
+                    cuadran += 1
+                    if cantidad != 1:
+                        multiplicacion_real = True
+                if cuadran >= _MIN_FILAS_CUADRAN_TABLA and multiplicacion_real:
+                    validas.append((q, p, t))
+                if len(validas) > 1:
+                    return None
+    return validas[0] if len(validas) == 1 else None
+
+
+def _valor_celda(fila: FILA, indice: int) -> CELDA:
+    return fila[indice] if indice < len(fila) else None
+
+
+# Quinta guarda, encontrada con la auditoría del reproceso completo: la
+# aritmética por sí sola acepta una tabla que **no tiene columna de
+# descripción**. Caso real medido, `2.23/28510.0098`/`6.22/28510.0051`/`0159`
+# (`ANEJO_1` p.9): "SFT01-2388L-PH-6920 | 20 | 24,00 € | 480,00 €" -- código,
+# cantidad, precio e importe, y ni una designación. Sus filas cuadran (20 ×
+# 24,00 = 480,00) y entraron como 45 líneas de catálogo **sin descripción**,
+# que es exactamente lo que la comprobación permanente de
+# `construir_linea_catalogo` existe para impedir (sesión 2026-09-06, bloque 2):
+# una línea sin descripción no sirve en almacenes.
+#
+# La guarda, en dos mitades:
+#
+# - **A nivel de tabla**: alguna columna fuera de la tripleta tiene que ser una
+#   columna de DESIGNACIÓN, no de referencia. La distinción, medida contra el
+#   corpus: una designación son varias palabras con letras de verdad ("Armario
+#   ETSI 2200*600*300 mm. Para alojamiento de equipo SDH", "Instalación y
+#   puesta a punto de equipo SDH"); una referencia de herramienta es un código,
+#   aunque lleve espacios ("WCMX-04 02 08-R53", "SNC-55 R16 T03 IN6530",
+#   "SFT01-2388L-PH-6920"). Se exige que **al menos la mitad** de las filas que
+#   cuadran tengan designación en esa misma columna: en el cuadro "TIPO |
+#   CANTIDAD | PRECIO UD. | PRECIO TOTAL" de `2.23/28510.0098` solo la cumplen
+#   1 de 19, y en un cuadro de verdad la cumplen todas.
+# - **A nivel de fila**: una fila solo llega a ser línea si trae letras en
+#   alguna columna fuera de la tripleta. Así nunca sale una línea sin
+#   descripción, aunque su tabla sí sea un cuadro -- la fila "12.01 | | 1 |
+#   1.980,50 | 1.980,50 €" de `3.16/28510.0044` p.19 (el rótulo "Seguridad y
+#   Salud" cae en la fila de arriba) cuadra y no es un material.
+_PALABRA_CON_LETRAS_RE = re.compile(r"[a-zñ]{3,}")
+_MIN_PALABRAS_DESIGNACION = 2
+
+
+def _parece_designacion(texto: str) -> bool:
+    palabras = sum(1 for p in texto.split() if _PALABRA_CON_LETRAS_RE.search(p))
+    return palabras >= _MIN_PALABRAS_DESIGNACION
+
+
+def _tiene_columna_de_descripcion(
+    filas: list[FILA], tripleta: tuple[int, int, int], fuera: list[int]
+) -> bool:
+    con_datos = [
+        fila for fila in filas
+        if all(_numero_de_celda(_valor_celda(fila, i)) is not None for i in tripleta)
+    ]
+    if not con_datos:
+        return False
+    for indice in fuera:
+        designaciones = sum(
+            1 for fila in con_datos if _parece_designacion(_texto_celda(_valor_celda(fila, indice)))
+        )
+        if designaciones * 2 >= len(con_datos):
+            return True
+    return False
+
+
+def _fila_trae_descripcion(fila: FILA, fuera: list[int]) -> bool:
+    return any(_LETRAS_RE.search(_texto_celda(_valor_celda(fila, i))) for i in fuera)
+
+
+def _cuadro_demostrado_por_aritmetica(
+    filas: list[FILA],
+) -> Optional[tuple[int, list[FILA]]]:
+    """(dónde acaba la cabecera, filas de datos) de una tabla que se demuestra
+    sola por la aritmética de sus filas, o `None`.
+
+    **Solo salen las filas que pasan la comprobación de su propia fila**, que
+    es la condición que puso el cliente para aceptar estas líneas: las filas de
+    sección de un presupuesto ("Obra civil", "Energía", "Gestión de Red") no
+    traen ni cantidad ni precio y no son materiales, y el pie de totales
+    tampoco. Sin este filtro entraban como líneas de catálogo sin precio."""
+    tripleta = _tripleta_que_cuadra(filas)
+    if tripleta is None:
+        return None
+    fuera = [i for i in range(max((len(f) for f in filas), default=0)) if i not in tripleta]
+    if not _tiene_columna_de_descripcion(filas, tripleta, fuera):
+        return None
+
+    def cuadra(fila: FILA) -> bool:
+        valores = [_numero_de_celda(_valor_celda(fila, i)) for i in tripleta]
+        return all(v is not None for v in valores)
+
+    def es_dato(fila: FILA) -> bool:
+        return cuadra(fila) and _fila_trae_descripcion(fila, fuera)
+
+    inicio: Optional[int] = None
+    if cuadra(filas[0]):
+        inicio = 0  # la tabla arranca en datos: es una continuación sin cabecera
+    else:
+        for indice, fila in enumerate(filas[1:], start=1):
+            if cuadra(fila) or any(
+                _LETRAS_RE.search(_texto_celda(_valor_celda(fila, i))) for i in fuera
+            ):
+                # Primera fila con datos o con texto propio fuera de las
+                # columnas numéricas: lo de arriba es la cabecera (una o
+                # varias líneas).
+                inicio = indice
+                break
+    if inicio is None:
+        return None
+    datos = [fila for fila in filas[inicio:] if es_dato(fila)]
+    return (inicio, datos) if datos else None
+
+
+# Bloque 3, sesión 2026-09-19 (quinta parte), los 14 de "cobertura parcial de
+# lotes": el cuadro de precios de las compras multi-lote del Laboratorio
+# Central de ADIF mete **todos sus lotes en una sola tabla**, cada uno
+# encabezado por una fila cuya única celda es la etiqueta del lote:
+#
+#   ['LOTE 1', '', '']
+#   ['Concepto', 'Unidades', 'Importe']
+#   ['Calibrador multiproducto...', '3', '210.000,00 €']
+#   ['LOTE 2', '', '']
+#   ['Concepto', 'Unidades', 'Importe']
+#   ['Calibrador de comprobadores...', '1', '23.000,00 €']
+#
+# La tabla entera se descartaba como espuria porque su PRIMERA fila
+# ("LOTE 1") no es una cabecera de columnas, y ni el código de precio ni la
+# matrícula existen aquí. Y aunque se aceptara, las líneas de los dos lotes
+# quedarían mezcladas o huérfanas: la etapa 3.5 busca el "LOTE N" en la franja
+# de página que precede a la tabla, y aquí las etiquetas van DENTRO.
+#
+# Esto es certeza estructural por geometría, no por parecido: el documento
+# pone cada bloque debajo de su propia etiqueta de lote, en orden de lectura.
+# Se parte la tabla en un bloque por etiqueta, cada uno con su propia cabecera
+# de columnas, y la etiqueta viaja en `TablaExtraida.titulo_propio` para que
+# la etapa 3.5 la resuelva por la vía que ya existe (`texto_titulo_tabla`).
+#
+# Guardas:
+# - Esta vía solo se prueba cuando ninguna de las de siempre acepta la tabla
+#   (ver `_tablas_extraidas`): no puede quitar una fila que ya salía.
+# - Cada bloque tiene que ser un cuadro de precios por sí mismo
+#   (`_filas_cuadro_sin_codigo`, con sus guardas de siempre). Si un solo
+#   bloque no lo es, no se parte nada: se devuelve la tabla al camino normal.
+# - Nada antes de la primera etiqueta entra: es el título del cuadro.
+_FILA_SOLO_LOTE_RE = re.compile(r"^lote\s*(?:n[ºo]?\s*)?(\d{1,2})\b")
+_MIN_BLOQUES_DE_LOTE = 1
+
+
+def _etiqueta_de_lote(fila: FILA) -> Optional[str]:
+    """La fila es únicamente la etiqueta de un lote ("LOTE 1", "Lote nº2"):
+    una sola celda con texto y ese texto empieza por la etiqueta. Devuelve el
+    texto literal de la celda, que es lo que la etapa 3.5 sabe interpretar."""
+    con_texto = [c for c in fila if _texto_celda(c)]
+    if len(con_texto) != 1:
+        return None
+    return con_texto[0].strip() if _FILA_SOLO_LOTE_RE.match(_texto_celda(con_texto[0])) else None
+
+
+def _bbox_de_filas(tabla, inicio: int, fin: int) -> tuple[float, float, float, float]:
+    """La caja que ocupan las filas `[inicio, fin)` de la tabla, para que cada
+    bloque de lote tenga su propia geometría. Si `pdfplumber` no da una fila
+    por cada fila extraída (puede fusionar), cae a la caja de la tabla
+    entera: perder precisión es aceptable, inventarla no."""
+    x0, top, x1, bottom = tabla.bbox
+    filas_geometria = [f for f in getattr(tabla, "rows", []) if getattr(f, "bbox", None)]
+    if fin > len(filas_geometria) or inicio >= fin:
+        return (x0, top, x1, bottom)
+    arriba = min(f.bbox[1] for f in filas_geometria[inicio:fin])
+    abajo = max(f.bbox[3] for f in filas_geometria[inicio:fin])
+    return (x0, arriba, x1, abajo)
+
+
+def _es_cabecera_de_cuadro(fila: FILA) -> bool:
+    descripcion = _columna_con(fila, _COLUMNA_DESCRIPCION)
+    precio = _columna_con(fila, ("precio",))
+    if precio is None:
+        precio = _columna_con(fila, _COLUMNA_PRECIO)
+    return descripcion is not None and precio is not None and descripcion != precio
+
+
+def _bloques_por_fila_de_lote(
+    filas: list[FILA], presupuestos_declarados: tuple[Decimal, ...]
+) -> Optional[list[tuple[str, FILA, list[FILA], int, int]]]:
+    indices = [i for i, fila in enumerate(filas) if _etiqueta_de_lote(fila) is not None]
+    if len(indices) < _MIN_BLOQUES_DE_LOTE:
+        return None
+    bloques: list[tuple[str, FILA, list[FILA], int, int]] = []
+    limites = indices + [len(filas)]
+    # La cabecera de columnas se repite debajo de cada etiqueta, pero no
+    # siempre: `3.21/28510.0098` la imprime para los lotes 1 y 2 y la omite
+    # para el 3. Un bloque sin cabecera propia usa la del bloque anterior --
+    # es la MISMA tabla, con las mismas columnas en las mismas posiciones, así
+    # que no hay nada que adivinar.
+    cabecera_vigente: Optional[FILA] = None
+    for posicion, inicio in enumerate(indices):
+        etiqueta = _etiqueta_de_lote(filas[inicio])
+        fin = limites[posicion + 1]
+        cuerpo = filas[inicio + 1:fin]
+        if cuerpo and _es_cabecera_de_cuadro(cuerpo[0]):
+            cabecera_vigente = cuerpo[0]
+            cuerpo = cuerpo[1:]
+        if cabecera_vigente is None or not cuerpo:
+            return None
+        datos = _filas_cuadro_sin_codigo([cabecera_vigente] + cuerpo, presupuestos_declarados)
+        if not datos:
+            return None
+        bloques.append((etiqueta, cabecera_vigente, datos, inicio, fin))
+    return bloques
+
+
+def _tablas_extraidas(
+    tabla, pagina, presupuestos_declarados: tuple[Decimal, ...] = ()
+) -> list[TablaExtraida]:
+    """Las tablas de catálogo que salen de UNA tabla cruda de `pdfplumber`.
+    Normalmente una, o ninguna si es espuria; varias cuando el cuadro mete
+    todos sus lotes en la misma caja de tabla, un bloque por lote (ver
+    `_bloques_por_fila_de_lote`)."""
+    # `tabla.extract()` una sola vez para las dos vías: no es gratis, y esto
+    # corre sobre cada tabla de cada página candidata de todo el corpus.
     filas = tabla.extract()
+    unica = _tabla_extraida(tabla, pagina, presupuestos_declarados, filas)
+    if unica is not None:
+        # La partición por lotes se prueba SOLO cuando ninguna de las vías de
+        # siempre acepta la tabla: así no puede quitar ni una fila de las que
+        # ya salen (su propia garantía aritmética sí descarta las que ella
+        # misma recupera, `descartar_bloques_de_lote_que_no_cuadran`).
+        return [unica]
+    if filas and not _es_modelo_de_oferta_en_blanco(filas):
+        bloques = _bloques_por_fila_de_lote(filas, presupuestos_declarados)
+        if bloques is not None:
+            return [
+                TablaExtraida(
+                    cabecera=_combinar_filas_cabecera([cabecera]),
+                    filas=datos,
+                    pagina=pagina.page_number,
+                    # Cada bloque con SU propia caja, no la de la tabla entera:
+                    # la etapa 3.5 avanza de arriba abajo y dos tablas con la
+                    # misma caja le dejan una franja de altura negativa.
+                    bbox=_bbox_de_filas(tabla, inicio, fin),
+                    columnas_x=_columnas_x(tabla),
+                    titulo_propio=etiqueta,
+                )
+                for etiqueta, cabecera, datos, inicio, fin in bloques
+            ]
+    return []
+
+
+def _tabla_extraida(
+    tabla, pagina, presupuestos_declarados: tuple[Decimal, ...] = (),
+    filas: Optional[list[FILA]] = None,
+) -> Optional[TablaExtraida]:
+    filas = tabla.extract() if filas is None else filas
     if not filas:
         return None
     if _es_modelo_de_oferta_en_blanco(filas):
         return None
     indice_datos = _indice_primera_fila_datos(filas)
     if indice_datos is None:
-        datos = _filas_cuadro_sin_codigo(filas)
+        datos = _filas_cuadro_sin_codigo(filas, presupuestos_declarados)
         if datos is None:
-            return None  # tabla espuria: ni código de precio ni cabecera de cuadro
+            # Última evidencia antes de darla por espuria: que la aritmética de
+            # sus propias filas la demuestre (ver `_tripleta_que_cuadra`).
+            demostrado = _cuadro_demostrado_por_aritmetica(filas)
+            if demostrado is None:
+                return None  # tabla espuria: ni código de precio ni cabecera de cuadro
+            inicio_datos, filas_que_cuadran = demostrado
+            return TablaExtraida(
+                cabecera=_combinar_filas_cabecera(filas[:inicio_datos]),
+                filas=filas_que_cuadran,
+                pagina=pagina.page_number,
+                bbox=tuple(tabla.bbox),
+                columnas_x=_columnas_x(tabla),
+            )
         return TablaExtraida(
             cabecera=_combinar_filas_cabecera(filas[:1]),
             filas=datos,
@@ -424,16 +867,24 @@ def _tabla_extraida(tabla, pagina) -> Optional[TablaExtraida]:
     )
 
 
-def extraer_tablas_pagina(pagina) -> list[TablaExtraida]:
+def extraer_tablas_pagina(
+    pagina, presupuestos_declarados: tuple[Decimal, ...] = ()
+) -> list[TablaExtraida]:
     """`pagina` es un objeto página de `pdfplumber` (ya abierto por el
     llamador, que también es quien decide qué páginas son candidatas —
-    etapa 3)."""
+    etapa 3).
+
+    `presupuestos_declarados`: los importes de licitación que el sistema ya
+    tiene publicados y trazados para este expediente y sus lotes. Solo se
+    usan para la demostración aritmética de un cuadro cuyos precios vienen
+    sin decimales ni símbolo (ver `_precios_demostrados_por_un_total`);
+    ninguna otra decisión de esta etapa los mira."""
     resultado: list[TablaExtraida] = []
     descartadas: list[tuple] = []
     for tabla in pagina.find_tables():
-        extraida = _tabla_extraida(tabla, pagina)
-        if extraida is not None:
-            resultado.append(extraida)
+        extraidas = _tablas_extraidas(tabla, pagina, presupuestos_declarados)
+        if extraidas:
+            resultado.extend(extraidas)
         elif len(tabla.rows) >= 2:
             descartadas.append(tuple(tabla.bbox))
     if not descartadas:
@@ -443,7 +894,7 @@ def extraer_tablas_pagina(pagina) -> list[TablaExtraida]:
         for tabla in pagina.find_tables(_AJUSTES_SEGUNDO_INTENTO)
         if any(_solapan(tuple(tabla.bbox), d) for d in descartadas)
         and not any(_solapan(tuple(tabla.bbox), t.bbox) for t in resultado)
-        and (extraida := _tabla_extraida(tabla, pagina)) is not None
+        for extraida in _tablas_extraidas(tabla, pagina, presupuestos_declarados)
     ]
     if not recuperadas:
         return resultado

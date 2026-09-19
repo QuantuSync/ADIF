@@ -1,6 +1,6 @@
 from typing import Optional
 
-from fastapi import APIRouter, Body, Depends, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -13,6 +13,7 @@ from app.extraccion.descubrimiento_matriz import TIPO_TRABAJO as TIPO_TRABAJO_DE
 from app.extraccion.estado_sap import cargar_estado_sap
 from app.extraccion.estados_adif import cargar_estados_adif
 from app.extraccion.maestro_materiales import cargar_maestro_materiales, completar_unidades_desde_maestro
+from app.extraccion.ocr_relectura import TIPO_TRABAJO as TIPO_TRABAJO_OCR_RELECTURA
 from app.extraccion.sap_desglose import cargar_sap_desglose
 from app.ingesta_local import TIPO_TRABAJO as TIPO_TRABAJO_INGESTA_LOCAL
 from app.mantenimiento.auditoria import TIPO_TRABAJO as TIPO_TRABAJO_AUDITORIA
@@ -25,7 +26,7 @@ from app.mantenimiento.programacion import (
     obtener_estado_copia,
     obtener_estado_descubrimiento_pedidos,
 )
-from app.models import TrabajoCola
+from app.models import Documento, TrabajoCola
 from app.queue import encolar_trabajo
 from app.schemas import (
     EstadoMantenimientoOut,
@@ -318,6 +319,55 @@ def historial_ingesta_local(
     return db.execute(
         select(TrabajoCola)
         .where(TrabajoCola.tipo == TIPO_TRABAJO_INGESTA_LOCAL)
+        .order_by(TrabajoCola.created_at.desc())
+        .limit(limite)
+    ).scalars().all()
+
+
+class OcrRelecturaPeticion(BaseModel):
+    """Bloque 1, sesión 2026-09-19 (quinta parte): páginas concretas de un
+    documento escaneado a releer con un modelo mejor que `MODEL_ID`. `modelo`
+    es opcional; sin él se usa `OCR_MODELO_RELECTURA`, y sin ninguno de los
+    dos el trabajo falla en vez de releer con el modelo de siempre."""
+
+    documento_id: int
+    paginas: list[int]
+    modelo: Optional[str] = None
+
+
+@router.post("/mantenimiento/ocr/releer", response_model=TrabajoOut)
+def lanzar_relectura_optica(
+    peticion: OcrRelecturaPeticion = Body(...),
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    """Encola la relectura (`app.extraccion.ocr_relectura`). La API no llama
+    al modelo nunca -- solo el worker tiene proveedor (CONTEXTO.md sección
+    10) --, así que aquí solo se valida que el documento existe y se encola.
+
+    Deliberadamente sin programación propia y sin disparo automático: releer
+    con un modelo más caro es una decisión por documento, tomada mirando la
+    lectura que hay, no algo que el ciclo deba intentar solo."""
+    if not peticion.paginas:
+        raise HTTPException(status_code=400, detail="hay que indicar al menos una página")
+    documento = db.get(Documento, peticion.documento_id)
+    if documento is None:
+        raise HTTPException(status_code=404, detail=f"documento_id {peticion.documento_id} no existe")
+    payload: dict = {"documento_id": peticion.documento_id, "paginas": peticion.paginas}
+    if peticion.modelo:
+        payload["modelo"] = peticion.modelo
+    return encolar_trabajo(db, tipo=TIPO_TRABAJO_OCR_RELECTURA, payload=payload)
+
+
+@router.get("/mantenimiento/ocr/historial", response_model=list[TrabajoOut])
+def historial_relectura_optica(
+    limite: int = Query(default=20, ge=1, le=200),
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    return db.execute(
+        select(TrabajoCola)
+        .where(TrabajoCola.tipo == TIPO_TRABAJO_OCR_RELECTURA)
         .order_by(TrabajoCola.created_at.desc())
         .limit(limite)
     ).scalars().all()

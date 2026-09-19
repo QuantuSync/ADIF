@@ -9,6 +9,8 @@ from app.db import SessionLocal
 from app.extraccion.cruce_codigos import validar_ruta_codigos_proyecto
 from app.extraccion.descubrimiento_matriz import TIPO_TRABAJO as TIPO_DESCUBRIMIENTO_PEDIDOS
 from app.extraccion.descubrimiento_matriz import descubrir_pedidos_de_matrices_conocidas
+from app.extraccion.ocr_relectura import TIPO_TRABAJO as TIPO_OCR_RELECTURA
+from app.extraccion.ocr_relectura import modelo_de_relectura, releer_paginas
 from app.extraccion.orquestador import ejecutar_extraccion_expediente
 from app.ingesta_local import TIPO_TRABAJO as TIPO_INGESTA_LOCAL
 from app.ingesta_local import ingerir_carpeta_local
@@ -194,6 +196,34 @@ def procesar_ingesta_local(db, trabajo) -> dict:
     return resumen.to_dict()
 
 
+def procesar_ocr_relectura(db, trabajo) -> dict:
+    """Bloque 1, sesión 2026-09-19 (quinta parte): relee páginas concretas de
+    un documento escaneado con un modelo mejor que `MODEL_ID`
+    (`app.extraccion.ocr_relectura`). Vive en el worker y no en la API por la
+    misma razón que el resto de la cascada: es el único proceso con proveedor
+    de modelo (CONTEXTO.md sección 10). Payload: `documento_id`, `paginas` y,
+    opcionalmente, `modelo`."""
+    payload = trabajo.payload or {}
+    documento_id = payload.get("documento_id")
+    paginas = payload.get("paginas") or []
+    if documento_id is None or not paginas:
+        raise RuntimeError("relectura óptica sin `documento_id` o sin `paginas`")
+    modelo = modelo_de_relectura(payload, settings.ocr_modelo_relectura)
+    if not settings.model_api_key:
+        raise RuntimeError("relectura óptica sin MODEL_API_KEY configurada")
+    documento = db.get(Documento, documento_id)
+    if documento is None:
+        raise RuntimeError(f"documento_id {documento_id} no existe")
+    proveedor = APIModelProvider(
+        api_key=settings.model_api_key, modelo=modelo, workspace_id=settings.model_workspace_id,
+    )
+    return releer_paginas(
+        db, documento.hash,
+        lambda: storage.recuperar(documento.ruta_almacenamiento),
+        proveedor, paginas, modelo,
+    )
+
+
 def procesar_descubrimiento_pedidos(db, trabajo) -> dict:
     """Descubrimiento inverso matriz -> pedidos (sesión de descubrimiento
     inverso, app.extraccion.descubrimiento_matriz): payload opcional
@@ -214,6 +244,7 @@ MANEJADORES = {
     TIPO_DESCUBRIMIENTO_PEDIDOS: procesar_descubrimiento_pedidos,
     TIPO_AUDITORIA_CATALOGO: ejecutar_auditoria,
     TIPO_INGESTA_LOCAL: procesar_ingesta_local,
+    TIPO_OCR_RELECTURA: procesar_ocr_relectura,
 }
 
 
