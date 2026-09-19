@@ -1432,8 +1432,13 @@ class _LoteFalso:
 
 
 class _ExpedienteFalso:
-    def __init__(self, declarados):
+    def __init__(self, declarados, titulo=None):
         self.lotes_totales_declarados = declarados
+        # Sesión 2026-09-19 (segunda parte): `_lotes_candidatos_del_cuadro`
+        # mira el título para no confundir el sentinela "1" con un lote real
+        # llamado "Lote 1" (ver su docstring). Sin título, no hay confusión
+        # posible y el comportamiento es el de siempre.
+        self.nombre_proyecto = titulo
 
 
 class _ResultadoFalso:

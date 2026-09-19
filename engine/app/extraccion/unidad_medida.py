@@ -105,6 +105,24 @@ def es_unidad_conocida(valor: str) -> bool:
     return all(parte in _UNIDADES for parte in partes)
 
 
+# Sesión 2026-09-19 (segunda parte, decisión del cliente): "PA" **no es una
+# unidad de medida**, es el TIPO de línea -- "partida alzada", que CONTEXTO.md
+# sección 2 define como una reserva presupuestaria y no un artículo de
+# almacén. Sigue dentro de `_UNIDADES` a propósito: así la celda no dispara
+# el motivo de "unidad de medida descartada por no ser una unidad conocida"
+# (no es un valor ilegible ni un fallo de mapeo, el documento lo pone a
+# posta), pero `app.catalogo._construir_campos` no la guarda como unidad y la
+# celda del Excel sale vacía con su motivo -- "no aplica (partida alzada)",
+# el mismo que ya llevan la matrícula y el código de material de esas
+# mismas filas. Medido antes de aplicarlo: las 33 filas del Excel con unidad
+# "PA" tienen, las 33, descripción que empieza por "Partida alzada".
+_MARCAS_DE_PARTIDA_ALZADA = frozenset({"pa"})
+
+
+def es_marca_de_partida_alzada(valor: str) -> bool:
+    return _clave(valor).rstrip("*").strip() in _MARCAS_DE_PARTIDA_ALZADA
+
+
 def _clave(parte: str) -> str:
     return _sin_acentos(parte.strip().lower()).replace(".", "")
 

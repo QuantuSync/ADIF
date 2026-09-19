@@ -312,6 +312,30 @@ Comprobado antes de quitarla: ninguna pantalla de la web ni ninguna ruta de
 la API dependía de ella (solo `app/exportacion.py` y dos tests). El Excel
 pasa de 18 columnas a 17.
 
+**La columna "Código de precio" entra en el Excel (decisión del cliente,
+sesión 2026-09-19, segunda parte).** Es la clave real del catálogo
+(`expediente + lote + código de precio`) y hasta entonces solo vivía dentro
+del sistema. Va la **16 de 18**, la última de las que rellena el sistema, sin
+mover ninguna de las anteriores: detrás quedan "Motivo de las celdas vacías"
+y "Comentarios", que decisiones anteriores del cliente ya habían fijado al
+final. 9.219 filas la traen y 10.350 la dejan vacía, **todas con su motivo**
+("el cuadro de precios de este documento no numera sus renglones"): no es un
+hueco de extracción sino cuadros que no numeran sus renglones. Comprobado
+antes de añadirla: **el código no se repite ni una vez** dentro de un mismo
+expediente y lote.
+
+**"PA" no es una unidad de medida (misma sesión y misma decisión).** Es el
+TIPO de línea — partida alzada, sección 2 —, así que
+`app.extraccion.unidad_medida.es_marca_de_partida_alzada` la reconoce y
+`_construir_campos` **no la guarda** como unidad: la celda sale vacía con el
+motivo "no aplica (partida alzada)", el mismo que ya llevan la matrícula y el
+código de material de esas mismas filas. Dos detalles que no se pueden
+perder: `PA` **sigue** dentro del vocabulario de unidades conocidas (sacarlo
+mandaría la línea a revisión con un motivo falso, porque el documento no está
+mal escrito) y se escribe **`INVALIDADO`, no `None`**, o el valor ya guardado
+sobreviviría al reproceso. El literal se conserva en
+`unidad_medida_original`.
+
 **Celdas vacías en el Excel (sesión 2026-09-14):** la celda se deja vacía
 — un marcador de texto rompería las columnas numéricas — y su motivo va en
 la columna "Motivo de las celdas vacías" (justo antes de "Comentarios", que
@@ -2388,6 +2412,60 @@ sobre el corpus: +2.316 líneas en 54 expedientes, ~10,75 $.
   diferencias** están explicadas una a una (−80 del punto 2, 1 precio del
   punto 1, −1 fila de "Conciliación" del punto 3). "Conciliación" cuadra con
   "Materiales" (19.473 = 19.473), 0 expedientes sin Situación.
+- **Sesión 2026-09-19 (segunda parte): cinco de las seis decisiones abiertas,
+  contestadas por el cliente y aplicadas**
+  (`docs/sesion-2026-09-19-decisiones-aplicadas-y-garantia-afinada.md`).
+  (1) **`PA` fuera de la columna "Unidad de medida"**: no es una unidad, es el
+  tipo de línea (`es_marca_de_partida_alzada`). **33 filas en 17 expedientes**;
+  la celda sale vacía con el motivo que `app.celdas_vacias` ya daba para la
+  matrícula y el código de material de esas mismas filas ("no aplica, partida
+  alzada"). Dos detalles que no se pueden perder: `PA` **sigue** en el
+  vocabulario de unidades conocidas (sacarlo mandaría la línea a revisión con
+  un motivo falso) y se escribe **`INVALIDADO`, no `None`**, o el "PA" ya
+  guardado sobreviviría al reproceso. (2) **CONTRAGUJA/CONTRAAGUJA: no se
+  unifica**; la descripción sigue literal del PDF y la pregunta para ADIF
+  queda redactada en `docs/pregunta-cliente-contraguja-contraaguja.md`.
+  (3) **Columna "Código de precio"**, la 16 de **18**, la última de las que
+  rellena el sistema y **sin mover ninguna de las anteriores** (detrás siguen
+  "Motivo de las celdas vacías" y "Comentarios", que el cliente ya había
+  fijado al final). **9.219 filas la traen, 10.350 la dejan vacía y las 10.350
+  llevan su motivo** ("el cuadro de precios de este documento no numera sus
+  renglones"); **0 repeticiones** del mismo código dentro de un expediente y
+  lote. (4) **Las 6 descripciones desplazadas de `6.24/28510.0171`**, que no
+  estaban cortas sino **desplazadas** (cada una empezaba por el final del
+  material anterior). `corregir_descripcion_desplazada_entre_tablas`: dos
+  tablas del MISMO documento con las mismas claves, y el texto concatenado de
+  una es **prefijo estricto** del de la otra — es el mismo texto cortado en
+  sitios distintos, no un parecido. Barrido el corpus entero: el
+  desplazamiento grave existe **en un solo expediente**, y el mecanismo en dos
+  (8 filas). (5) **La garantía del reparto por lotes, afinada sin aflojarla**:
+  las filas del anejo de criterios técnicos del conjunto de los lotes dejan de
+  contar como huérfanas, porque **no pueden tener lote por diseño** y quedarían
+  huérfanas igual. Una huérfana de verdad sigue descartando el intento entero.
+  Entran `6.22/28510.0173` (**272 → 368 filas, +96**) y `6.25/28510.0171` (21
+  filas, que pasan de amontonarse en el sentinela a su lote real, 11 y 10), y
+  **`4.25/28510.0132` se queda exactamente con sus 119 filas**. Condición del
+  cliente cumplida: la **prueba aritmética** del reparto de `6.22/28510.0173`
+  **cuadra al céntimo** — 5.900.000,00 € por lote, contra el presupuesto que
+  publican su `ADJUDICACION_1.pdf` p.2 y su `ANEJO_1.pdf` p.5.
+  **Defecto encontrado al verificar y corregido**: el arreglo del título del
+  bloque 3 **no era idempotente** para `6.22/28510.0011` (volvía a 24 filas en
+  la pasada siguiente) porque `LOTE_UNICO` vale `"1"`, el mismo texto que un
+  lote real "Lote 1" — `_lotes_candidatos_del_cuadro` no trata como sentinela
+  un lote único cuyo número es el que declara el título. (6) **Reproceso
+  completo con la red apagada**: 517 expedientes, **18 min 34 s**,
+  `descargas_lanzadas: 0`. **1.171 tests** (1.141 antes). **Auditoría: 0
+  errores, 6 avisos.** Excel 19.473 → **19.569 filas**, 17 → **18 columnas**,
+  y las **cuatro únicas diferencias** explicadas una a una (+96 del punto 5, la
+  columna nueva del 3, 33 celdas de unidad del 1, 8 descripciones del 4);
+  **0 materiales perdidos** por las tres claves y **0 precios cambiados**.
+  "Conciliación" cuadra con "Materiales" (19.569 = 19.569), 0 expedientes sin
+  Situación. **Sigue sin tocar la sexta decisión**: los **once expedientes
+  cuyo título declara un lote que no está entre los suyos** (265 filas) —
+  `6.21/28510.0135` dice "Lote 6" y tiene el 1, el 3 y el 7, y su propio
+  `ANEJO_3.pdf` trae una sección "LOTE 6" con su título palabra por palabra.
+  La regla del título no puede tocarlos sin inventar un lote; la pregunta es
+  para ADIF.
 
 ---
 
@@ -2427,4 +2505,6 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `sesion-2026-09-18-reproceso-glifos-y-conciliacion.md`,
 `sesion-2026-09-18-verificacion-del-reparto-por-lotes.md`,
 `sesion-2026-09-19-precio-desde-importe-lotes-del-titulo-y-fusion.md`,
+`sesion-2026-09-19-decisiones-aplicadas-y-garantia-afinada.md`,
+`pregunta-cliente-contraguja-contraaguja.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.

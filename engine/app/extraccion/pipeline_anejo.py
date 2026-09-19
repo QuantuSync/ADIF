@@ -28,6 +28,7 @@ from app.catalogo import (
     MOTIVO_MAPEO_INCOHERENTE,
     _acumular_motivo,
     construir_lineas_desde_tabla,
+    corregir_descripcion_desplazada_entre_tablas,
     corregir_precio_con_importe_del_documento,
     importes_de_pie_de_tabla,
     resolver_glifos_con_precio_de_otro_lote,
@@ -88,6 +89,10 @@ class ResultadoProcesamientoAnejo:
     # cuenta para el resumen del ciclo.
     precios_corregidos_desde_importe: int = 0
     precios_importe_sin_cerrar_el_lote: int = 0
+    # Sesión 2026-09-19 (segunda parte): líneas cuya descripción venía
+    # desplazada de su propia fila y se ha tomado de la otra tabla del mismo
+    # documento que trae la misma clave sin desplazar.
+    descripciones_desplazadas_corregidas: int = 0
 
 
 # Sesión 2026-09-14 (`6.23/28510.0051_ANEJO_3_9d725c710163f3db.pdf`, "NOTA DE
@@ -736,6 +741,14 @@ def procesar_anejo(
     # no: nunca puede llegar a `guardar_lineas_catalogo`.
     glifos_confirmados_por_otro_lote = resolver_glifos_con_precio_de_otro_lote(lineas)
 
+    # Sesión 2026-09-19 (segunda parte, decisión del cliente): una tabla cuya
+    # columna de descripción está desplazada una línea de envoltura respecto
+    # de sus propias filas, demostrada contra OTRA tabla del mismo documento
+    # que trae las mismas claves (ver `corregir_descripcion_desplazada_entre_
+    # tablas`). Va aquí, con el documento entero leído, porque la prueba
+    # necesita las dos tablas a la vez.
+    descripciones_desplazadas = corregir_descripcion_desplazada_entre_tablas(lineas)
+
     # Bloque 2, sesión 2026-09-19 (decisión del cliente, acotada): el precio
     # que el documento imprime mal, reescrito desde su propia columna de
     # importes -- y solo cuando las DOS condiciones se cumplen a la vez (ver
@@ -771,4 +784,5 @@ def procesar_anejo(
         glifos_confirmados_por_otro_lote=glifos_confirmados_por_otro_lote,
         precios_corregidos_desde_importe=precios_corregidos,
         precios_importe_sin_cerrar_el_lote=precios_sin_cerrar_el_lote,
+        descripciones_desplazadas_corregidas=descripciones_desplazadas,
     )

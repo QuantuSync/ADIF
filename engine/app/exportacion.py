@@ -99,6 +99,7 @@ _COLUMNA_DE_CAMPO = {
     "titulo_expediente": "Título expediente y Objeto del contrato (documento)",
     "estado_contrato_sap": "Estado del contrato (SAP)",
     # Columnas de la línea.
+    "codigo_precio": "Código de precio",
     "matricula": "Matrícula del material",
     "codigo_material": "Código del material",
     "cantidad": "Cantidad",
@@ -205,6 +206,23 @@ COLUMNAS = [
     # misma columna dos veces. Se queda "Código de expediente", que es el
     # nombre por el que el cliente filtra.
     "Objeto del contrato (documento)",
+    # Sesión 2026-09-19 (segunda parte, decisión del cliente): la clave real
+    # del catálogo (`expediente + lote + código de precio`, CONTEXTO.md
+    # sección 7), que hasta hoy solo vivía dentro del sistema. Es lo único
+    # que lleva una fila del Excel a su renglón del PDF, y se comprobó antes
+    # de añadirla que **no se repite ni una sola vez** dentro de un mismo
+    # expediente y lote: es un identificador de verdad, no un número
+    # decorativo. Las 10.417 filas que la dejan vacía no son un hueco de
+    # extracción sino cuadros que no numeran sus renglones, y eso lo dice la
+    # columna "Motivo de las celdas vacías" (`app.celdas_vacias`).
+    #
+    # Va aquí, la última de las columnas que rellena el sistema, **sin mover
+    # ninguna de las anteriores**: detrás quedan las dos que ya tenían su
+    # sitio reservado al final por decisiones anteriores del cliente --
+    # "Motivo de las celdas vacías" (sesión 2026-09-14, "justo antes de
+    # Comentarios") y "Comentarios" (sesión 2026-09-09, "al final de todas",
+    # la única que rellena una persona a mano).
+    "Código de precio",
     # Sesión 2026-09-14 (continuación), encargo del cliente: por qué está
     # vacía cada celda de datos de la fila, con los tres motivos de la web
     # (no aplica / no consta / pendiente, `app.celdas_vacias`). Las celdas
@@ -808,6 +826,7 @@ def generar_excel_catalogo(db: Session, incluir_pendientes_sin_lote: bool = Fals
             _celda_texto_o_espacio(linea.unidad_medida),
             _celda_texto_o_espacio(expediente.estado_contrato_sap),
             _celda_texto_o_espacio(expediente.nombre_proyecto),
+            _celda_texto_o_espacio(_celda_texto(linea.codigo_precio)),
             _celda_texto_o_espacio(
                 _texto_celdas_vacias(
                     linea, lote.identificador_lote if lote else None, expediente,

@@ -266,6 +266,10 @@ def test_exportar_catalogo_genera_xlsx_con_columnas_del_formato_esperado(cliente
         # decisión del cliente): salía del mismo campo que "Código de
         # expediente" y coincidía con ella en las 18.239 filas.
         "Objeto del contrato (documento)",
+        # Sesión 2026-09-19 (segunda parte, decisión del cliente): la clave
+        # real del catálogo, la última de las que rellena el sistema, sin
+        # mover ninguna de las anteriores.
+        "Código de precio",
         "Motivo de las celdas vacías",
         "Comentarios",
     ]
@@ -303,16 +307,19 @@ def test_exportar_catalogo_genera_xlsx_con_columnas_del_formato_esperado(cliente
     # sesión 2026-09-18: las columnas del EXPEDIENTE que quedan vacías sí
     # llevan motivo ahora -- aquí, las tres que dependen del cruce, que este
     # test deja sin configurar a propósito.
-    assert "Código interno: no consta" in fila[15]
-    assert "Código matriz: no consta" in fila[15]
-    assert "Estado del contrato (SAP): no consta" in fila[15]
+    assert fila[15] == "P-001"
+    assert "Código interno: no consta" in fila[16]
+    assert "Código matriz: no consta" in fila[16]
+    assert "Estado del contrato (SAP): no consta" in fila[16]
     # El título sí está, así que no aparece; y "Código de expediente" ya no
     # puede quedar vacía, así que no aparece nunca.
-    assert "Título expediente" not in fila[15]
-    assert "Código de expediente:" not in fila[15]
+    assert "Título expediente" not in fila[16]
+    assert "Código de expediente:" not in fila[16]
+    # La línea sembrada trae su código de precio, así que tampoco aparece.
+    assert "Código de precio:" not in fila[16]
     # Segunda tanda de cambios del cliente (bloque 1, sesión 2026-09-09):
     # "Comentarios" se mueve al final de todas las columnas.
-    assert fila[16] == " "
+    assert fila[17] == " "
 
 
 def test_exportar_catalogo_explica_el_hueco_de_un_valor_de_otro_lote(cliente, db_session, tmp_path, monkeypatch):
@@ -347,9 +354,9 @@ def test_exportar_catalogo_explica_el_hueco_de_un_valor_de_otro_lote(cliente, db
         "Matrícula del material: no consta; "
         "Cantidad: pendiente (el documento da una cantidad distinta para cada lote y falta saber cuál es la "
         "de este)"
-    ) in fila[15]
-    assert "Código interno: no consta" in fila[15]
-    assert "Estado del contrato (SAP): no consta" in fila[15]
+    ) in fila[16]
+    assert "Código interno: no consta" in fila[16]
+    assert "Estado del contrato (SAP): no consta" in fila[16]
     filas_resumen = [[c.value for c in f] for f in libro["Resumen"].iter_rows()]
     assert any(
         (f[0] or "").startswith("Líneas del catálogo con Cantidad o Precio unitario pendiente") and f[1] == 1

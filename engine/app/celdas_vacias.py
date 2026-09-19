@@ -46,6 +46,13 @@ _DETALLE_SIN_FILA_PROPIA = "este expediente no figura por sí mismo en el listad
 _DETALLE_SIN_MATRIZ = "no se conoce ningún acuerdo marco del que dependa este expediente"
 _DETALLE_SIN_TITULO = "no se ha encontrado el título en los documentos de este expediente"
 _DETALLE_SIN_ESTADO_SAP = "este expediente no aparece en el listado de contratos en ejecución de SAP"
+# Sesión 2026-09-19 (segunda parte, decisión del cliente): la columna "Código
+# de precio" entra en el Excel, y más de la mitad de sus celdas salen vacías.
+# No es un hueco de extracción -- es que el cuadro de precios de ese documento
+# no numera sus renglones (`6.20/28510.0042`/`0046`/`0047` aportan solos casi
+# 4.000 de esas filas). Sin este motivo, una columna medio vacía se lee como
+# un dato perdido.
+_DETALLE_CUADRO_SIN_NUMERAR = "el cuadro de precios de este documento no numera sus renglones"
 # Bloque 7, sesión 2026-09-18 (continuación), caso `6.26/28510.0014`. En la
 # segunda familia de precio (CONTEXTO.md sección 16: los acuerdos marco de
 # carril, `P(t) = Precio ofertado × Kt × Coeficiente de baja`) no hay una baja
@@ -128,6 +135,8 @@ def celdas_vacias(
         else:
             vacias.append(CeldaVacia(campo, NO_CONSTA))
 
+    if not linea.codigo_precio:
+        vacias.append(CeldaVacia("codigo_precio", NO_CONSTA, _DETALLE_CUADRO_SIN_NUMERAR))
     if not linea.matricula:
         sin_dato_propio("matricula")
     if not linea.codigo_material:
