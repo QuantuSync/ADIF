@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session
 
 from app.catalogo import (
     guardar_lineas_catalogo,
+    recalcular_precio_adjudicado,
     podar_lineas_heredadas_obsoletas,
     podar_lineas_obsoletas_de_documento,
 )
@@ -2036,6 +2037,18 @@ def ejecutar_extraccion_expediente(
             # lote. Si la matriz está en proceso o hay un ciclo, se conservan
             # hasta que la herencia se pueda decidir.
             lineas_podadas += podar_lineas_heredadas_obsoletas(db, expediente.id, ids_heredadas)
+            db.commit()
+        # Encargo del cliente, sesión 2026-09-19 (cuarta parte): el precio
+        # adjudicado de una línea no puede calcularse antes de conocer la baja
+        # de su lote. Aquí las bajas ya son definitivas -- han pasado la
+        # extracción de todos los documentos, la herencia de acuerdo marco y
+        # la baja derivada de los importes --, así que se rederiva desde cero
+        # (ver `recalcular_precio_adjudicado`). Va fuera del `if not
+        # herencia_pendiente` a propósito: un expediente que espera a su
+        # matriz tampoco debe quedarse con un adjudicado calculado con una
+        # baja que todavía no era la suya.
+        lineas_adjudicado_recalculado = recalcular_precio_adjudicado(db, expediente.id)
+        if lineas_adjudicado_recalculado:
             db.commit()
 
         if motivo_revision is None and total_lineas == 0:
