@@ -622,8 +622,8 @@ La pantalla muestra el valor con un indicador y la explicación en el `title`.
 
 ### Pruebas
 
-**1.258 pasan** (1.213 al cerrar la cuarta parte, **+45**). Ninguna saltada.
-Las nuevas, en `engine/tests/test_decisiones_2026_09_19_quinta.py` (36) y
+**1.259 pasan** (1.213 al cerrar la cuarta parte, **+46**). Ninguna saltada.
+Las nuevas, en `engine/tests/test_decisiones_2026_09_19_quinta.py` (37) y
 `engine/tests/test_relectura_optica_y_conciliacion_web.py` (8), más una de
 regresión en `tests/extraccion/test_orquestador.py` para el hueco de
 idempotencia de la poda. Cada mecanismo con su contraejemplo: el presupuesto
@@ -645,7 +645,7 @@ true` y `busqueda_desactivada: true`.
 | | |
 |---|---|
 | Expedientes reextraídos | **517** (519 evaluados) |
-| Tiempo | **21 min 5 s** (1.265,8 s) |
+| Tiempo | **21 min 16 s** (1.276,4 s) |
 | `descargas_lanzadas` | **0** |
 | `saltados_descarga` | 519 |
 | `sin_publicar_reintentados` | 0 |
@@ -678,7 +678,7 @@ C:\dev\ADIF\catalogo_adif_2026-09-19-residuales-y-conciliacion.xlsx
 
 | | Antes | Ahora | |
 |---|---:|---:|---|
-| Filas de "Materiales" | 19.865 | **20.001** | **+136** |
+| Filas de "Materiales" | 19.865 | **19.997** | **+132** |
 | Columnas | 18 | **18** | = |
 | Expedientes con filas | 373 | **387** | +14 |
 | Filas de "Conciliación" | 534 | **534** | = |
@@ -689,10 +689,10 @@ C:\dev\ADIF\catalogo_adif_2026-09-19-residuales-y-conciliacion.xlsx
 **0 expedientes desaparecen y 0 materiales perdidos por ninguna de las tres
 claves.** El orden relativo de las 18 columnas es el mismo.
 
-**Los 18 expedientes que cambian de número de filas: los 18 suben, ninguno
-baja.** Comprobado sobre los 18: **0 líneas sin descripción**, y la cuenta de
-cada fila contra el importe que trae su propia fila cuadra en todas las que lo
-publican.
+**Los 17 expedientes que cambian de número de filas: los 17 suben, ninguno
+baja.** Comprobado sobre los 17: **0 líneas sin descripción** —en el
+entregable entero, 0 de 19.997—, y la cuenta de cada fila contra el importe que
+trae su propia fila cuadra en todas las que lo publican.
 
 | Expediente | Antes | Ahora | Por qué |
 |---|---:|---:|---|
@@ -706,7 +706,6 @@ publican.
 | `3.22/28510.0048` | 0 | **7** | Bloque 3 |
 | `3.19/28510.0141` | 0 | **6** | +6. Cuadro de grupos SAI modulares, por aritmética |
 | `2.20/28510.0083` | 0 | **6** | +6. Soporte de software de gestión de red, por aritmética |
-| `2.22/28510.0075` | 1 | **5** | +4. Servicios de calibración: su tabla pone el PRECIO antes de la CANTIDAD, y la regla nueva de "una descripción que es solo una cifra no es una descripción" recupera la designación de verdad |
 | `2.24/28510.0219` | 0 | **4** | +4. Gasóleo C por anualidad, a 1,2020 €/L |
 | `2.19/28510.0214` | 0 | **3** | +3. Mascarillas FFP2 y material de protección |
 | `3.21/28510.0096` | 0 | **3** | Bloque 3 |
@@ -729,8 +728,8 @@ cambian: 0.**
 ### Cuadre de "Conciliación" con "Materiales"
 
 ```
-suma de la columna de líneas de "Conciliación": 20.001
-filas de la hoja "Materiales":                  20.001
+suma de la columna de líneas de "Conciliación": 19.997
+filas de la hoja "Materiales":                  19.997
 ```
 
 **0 expedientes sin Situación.** `comprobar_cuadre` revienta la exportación si
@@ -749,13 +748,13 @@ alguna de las dos cosas falla, así que el Excel no habría salido de otro modo.
 | Grupos de importe de licitación compartido | 54 grupos, 24 expedientes | igual |
 | Expedientes con importe repetido entre sus lotes | 8 | igual |
 
-La auditoría que corre al final del propio ciclo dio **1 error**, y está
-explicado: `lineas_cambian_sin_cambiar_documentos` sobre
-`2.23/28510.0098`/`6.22/28510.0051`/`6.22/28510.0159`, los tres cuadros de
-"TIPO | CANTIDAD | PRECIO UD. | PRECIO TOTAL" que bajan a 0 líneas. La regla
-solo descarta una bajada si `lineas_podadas` de ese mismo ciclo la explica, y
-a esos tres los podó una reextracción dirigida **antes** del ciclo. La regla
-"cualquier subida es error, sin excepción" se deja intacta a propósito.
+La auditoría que corre al final del propio ciclo dio **0 errores y 7 avisos**:
+los mismos seis, más `lineas_bajan_explicado_por_poda` sobre **1 expediente**,
+`2.22/28510.0075`, que baja de 5 líneas a 1 porque la regla nueva descarta sus
+4 filas de cabecera rota. Es el aviso que existe justo para eso: la bajada la
+explica exactamente el balance de su propia reextracción de este ciclo, así
+que no es una pérdida silenciosa. La regla "cualquier subida es error, sin
+excepción" se deja intacta a propósito.
 
 ### Recuento por Situación y total de filas
 
@@ -774,7 +773,7 @@ a esos tres los podó una reextracción dirigida **antes** del ciclo. La regla
 | Pendiente de procesar | **0** | 0 |
 | **Total** | **534** | 534 |
 
-**Filas totales de "Materiales": 20.001.** Líneas en la base de datos: 39.982
+**Filas totales de "Materiales": 19.997.** Líneas en la base de datos: 39.978
 en 612 expedientes, 391 de ellos con alguna línea.
 
 ### La web
@@ -785,8 +784,9 @@ Las **seis** pantallas abiertas con Chromium de verdad (el del scraping, no
 reales, **0 banners de error** y **0 errores de consola**.
 
 Y la comprobación que pedía el encargo: la vista de Conciliación da **las
-mismas cifras que el Excel** — 534 filas, 20.001 líneas sumadas, y el mismo
-recuento en las once Situaciones.
+mismas cifras que el Excel** — 534 filas, **19.997 líneas sumadas** (la
+pantalla lo escribe así: "534 expedientes · 19.997 filas en el catálogo
+entregado") y el mismo recuento en las once Situaciones.
 
 ---
 

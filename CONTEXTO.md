@@ -2758,7 +2758,7 @@ tomada mirando la lectura que hay.
   no se podían relocalizar, los 14 de cobertura parcial de lotes y la
   Conciliación en la web**
   (`docs/sesion-2026-09-19-residuales-cobertura-de-lotes-y-conciliacion-en-la-web.md`).
-  Excel 19.865 → **20.001 filas**, 373 → **387 expedientes con filas**, 18
+  Excel 19.865 → **19.997 filas**, 373 → **387 expedientes con filas**, 18
   columnas, **0 expedientes desaparecidos y 0 materiales perdidos por ninguna
   de las tres claves** (5.307 / 7.990 / 9.314; la de matrícula, idéntica).
   (1) **Bloque 1, los tres residuales.** De las 13 cantidades, **5 se arreglan**
@@ -2820,11 +2820,14 @@ tomada mirando la lectura que hay.
   demostrado mal y tampoco valen su precio ni su cantidad (4 filas en todo el
   corpus). Y la `UniqueViolation` de `cache_codigo_material` que tumbaba un
   documento entero.
-  (7) **Reproceso completo con la red apagada**: 517 expedientes, **21 min
-  5 s**, `descargas_lanzadas: 0`. **1.258 pruebas** (1.213 antes).
-  **Auditoría: 0 errores, 6 avisos.** "Conciliación" cuadra con "Materiales"
-  (20.001 = 20.001), 0 expedientes sin Situación, y las seis pantallas de la
-  web abren con datos reales y sin un solo error de consola.
+  (7) **Reproceso completo con la red apagada** (ciclo 29063, el sexto de la
+  sesión): 517 expedientes, **21 min 16 s**, `descargas_lanzadas: 0`.
+  **1.259 pruebas** (1.213 antes). **Auditoría: 0 errores, 6 avisos**
+  (7 en la de fin de ciclo, con `lineas_bajan_explicado_por_poda` sobre
+  `2.22/28510.0075`). "Conciliación" cuadra con "Materiales"
+  (19.997 = 19.997), 0 expedientes sin Situación, **0 líneas sin descripción
+  en el entregable**, y las seis pantallas de la web abren con datos reales y
+  sin un solo error de consola.
 
 ---
 
