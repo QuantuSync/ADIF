@@ -526,6 +526,13 @@ class LineaCatalogo(Base):
     # texto original -- menos fiable, y quien revise debe saberlo. Mismo
     # convenio que las otras marcas de origen: `True` o ausente.
     texto_reconocido = Column(Boolean, nullable=True)
+    # Bloque 2, sesión 2026-09-19 (migración 0039): el `precio_unitario` de
+    # esta línea no salió literal de su celda del cuadro -- se recalculó
+    # desde la columna de importes del propio documento
+    # (`app.catalogo.corregir_precio_con_importe_del_documento`), y solo
+    # porque las dos condiciones del cliente se cumplen a la vez. Mismo
+    # convenio que `texto_reconocido`: `True` o ausente.
+    precio_corregido_desde_importe = Column(Boolean, nullable=True)
     # Bloque 4, sesión 2026-09-09 (migración 0025): `True` únicamente cuando
     # `unidad_medida` se rellenó desde `maestro_materiales` (app.extraccion.
     # maestro_materiales.completar_unidades_desde_maestro) porque el

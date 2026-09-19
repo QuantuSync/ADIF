@@ -22,6 +22,7 @@ trabaja por lote, nunca por expediente.
 from __future__ import annotations
 
 import io
+import re
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -62,7 +63,11 @@ from app.extraccion.herencia_matriz import (
     reencolar_pedidos_esperando_matriz,
     resolver_o_encolar_matriz,
 )
-from app.extraccion.identidad_expediente import corregir_identidad_expediente
+from app.extraccion.identidad_expediente import (
+    corregir_identidad_expediente,
+    detectar_expediente_recortado,
+    fusionar_en,
+)
 from app.extraccion.invalidado import INVALIDADO
 from app.extraccion.lotes import (
     IdentidadContrato,
@@ -363,6 +368,77 @@ def _lote_propio(expediente: Expediente, lotes_declarados: list[LoteDeclarado]) 
     codigo = normalizar_codigo_expediente(expediente.codigo_expediente)
     propios = [d for d in lotes_declarados if normalizar_codigo_expediente(d.codigo_expediente_lote) == codigo]
     return propios[0].identificador if len(propios) == 1 else None
+
+
+# Bloque 3, sesión 2026-09-19 (decisión del cliente). El título del propio
+# expediente declarando cuál de los lotes de la licitación es: "Lote 1:
+# Jefatura de Barcelona", "Lote 4. Corazones de punta fija...", "Lote nº 2:
+# arrendamiento de vagones zona norte". Tiene que ABRIR el título -- nunca
+# "contiene la palabra lote" en cualquier posición, que es lo que dice
+# cualquier pliego multi-lote en su prosa -- y el número tiene que venir
+# seguido de su separador real (":", "." o "-") o del final del fragmento.
+_LOTE_EN_TITULO_RE = re.compile(r"^\s*LOTE\s*(?:N\s*[º°o]|[Nº°])?\.?\s*(\d{1,2})\s*(?:[:.\-–]|\s|$)", re.IGNORECASE)
+
+
+def _lote_declarado_en_el_titulo(expediente: Expediente) -> Optional[str]:
+    """El número de lote que abre el título del expediente, o `None`.
+
+    Es la ÚNICA fuente que tienen `6.22/28510.0011`-`0014` (balasto, 6 lotes):
+    sus documentos son los mismos siete que comparten con sus hermanos y los
+    dos únicos Contratos publicados son los de los lotes 5 y 6, así que
+    `_lote_propio` (por código declarado) y la identidad de Contrato no los
+    alcanzan. Sin esto, `_lotes_candidatos_del_cuadro` les reparte los SEIS
+    cuadros del ANEJO y cada uno carga con el material de toda la licitación.
+    """
+    encontrado = _LOTE_EN_TITULO_RE.match(expediente.nombre_proyecto or "")
+    return encontrado.group(1) if encontrado else None
+
+
+def _aplicar_lote_propio_del_titulo(
+    db: Session, expediente: Expediente, identificador: str
+) -> Optional[str]:
+    """Certeza estructural, y nada más que eso. Tres condiciones:
+
+    1. **El expediente carga con más de un lote.** Es el problema que esta
+       regla existe para arreglar -- "cargarles los seis cuadros les
+       multiplica el material" -- y nada más. Con un solo lote no hay ningún
+       cuadro de más que quitar, y activar `lote_propio` ahí sería otro
+       cambio, con otro alcance: haría que las tablas sin cabecera de lote de
+       sus documentos se le atribuyeran. Medido sobre el corpus: sin esta
+       condición la regla tocaría 33 expedientes en vez de 4, entre ellos
+       `6.21/28510.0109`, cuyo único lote es el sentinela `LOTE_UNICO` ("1")
+       y da la casualidad de que su título dice "Lote 1".
+    2. **El expediente ya tiene un lote con ese número.** Si no lo tiene, el
+       título habla de un lote del que aquí no hay ni rastro y no se inventa
+       ninguno -- caso real, `6.21/28510.0135`/`0137`/`0138`, cuyos títulos
+       dicen "Lote 6/8/9" y cuyos lotes guardados son el 1, el 3 y el 7: esos
+       se quedan exactamente como están.
+    3. **Ningún lote sobrante lleva un dato propio** (baja, importe o código
+       de expediente de lote). Un lote con dato propio no lo puso el reparto
+       del cuadro: lo declaró un documento, y contra un documento el título
+       no manda.
+
+    Los lotes sobrantes se borran con sus líneas, igual que
+    `_eliminar_lotes_de_hermanos`. Esas líneas no se pierden del entregable:
+    son los cuadros de los lotes hermanos, que salen en el expediente de cada
+    hermano y en el principal de la licitación."""
+    lotes = db.execute(select(Lote).where(Lote.expediente_id == expediente.id)).scalars().all()
+    if len(lotes) <= 1:
+        return None
+    propios = [l for l in lotes if l.identificador_lote == identificador]
+    if not propios:
+        return None
+    sobrantes = [l for l in lotes if l.identificador_lote != identificador]
+    if any(
+        l.baja_lote is not None
+        or l.importe_licitacion is not None
+        or l.importe_adjudicacion is not None
+        or l.codigo_expediente_lote
+        for l in sobrantes
+    ):
+        return None
+    _eliminar_lotes_de_hermanos(db, expediente.id, {l.identificador_lote for l in sobrantes})
+    return identificador
 
 
 def _es_contrato_de_otro_lote(
@@ -1180,6 +1256,31 @@ def ejecutar_extraccion_expediente(
             "motivo_revision": expediente.error,
         }
 
+    # Bloque 4, sesión 2026-09-19 (decisión del cliente): este expediente es
+    # el mismo que otro, con el número recortado por el buscador de la
+    # Plataforma (ver `detectar_expediente_recortado`, tres condiciones
+    # estructurales). Se unifica con el del código completo antes de extraer
+    # nada -- extraerlo sería anclar datos a una identidad que no existe -- y
+    # esta llamada termina aquí: la fila ya no está.
+    canonico = detectar_expediente_recortado(db, expediente)
+    if canonico is not None:
+        resumen = fusionar_en(db, expediente, canonico)
+        return {
+            "expediente": canonico.codigo_expediente,
+            "documentos_procesados": 0,
+            "documentos_pliego_omitidos": 0,
+            "tablas_procesadas": 0,
+            "lineas_creadas": 0,
+            "lineas_actualizadas": 0,
+            "lineas_podadas": 0,
+            "llamadas_modelo": 0,
+            "lotes": [],
+            "baja_global": None,
+            "estado": canonico.estado.value,
+            "motivo_revision": None,
+            "unificado": resumen,
+        }
+
     expediente.estado = EstadoExpediente.extrayendo
     expediente.error = None
     db.commit()
@@ -1611,6 +1712,21 @@ def ejecutar_extraccion_expediente(
 
             motivo_revision = _acumular_motivo(motivo_revision, asegurar_cruce_codigos(db, expediente))
             db.commit()
+
+            # Bloque 3, sesión 2026-09-19 (decisión del cliente): si ninguna
+            # de las dos vías fuertes ha dicho cuál es el lote de este
+            # expediente (un lote declarado con su código, o su propio
+            # Contrato), su título puede decirlo -- y entonces el reparto por
+            # lotes del cuadro no debe intentarse siquiera, porque este
+            # expediente no es la licitación, es uno de sus contratos. Va
+            # aquí, después de las dos ramas y antes de
+            # `_lotes_candidatos_del_cuadro`, que consulta `lote_propio`.
+            if lote_propio is None:
+                identificador_del_titulo = _lote_declarado_en_el_titulo(expediente)
+                if identificador_del_titulo is not None:
+                    lote_propio = _aplicar_lote_propio_del_titulo(db, expediente, identificador_del_titulo)
+                    if lote_propio is not None:
+                        lotes = list(expediente.lotes)
 
             # Bloque 2, sesión 2026-09-18 (tercera parte): un expediente que
             # declara N lotes y todavía no tiene ninguno identificado por

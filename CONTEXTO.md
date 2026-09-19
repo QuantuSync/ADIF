@@ -341,6 +341,27 @@ Añadir internamente, aunque no salgan al Excel como columna propia:
 `codigo_precio`, `documento_origen`, `pagina`, `fragmento`, `confianza`,
 `estado_revision`.
 
+**Un precio del catálogo es el que imprime el cuadro, con una sola
+excepción y dos condiciones (decisión del cliente, sesión 2026-09-19).**
+`app.catalogo.corregir_precio_con_importe_del_documento` es el único
+mecanismo por el que un `precio_unitario` puede salir de otro sitio que su
+propia celda, y solo si se cumplen **las dos a la vez**: (1) el IMPORTE del
+renglón dividido entre su cantidad da el precio corregido con **división
+exacta** — sin residuo y con decimales que caben en la columna; y (2) con
+ese precio, el lote suma **exactamente** uno de los totales que el propio
+documento declara al pie de su cuadro ("Presupuesto de Ejecución Material",
+"SUMA", "TOTAL LOTE N"...). Si falta cualquiera de las dos, la línea **no se
+corrige** y va a revisión con su motivo: nunca se escribe un precio que no
+esté demostrado por la aritmética del propio documento. La línea corregida
+se marca en los mismos tres sitios que el reconocimiento óptico
+(`lineas_catalogo.precio_corregido_desde_importe`, migración 0039; su
+`motivo_revision`; y el prefijo `[precio recalculado desde el importe del
+documento]` en el fragmento), y el Resumen del Excel lleva su recuento. La
+columna de importes se reconoce por **coincidencia exacta** del nombre de
+cabecera (`completar_columna_importe`), es un campo opcional fuera de
+`CAMPOS` — el modelo nunca la ve y no se cachea, así que no invalida ninguna
+cabecera ya aprendida — y "IMPORTE UNITARIO" queda deliberadamente fuera.
+
 ### Cruce con el Excel de códigos
 
 El anuncio PCSP trae **los dos códigos escritos en campos fijos**:
@@ -2306,6 +2327,67 @@ sobre el corpus: +2.316 líneas en 54 expedientes, ~10,75 $.
   del Excel están explicadas una a una — 8 del modelo de oferta en blanco, 7
   copias exactas de un material que ya estaba, 1 fila fundida ilegible — y
   **ninguna es del bloque 1**.
+- **Sesión 2026-09-19: cuatro de las once decisiones pendientes, contestadas
+  por el cliente e implementadas; dos más analizadas sin tocar nada**
+  (`docs/sesion-2026-09-19-precio-desde-importe-lotes-del-titulo-y-fusion.md`).
+  (1) **El precio que demuestra el propio documento** (sección 7 de este
+  fichero): `corregir_precio_con_importe_del_documento`, migración **0039**,
+  con las dos condiciones del cliente. Sobre 39.009 líneas del corpus, **1 se
+  corrige** (`6.17/28510.0056` lote 1 `P-7`, 56.555,91 → 56.455,91 €, el
+  dígito de reconocimiento óptico que la sesión anterior dejó anotado) y **7
+  en 4 expedientes cumplen la primera condición pero no la segunda y no se
+  tocan**. Que solo una pase las dos puertas es el resultado esperado: no es
+  un mecanismo que reescriba precios, es uno que solo actúa cuando el
+  documento demuestra la cifra dos veces. (2) **El lote que declara el título
+  del expediente** (`_lote_declarado_en_el_titulo` +
+  `_aplicar_lote_propio_del_titulo`): `6.22/28510.0011`-`0014` cargaban con
+  los SEIS cuadros de la licitación porque sus documentos son los de sus
+  hermanos y los dos únicos Contratos publicados son los de los lotes 5 y 6.
+  Tres condiciones de certeza estructural — el título ABRE con "Lote N", el
+  expediente carga con **más de un lote**, y ese número está entre los suyos y
+  ningún sobrante lleva dato propio. Efecto medido: **4 expedientes, −20 filas
+  cada uno, −80 en total**, y **0 materiales perdidos** (las tres claves del
+  Excel dan 11.832 / 11.895 / 13.182 antes y después; cada fila que sueltan
+  sigue en el expediente de su lote y en el principal `6.21/28510.0141`). Sin
+  la condición "más de un lote", la regla tocaría **33** expedientes en vez de
+  4: se midió antes de acotarla. Quedan **11 expedientes en la misma situación
+  cuyo título declara un lote que NO está entre los suyos** — sin tocar,
+  decisión del cliente. (3) **`19/28510` y `6.19/28510.0129` unificados**
+  (`detectar_expediente_recortado` + `fusionar_en`, el caso que el docstring
+  de `corregir_identidad_expediente` dejaba fuera como "fusión, no
+  renombrado"): tres condiciones estructurales —código subcadena del otro,
+  **exactamente el mismo conjunto de documentos**, mismo título—, un único par
+  en los 613, y **cero filas apuntando al código viejo** tras la fusión
+  (comprobado tabla por tabla). El corpus pasa a **612 expedientes** y
+  "Conciliación" a 534 filas. **No se toca `app.criterio_expediente`**: el
+  recorte sigue entrando y se deshace después. (4) **Las 2.752 huérfanas de
+  las causas C y D: medidas tabla a tabla, NO se pueden atribuir.** La
+  hipótesis de la sesión anterior ("la D tiene un camino claro") **es falsa**,
+  y se comprobó replicando la etapa 3.5 sobre los documentos reales: cada una
+  de esas líneas es la **página de continuación del cuadro de OTRO lote**
+  (`6.23/28510.0097` continúa los `ANEJO Nº1/2/3 … LOTE 1/2/3` que no son
+  suyos; `4.26/28510.0020` continúa la tabla de la partida alzada que la
+  sesión 2026-09-14 ya determinó que no es del lote 2; `6.21/28510.0112`/
+  `0113` llegan en glifos CID sin tabla de caracteres). Atribuirlas metería el
+  material del hermano en la ficha — el error contrario al punto (2). **0
+  atribuidas**; lo que sí cambia es que **1.806 líneas en 20 expedientes pasan
+  a decir de qué cuadro son** (`identificador_no_declarado` arrastrado por la
+  cadena de continuaciones, con su categoría propia en el Resumen) y **946 se
+  quedan exactamente como estaban**. (5) **La garantía del reparto por lotes
+  NO se afloja** (decisión del cliente), pero el análisis de los 16 que
+  rechaza da un hallazgo que sí permite **afinarla sin aflojarla**:
+  `6.22/28510.0173` (183 huérfanas) y `6.25/28510.0171` (21) tienen el **100 %
+  de sus huérfanas en el anejo de criterios técnicos**, que por diseño no
+  pertenece a ningún lote (sección 7) — la garantía los rechaza por filas que
+  serían huérfanas de todas formas. Y `4.25/28510.0132`, el único de los
+  quince que perdía 91 filas, **seguiría rechazado** (sus 106 huérfanas son
+  "banda vacía" y "tabla separada", no criterios). **Medido, no aplicado.**
+  (6) **Reproceso completo con la red apagada**: 518 expedientes, **19 min
+  11 s**, `descargas_lanzadas: 0`. **1.141 tests** (1.104 antes). **Auditoría:
+  0 errores, 6 avisos.** Excel: 19.553 → **19.473 filas**, y las **tres únicas
+  diferencias** están explicadas una a una (−80 del punto 2, 1 precio del
+  punto 1, −1 fila de "Conciliación" del punto 3). "Conciliación" cuadra con
+  "Materiales" (19.473 = 19.473), 0 expedientes sin Situación.
 
 ---
 
@@ -2344,4 +2426,5 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `sesion-2026-09-18-barrido-no-publicados-y-glifos.md`,
 `sesion-2026-09-18-reproceso-glifos-y-conciliacion.md`,
 `sesion-2026-09-18-verificacion-del-reparto-por-lotes.md`,
+`sesion-2026-09-19-precio-desde-importe-lotes-del-titulo-y-fusion.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.
