@@ -265,7 +265,27 @@ Cada documento cae por la primera etapa que lo resuelva. **No saltes etapas.**
      fila** ha de traer letras fuera de la tripleta para llegar a ser línea.
      Sin ella entraban 45 líneas sin descripción de tres cuadros
      ("TIPO | CANTIDAD | PRECIO UD. | PRECIO TOTAL") cuya única columna de
-     texto es la referencia del inserto o de la fresa. **Lo que NO se exige es
+     texto es la referencia del inserto o de la fresa. **Decisión del cliente,
+     sesión 2026-09-19 sexta parte: esa referencia SÍ se acepta como
+     Descripción del material**, y esas líneas quedan marcadas en los tres
+     sitios de siempre (`lineas_catalogo.descripcion_desde_referencia`,
+     migración 0040; su `motivo_revision`; y el prefijo
+     `[descripción tomada de la referencia del documento]` en el fragmento),
+     igual que las de reconocimiento óptico. Lo que NO se afloja: la tabla
+     sigue necesitando una columna de texto fuera de la tripleta —una de puras
+     cifras no entra— y cada fila sigue necesitando letras en ella para llegar
+     a ser línea. **Dos vías más de fila, misma sesión y misma condición
+     (entra solo si la aritmética del documento la demuestra)**: una fila cuyas
+     TRES celdas de la tripleta están vacías y aparecen, las tres, **una
+     columna a la derecha**, con `cantidad × precio = importe` al céntimo
+     (`_fila_cuadra_desplazada`; la fila se devuelve **sin tocar**, y quien lee
+     sus valores es la recuperación de columna fantasma que ya existe, con su
+     motivo) — `3.21/28510.0096` p.6, "Potenciómetro rotatorio", 10 × 150,00 —;
+     y una fila que cuadra y a la que solo le falta la descripción, cuando el
+     **rótulo de su sección** está en la fila inmediatamente anterior y su
+     numeración lo demuestra (`12` es prefijo estricto de `12.01`,
+     `_hereda_de_la_fila_de_seccion`) — la fila `12.01` de `3.16/28510.0044`,
+     1.980,50 €, la que cierra el TOTAL declarado de 824.323,67 €. **Lo que NO se exige es
      el orden de las columnas**: se probó pedir que la cantidad no tuviera
      forma de importe y se retiró — quitaba 9 líneas buenas de cuadros
      rotulados "Concepto | Precio unitario | Cantidad | Presupuesto" para
@@ -479,6 +499,63 @@ columna de importes se reconoce por **coincidencia exacta** del nombre de
 cabecera (`completar_columna_importe`), es un campo opcional fuera de
 `CAMPOS` — el modelo nunca la ve y no se cachea, así que no invalida ninguna
 cabecera ya aprendida — y "IMPORTE UNITARIO" queda deliberadamente fuera.
+
+**El cuadro cuya ÚNICA columna de dinero se llama "IMPORTE" no publica precio
+unitario** (decisión 1 del cliente, sesión 2026-09-19 sexta parte,
+`corregir_columna_importe_tomada_por_precio`). El mapeo necesita un
+`precio_unitario` para que la tabla llegue a ser cuadro de precios y se lo da a
+la única columna de euros que hay; pero el documento ya dice lo que esa columna
+es —el importe del renglón—, así que **49.604,00 € son 16 aires acondicionados,
+no uno**. La columna pasa a `importe`, la tabla se queda **sin precio**, y a
+partir de ahí manda la regla de arriba con dos diferencias: la comprobación es
+**por cuadro** (un documento puede imprimir el mismo cuadro dos veces, y sumar
+las dos copias daría el doble del presupuesto) y el total contra el que se
+comprueba puede ser el **presupuesto de licitación publicado del lote**, porque
+un cuadro así no declara pie de totales. **Todo o nada dentro del cuadro**: si a
+una sola fila le falta la cantidad o su división no es exacta, no hay nada
+demostrado. Y si no se confirma, esas filas **se quedan fuera del entregable**
+con su motivo (`MOTIVO_IMPORTE_SIN_PRECIO_NI_CONFIRMACION`, marca de exclusión
+como `MOTIVO_MAPEO_INCOHERENTE`), en vez de publicar el importe de un renglón
+entero en la columna de precio unitario. Caso que lo motiva:
+`3.18/28510.0082` p.7 y p.238, cuyas ocho filas suman 395.815,00 € al céntimo,
+exactamente el presupuesto de su lote 1. En la misma cabecera ya demostrada mal
+mapeada, una columna que el mapeo dio a `unidad_medida` y que **no contiene ni
+una sola unidad** (todos sus valores son cifras peladas) se libera, y pasa a
+`cantidad` si no había otra (`liberar_unidad_que_son_solo_cifras`). Medido sobre
+las 497 cabeceras cacheadas del corpus: **3** disparan esta corrección. Corre
+**antes** que `descartar_bloques_de_lote_que_no_cuadran`, que juzga un bloque de
+lote por la suma de cantidad × precio unitario: con el orden al revés, un cuadro
+de lote sin precio propio se descartaba entero por una suma de cero
+(`3.21/28510.0098` perdía la línea de su lote 3).
+
+**La matrícula con una letra final no es válida, y su literal no se pierde**
+(decisión 2, misma sesión). `69520000N`, `64551025O`: la celda de matrícula se
+queda vacía con su motivo, como hasta ahora, pero el literal se conserva al
+final de la Descripción del material, marcado como lo que es
+(`[matrícula impresa en el documento, no válida: 69520000N]`) — el motivo de
+revisión no basta, porque no es ninguna de las 18 columnas del Excel y en
+almacenes buscan por la descripción. Solo para esa forma exacta (8 o 9 cifras y
+una sola letra): un literal sin forma de matrícula es ruido de otra columna.
+Medido: **33 líneas de 4 expedientes** (`6.17/28510.0116`, `6.19/28510.0115`,
+`0161`, `0163`).
+
+**La Descripción del material que es la referencia del documento** (decisión 5,
+misma sesión, `app.extraccion.referencia_como_descripcion`). Tres cuadros del
+corpus listan insertos y fresas de mecanizado por su referencia de fabricante y
+no traen ninguna otra columna de texto; el cliente acepta esa referencia como
+descripción, con la línea marcada en los mismos tres sitios que el
+reconocimiento óptico (`lineas_catalogo.descripcion_desde_referencia`, migración
+0040; el motivo; y el prefijo en el fragmento) y contada en el Resumen del
+Excel. Ver la quinta guarda de la etapa 4, sección 5.
+
+**El presupuesto de licitación que ADIF publique en su listado de estados**
+(bloque 2, misma sesión) vive en `expedientes.presupuesto_licitacion_adif`
+(migración 0041) y **nunca escribe en `importe_licitacion`**, que sale de los
+documentos publicados: son dos hechos de dos fuentes, como "Estado según ADIF"
+y "Estado que consta publicado en la Plataforma". La comparación entre los dos
+es la hoja **"Presupuestos ADIF"** del Excel (`app.presupuestos_adif`), que solo
+se escribe cuando hay algún presupuesto cargado. Hoy el listado que tenemos no
+trae esa columna y la hoja no existe.
 
 ### Cruce con el Excel de códigos
 
@@ -2829,6 +2906,80 @@ tomada mirando la lectura que hay.
   en el entregable**, y las seis pantallas de la web abren con datos reales y
   sin un solo error de consola.
 
+
+- **Sesión 2026-09-19 (sexta parte): las seis decisiones del cliente, las tres
+  entradas que esperamos de ADIF, el mantenimiento sin nadie delante y el
+  diccionario del Excel**
+  (`docs/sesion-2026-09-19-decisiones-del-cliente-entradas-y-mantenimiento.md`).
+  Excel 19.997 → **20.035 filas**, 387 → **390 expedientes con filas**, 18
+  columnas, **0 expedientes desaparecidos, 0 expedientes que pierdan filas y 0
+  materiales perdidos por ninguna de las tres claves** (5.306 / 6.441 / 7.334,
+  idénticas).
+  (1) **`3.18/28510.0082`**: la columna que su cabecera llama "IMPORTE" deja de
+  ser el precio unitario (sección 7 de este documento). Sus ocho filas dividen
+  exactas y suman **395.815,00 €**, el presupuesto de su lote 1 al céntimo, y
+  entran con su precio real —3.100,25 € en vez de 49.604,00 €—. Si no se
+  confirmara, se quedarían **fuera del entregable** con su motivo, que es lo que
+  pidió el cliente. Alcance medido: **3 de las 497 cabeceras cacheadas**. **Dos
+  defectos reales al verificar**: la recuperación de la descripción exigía un
+  precio ya resuelto (y un cuadro sin columna de precio no lo puede cumplir
+  nunca), y `descartar_bloques_de_lote_que_no_cuadran` corría antes de que estas
+  líneas tuvieran precio, así que su suma de cero descartaba el bloque entero
+  (`3.21/28510.0098` perdía la línea de su lote 3). **Efecto de paso, bueno**:
+  ese mismo expediente pasa de 4 a 5 líneas, porque el cuadro que la quinta
+  parte tuvo que descartar (3 × 210.000,00 € = el triple del presupuesto) ahora
+  se resuelve con la división.
+  (2) **Las matrículas con letra final** (`69520000N`) siguen sin ser válidas y
+  la celda sigue vacía con su motivo, pero **el literal se conserva al final de
+  la Descripción del material**, marcado. **33 líneas de 4 expedientes**.
+  (3) **La numeración de lotes desplazada de `3.22/28510.0009` y
+  `3.21/28510.0096` no se toca**: es pregunta para ADIF.
+  (4) **Las dos filas sueltas entran, las dos demostradas por la aritmética del
+  documento**: la `12.01` de `3.16/28510.0044` con el rótulo de su sección, cuya
+  numeración lo demuestra (`12` es prefijo de `12.01`), y la cuarta del lote 1
+  de `3.21/28510.0096`, con las tres celdas desplazadas la misma columna y
+  10 × 150,00 = 1.500,00. Con ellas, `3.16/28510.0044` suma **824.323,67 €
+  exactos** —su presupuesto publicado— y el lote 1 de `3.21/28510.0096`,
+  22.200,00 €.
+  (5) **La referencia de la herramienta se acepta como Descripción del
+  material**, con la línea marcada como las de reconocimiento óptico: **35
+  líneas** de tres cuadros (`2.23/28510.0098` 15, `6.22/28510.0051` 10,
+  `6.22/28510.0159` 10). No son 45: la mitad de los renglones de los dos últimos
+  escribe el precio con punto decimal a la inglesa (`12.5`) y la guarda
+  aritmética los descarta — ninguno entra con un precio inventado, y queda
+  anotado.
+  (6) **Las tres entradas que esperamos del cliente, montadas y probadas sobre
+  datos sintéticos** (`docs/entradas-pendientes-del-cliente.md`, 17 pruebas): la
+  lista de vigentes con remanente (lectura tolerante + Situación en la
+  Conciliación + búsqueda en la Plataforma de los que falten), el listado de
+  estados con presupuesto de licitación (campo propio, migración 0041, y hoja
+  nueva "Presupuestos ADIF") y el catálogo antiguo (cruce por matrícula y, solo
+  cuando no la hay, por descripción normalizada, con su informe **aparte** del
+  entregable). Sin su variable de entorno, los tres devuelven `configurado:
+  false` y no tocan nada.
+  (7) **El mantenimiento sin nadie delante, comprobado en vivo**
+  (`docs/mantenimiento-sin-supervision.md`): los cuatro ciclos automáticos con
+  su intervalo real; la caducidad de `sin_publicar` (3 días para lo reciente, 14
+  para lo antiguo) **probada dentro del ciclo**, no solo sobre la función pura;
+  la copia de seguridad **restaurada de verdad** en una base aparte, con ocho
+  recuentos y dos `md5` idénticos byte a byte; y un ciclo **muerto a mitad con
+  SIGKILL**, del que lo `pendiente` lo recoge el bucle normal del worker y lo
+  `en_proceso` se reclama solo a los 300 s — el segundo intento saltó 516 de 519
+  y tardó 9,7 s. **Nada roto que arreglar**; tres límites conocidos anotados.
+  (8) **Un solo documento de preguntas** (`docs/preguntas-pendientes-cliente.md`,
+  once) y **el diccionario del Excel** (`docs/diccionario-excel.md`, las 18
+  columnas de "Materiales", las 11 de "Conciliación", los tres motivos de celda
+  vacía y las once Situaciones).
+  (9) **Reproceso completo con la red apagada**: 517 expedientes, **21 min
+  45 s**, `descargas_lanzadas: 0`. **1.304 pruebas** (1.259 antes).
+  **Auditoría: 0 errores, 6 avisos** (el único que se mueve es precios atípicos,
+  1.545 → 1.544). **Dos exportaciones seguidas idénticas salvo la fecha de
+  creación del fichero** (única entrada distinta del `.zip`: `docProps/core.xml`).
+  "Conciliación" cuadra con "Materiales" (20.035 = 20.035), **0 expedientes sin
+  Situación**, **0 líneas sin descripción**, y las seis pantallas de la web
+  abren con datos reales, sin un banner de error ni un error de consola;
+  `/conciliacion` da las mismas cifras que el Excel, Situación a Situación.
+
 ---
 
 El registro histórico de hallazgos y decisiones de cada sesión vive en
@@ -2871,6 +3022,11 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `sesion-2026-09-19-cantidades-escaneados-y-situaciones.md`,
 `sesion-2026-09-19-espacios-del-contrato-y-precio-adjudicado.md`,
 `sesion-2026-09-19-residuales-cobertura-de-lotes-y-conciliacion-en-la-web.md`,
+`sesion-2026-09-19-decisiones-del-cliente-entradas-y-mantenimiento.md`,
+`entradas-pendientes-del-cliente.md`,
+`mantenimiento-sin-supervision.md`,
+`preguntas-pendientes-cliente.md`,
+`diccionario-excel.md`,
 `pregunta-cliente-contraguja-contraaguja.md`,
 `preguntas-cliente-lotes-del-titulo-y-ficheros-de-entrada.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.
