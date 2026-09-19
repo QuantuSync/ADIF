@@ -442,3 +442,65 @@ def test_sin_la_bandera_el_reintento_de_sin_publicar_si_sale_a_la_red(db_session
     assert llamadas == [expediente.codigo_expediente]
     assert resumen["sin_publicar_desactivado"] is False
     assert resumen["sin_publicar_reintentados"] == 1
+
+
+def test_la_caducidad_corta_y_la_larga_del_sin_publicar_deciden_dentro_del_ciclo(db_session):
+    """Bloque 3, sesión 2026-09-19 (sexta parte), encargo del cliente: "si la
+    caducidad de la marca de no publicado funciona como se diseñó, 3 días para
+    lo reciente y 14 para lo antiguo, con una prueba que lo demuestre".
+
+    Las dos ramas ya estaban probadas sobre la función pura
+    (`tests/mantenimiento/test_frescura.py`); lo que faltaba era comprobarlo
+    **dentro del ciclo real**, que es quien decide a quién se le vuelve a
+    pedir una búsqueda a la Plataforma. Los dos expedientes son idénticos
+    salvo en el año de su código: los dos se marcaron `sin_publicar` hace
+    cuatro días y los dos están confirmados con la lógica de búsqueda vigente.
+    Solo se rebusca el del año en curso."""
+    ahora = datetime.now(timezone.utc)
+    reciente = _crear_expediente(
+        db_session, sufijo="0001", estado=EstadoExpediente.sin_publicar,
+        sin_publicar_en=ahora - timedelta(days=4),
+        sin_publicar_version_busqueda=VERSION_LOGICA_BUSQUEDA,
+    )
+    reciente.codigo_expediente = f"6.{ahora.year % 100:02d}/28510.0001"
+    viejo = _crear_expediente(
+        db_session, sufijo="0002", estado=EstadoExpediente.sin_publicar,
+        sin_publicar_en=ahora - timedelta(days=4),
+        sin_publicar_version_busqueda=VERSION_LOGICA_BUSQUEDA,
+    )
+    viejo.codigo_expediente = "6.14/28510.0002"
+    db_session.commit()
+
+    trabajo = _trabajo_ciclo(db_session)
+    resumen = ejecutar_ciclo_mantenimiento(
+        db_session, storage=None, model_provider=None,
+        manejadores={"descargar_expediente": lambda db, t: {}, **_AUDITORIA}, trabajo=trabajo,
+    )
+
+    assert resumen["sin_publicar_reintentados"] == 1
+    assert resumen["sin_publicar_en_plazo"] == 1
+    assert _descargas_por_expediente(db_session) == [reciente.id]
+
+
+def test_la_bandera_de_busqueda_desactivada_no_deja_salir_a_la_red_ni_por_esta_via(db_session):
+    """La otra mitad del mismo mecanismo (bloque 4, sesión 2026-09-18 sexta
+    parte): el reintento de un `sin_publicar` es una búsqueda en la Plataforma,
+    así que un reproceso lanzado sin red tampoco la lanza."""
+    ahora = datetime.now(timezone.utc)
+    exp = _crear_expediente(
+        db_session, sufijo="0001", estado=EstadoExpediente.sin_publicar,
+        sin_publicar_en=ahora - timedelta(days=40),
+        sin_publicar_version_busqueda=VERSION_LOGICA_BUSQUEDA,
+    )
+    exp.codigo_expediente = "6.14/28510.0001"
+    db_session.commit()
+
+    trabajo = _trabajo_ciclo(db_session, payload={"busqueda_desactivada": True})
+    resumen = ejecutar_ciclo_mantenimiento(
+        db_session, storage=None, model_provider=None,
+        manejadores={"descargar_expediente": lambda db, t: {}, **_AUDITORIA}, trabajo=trabajo,
+    )
+
+    assert resumen["sin_publicar_desactivado"] is True
+    assert resumen["sin_publicar_reintentados"] == 0
+    assert _descargas_por_expediente(db_session) == []
