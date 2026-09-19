@@ -29,7 +29,7 @@ from app.extraccion.unidad_medida import (
     limpiar_unidad,
     normalizar_unidad,
 )
-from app.models import LineaCatalogo, Lote
+from app.models import LineaCatalogo, Lote, MaestroMaterial
 
 # `LineaCatalogo.codigo_precio` es `String(32)` (app/models.py) -- se lee del
 # propio modelo, no se repite el número a mano, para que no puedan divergir.
@@ -77,6 +77,43 @@ _MATRICULA_CON_LETRA_FINAL_RE = re.compile(
 
 def _marca_de_matricula_no_valida(literal: str) -> str:
     return f"[matrícula impresa en el documento, no válida: {literal}]"
+
+
+# Bloque 1, sesión 2026-09-19 (séptima parte), decisión del cliente: la
+# matrícula de 8 cifras que el documento imprime de verdad se queda literal
+# -- nunca se "completa" con un dígito para que case con el maestro actual,
+# porque el parecido no demuestra nada (`64571017` casa a la vez con
+# `645710170`, una palomilla, y con `645710175`, que son las antenas). Lo
+# que sí lleva la fila es el motivo, para que en almacenes se sepa por qué
+# esa matrícula no aparece en el listado de materiales de ADIF de hoy.
+#
+# NO es un motivo de exclusión (`app.exportacion._MOTIVOS_FUERA_DEL_
+# ENTREGABLE`): la línea sale en "Materiales" con su matrícula tal cual.
+MOTIVO_MATRICULA_8_FUERA_DEL_MAESTRO = (
+    "matrícula con formato antiguo de 8 dígitos, no figura en el maestro actual de ADIF"
+)
+
+
+def matriculas_8_fuera_del_maestro(db: Session, matriculas) -> frozenset[str]:
+    """De `matriculas`, las de 8 cifras que NO están en el maestro de
+    materiales de ADIF (`app.extraccion.maestro_materiales`).
+
+    Con el maestro sin cargar devuelve el conjunto vacío: sin listado contra
+    el que comprobar no se puede afirmar que una matrícula no figure en él, y
+    marcar las 390 filas por el hueco de una fuente de entrada sería escribir
+    un motivo falso."""
+    candidatas = {m for m in matriculas if m and len(m) == 8 and m.isdigit()}
+    if not candidatas:
+        return frozenset()
+    if db.query(MaestroMaterial).limit(1).first() is None:
+        return frozenset()
+    en_maestro = {
+        fila[0]
+        for fila in db.query(MaestroMaterial.matricula)
+        .filter(MaestroMaterial.matricula.in_(candidatas))
+        .all()
+    }
+    return frozenset(candidatas - en_maestro)
 
 
 # Solo la de 9 cifras: dentro de ruido pegado, 8 cifras seguidas también son
@@ -3024,7 +3061,23 @@ def guardar_lineas_catalogo(
     fusion_material = lote_id is not None
     combinadas = _combinar_por_clave(lineas, permitir_fusion_material=fusion_material)
     claves_de_esta_llamada = {datos["clave_linea"] for datos in combinadas}
+    # Bloque 1, sesión 2026-09-19 (séptima parte): una consulta por llamada,
+    # no una por línea. Va aquí y no en `_construir_campos` porque el maestro
+    # vive en base de datos y esa función no ve la sesión; `motivo_revision`
+    # se recalcula entero en cada pasada (ver el bucle de actualización más
+    # abajo), así que anotarlo aquí es idempotente.
+    fuera_del_maestro = matriculas_8_fuera_del_maestro(
+        db, (datos.get("matricula") for datos in combinadas)
+    )
     for datos in combinadas:
+        # Solo donde `motivo_revision` ya es un campo evaluado de la línea:
+        # la herencia de acuerdo marco (`app.extraccion.herencia_matriz`) lo
+        # deja deliberadamente fuera de `datos` porque ahí significa "no se
+        # ha evaluado", y colarlo aquí pisaría el motivo que la línea tuviera.
+        if "motivo_revision" in datos and datos.get("matricula") in fuera_del_maestro:
+            datos["motivo_revision"] = _acumular_motivo_unico(
+                datos.get("motivo_revision"), MOTIVO_MATRICULA_8_FUERA_DEL_MAESTRO
+            )
         # Transitorio, nunca una columna de `LineaCatalogo` -- se retira
         # antes de que `datos` se use para crear/actualizar la fila real,
         # y se guarda aparte para la limpieza de huérfana superada de más
