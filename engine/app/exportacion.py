@@ -47,10 +47,11 @@ from typing import Optional
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.catalogo import MOTIVO_MAPEO_INCOHERENTE
-from app.catalogo_consulta import consultar_catalogo
+from app.catalogo_consulta import consultar_catalogo, filtros_del_entregable
 from app.celdas_vacias import ETIQUETA_MOTIVO, PENDIENTE, celdas_vacias
 from app.conciliacion import (
     COLUMNAS_CONCILIACION,
@@ -708,6 +709,48 @@ def _escribir_resumen(
     hoja.column_dimensions["C"].width = 60
 
 
+# Bloque 5, sesión 2026-09-19 (quinta parte): la decisión de "esta línea sale
+# en Materiales" vive en UN sitio. La vista de Conciliación de la web necesita
+# el mismo recuento por expediente que escribe el Excel -- si las dos cifras
+# pudieran discrepar, la vista dejaría de servir para lo único que existe
+# (docstring de `app.conciliacion`), y duplicar el criterio es exactamente
+# como empiezan a discrepar.
+def _sale_en_materiales(
+    motivo_revision: Optional[str], tiene_lote: bool, incluir_pendientes_sin_lote: bool
+) -> bool:
+    mapeo_incoherente = bool(motivo_revision) and MOTIVO_MAPEO_INCOHERENTE in motivo_revision
+    return not ((not tiene_lote and not incluir_pendientes_sin_lote) or mapeo_incoherente)
+
+
+def linea_sale_en_materiales(linea, lote, incluir_pendientes_sin_lote: bool = False) -> bool:
+    return _sale_en_materiales(linea.motivo_revision, lote is not None, incluir_pendientes_sin_lote)
+
+
+def contar_filas_de_materiales(
+    db: Session, incluir_pendientes_sin_lote: bool = False
+) -> Counter[int]:
+    """Las filas que `generar_excel_catalogo` escribiría en "Materiales", por
+    `Expediente.id`.
+
+    Mismos filtros que el Excel (`app.catalogo_consulta.filtros_del_entregable`,
+    incluidas las dos listas de exclusión) y **el mismo criterio de inclusión**
+    (`linea_sale_en_materiales`), pero en una sola consulta de tres columnas:
+    el Excel necesita cada línea entera y la pagina de 500 en 500 con cuatro
+    joins y su orden de completitud -- para contar no hace falta nada de eso,
+    y la vista de Conciliación de la web no puede tardar minutos."""
+    conteo: Counter[int] = Counter()
+    for expediente_id, lote_id, motivo in db.execute(
+        filtros_del_entregable(
+            select(
+                LineaCatalogo.expediente_id, LineaCatalogo.lote_id, LineaCatalogo.motivo_revision
+            )
+        )
+    ):
+        if _sale_en_materiales(motivo, lote_id is not None, incluir_pendientes_sin_lote):
+            conteo[expediente_id] += 1
+    return conteo
+
+
 def generar_excel_catalogo(db: Session, incluir_pendientes_sin_lote: bool = False) -> bytes:
     libro = Workbook()
     hoja = libro.active
@@ -753,8 +796,7 @@ def generar_excel_catalogo(db: Session, incluir_pendientes_sin_lote: bool = Fals
             # porque el problema no es "falta asignar lote" sino "no se
             # confía en cómo se leyeron las columnas de esta tabla" (ver
             # `MOTIVO_MAPEO_INCOHERENTE`).
-            mapeo_incoherente = bool(linea.motivo_revision) and MOTIVO_MAPEO_INCOHERENTE in linea.motivo_revision
-            se_incluye = not ((lote is None and not incluir_pendientes_sin_lote) or mapeo_incoherente)
+            se_incluye = linea_sale_en_materiales(linea, lote, incluir_pendientes_sin_lote)
             if se_incluye and linea.matricula is not None:
                 claves_incluidas.add(
                     (expediente.id, linea.matricula, linea.descripcion, linea.precio_unitario)
@@ -764,8 +806,7 @@ def generar_excel_catalogo(db: Session, incluir_pendientes_sin_lote: bool = Fals
         pagina += 1
 
     for linea, lote, expediente in todas_las_filas:
-        mapeo_incoherente = bool(linea.motivo_revision) and MOTIVO_MAPEO_INCOHERENTE in linea.motivo_revision
-        if (lote is None and not incluir_pendientes_sin_lote) or mapeo_incoherente:
+        if not linea_sale_en_materiales(linea, lote, incluir_pendientes_sin_lote):
             # Encargo de esta sesión (hallazgo real, `6.22/28510.0033`/`0057`/
             # `0058`: un anejo de "criterios técnicos" repite íntegro el mismo
             # cuadro de precios que ya trae, con lote asignado, otro

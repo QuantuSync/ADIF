@@ -42,6 +42,15 @@ _ALIAS_DETERMINISTAS: dict[str, tuple[str, ...]] = {
         "cantidad estimada de referencia",
         "cantidad",
         "cantidades",
+        # Bloque 2, sesión 2026-09-19 (quinta parte): "MEDICIÓN" es el tercer
+        # nombre que el corpus da a la columna de cantidad, y
+        # `app.extraccion.tabla` y `app.extraccion.localizador` ya lo tratan
+        # como tal desde 2026-09-15 -- el vocabulario de este módulo se había
+        # quedado sin él, así que una cabecera perfectamente legible
+        # ("SUMINSTRO CODIGO | DESCRIPCIÓN | UNIDAD | MEDICIÓN | Precio
+        # Unitario | IMPORTE", `4.26/28510.0031` p.8) resolvía determinista
+        # con `cantidad` a `None` y la cantidad se perdía.
+        "medicion",
     ),
     "precio_unitario": (
         "precio unitario de referencia",

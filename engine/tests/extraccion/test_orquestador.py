@@ -1495,3 +1495,38 @@ def test_el_intento_solo_vale_si_cubre_todos_los_lotes_declarados():
     assert _el_cuadro_declara_todos_los_lotes(_ResultadoFalso(["1", "2"]), candidatos) is False
     assert _el_cuadro_declara_todos_los_lotes(_ResultadoFalso(["1", "2", "3"]), candidatos) is True
     assert _el_cuadro_declara_todos_los_lotes(_ResultadoFalso([]), candidatos) is False
+
+
+def test_un_documento_que_deja_de_aportar_lineas_pierde_las_de_la_pasada_anterior(db_session):
+    """Hueco de idempotencia real, cerrado en la sesión 2026-09-19 (quinta
+    parte): `podar_lineas_obsoletas_de_documento` vivía dentro del
+    `if resultado.lineas:` del orquestador, así que un documento que dejaba de
+    aportar nada -- porque una guarda nueva de la cascada rechaza su tabla --
+    conservaba para siempre las líneas de la pasada anterior. Destapado con
+    las 45 líneas sin descripción de `2.23/28510.0098`/`6.22/28510.0051`/
+    `0159`, cuyo cuadro ya rechazaba la guarda de designación y cuyas líneas
+    seguían ahí.
+
+    Aquí se simula con un expediente cuyo único documento no trae cuadro de
+    precios (un Anuncio PCSP) y una línea de basura colgada de él."""
+    expediente = _crear_expediente_con_documentos(
+        db_session, "6.24/28510.0193", [("ADJUDICACION", fx.ANUNCIO_PCSP_SIN_MATRIZ)],
+    )
+    documento = db_session.query(Documento).filter_by(hash="hash-6.24/28510.0193-ADJUDICACION").one()
+    lote = Lote(expediente_id=expediente.id, identificador_lote="1")
+    db_session.add(lote)
+    db_session.commit()
+    db_session.add(LineaCatalogo(
+        expediente_id=expediente.id, lote_id=lote.id, documento_origen_id=documento.id,
+        clave_linea="basura-de-la-pasada-anterior", orden_aparicion=0,
+        descripcion="linea de una pasada anterior que este documento ya no produce",
+        precio_unitario=Decimal("1"),
+    ))
+    db_session.commit()
+
+    ejecutar_extraccion_expediente(
+        db_session, _StorageDirecta(), SimpleNamespace(expediente_id=expediente.id),
+        model_provider=None,
+    )
+
+    assert db_session.query(LineaCatalogo).filter_by(expediente_id=expediente.id).count() == 0

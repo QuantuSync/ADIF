@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 const ENLACES = [
   { href: "/", etiqueta: "Expedientes" },
   { href: "/catalogo", etiqueta: "Catálogo" },
+  { href: "/conciliacion", etiqueta: "Conciliación" },
   { href: "/revision", etiqueta: "Cola de revisión" },
   { href: "/revision/candidatos-matricula", etiqueta: "Candidatos de matrícula" },
   { href: "/mantenimiento", etiqueta: "Mantenimiento" },

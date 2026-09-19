@@ -226,6 +226,7 @@ def asociar_lote_tabla(
     tabla_bbox: tuple[float, float, float, float],
     identificadores_validos: Optional[set[str]] = None,
     texto_titulo_tabla: str = "",
+    texto_lote_propio: str = "",
     texto_cola_pagina_anterior: str = "",
     separada_por_paginas: bool = False,
     texto_paginas_previas: str = "",
@@ -241,6 +242,11 @@ def asociar_lote_tabla(
     puede estar en otros dos sitios que también son solo de esta tabla,
     verificados en `4.26/28510.0020` (en su CONTRATO y en su ANEJO, el
     presupuesto de cada lote quedaba sin lote):
+
+    `texto_lote_propio` (bloque 3, sesión 2026-09-19 quinta parte): la fila de
+    etiqueta de lote que la propia tabla trae encima de sus datos, cuando el
+    cuadro mete todos sus lotes en la misma caja de tabla. **Gana sobre la
+    franja**, por el motivo que explica el comentario de abajo.
 
     - `texto_titulo_tabla`: dentro de la propia caja de la tabla, en sus
       filas de título -- `pdfplumber` las devuelve como cabecera ("...
@@ -287,8 +293,30 @@ def asociar_lote_tabla(
       nunca para asignar un lote a la tabla, porque ese texto puede ser un
       pliego entero."""
     _x0, techo_tabla, _x1, _bottom = tabla_bbox
-    banda = pagina_pdfplumber.crop((0, banda_top, pagina_pdfplumber.width, techo_tabla))
-    texto_banda = banda.extract_text() or ""
+    if techo_tabla > banda_top:
+        banda = pagina_pdfplumber.crop((0, banda_top, pagina_pdfplumber.width, techo_tabla))
+        texto_banda = banda.extract_text() or ""
+    else:
+        # Bloque 3, sesión 2026-09-19 (quinta parte): dos tablas pegadas -- o
+        # los bloques de lote en que se parte un mismo cuadro
+        # (`app.extraccion.tabla._bloques_por_fila_de_lote`) -- no dejan
+        # ninguna franja entre ellas. `crop` revienta con una caja de altura
+        # cero o negativa, así que aquí es simplemente "no hay franja": lo que
+        # decide entonces es el título propio de la tabla, que es justo donde
+        # esos bloques traen su "LOTE N".
+        texto_banda = ""
+
+    # Bloque 3, sesión 2026-09-19 (quinta parte): el lote que la PROPIA tabla
+    # declara en una fila de etiqueta encima de sus datos
+    # (`app.extraccion.tabla._bloques_por_fila_de_lote`) gana sobre cualquier
+    # cosa que haya en la franja. Es la declaración más específica que existe
+    # sobre esa tabla -- está dentro de ella, justo encima de sus filas --, y
+    # la franja de estos cuadros trae una trampa real: entre el bloque del
+    # lote N y el del N+1, `3.22/28510.0106` imprime "El presupuesto base del
+    # lote N es de VEINTISEIS MIL EUROS...". Sin esta preferencia, cada bloque
+    # se quedaba con el lote del anterior -- los cinco desplazados uno.
+    if texto_lote_propio and _LOTE_CABECERA_RE.search(texto_lote_propio):
+        return _asociar_por_texto(texto_lote_propio, identificadores_validos)
 
     if _abre_anejo_del_conjunto(texto_banda):
         # Antes que las menciones de lote de la franja: la frase del anejo

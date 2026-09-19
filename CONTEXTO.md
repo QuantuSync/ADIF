@@ -211,6 +211,15 @@ Cada documento cae por la primera etapa que lo resuelva. **No saltes etapas.**
    literalmente "Designación Plano PRECIO". "Designación" y "Denominación"
    cuentan ya como columna de descripción entre los marcadores, los otros dos
    nombres que el corpus le da (`6.18/28510.0064`).
+   **Una página se abre también por la aritmética de sus propias líneas**
+   (sesión 2026-09-19, quinta parte): una línea que acaba en cantidad, precio e
+   importe con `cantidad × precio = importe` al céntimo, y con descripción, es
+   la firma de una fila de cuadro de precios y no la produce un párrafo de
+   pliego. Tres así en la misma página la abren; una basta si la anterior ya
+   está abierta. Es la única señal que trae el presupuesto de
+   `3.16/28510.0044` (p.17-19), cuyos rótulos —"MEDICIÓN PRESUPUESTADA",
+   "P.UNITARIO", y la columna de descripción rotulada con el título del
+   cuadro— no están en ningún vocabulario de esta etapa.
 4. **Extraer la tabla** con `pdfplumber` sobre esas páginas. Si una tabla sale
    sin ninguna fila de datos, segundo intento sin imantar las líneas
    verticales (`snap_x_tolerance` 1): el borde de una tabla vecina puede
@@ -235,6 +244,55 @@ Cada documento cae por la primera etapa que lo resuelva. **No saltes etapas.**
    columna de cantidad se exigen tres filas como mínimo**, porque con una o dos
    "descripción + importe" no se distingue de un resumen de presupuesto (con
    cantidad sigue bastando una, el criterio de 2026-09-15).
+   **Dos vías más, las dos de la sesión 2026-09-19 (quinta parte) y las dos
+   solo cuando ninguna de las anteriores acepta la tabla** (así no pueden
+   quitar ni una fila de las que ya salían):
+   - **La tabla que se demuestra por la aritmética de sus filas**
+     (`_tripleta_que_cuadra`): si existen tres columnas —cantidad, precio,
+     importe, de izquierda a derecha— tales que TODA fila que las trae rellenas
+     cumple la cuenta, y hay al menos dos, la tabla no es espuria aunque no
+     traiga ni código de precio ni matrícula ni un rótulo conocido. Cinco
+     guardas: una sola tripleta (dos combinaciones a la vez es ambiguo y se
+     descarta), ni una fila que la contradiga, **al menos una fila con cantidad
+     distinta de 1** (sin ella la identidad es gratis: "1 × X = X" la cumple
+     cualquier lista de conceptos a tanto alzado) y **solo salen las filas que
+     pasan la cuenta** — las filas de sección de un presupuesto ("Obra civil",
+     "Energía") no son materiales. **Y la quinta: el cuadro tiene que traer
+     una columna de DESIGNACIÓN fuera de la tripleta**
+     (`_tiene_columna_de_descripcion`) — no basta "tiene letras" ni "tiene un
+     espacio": una designación son **varias palabras con letras de verdad**, y
+     lo han de ser en **la mayoría** de las filas que cuadran; además **cada
+     fila** ha de traer letras fuera de la tripleta para llegar a ser línea.
+     Sin ella entraban 45 líneas sin descripción de tres cuadros
+     ("TIPO | CANTIDAD | PRECIO UD. | PRECIO TOTAL") cuya única columna de
+     texto es la referencia del inserto o de la fresa. **Lo que NO se exige es
+     el orden de las columnas**: se probó pedir que la cantidad no tuviera
+     forma de importe y se retiró — quitaba 9 líneas buenas de cuadros
+     rotulados "Concepto | Precio unitario | Cantidad | Presupuesto" para
+     excluir 4 dudosas (prueba
+     `test_un_cuadro_con_el_precio_antes_que_la_cantidad_tambien_se_demuestra`).
+     La tabla vuelve al camino normal con su cabecera: la etapa 5 sigue siendo la que traduce "P.UNITARIO".
+   - **El cuadro que mete todos sus lotes en la misma tabla**
+     (`_bloques_por_fila_de_lote`), con una fila que es solo la etiqueta del
+     lote encima de cada bloque — las compras multi-lote del Laboratorio
+     Central de ADIF. Se parte en un bloque por etiqueta, cada uno con su
+     propia caja (geometría de sus filas) y con la etiqueta en
+     `TablaExtraida.titulo_propio`, aparte de la cabecera de columnas, para que
+     la firma de cabecera —y con ella la caché del mapeo— siga siendo la misma
+     para los N bloques. Un bloque sin cabecera propia usa la del anterior (es
+     la MISMA tabla). **Condición del cliente: estas líneas solo entran si la
+     suma de cantidad × precio unitario del lote cuadra con el presupuesto de
+     licitación publicado de ese lote**, cuando existe
+     (`app.extraccion.pipeline_anejo.descartar_bloques_de_lote_que_no_cuadran`)
+     — es la misma garantía del reparto por lotes, y caza el cuadro cuya
+     tercera columna es el IMPORTE del renglón y no el precio unitario.
+   **Un precio escrito sin decimales ni símbolo ("5.400") solo se acepta si un
+   presupuesto de licitación publicado lo demuestra**, misma sesión, decisión
+   del cliente sobre `6.17/28510.0116`: tiene que existir **exactamente un**
+   presupuesto que sea múltiplo entero exacto de la suma de los precios del
+   cuadro (2 × 24.780 = 49.560,00 €, y el propio anejo declara las dos cosas).
+   Sin presupuesto publicado, el cuadro se queda fuera; una tabla que mezcla
+   importes de verdad y cifras peladas se descarta entera.
 5. **Mapear cabecera → esquema.** Única etapa donde interviene el modelo. Ver sección 6.
 6. **Normalizar y derivar.** Ver secciones 7 y 8.
 
@@ -590,6 +648,16 @@ como parámetro que el llamador pueda desactivar.
   cumplen y **0 traen un `!` junto con un espacio**, así que no hay ni un caso
   en el que tenga que decidir algo dudoso (decisión del cliente, sesión
   2026-09-19 cuarta parte).
+- **Una celda que es solo una cifra nunca es una descripción** ("5.200,00 €",
+  "1,2020 €/L", "70.000"), misma familia que "una unidad de medida que es solo
+  dígitos nunca es una unidad real" (2026-09-07). Si la columna que el mapeo da
+  por descripción trae un importe, ese mapeo está mal, y entonces **la fila
+  entera deja de valer**: no se publica su precio, ni su cantidad, ni su código
+  de precio — la fila no llega a ser línea (sesión 2026-09-19 quinta parte,
+  `2.22/28510.0075` p.96, cuya cabecera es `['PRESUPUESTO', None, None, None,
+  None]`; 4 filas en todo el corpus). Es lo contrario del caso de
+  2026-09-14/16, donde la fila **sin** descripción sí se conserva para
+  revisión: allí la fila no dice qué material es, aquí dice algo y es falso.
 
 ---
 
@@ -622,6 +690,15 @@ Estas reglas no se rompen ni siquiera "solo para la demo".
 9. **Idempotencia.** Reprocesar un expediente actualiza sus filas, nunca las duplica.
    Escritura por clave, no añadido ciego. El catálogo es acumulativo y una segunda
    ejecución que duplique filas destruye la confianza del cliente.
+   **Y funciona igual cuando una pasada produce MENOS que la anterior**
+   (sesión 2026-09-19, quinta parte): `podar_lineas_obsoletas_de_documento`
+   corre por cada documento procesado, también cuando ese documento no aporta
+   ninguna línea — vivía dentro de un `if resultado.lineas:` y un documento
+   que dejaba de aportar nada (porque una guarda nueva de la cascada rechaza
+   su tabla) conservaba para siempre las líneas de la pasada anterior, en
+   silencio. `procesar_anejo` extrae el documento entero en una pasada, así
+   que "ninguna línea" significa "ya no aporta nada", no "solo se ha
+   reprocesado una parte".
 10. **Trazabilidad obligatoria.** Cada cifra queda anclada a documento, página y
     fragmento. Es lo que la versión hecha con Copilot no puede ofrecer, y es donde
     se decide la comparación.
@@ -671,13 +748,34 @@ no Edge.
 3. Seguimiento por expediente: descargando, extrayendo, pendiente de revisión,
    completado, fallido, y por qué.
 4. **Cola de revisión**: casos que no cuadran, con el documento al lado, para
-   confirmar o corregir.
+   confirmar o corregir. Por línea hay **cuatro salidas, no una** (encargo del
+   cliente: que una línea no se quede pendiente para siempre): confirmar,
+   corregir el dato a mano, **descartarla con su motivo** (obligatorio) y
+   dejarla pendiente de consulta con su nota (obligatoria).
 5. Explorar el catálogo con filtros y **búsqueda por matrícula a través de todos los
    expedientes** (es la pregunta que ADIF realmente tiene: cómo evoluciona el precio
    de un material).
 6. Exportar el Excel único.
 7. Ver el estado del mantenimiento automático (`/mantenimiento`): última
    ejecución, próxima, histórico, y lanzar un ciclo a mano.
+8. **La Conciliación con la Plataforma** (`/conciliacion`, `GET /conciliacion`,
+   sesión 2026-09-19 quinta parte): la misma hoja del Excel, una fila por
+   expediente publicado del departamento con su Situación y su motivo,
+   filtrable por Situación y con el recuento de cada una. **La columna de
+   líneas sale del mismo recuento que escribe la hoja "Materiales"**
+   (`app.exportacion.contar_filas_de_materiales`, con el mismo criterio de
+   inclusión `linea_sale_en_materiales` y los mismos filtros
+   `app.catalogo_consulta.filtros_del_entregable`), nunca de una consulta
+   propia: si las dos cifras pudieran discrepar, la vista dejaría de servir
+   para lo único que existe. No se sondea periódicamente, a diferencia de las
+   otras cuatro pantallas.
+
+El catálogo muestra las mismas columnas que el Excel, con el mismo nombre:
+"Código de precio" y "Código del material" son dos columnas distintas (el
+rótulo "Código" a secas de antes de la sesión 2026-09-19 quinta parte las
+confundía), y "Estado según ADIF" convive en `/expedientes` con el estado del
+volcado de SAP anterior **sin mezclarse nunca con él** (sección 7: son dos
+volcados distintos, juntarlos dejaría cada valor sin procedencia).
 
 ---
 
@@ -763,6 +861,21 @@ texto, caché por hash (`cache_ocr_documento`), líneas marcadas
 (`texto_reconocido`, motivo y prefijo "[reconocimiento óptico]" en fragmento y
 trazas). Segundo uso permitido del modelo, además del de la sección 6. Lanzado
 sobre el corpus: +2.316 líneas en 54 expedientes, ~10,75 $.
+**Relectura de páginas concretas con un modelo mejor (sesión 2026-09-19, quinta
+parte, `app.extraccion.ocr_relectura`, trabajo de cola `ocr_relectura`,
+`POST /mantenimiento/ocr/releer`).** `MODEL_ID` basta para casi todo el corpus
+de escaneados; la excepción medida es la tabla apaisada del presupuesto de
+`3.16/28510.0044`, que `claude-haiku-4-5` devolvía inservible y `claude-opus-5`
+lee entera (6 páginas, 0,17 $). Cuatro condiciones: **solo las páginas que se
+le nombran** (releer las 130 costaría veinte veces más y las otras 124 están
+bien leídas), **solo con el modelo que se le nombra** (payload o
+`OCR_MODELO_RELECTURA`; sin ninguno de los dos **falla**, nunca relee en
+silencio con el modelo de siempre), **nunca empeora lo que había** (una página
+que vuelve con error o vacía se deja como estaba) y **queda escrito de dónde
+sale cada página** (`modelo` dentro de `CacheOcrDocumento.paginas`; el `modelo`
+de la caché sigue siendo el base, que es el que gobierna su validez). No se
+dispara solo ni tiene programación propia: es una decisión por documento,
+tomada mirando la lectura que hay.
 
 ---
 
@@ -2641,6 +2754,78 @@ sobre el corpus: +2.316 líneas en 54 expedientes, ~10,75 $.
   diferencias del entregable están explicadas una a una**: las 5 filas
   duplicadas de `4.26/28510.0005` y las 14 celdas de precio adjudicado.
 
+- **Sesión 2026-09-19 (quinta parte): los tres residuales, las cantidades que
+  no se podían relocalizar, los 14 de cobertura parcial de lotes y la
+  Conciliación en la web**
+  (`docs/sesion-2026-09-19-residuales-cobertura-de-lotes-y-conciliacion-en-la-web.md`).
+  Excel 19.865 → **20.001 filas**, 373 → **387 expedientes con filas**, 18
+  columnas, **0 expedientes desaparecidos y 0 materiales perdidos por ninguna
+  de las tres claves** (5.307 / 7.990 / 9.314; la de matrícula, idéntica).
+  (1) **Bloque 1, los tres residuales.** De las 13 cantidades, **5 se arreglan**
+  (`6.24/28510.0173` p.9: descripción, precio y cantidad caen cada uno en su
+  columna fantasma, y la cantidad se perdía por orden de ejecución) y 8 se
+  explican una a una — 5 de `6.26/28510.0030` con `-` en "Precio suministro" y
+  su cantidad en blanco (el `1.473,52 €` es el precio de REPARACIÓN, otro par
+  de columnas), 1 de `6.24/28510.0125` en blanco en el PDF, y 2 de
+  `3.18/28510.0082` que no se pueden arreglar solas porque su columna "Precio
+  unitario" es en realidad el IMPORTE. **Los precios sin decimales ni símbolo
+  de `6.17/28510.0116` quedan demostrados** (su propio anejo declara las
+  cantidades y el total: 2 × 24.780 = **49.560,00 € al céntimo**) y entran sus
+  3 líneas; la regla exige **exactamente un** presupuesto publicado que sea
+  múltiplo entero exacto de la suma, descarta la tabla que mezcla importes y
+  cifras peladas, y sin presupuesto deja el cuadro fuera. **`3.16/28510.0044`
+  releído con `claude-opus-5`, solo sus 6 páginas de cuadro, por 0,17 $**
+  (`app.extraccion.ocr_relectura`, sección 15): 14 líneas cuya suma
+  (822.343,17 €) cierra con el TOTAL que declara el documento (824.323,67 €)
+  salvo **una** fila cuya descripción vuelve vacía. Para que entraran hicieron
+  falta las dos vías nuevas de las etapas 3 y 4 (sección 5).
+  (2) **Bloque 2**: las 285 líneas del entregable con cantidad vacía **y sin
+  código ni matrícula** —el conjunto reproducible que contiene las 173 que la
+  tercera parte dejó sin determinar— relocalizadas **por página y posición de
+  la traza de origen**: **285 de 285**, 279 legítimas y **6 huecos reales, los
+  6 arreglados** (5 de la misma partida alzada que comparten cinco hermanos, y
+  1 por "MEDICIÓN" ausente del vocabulario de cantidad del mapeo).
+  (3) **Bloque 3**: **la premisa del encargo no era correcta** — en los 14,
+  ningún lote aportaba una sola línea al entregable. Los 14 quedan explicados
+  uno a uno (qué lotes faltan, si su cuadro está publicado y por qué no entra);
+  3 tienen un límite de origen real. La recuperación es por geometría
+  (`_bloques_por_fila_de_lote`) con la **prueba aritmética que exigió el
+  cliente** como puerta, y 5 expedientes pasan a aportar 20 filas.
+  **Dos lotes cuya suma no cuadra se dejan como están y se cuentan**:
+  `3.22/28510.0009` y `3.21/28510.0096`, donde la numeración de lotes del
+  cuadro y la de la adjudicación no coinciden — pregunta para ADIF.
+  (4) **Bloque 4**: **0 celdas del catálogo con un `!`**, en ninguna columna de
+  ninguna tabla, y por tanto ninguna comparación de claves falla por eso. No
+  hay más afectadas que las 5 de `4.26/28510.0005` que la cuarta parte ya
+  recompuso.
+  (5) **Bloque 5, la web**: "Código de precio" con su nombre (el rótulo decía
+  "Código" a secas), **"Código del material"** como columna propia (estaba en
+  el Excel y en la API y no se mostraba en ninguna pantalla), **"Estado según
+  ADIF"** en `/expedientes` sin mezclarse con el volcado de SAP anterior, y
+  **`/conciliacion`** nueva (sección 11). Comprobado columna a columna que las
+  18 del Excel están todas. La cola de revisión ya tenía las cuatro salidas por
+  línea que el cliente pidió en su día.
+  (6) **Tres defectos reales encontrados verificando, los tres corregidos**:
+  los bloques de lote se quedaban con el lote del bloque anterior (la franja de
+  página traía "El presupuesto base del lote N es de..."); **45 líneas sin
+  descripción** de tres cuadros cuya única columna de texto es la referencia de
+  la herramienta; y **un hueco de idempotencia** — la poda vivía dentro de un
+  `if resultado.lineas:`, así que un documento que dejaba de aportar nada
+  conservaba para siempre las líneas de la pasada anterior (invariante 9).
+  Más un cuarto: **una cabecera que no dice nada** (`2.22/28510.0075` p.96,
+  `['PRESUPUESTO', None, None, None, None]`) con la que la etapa 5 mapeó todo
+  un sitio a la izquierda — la designación en `cantidad`, el importe en
+  `descripcion` y `1` en el precio. **Si la columna de descripción trae un
+  importe, la fila no llega a ser línea**: el mapeo de esa cabecera está
+  demostrado mal y tampoco valen su precio ni su cantidad (4 filas en todo el
+  corpus). Y la `UniqueViolation` de `cache_codigo_material` que tumbaba un
+  documento entero.
+  (7) **Reproceso completo con la red apagada**: 517 expedientes, **21 min
+  5 s**, `descargas_lanzadas: 0`. **1.258 pruebas** (1.213 antes).
+  **Auditoría: 0 errores, 6 avisos.** "Conciliación" cuadra con "Materiales"
+  (20.001 = 20.001), 0 expedientes sin Situación, y las seis pantallas de la
+  web abren con datos reales y sin un solo error de consola.
+
 ---
 
 El registro histórico de hallazgos y decisiones de cada sesión vive en
@@ -2682,6 +2867,7 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `sesion-2026-09-19-decisiones-aplicadas-y-garantia-afinada.md`,
 `sesion-2026-09-19-cantidades-escaneados-y-situaciones.md`,
 `sesion-2026-09-19-espacios-del-contrato-y-precio-adjudicado.md`,
+`sesion-2026-09-19-residuales-cobertura-de-lotes-y-conciliacion-en-la-web.md`,
 `pregunta-cliente-contraguja-contraaguja.md`,
 `preguntas-cliente-lotes-del-titulo-y-ficheros-de-entrada.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.

@@ -104,6 +104,15 @@ class ExpedienteOut(BaseModel):
     # `Expediente.estado_contrato_sap`.
     estado_contrato_sap: Optional[str] = None
     estado_contrato_sap_actualizado_en: Optional[datetime] = None
+    # Bloque 5, sesión 2026-09-19 (quinta parte): "Estado según ADIF", el del
+    # listado que ADIF envió el 18/09/2026 (`Expediente.estado_adif`,
+    # CONTEXTO.md sección 7). Columna 11 del Excel desde la sesión 2026-09-18
+    # y hasta ahora invisible en la web, que era el hueco que la revisión de
+    # esta sesión buscaba. **Nunca se mezcla con `estado_contrato_sap` ni con
+    # `estado`**: son tres hechos de tres fuentes distintas (dos volcados de
+    # SAP distintos y el estado de procesamiento de este sistema).
+    estado_adif: Optional[str] = None
+    estado_adif_actualizado_en: Optional[datetime] = None
     # Sesión 2026-09-15: un `sin_publicar` ya no es definitivo -- ver
     # `Expediente.sin_publicar_en` y `app.mantenimiento.frescura`.
     sin_publicar_en: Optional[datetime] = None
@@ -455,3 +464,54 @@ class EstadoMantenimientoOut(BaseModel):
     proxima_ejecucion: datetime
     intervalo_segundos: float
     programado_activo: bool
+
+
+# Bloque 5, sesión 2026-09-19 (quinta parte): la hoja "Conciliación" servida a
+# la web (`app.routers.conciliacion`). Un espejo exacto de
+# `app.conciliacion.FilaConciliacion` -- ni un campo calculado aquí, ni un
+# nombre distinto del que lleva la columna del Excel.
+class FilaConciliacionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    codigo_expediente: str
+    titulo: Optional[str] = None
+    organo_contratacion: Optional[str] = None
+    estado_plataforma: Optional[str] = None
+    estado_adif: Optional[str] = None
+    documentos_descargados: int
+    documentos_reconocimiento_optico: int
+    lineas_en_catalogo: int
+    baja: str
+    situacion: str
+    motivo: str
+
+
+class RecuentoSituacionOut(BaseModel):
+    situacion: str
+    expedientes: int
+
+
+class RegistroPublicadoOut(BaseModel):
+    """De qué fecha es el registro de lo publicado y qué cubre -- el mismo
+    texto que el Resumen del Excel, para que la web no dé una cifra sin decir
+    de cuándo es."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    departamentos: list[str] = []
+    periodos_sindicacion: list[str] = []
+    sindicacion_actualizado_hasta: Optional[datetime] = None
+    busqueda_ejecutada_en: Optional[datetime] = None
+    busqueda_fragmentos: list[str] = []
+    busqueda_codigos_encontrados: Optional[int] = None
+    expedientes_publicados: int = 0
+    expedientes_no_publicados: int = 0
+    expedientes_en_ficha_de_otro: int = 0
+
+
+class ConciliacionOut(BaseModel):
+    total: int
+    total_lineas: int
+    situaciones: list[RecuentoSituacionOut]
+    filas: list[FilaConciliacionOut]
+    registro: RegistroPublicadoOut

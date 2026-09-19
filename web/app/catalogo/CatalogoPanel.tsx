@@ -182,6 +182,31 @@ function celdaCodigoPrecio(linea: LineaCatalogo) {
   );
 }
 
+// "Código del material" (CONTEXTO.md secciones 6 y 7): la columna "REPUESTO"
+// del cuadro cuando existe, y si no el sustantivo principal de la
+// descripción contra un vocabulario controlado. Estaba en el Excel y en la
+// API desde el principio y no se mostraba en ninguna pantalla -- hueco
+// encontrado en la revisión del bloque 5 de la sesión 2026-09-19 (quinta
+// parte). Vacía en el 5,3 % del catálogo: el vocabulario no casa esa
+// descripción todavía, no es un dato perdido.
+function celdaCodigoMaterial(linea: LineaCatalogo) {
+  if (linea.codigo_material) return linea.codigo_material;
+  if (esPartidaAlzada(linea.descripcion)) {
+    return (
+      <DatoVacio
+        motivo="na"
+        titulo="Una partida alzada es una reserva presupuestaria, no un artículo de almacén: no tiene código de material."
+      />
+    );
+  }
+  return (
+    <DatoVacio
+      motivo="no-consta"
+      titulo="El vocabulario de códigos de material no reconoce todavía el sustantivo principal de esta descripción."
+    />
+  );
+}
+
 // Cantidad vacía: verificado contra el corpus real (bloque 3, sesión
 // 2026-09-06, docs/inventario-celdas-vacias.md) que la mayoría de los casos
 // son catálogos de acuerdo marco de muchos lotes que fijan solo el precio
@@ -438,7 +463,14 @@ export default function CatalogoPanel({ apiUrl }: { apiUrl: string }) {
                   <th>Título expediente</th>
                   <th>Lote</th>
                   <th>Matrícula</th>
-                  <th>Código</th>
+                  {/* Bloque 5, sesión 2026-09-19 (quinta parte): esta columna
+                      siempre fue `codigo_precio`, pero el rótulo decía
+                      "Código" a secas -- indistinguible de "Código del
+                      material", que es otra cosa y otra columna del Excel. El
+                      Excel la llama "Código de precio" desde que entró
+                      (sesión 2026-09-19, segunda parte); aquí también. */}
+                  <th>Código de precio</th>
+                  <th>Código del material</th>
                   <th>Descripción</th>
                   <th className="num">Cantidad</th>
                   <th>Unidad</th>
@@ -469,6 +501,7 @@ export default function CatalogoPanel({ apiUrl }: { apiUrl: string }) {
                         )}
                       </td>
                       <td className="mono">{celdaCodigoPrecio(linea)}</td>
+                      <td>{celdaCodigoMaterial(linea)}</td>
                       <td>
                         <DescripcionCelda texto={linea.descripcion} />
                       </td>

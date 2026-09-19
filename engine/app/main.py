@@ -11,7 +11,7 @@ from app.extraccion.estado_sap import validar_ruta_estado_sap
 from app.extraccion.estados_adif import validar_ruta_estados_adif
 from app.extraccion.maestro_materiales import validar_ruta_maestro_materiales
 from app.extraccion.sap_desglose import validar_ruta_sap_desglose
-from app.routers import catalogo, documentos, expedientes, health, mantenimiento, revision, trabajos
+from app.routers import catalogo, conciliacion, documentos, expedientes, health, mantenimiento, revision, trabajos
 
 logger = logging.getLogger("api")
 
@@ -81,6 +81,7 @@ app.include_router(health.router)
 app.include_router(expedientes.router)
 app.include_router(trabajos.router)
 app.include_router(catalogo.router)
+app.include_router(conciliacion.router)
 app.include_router(revision.router)
 app.include_router(documentos.router)
 app.include_router(mantenimiento.router)

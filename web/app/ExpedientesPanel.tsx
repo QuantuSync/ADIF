@@ -108,6 +108,9 @@ export type Expediente = {
   // arriba (estado de PROCESAMIENTO de este sistema) -- un expediente puede
   // estar `completado` aquí y seguir "En ejecución" para ADIF, o al revés.
   estado_contrato_sap: string | null;
+  // Bloque 5, sesión 2026-09-19 (quinta parte): el del listado que ADIF
+  // envió el 18/09/2026 -- nunca se mezcla con el de arriba.
+  estado_adif: string | null;
   // Bloque 3, sesión 2026-09-12 (repaso de interfaz): estos tres avisos ya
   // existían en la API (`engine/app/schemas.py`) desde sesiones anteriores
   // -- CONTEXTO.md sección 16 solo pedía sacar `aviso_sindicacion`, pero
@@ -656,6 +659,22 @@ export default function ExpedientesPanel({
                         title="Estado del contrato según la exportación SAP de ADIF -- distinto del estado de procesamiento de este sistema, a la izquierda."
                       >
                         SAP: {exp.estado_contrato_sap}
+                      </span>
+                    )}
+                    {/* Bloque 5, sesión 2026-09-19 (quinta parte): "Estado
+                        según ADIF", el del listado que ADIF envió el
+                        18/09/2026. Columna 11 del Excel desde la sesión
+                        2026-09-18 y hasta ahora invisible en la web. Se
+                        muestra aparte del de arriba a propósito: son dos
+                        volcados de SAP distintos (212 códigos en común, 155
+                        solo en uno, 146 solo en el otro, CONTEXTO.md sección
+                        7) y juntarlos dejaría cada valor sin procedencia. */}
+                    {exp.estado_adif && (
+                      <span
+                        className="status-note status-note-tight"
+                        title="Estado según el listado de estados de contratación que ADIF envió el 18/09/2026, sacado por ellos de SAP -- distinto del volcado de ejecución SAP anterior y del estado de procesamiento de este sistema."
+                      >
+                        ADIF: {exp.estado_adif}
                       </span>
                     )}
                     <AvisoInformativo texto={exp.aviso_sindicacion} />

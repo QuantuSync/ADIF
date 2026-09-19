@@ -1799,6 +1799,25 @@ def ejecutar_extraccion_expediente(
                 **{l.identificador_lote: l.baja_lote for l in lotes},
             }
             hermanos_en_catalogo = _hermanos_en_catalogo(db, lotes_hermanos)
+            # Bloque 1, sesión 2026-09-19 (quinta parte): los presupuestos de
+            # licitación ya publicados y trazados de este expediente y de sus
+            # lotes. Es lo único con lo que se puede demostrar un precio que el
+            # cuadro escribe sin decimales ni símbolo (`app.extraccion.tabla.
+            # _precios_demostrados_por_un_total`, condición del cliente sobre
+            # `6.17/28510.0116`). Se calculan aquí, después de que los importes
+            # estén resueltos y antes del bucle de documentos.
+            presupuestos_declarados = tuple(
+                {
+                    importe
+                    for importe in [expediente.importe_licitacion, *(l.importe_licitacion for l in lotes)]
+                    if importe is not None
+                }
+            )
+            # Bloque 3, misma sesión: el presupuesto de licitación publicado de
+            # cada lote, para la prueba aritmética que el cliente exige a lo
+            # que recupera la partición de un cuadro en bloques de lote
+            # (`app.extraccion.pipeline_anejo.descartar_bloques_de_lote_que_no_cuadran`).
+            presupuestos_por_lote = {l.identificador_lote: l.importe_licitacion for l in lotes}
 
             # Etapas 3-6: el cuadro de precios se busca por contenido en TODOS
             # los documentos, nunca solo en los clasificados como "anejo"
@@ -1860,6 +1879,8 @@ def ejecutar_extraccion_expediente(
                             io.BytesIO(contenido), item.paginas, item.documento.id, expediente.id,
                             {**bajas_por_identificador, **lotes_candidatos_del_cuadro}, db, model_provider,
                             lote_propio=lote_propio, documento_de_otro_lote=de_otro_lote,
+                            presupuestos_declarados=presupuestos_declarados,
+                            presupuestos_por_lote=presupuestos_por_lote,
                         )
                         if _el_cuadro_declara_todos_los_lotes(tentativo, lotes_candidatos_del_cuadro):
                             resultado = tentativo
@@ -1874,11 +1895,14 @@ def ejecutar_extraccion_expediente(
                             io.BytesIO(contenido), item.paginas, item.documento.id, expediente.id,
                             bajas_por_identificador, db, model_provider,
                             lote_propio=lote_propio, documento_de_otro_lote=de_otro_lote,
+                            presupuestos_declarados=presupuestos_declarados,
+                            presupuestos_por_lote=presupuestos_por_lote,
                         )
                     if resultado.lineas and item.reconocido:
                         for linea in resultado.lineas:
                             marcar_linea_reconocida(linea)
                         documentos_reconocidos[item.documento.nombre_archivo] = len(resultado.lineas)
+                    ids_tocadas_documento: set[int] = set()
                     if resultado.lineas:
                         grupos: dict[Optional[str], list[dict]] = {}
                         for linea in resultado.lineas:
@@ -1890,7 +1914,6 @@ def ejecutar_extraccion_expediente(
                         # -- nunca dentro del bucle, porque un grupo no debe
                         # podar lo que otro grupo del MISMO documento acaba
                         # de tocar.
-                        ids_tocadas_documento: set[int] = set()
                         for identificador, lineas_grupo in grupos.items():
                             lote_id = lotes_por_identificador.get(identificador) if identificador is not None else None
                             if identificador in lotes_hermanos:
@@ -1908,16 +1931,30 @@ def ejecutar_extraccion_expediente(
                             lineas_creadas_doc += guardado.creadas
                             lineas_actualizadas_doc += guardado.actualizadas
                             ids_tocadas_documento |= guardado.ids_tocadas
-                        # Silenciosa a propósito, sin motivo_revision (no
-                        # manda el expediente a revisión): mismo criterio que
-                        # `_limpiar_huerfana_superada`, que ya borra huérfanas
-                        # superadas sin avisar -- la poda es idempotencia
-                        # esperada, no un hallazgo dudoso. Se cuenta igual
-                        # (`lineas_podadas`, en el resumen final) para que
-                        # quede visible en el informe del reproceso.
-                        lineas_podadas += podar_lineas_obsoletas_de_documento(
-                            db, expediente.id, item.documento.id, frozenset(ids_tocadas_documento)
-                        )
+                    # Silenciosa a propósito, sin motivo_revision (no manda el
+                    # expediente a revisión): mismo criterio que
+                    # `_limpiar_huerfana_superada`, que ya borra huérfanas
+                    # superadas sin avisar -- la poda es idempotencia
+                    # esperada, no un hallazgo dudoso. Se cuenta igual
+                    # (`lineas_podadas`, en el resumen final) para que quede
+                    # visible en el informe del reproceso.
+                    #
+                    # Sesión 2026-09-19 (quinta parte): la poda corre **aunque
+                    # el documento no haya producido ninguna línea**. Vivía
+                    # dentro del `if resultado.lineas:` y eso dejaba un hueco
+                    # de idempotencia real: un documento que dejaba de aportar
+                    # nada (porque una guarda nueva de la cascada rechaza su
+                    # tabla) conservaba para siempre las líneas de la pasada
+                    # anterior. Destapado con las 45 líneas sin descripción de
+                    # `2.23/28510.0098`/`6.22/28510.0051`/`0159`: la guarda ya
+                    # rechazaba su cuadro y las líneas seguían ahí.
+                    # `procesar_anejo` extrae el documento entero en una pasada
+                    # (docstring de `podar_lineas_obsoletas_de_documento`), así
+                    # que "ninguna línea" significa "este documento ya no
+                    # aporta nada", no "solo se ha reprocesado una parte".
+                    lineas_podadas += podar_lineas_obsoletas_de_documento(
+                        db, expediente.id, item.documento.id, frozenset(ids_tocadas_documento)
+                    )
                     item.documento.procesado_en = datetime.now(timezone.utc)
                     db.commit()
                     if resultado.lineas:

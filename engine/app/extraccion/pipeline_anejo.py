@@ -112,6 +112,69 @@ class ResultadoProcesamientoAnejo:
 _MARCAS_SUBSANACION = (("donde aparece", "debiendo ser"), ("donde dice", "debe decir"))
 
 
+_TOLERANCIA_CUADRE_LOTE = Decimal("0.01")
+
+
+def descartar_bloques_de_lote_que_no_cuadran(
+    lineas: list[dict], presupuestos_por_lote: dict[str, Optional[Decimal]]
+) -> tuple[list[dict], list[str]]:
+    """Condición del cliente para el bloque 3 de la sesión 2026-09-19 (quinta
+    parte): las líneas recuperadas de un cuadro partido en bloques por lote
+    (`app.extraccion.tabla._bloques_por_fila_de_lote`) **solo entran si pasan
+    la misma prueba que el reparto por lotes** -- suma de cantidad × precio
+    unitario del lote contra el presupuesto de licitación publicado de ese
+    lote, **cuando exista ese presupuesto**. Sin presupuesto publicado no hay
+    con qué comprobar y entran, igual que en la verificación del reparto.
+
+    Es la misma garantía que `_el_cuadro_declara_todos_los_lotes` (sesión
+    2026-09-18, sexta parte) aplicada a esta vía nueva: una recuperación
+    estructuralmente cierta puede seguir leyendo mal una columna -- el caso
+    medido es un cuadro "Concepto | Unidades | Importe" cuya tercera columna
+    es el IMPORTE de la fila, no el precio unitario, así que 3 × 210.000,00 €
+    da el triple del presupuesto de su lote. La cuenta lo caza, y esas líneas
+    se quedan fuera con su motivo en vez de meter un precio inflado.
+
+    Devuelve (líneas que se quedan, motivos de los lotes descartados)."""
+    marcadas = [l for l in lineas if l.get("de_bloque_de_lote")]
+    for linea in lineas:
+        linea.pop("de_bloque_de_lote", None)
+    if not marcadas:
+        return lineas, []
+    por_lote: dict[Optional[str], list[dict]] = {}
+    for linea in marcadas:
+        por_lote.setdefault(linea.get("identificador_lote"), []).append(linea)
+    descartadas: set[int] = set()
+    motivos: list[str] = []
+    for identificador, grupo in sorted(por_lote.items(), key=lambda kv: str(kv[0])):
+        presupuesto = presupuestos_por_lote.get(identificador) if identificador is not None else None
+        if presupuesto is None:
+            continue
+        # La suma es la del LOTE entero en este documento, no solo la de las
+        # líneas recuperadas: la prueba que pidió el cliente es "suma de
+        # cantidad × precio unitario del lote contra el presupuesto de
+        # licitación publicado de ese lote". Lo que se descarta si no cuadra
+        # son solo las recuperadas por esta vía -- las que ya salían antes no
+        # se tocan.
+        del_lote = [l for l in lineas if l.get("identificador_lote") == identificador]
+        suma = sum(
+            (l["cantidad"] * l["precio_unitario"]
+             for l in del_lote
+             if l.get("cantidad") is not None and l.get("precio_unitario") is not None),
+            Decimal("0"),
+        )
+        if abs(suma - presupuesto) <= _TOLERANCIA_CUADRE_LOTE:
+            continue
+        descartadas.update(id(l) for l in grupo)
+        motivos.append(
+            f"LOTE {identificador}: las {len(grupo)} línea(s) del cuadro repartido por lotes no entran "
+            f"porque su suma de cantidad × precio unitario ({suma:.2f} €) no cuadra con el presupuesto "
+            f"de licitación publicado de ese lote ({presupuesto:.2f} €)"
+        )
+    if not descartadas:
+        return lineas, motivos
+    return [l for l in lineas if id(l) not in descartadas], motivos
+
+
 def _es_nota_de_subsanacion(paginas_texto: list[PaginaTexto]) -> bool:
     texto = normalizar(" ".join(p.texto for p in paginas_texto[:3]))
     return any(original in texto and correccion in texto for original, correccion in _MARCAS_SUBSANACION)
@@ -139,6 +202,8 @@ def procesar_anejo(
     model_provider: Optional[ModelProvider] = None,
     lote_propio: Optional[str] = None,
     documento_de_otro_lote: bool = False,
+    presupuestos_declarados: tuple[Decimal, ...] = (),
+    presupuestos_por_lote: Optional[dict[str, Optional[Decimal]]] = None,
 ) -> ResultadoProcesamientoAnejo:
     """`paginas_texto`: el texto plano de cada página, ya extraído por el
     llamador (etapa 1 de la cascada, `app.extraccion.texto.
@@ -179,7 +244,20 @@ def procesar_anejo(
     en la p.116 y una tabla suya suelta en la p.122). `documento_de_otro_lote`:
     el documento es el Contrato de otro lote -- sus tablas se siguen
     asociando por su cabecera, pero ninguna sin cabecera se atribuye a este
-    expediente."""
+    expediente.
+
+    `presupuestos_declarados` (bloque 1, sesión 2026-09-19 quinta parte): los
+    importes de licitación publicados de este expediente y de sus lotes. Solo
+    los usa la etapa 4 para demostrar los precios de un cuadro escritos sin
+    decimales ni símbolo (ver `app.extraccion.tabla.
+    _precios_demostrados_por_un_total`); nada más de la cascada los mira.
+
+    `presupuestos_por_lote`: identificador de lote -> su presupuesto de
+    licitación publicado. Solo lo usa
+    `descartar_bloques_de_lote_que_no_cuadran` (condición del cliente para
+    el bloque 3 de esta sesión); sin él, esa comprobación no descarta
+    nada."""
+    presupuestos_por_lote = presupuestos_por_lote or {}
     lineas: list[dict] = []
     tablas_procesadas = 0
     llamadas_modelo = 0
@@ -269,7 +347,9 @@ def procesar_anejo(
 
         for candidata in localizacion.candidatas:
             pagina = pdf.pages[candidata.numero - 1]
-            tablas_pagina = sorted(extraer_tablas_pagina(pagina), key=lambda t: t.bbox[1])
+            tablas_pagina = sorted(
+                extraer_tablas_pagina(pagina, presupuestos_declarados), key=lambda t: t.bbox[1]
+            )
             banda_top = 0.0
             for tabla in tablas_pagina:
                 heredado_de_pagina_anterior = False
@@ -304,6 +384,7 @@ def procesar_anejo(
                     resultado_asociacion = asociar_lote_tabla(
                         pagina, banda_top, tabla.bbox, identificadores_validos=set(lotes),
                         texto_titulo_tabla=" ".join(c for c in tabla.cabecera if c),
+                        texto_lote_propio=tabla.titulo_propio,
                         texto_cola_pagina_anterior=cola_anterior,
                         separada_por_paginas=separada,
                         texto_paginas_previas=paginas_previas,
@@ -733,6 +814,16 @@ def procesar_anejo(
                     # tabla (`6.23/28510.0051`: P-0166 y P-0178, mismo texto
                     # y precio en las p.21 y 22 del mismo cuadro).
                     linea["tabla_origen"] = (documento_origen_id, tablas_con_cabecera)
+                    # Bloque 3, sesión 2026-09-19 (quinta parte): la línea sale
+                    # de un cuadro que mete todos sus lotes en una sola tabla,
+                    # partida en bloques por su fila "LOTE N"
+                    # (`app.extraccion.tabla._bloques_por_fila_de_lote`).
+                    # Marca transitoria: la condición del cliente es que estas
+                    # líneas solo entren si la suma del lote cuadra con su
+                    # presupuesto publicado, y eso se comprueba al terminar el
+                    # documento (ver `descartar_bloques_de_lote_que_no_cuadran`).
+                    if tabla.titulo_propio:
+                        linea["de_bloque_de_lote"] = True
                     if identificador_lote is None:
                         # Hallazgo real (expediente 6.25/28510.0027): varias
                         # tablas ambiguas del mismo documento pueden compartir
@@ -751,6 +842,13 @@ def procesar_anejo(
 
     if _es_nota_de_subsanacion(paginas_texto):
         lineas = _quedarse_con_la_correccion(lineas)
+
+    # Bloque 3, sesión 2026-09-19 (quinta parte), condición del cliente: la
+    # prueba aritmética del reparto por lotes para lo que recupera la partición
+    # de un cuadro en bloques de lote. Va aquí, con el documento entero leído,
+    # porque el cuadro de un lote puede ocupar varios bloques y páginas.
+    lineas, motivos_bloques = descartar_bloques_de_lote_que_no_cuadran(lineas, presupuestos_por_lote)
+    tablas_sin_lote.extend(motivos_bloques)
 
     # Bloque 5, sesión 2026-09-18 (quinta parte): las celdas en glifos que la
     # aritmética de su propia fila no pudo confirmar, resueltas -- si se puede
