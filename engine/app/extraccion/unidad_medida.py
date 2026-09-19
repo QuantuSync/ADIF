@@ -25,9 +25,22 @@ de varias formas ("UD.", "UN", "ud", "Ud." son todas unidad; "t", "T", "Ton";
 el valor tal como venía se guarda aparte (`unidad_medida_original`). Solo se
 unifica lo que es claramente lo mismo -- verificado contra el catálogo real
 que "M" es metro (cable, carril) y "T" tonelada (balasto) --; lo que no, se
-deja como viene: "PA" (partida alzada) no es "ud", "P" (del maestro de SAP,
-sin nombre completo) no es ninguna de las dos, "ml" puede ser metro lineal o
-mililitro, "pieza" no se da por "ud".
+deja como viene: "PA" (partida alzada) no es "ud" y "P" (del maestro de SAP,
+sin nombre completo) no es ninguna de las dos; "pieza" no se da por "ud".
+
+**"Ml" SÍ se unifica con "m" desde la sesión 2026-09-19 (séptima parte,
+bloque 3), y hasta entonces no se hacía por una duda que el corpus deshace.**
+La duda era "metro lineal o mililitro". Las tres únicas líneas del entregable
+con esa unidad son las de `6.17/28510.0007` p.20, el presupuesto de licitación
+de un suministro de balasto, y son obra civil medida a lo largo: "Colocación
+de lámina geotextil" (800 Ml), "Muro de contención..." (400 Ml) y "Ejecución
+de zona de paso próxima a la vía" (400 Ml). El propio cuadro usa `m3` y `m2`
+para volumen y superficie en las filas de al lado, y `PA` para la partida
+alzada: `Ml` es metro lineal sin ninguna duda -- un muro de contención no se
+mide en mililitros. El literal del documento se conserva en
+`unidad_medida_original`, así que la unificación no pierde nada y es
+reversible. Si algún día aparece un "ml" que sea de verdad mililitro, se verá
+en esa columna.
 """
 
 import re
@@ -61,7 +74,7 @@ _UNIDADES = frozenset({
 # se deja tal cual.
 _FORMA_UNICA = {
     "u": "ud", "ud": "ud", "uds": "ud", "un": "ud", "und": "ud", "unid": "ud", "unidad": "ud", "unidades": "ud",
-    "m": "m", "metro": "m", "metros": "m",
+    "m": "m", "metro": "m", "metros": "m", "ml": "m",
     "m2": "m2", "m3": "m3", "dm3": "dm3", "cm3": "cm3", "km": "km", "cm": "cm", "mm": "mm",
     "l": "l", "litro": "l", "litros": "l",
     "kg": "kg", "g": "g",

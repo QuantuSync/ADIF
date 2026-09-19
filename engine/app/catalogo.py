@@ -93,16 +93,24 @@ MOTIVO_MATRICULA_8_FUERA_DEL_MAESTRO = (
     "matrícula con formato antiguo de 8 dígitos, no figura en el maestro actual de ADIF"
 )
 
+# Bloque 2, misma sesión y misma decisión: la de NUEVE cifras que el documento
+# imprime así y el maestro no recoge. Son dos motivos y no uno porque explican
+# dos cosas distintas -- la de 8 cifras es un formato que ADIF ya no usa; la de
+# 9 es del formato de hoy y lo que falta es la fila del maestro. Medido: el
+# maestro es parcial artículo a artículo dentro de la misma familia (ver
+# `docs/matriculas-de-9-digitos-fuera-del-maestro.md`).
+MOTIVO_MATRICULA_FUERA_DEL_MAESTRO = "no figura en el maestro de materiales de ADIF"
 
-def matriculas_8_fuera_del_maestro(db: Session, matriculas) -> frozenset[str]:
-    """De `matriculas`, las de 8 cifras que NO están en el maestro de
-    materiales de ADIF (`app.extraccion.maestro_materiales`).
+
+def matriculas_fuera_del_maestro(db: Session, matriculas) -> frozenset[str]:
+    """De `matriculas`, las que NO están en el maestro de materiales de ADIF
+    (`app.extraccion.maestro_materiales`).
 
     Con el maestro sin cargar devuelve el conjunto vacío: sin listado contra
     el que comprobar no se puede afirmar que una matrícula no figure en él, y
-    marcar las 390 filas por el hueco de una fuente de entrada sería escribir
+    marcar miles de filas por el hueco de una fuente de entrada sería escribir
     un motivo falso."""
-    candidatas = {m for m in matriculas if m and len(m) == 8 and m.isdigit()}
+    candidatas = {m for m in matriculas if m and m.isdigit()}
     if not candidatas:
         return frozenset()
     if db.query(MaestroMaterial).limit(1).first() is None:
@@ -114,6 +122,14 @@ def matriculas_8_fuera_del_maestro(db: Session, matriculas) -> frozenset[str]:
         .all()
     }
     return frozenset(candidatas - en_maestro)
+
+
+def motivo_de_matricula_fuera_del_maestro(matricula: str) -> str:
+    return (
+        MOTIVO_MATRICULA_8_FUERA_DEL_MAESTRO
+        if len(matricula) == 8
+        else MOTIVO_MATRICULA_FUERA_DEL_MAESTRO
+    )
 
 
 # Solo la de 9 cifras: dentro de ruido pegado, 8 cifras seguidas también son
@@ -3066,7 +3082,7 @@ def guardar_lineas_catalogo(
     # vive en base de datos y esa función no ve la sesión; `motivo_revision`
     # se recalcula entero en cada pasada (ver el bucle de actualización más
     # abajo), así que anotarlo aquí es idempotente.
-    fuera_del_maestro = matriculas_8_fuera_del_maestro(
+    fuera_del_maestro = matriculas_fuera_del_maestro(
         db, (datos.get("matricula") for datos in combinadas)
     )
     for datos in combinadas:
@@ -3076,7 +3092,8 @@ def guardar_lineas_catalogo(
         # ha evaluado", y colarlo aquí pisaría el motivo que la línea tuviera.
         if "motivo_revision" in datos and datos.get("matricula") in fuera_del_maestro:
             datos["motivo_revision"] = _acumular_motivo_unico(
-                datos.get("motivo_revision"), MOTIVO_MATRICULA_8_FUERA_DEL_MAESTRO
+                datos.get("motivo_revision"),
+                motivo_de_matricula_fuera_del_maestro(datos["matricula"]),
             )
         # Transitorio, nunca una columna de `LineaCatalogo` -- se retira
         # antes de que `datos` se use para crear/actualizar la fila real,
