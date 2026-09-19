@@ -910,8 +910,11 @@ _PARENTESIS_RE = re.compile(r"\([^)]*\)")
 
 def _nombre_de_columna_importe(texto: str) -> bool:
     """El nombre, sin su calificador entre paréntesis ("IMPORTE (€ Ejecución
-    por Contrata)" -> "importe"), es uno de los nombres cerrados de arriba."""
-    return _PARENTESIS_RE.sub(" ", texto).strip() in _NOMBRES_COLUMNA_IMPORTE
+    por Contrata)" -> "importe") y sin la llamada a nota al pie que algunos
+    cuadros le cuelgan ("IMPORTE **" -> "importe", `3.18/28510.0082_ANEJO_1`
+    p.7, que repite en p.238 el mismo cuadro con la cabecera sin asteriscos),
+    es uno de los nombres cerrados de arriba."""
+    return _PARENTESIS_RE.sub(" ", texto).strip().rstrip("*").strip() in _NOMBRES_COLUMNA_IMPORTE
 
 
 def completar_columna_importe(
@@ -936,3 +939,82 @@ def completar_columna_importe(
     if len(candidatas) != 1:
         return mapeo
     return {**mapeo, CAMPO_IMPORTE: candidatas[0]}
+
+
+# Bloque 1, decisión 1 del cliente (sesión 2026-09-19, sexta parte): un cuadro
+# cuya ÚNICA columna de dinero se llama, en su propia cabecera, "IMPORTE".
+#
+# Caso real que lo motiva, `3.18/28510.0082_ANEJO_1.pdf` p.238: la cabecera es
+# "MATRICULA | DESIGNACIÓN | U | IMPORTE" y el mapeo, que necesita un
+# `precio_unitario` para que la tabla llegue a ser cuadro de precios, se lo da
+# a la única columna de euros que hay. Pero el documento ya dice lo que esa
+# columna es: el IMPORTE del renglón, no el precio de una unidad —
+# 49.604,00 € son 16 aires acondicionados, no uno—. Publicar ese número como
+# precio unitario es publicar un precio dieciséis veces mayor que el real.
+#
+# Lo que se hace es mover la columna a `importe` (el campo opcional que solo
+# usa la comprobación aritmética) y dejar la tabla **sin precio**: a partir de
+# ahí manda la regla que el cliente ya aprobó
+# (`app.catalogo.corregir_precio_con_importe_del_documento`), que solo escribe
+# un precio si el importe entre la cantidad da exacto Y la suma del lote cierra
+# un total declarado. Si no lo cierra, la línea se queda fuera con su motivo.
+#
+# Coincidencia EXACTA del nombre, con el mismo vocabulario cerrado de
+# `completar_columna_importe` -- nunca "contiene", y "IMPORTE UNITARIO" sigue
+# deliberadamente fuera porque ese sí es un precio. Medido sobre las 497
+# cabeceras ya cacheadas del corpus: **3** la cumplen.
+def corregir_columna_importe_tomada_por_precio(
+    cabecera: list[Optional[str]], mapeo: dict[str, Optional[int]]
+) -> tuple[dict[str, Optional[int]], bool]:
+    """Devuelve `(mapeo, corregido)`. Si la columna que el mapeo tomó por
+    `precio_unitario` es, por su propio nombre de cabecera, la de importes,
+    pasa a `importe` y la tabla se queda sin columna de precio."""
+    indice = mapeo.get("precio_unitario")
+    if indice is None or mapeo.get(CAMPO_IMPORTE) is not None:
+        return mapeo, False
+    texto = cabecera[indice] if indice < len(cabecera) else None
+    if not texto or not _nombre_de_columna_importe(normalizar(texto)):
+        return mapeo, False
+    return {**mapeo, "precio_unitario": None, CAMPO_IMPORTE: indice}, True
+
+
+# Segunda mitad de la misma corrección. En una cabecera ya demostrada mal
+# mapeada (la de arriba), una columna que el mapeo dio a `unidad_medida` y que
+# **no contiene ni una sola unidad** -- todos sus valores son cifras peladas --
+# no es una columna de unidades: es la de cantidad ("U" de unidades, en
+# `3.18/28510.0082`), y sus valores ya se descartaban uno a uno con el motivo
+# "unidad de medida descartada por ser solo numérica".
+#
+# Se libera la columna, sin asignarla a `cantidad`: así la recuperación de
+# columna fantasma que ya existe (`app.catalogo._recuperar_cantidad_columna_
+# fantasma`, que nunca toca una columna reclamada por otro campo) puede leerla
+# en las filas a las que les falta la cantidad, con su motivo, y las filas que
+# sí la traen en su sitio no se mueven. Acotado a las tablas donde la
+# corrección de arriba ha disparado: fuera de ellas no hay nada que demuestre
+# que el mapeo esté mal.
+def liberar_unidad_que_son_solo_cifras(
+    mapeo: dict[str, Optional[int]], filas: list[list[Optional[str]]]
+) -> dict[str, Optional[int]]:
+    indice = mapeo.get("unidad_medida")
+    if indice is None:
+        return mapeo
+    valores = [
+        (fila[indice] or "").strip()
+        for fila in filas
+        if indice < len(fila) and (fila[indice] or "").strip()
+    ]
+    if not valores or not all(_SOLO_CIFRAS_RE.match(v) for v in valores):
+        return mapeo
+    if mapeo.get("cantidad") is None:
+        # El cuadro no tiene ninguna otra columna candidata a cantidad (el
+        # mismo cuadro de `3.18/28510.0082` aparece dos veces en su anejo, y
+        # en la copia de la p.7 el mapeo dejó `cantidad` sin columna): la que
+        # se acaba de demostrar que no son unidades es la de cantidad. Con
+        # `cantidad` ya mapeada, en cambio, solo se libera -- la recuperación
+        # de columna fantasma leerá esta de al lado en las filas a las que les
+        # falte, con su motivo.
+        return {**mapeo, "unidad_medida": None, "cantidad": indice}
+    return {**mapeo, "unidad_medida": None}
+
+
+_SOLO_CIFRAS_RE = re.compile(r"^[\d.,]+$")

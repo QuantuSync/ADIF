@@ -141,6 +141,15 @@ class TablaExtraida:
     # 6) tiene que seguir siendo la misma para los N bloques de un cuadro que
     # repite la misma cabecera de columnas en cada lote.
     titulo_propio: str = ""
+    # Bloque 1, decisión 5 del cliente (sesión 2026-09-19, sexta parte): el
+    # índice de la columna que hace de descripción en un cuadro cuya ÚNICA
+    # columna de texto es la referencia de la herramienta ("SFT01-2388L-PH-6920",
+    # "WCMX-04 02 08-R53"). El cliente acepta la referencia como Descripción del
+    # material, con la línea marcada. Se pasa aparte porque lo decide esta etapa
+    # -- es la que ya ha comprobado, para aceptar la tabla, que ninguna columna
+    # es una designación de verdad (ver `_tiene_columna_de_descripcion`) -- y
+    # la etapa 5 no puede saberlo mirando solo la cabecera.
+    columna_referencia: Optional[int] = None
 
 
 def _columnas_x(tabla) -> tuple[tuple[float, float] | None, ...]:
@@ -625,31 +634,152 @@ def _parece_designacion(texto: str) -> bool:
     return palabras >= _MIN_PALABRAS_DESIGNACION
 
 
+# Bloque 1, decisión 5 del cliente (sesión 2026-09-19, sexta parte): la guarda
+# de arriba dejaba fuera **tres cuadros reales** cuya única columna de texto es
+# la referencia del inserto o de la fresa ("TIPO | CANTIDAD | PRECIO UD. |
+# PRECIO TOTAL", `2.23/28510.0098` p.4 y p.9, `6.22/28510.0051` y
+# `6.22/28510.0159` p.9). El cliente decide que esa referencia **se acepta como
+# Descripción del material**, y que esas líneas queden marcadas de forma
+# visible, igual que las de reconocimiento óptico, diciendo que la descripción
+# es la referencia del documento.
+#
+# Lo que NO cambia: la tabla sigue teniendo que traer una columna de texto
+# fuera de la tripleta, y cada fila sigue teniendo que traer letras en ella
+# (`_fila_trae_descripcion`). Una tabla de puras cifras sigue sin entrar, y una
+# fila sin nada de texto sigue sin llegar a ser línea -- que es lo que esta
+# guarda existe para impedir. Lo único que se acepta ahora es que ese texto sea
+# un código en vez de una designación en prosa.
+@dataclass(frozen=True)
+class ColumnaDeTexto:
+    indice: int
+    # `True` cuando la columna es una designación de verdad (varias palabras
+    # con letras) en la mayoría de las filas que cuadran; `False` cuando es una
+    # columna de referencias.
+    es_designacion: bool
+
+
 def _tiene_columna_de_descripcion(
     filas: list[FILA], tripleta: tuple[int, int, int], fuera: list[int]
-) -> bool:
+) -> Optional[ColumnaDeTexto]:
+    """La columna que hace de descripción de la tabla, o `None` si no hay
+    ninguna columna de texto fuera de la tripleta."""
     con_datos = [
         fila for fila in filas
         if all(_numero_de_celda(_valor_celda(fila, i)) is not None for i in tripleta)
     ]
     if not con_datos:
-        return False
+        return None
+    referencia: Optional[int] = None
     for indice in fuera:
-        designaciones = sum(
-            1 for fila in con_datos if _parece_designacion(_texto_celda(_valor_celda(fila, indice)))
-        )
+        con_texto = [
+            _texto_celda(_valor_celda(fila, indice)) for fila in con_datos
+        ]
+        designaciones = sum(1 for texto in con_texto if _parece_designacion(texto))
         if designaciones * 2 >= len(con_datos):
-            return True
-    return False
+            return ColumnaDeTexto(indice, True)
+        if referencia is None:
+            con_letras = sum(1 for texto in con_texto if _LETRAS_RE.search(texto))
+            if con_letras * 2 >= len(con_datos):
+                referencia = indice
+    return ColumnaDeTexto(referencia, False) if referencia is not None else None
 
 
 def _fila_trae_descripcion(fila: FILA, fuera: list[int]) -> bool:
     return any(_LETRAS_RE.search(_texto_celda(_valor_celda(fila, i))) for i in fuera)
 
 
+# Bloque 1, decisión 4 del cliente (sesión 2026-09-19, sexta parte), primer
+# caso: la cuarta fila del cuadro del lote 1 de `3.21/28510.0096` p.6
+# ("Potenciómetro rotatorio, componente 20299800", 10 x 150,00 = 1.500,00).
+# Sus tres celdas numéricas caen **una columna a la derecha** de las de las
+# otras tres filas de su misma tabla, así que la fila no cuadraba en las
+# columnas de la tripleta y se descartaba entera.
+#
+# Entra solo porque la aritmética del documento la demuestra, que es la
+# condición que puso el cliente: el desplazamiento es el MISMO para las tres
+# celdas (nunca una a una, que sería recomponer la fila a gusto), las tres
+# celdas de la tripleta están vacías -- no es que traigan otra cosa -- y las
+# tres desplazadas cumplen cantidad x precio = importe al céntimo. La fila se
+# devuelve **sin tocar**: quien lee sus valores después es la recuperación de
+# columna fantasma que ya existe (`app.catalogo._recuperar_cantidad_columna_
+# fantasma` y `_recuperar_precio_columna_fantasma`), que solo mira la columna
+# vecina libre y deja su propio motivo en la línea. Aquí no se reescribe
+# ninguna celda: el fragmento de traza sigue siendo la fila tal y como la
+# imprime el documento.
+_DESPLAZAMIENTO_FILA = 1
+
+
+def _fila_cuadra_desplazada(fila: FILA, tripleta: tuple[int, int, int]) -> bool:
+    if any(_texto_celda(_valor_celda(fila, i)) for i in tripleta):
+        return False
+    valores = [_numero_de_celda(_valor_celda(fila, i + _DESPLAZAMIENTO_FILA)) for i in tripleta]
+    if any(v is None or v <= 0 for v in valores):
+        return False
+    cantidad, precio, importe = valores
+    return abs(cantidad * precio - importe) <= _TOLERANCIA_IMPORTE
+
+
+# Bloque 1, decisión 4 del cliente, segundo caso: la fila `12.01` del
+# presupuesto de `3.16/28510.0044` p.19, releído con reconocimiento óptico.
+#
+#   ["12",    "Seguridad y Salud", "",  "",         ""]
+#   ["12.01", "",                  "1", "1.980,50", "1.980,50 EUR"]
+#
+# La fila cuadra (1 x 1.980,50 = 1.980,50) y **es la que cierra el TOTAL que el
+# documento declara**: las 14 líneas que ya entran suman 822.343,17 EUR y con
+# ella suman 824.323,67 EUR, el presupuesto de licitación que el propio pliego
+# escribe en letra. Lo único que le falta es la descripción, y el documento la
+# imprime: es el rótulo de su sección, en la fila inmediatamente anterior, cuyo
+# número (`12`) es el prefijo del suyo (`12.01`).
+#
+# No se inventa ningún texto ni se busca parecido: la prueba es la numeración
+# del propio cuadro. Guardas: la fila de sección no trae ni una cifra en las
+# columnas de la tripleta (es solo un rótulo), su número es prefijo ESTRICTO
+# del de la fila, separado por un punto, y la fila no tiene texto propio en
+# ninguna columna fuera de la tripleta -- si lo tuviera, la descripción sería
+# la suya y no habría nada que heredar.
+_NUMERO_DE_SECCION_RE = re.compile(r"^\d{1,3}(?:\.\d{1,3})*$")
+
+
+def _hereda_de_la_fila_de_seccion(
+    filas: list[FILA], indice: int, tripleta: tuple[int, int, int], fuera: list[int]
+) -> Optional[FILA]:
+    """La fila `indice`, con la descripción que el documento imprime en el
+    rótulo de su sección, o `None` si no hay tal rótulo."""
+    if indice == 0:
+        return None
+    fila = filas[indice]
+    numeros = [
+        _texto_celda(_valor_celda(fila, i)) for i in fuera
+        if _NUMERO_DE_SECCION_RE.match(_texto_celda(_valor_celda(fila, i)))
+    ]
+    if len(numeros) != 1:
+        return None
+    propio = numeros[0]
+    seccion = filas[indice - 1]
+    if any(_numero_de_celda(_valor_celda(seccion, i)) is not None for i in tripleta):
+        return None
+    columnas_rotulo = [
+        i for i in fuera
+        if _NUMERO_DE_SECCION_RE.match(_texto_celda(_valor_celda(seccion, i)))
+        and propio.startswith(_texto_celda(_valor_celda(seccion, i)) + ".")
+    ]
+    if len(columnas_rotulo) != 1:
+        return None
+    textos = [
+        i for i in fuera
+        if i not in columnas_rotulo and _LETRAS_RE.search(_texto_celda(_valor_celda(seccion, i)))
+    ]
+    if len(textos) != 1:
+        return None
+    nueva = list(fila) + [None] * max(0, len(seccion) - len(fila))
+    nueva[textos[0]] = _valor_celda(seccion, textos[0])
+    return nueva
+
+
 def _cuadro_demostrado_por_aritmetica(
     filas: list[FILA],
-) -> Optional[tuple[int, list[FILA]]]:
+) -> Optional[tuple[int, list[FILA], "ColumnaDeTexto"]]:
     """(dónde acaba la cabecera, filas de datos) de una tabla que se demuestra
     sola por la aritmética de sus filas, o `None`.
 
@@ -662,7 +792,8 @@ def _cuadro_demostrado_por_aritmetica(
     if tripleta is None:
         return None
     fuera = [i for i in range(max((len(f) for f in filas), default=0)) if i not in tripleta]
-    if not _tiene_columna_de_descripcion(filas, tripleta, fuera):
+    columna_texto = _tiene_columna_de_descripcion(filas, tripleta, fuera)
+    if columna_texto is None:
         return None
 
     def cuadra(fila: FILA) -> bool:
@@ -670,7 +801,9 @@ def _cuadro_demostrado_por_aritmetica(
         return all(v is not None for v in valores)
 
     def es_dato(fila: FILA) -> bool:
-        return cuadra(fila) and _fila_trae_descripcion(fila, fuera)
+        return (cuadra(fila) or _fila_cuadra_desplazada(fila, tripleta)) and _fila_trae_descripcion(
+            fila, fuera
+        )
 
     inicio: Optional[int] = None
     if cuadra(filas[0]):
@@ -687,8 +820,20 @@ def _cuadro_demostrado_por_aritmetica(
                 break
     if inicio is None:
         return None
-    datos = [fila for fila in filas[inicio:] if es_dato(fila)]
-    return (inicio, datos) if datos else None
+    datos: list[FILA] = []
+    for indice in range(inicio, len(filas)):
+        fila = filas[indice]
+        if es_dato(fila):
+            datos.append(fila)
+            continue
+        # Decisión 4 del cliente: la fila que cuadra y a la que solo le falta
+        # la descripción, cuando el rótulo de su sección la imprime justo
+        # encima y su numeración lo demuestra (ver `_hereda_de_la_fila_de_seccion`).
+        if cuadra(fila) or _fila_cuadra_desplazada(fila, tripleta):
+            heredada = _hereda_de_la_fila_de_seccion(filas, indice, tripleta, fuera)
+            if heredada is not None and _fila_trae_descripcion(heredada, fuera):
+                datos.append(heredada)
+    return (inicio, datos, columna_texto) if datos else None
 
 
 # Bloque 3, sesión 2026-09-19 (quinta parte), los 14 de "cobertura parcial de
@@ -843,13 +988,14 @@ def _tabla_extraida(
             demostrado = _cuadro_demostrado_por_aritmetica(filas)
             if demostrado is None:
                 return None  # tabla espuria: ni código de precio ni cabecera de cuadro
-            inicio_datos, filas_que_cuadran = demostrado
+            inicio_datos, filas_que_cuadran, columna_texto = demostrado
             return TablaExtraida(
                 cabecera=_combinar_filas_cabecera(filas[:inicio_datos]),
                 filas=filas_que_cuadran,
                 pagina=pagina.page_number,
                 bbox=tuple(tabla.bbox),
                 columnas_x=_columnas_x(tabla),
+                columna_referencia=None if columna_texto.es_designacion else columna_texto.indice,
             )
         return TablaExtraida(
             cabecera=_combinar_filas_cabecera(filas[:1]),

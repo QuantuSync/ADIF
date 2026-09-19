@@ -50,7 +50,12 @@ from openpyxl.styles import Alignment
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.catalogo import MOTIVO_MAPEO_INCOHERENTE
+from app.catalogo import MOTIVO_IMPORTE_SIN_PRECIO_NI_CONFIRMACION, MOTIVO_MAPEO_INCOHERENTE
+from app.presupuestos_adif import (
+    COLUMNAS as COLUMNAS_PRESUPUESTOS,
+    NOMBRE_HOJA as NOMBRE_HOJA_PRESUPUESTOS,
+    construir_presupuestos_adif,
+)
 from app.catalogo_consulta import consultar_catalogo, filtros_del_entregable
 from app.celdas_vacias import ETIQUETA_MOTIVO, PENDIENTE, celdas_vacias
 from app.conciliacion import (
@@ -378,6 +383,17 @@ _CATEGORIAS_MOTIVO = (
         "descartado del Excel entero, aunque siga guardada en la base de datos.",
         "Que alguien abra el documento original en esa página y complete o corrija la fila a mano.",
     ),
+    (
+        MOTIVO_IMPORTE_SIN_PRECIO_NI_CONFIRMACION,
+        "cuadro sin precio unitario: solo publica el importe de cada renglón",
+        "El cuadro de precios de este documento no publica ningún precio unitario -- su única columna de "
+        "dinero es el IMPORTE de cada renglón, que es cantidad x precio --, y el precio que saldría de "
+        "dividir ese importe entre la cantidad no queda demostrado: con él, la suma del lote no cuadra ni "
+        "con un total declarado en el documento ni con el presupuesto de licitación publicado de ese lote. "
+        "Publicarlo tal cual pondría el importe de un renglón entero en la columna de precio unitario.",
+        "Que alguien abra el cuadro original y confirme el precio unitario de cada artículo, o que ADIF "
+        "facilite el desglose.",
+    ),
 )
 _EXPLICACION_OTRO_MOTIVO = (
     "El sistema detectó una ambigüedad de un tipo que no encaja en los motivos anteriores."
@@ -447,6 +463,27 @@ _NOTA_PRECIO_DESDE_IMPORTE = (
     "división sea exacta, y que con el precio corregido el lote sume exactamente uno de los totales que el "
     "propio documento declara al pie de su cuadro. Si falta cualquiera de las dos, la línea se deja tal cual "
     "y va a revisión. Cada línea corregida queda marcada y explicada en la cola de revisión."
+)
+
+# Bloque 1, decisión 5 del cliente (sesión 2026-09-19, sexta parte).
+_ETIQUETA_DESCRIPCION_DESDE_REFERENCIA = (
+    "Líneas cuya Descripción del material es la referencia que el documento imprime para el artículo "
+    "(su cuadro de precios no publica ninguna otra columna de texto)"
+)
+_NOTA_DESCRIPCION_DESDE_REFERENCIA = (
+    "En esas líneas, la columna \"Descripción del material\" no es una designación en prosa sino la "
+    "referencia de fabricante que el documento imprime para el artículo (\"SFT01-2388L-PH-6920\", "
+    "\"WCMX-04 02 08-R53\"): son cuadros de precios de insertos y herramienta de mecanizado cuya única "
+    "columna de texto es esa. No falta ninguna descripción: el documento no publica otra. Cada línea queda "
+    "marcada y explicada en la cola de revisión."
+)
+
+_NOTA_PRESUPUESTOS_ADIF = (
+    "Esta hoja compara dos cifras que NO se mezclan nunca: el presupuesto de licitación que ADIF publica en "
+    "su listado de estados, y el importe de licitación que este sistema leyó de un documento publicado en la "
+    "Plataforma, con su documento y su página. Primero las coincidencias, después las diferencias de mayor a "
+    "menor, y al final los expedientes de los que no se pudo leer ningún importe de los documentos. Una "
+    "diferencia no dice cuál de las dos cifras está mal: dice que hay que mirar ese expediente."
 )
 
 _NOTA_CODIGO_MATERIAL = (
@@ -530,6 +567,35 @@ def _escribir_conciliacion(libro: Workbook, filas: list) -> None:
         for celda in fila_hoja:
             if isinstance(celda.value, str) and len(celda.value) > 60:
                 celda.alignment = Alignment(wrap_text=True, vertical="top")
+
+
+# Bloque 2, sesión 2026-09-19 (sexta parte): el contraste del presupuesto que
+# ADIF publica contra el que el sistema lee de los documentos. Ver
+# `app.presupuestos_adif` -- y, en particular, por qué la hoja no se escribe
+# cuando no hay ningún presupuesto cargado.
+def _escribir_presupuestos_adif(libro: Workbook, filas: list) -> None:
+    if not filas:
+        return
+    hoja = libro.create_sheet(NOMBRE_HOJA_PRESUPUESTOS)
+    hoja.append(list(COLUMNAS_PRESUPUESTOS))
+    for fila in filas:
+        hoja.append([
+            _celda_texto_o_espacio(fila.codigo_expediente),
+            _celda_texto_o_espacio(fila.titulo),
+            _celda_numero(fila.presupuesto_adif),
+            _celda_numero(fila.importe_documentos),
+            _celda_numero(fila.diferencia),
+            _celda_numero(fila.diferencia_relativa),
+            _celda_texto_o_espacio(fila.resultado),
+        ])
+    for columna, ancho in zip("ABCDEFG", (22, 55, 30, 34, 26, 18, 34)):
+        hoja.column_dimensions[columna].width = ancho
+    for indice in range(2, hoja.max_row + 1):
+        for columna in (3, 4, 5):
+            hoja.cell(row=indice, column=columna).number_format = _FORMATO_IMPORTE
+        hoja.cell(row=indice, column=6).number_format = _FORMATO_PORCENTAJE
+    hoja.append([])
+    hoja.append([_NOTA_PRESUPUESTOS_ADIF, None])
 
 
 def _escribir_bloque_conciliacion(hoja, filas: list, registro: RegistroPublicado) -> None:
@@ -624,6 +690,7 @@ def _escribir_resumen(
     con_valor_de_otro_lote: int = 0,
     del_anejo_de_criterios: int = 0,
     precios_corregidos_desde_importe: int = 0,
+    descripciones_desde_referencia: int = 0,
     filas_conciliacion: Optional[list] = None,
     registro_publicado: Optional[RegistroPublicado] = None,
 ) -> None:
@@ -647,9 +714,13 @@ def _escribir_resumen(
     # tiene que verse, igual que las de reconocimiento óptico. Se cuenta
     # aquí, y cada línea lleva además su motivo y la marca en el fragmento.
     hoja.append([_ETIQUETA_PRECIO_DESDE_IMPORTE, precios_corregidos_desde_importe])
+    hoja.append([_ETIQUETA_DESCRIPCION_DESDE_REFERENCIA, descripciones_desde_referencia])
     hoja.append([])
     if precios_corregidos_desde_importe:
         hoja.append([_NOTA_PRECIO_DESDE_IMPORTE, None])
+        hoja.append([])
+    if descripciones_desde_referencia:
+        hoja.append([_NOTA_DESCRIPCION_DESDE_REFERENCIA, None])
         hoja.append([])
     if incluir_pendientes_sin_lote:
         hoja.append(["Exportado con las líneas pendientes de revisión incluidas en \"Materiales\".", None])
@@ -715,11 +786,23 @@ def _escribir_resumen(
 # pudieran discrepar, la vista dejaría de servir para lo único que existe
 # (docstring de `app.conciliacion`), y duplicar el criterio es exactamente
 # como empiezan a discrepar.
+# Los motivos que sacan una línea del entregable entero, no solo la marcan.
+# Los dos dicen lo mismo: el documento no publica el dato y lo que se
+# escribiría en su celda sería un número inventado.
+_MOTIVOS_FUERA_DEL_ENTREGABLE = (
+    MOTIVO_MAPEO_INCOHERENTE,
+    # Bloque 1, decisión 1 del cliente (sesión 2026-09-19, sexta parte): el
+    # cuadro cuya única columna de dinero es el IMPORTE del renglón, cuando la
+    # suma del lote no confirma el precio que saldría de la división.
+    MOTIVO_IMPORTE_SIN_PRECIO_NI_CONFIRMACION,
+)
+
+
 def _sale_en_materiales(
     motivo_revision: Optional[str], tiene_lote: bool, incluir_pendientes_sin_lote: bool
 ) -> bool:
-    mapeo_incoherente = bool(motivo_revision) and MOTIVO_MAPEO_INCOHERENTE in motivo_revision
-    return not ((not tiene_lote and not incluir_pendientes_sin_lote) or mapeo_incoherente)
+    fuera = bool(motivo_revision) and any(m in motivo_revision for m in _MOTIVOS_FUERA_DEL_ENTREGABLE)
+    return not ((not tiene_lote and not incluir_pendientes_sin_lote) or fuera)
 
 
 def linea_sale_en_materiales(linea, lote, incluir_pendientes_sin_lote: bool = False) -> bool:
@@ -764,6 +847,7 @@ def generar_excel_catalogo(db: Session, incluir_pendientes_sin_lote: bool = Fals
     # "Materiales" -- una línea corregida que se quede fuera del entregable
     # no tiene por qué contarse en su Resumen.
     precios_corregidos_desde_importe = 0
+    descripciones_desde_referencia = 0
     excluidas_por_categoria: Counter[str] = Counter()
     # Bloque 5, sesión 2026-09-18: las filas que de verdad se escriben en
     # "Materiales", por expediente. La hoja "Conciliación" se construye con
@@ -831,6 +915,8 @@ def generar_excel_catalogo(db: Session, incluir_pendientes_sin_lote: bool = Fals
         lineas_por_expediente[expediente.id] += 1
         if linea.precio_corregido_desde_importe:
             precios_corregidos_desde_importe += 1
+        if linea.descripcion_desde_referencia:
+            descripciones_desde_referencia += 1
         # "El sistema nunca inventa una matriz. Si no cruza, se deja
         # vacío" (CONTEXTO.md sección 7): el "Código interno" sí sale del
         # Excel de códigos de ADIF, así que sin cruce no hay nada que
@@ -895,10 +981,12 @@ def generar_excel_catalogo(db: Session, incluir_pendientes_sin_lote: bool = Fals
     comprobar_cuadre(filas_conciliacion, incluidas)
     registro = describir_registro_publicado(db, filas_conciliacion)
     _escribir_conciliacion(libro, filas_conciliacion)
+    _escribir_presupuestos_adif(libro, construir_presupuestos_adif(db))
 
     _escribir_resumen(
         libro, incluidas, excluidas_por_categoria, incluir_pendientes_sin_lote, con_valor_de_otro_lote,
-        del_anejo_de_criterios, precios_corregidos_desde_importe, filas_conciliacion, registro,
+        del_anejo_de_criterios, precios_corregidos_desde_importe, descripciones_desde_referencia,
+        filas_conciliacion, registro,
     )
 
     buffer = io.BytesIO()

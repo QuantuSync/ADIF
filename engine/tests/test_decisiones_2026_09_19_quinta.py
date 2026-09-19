@@ -207,7 +207,7 @@ CUADRO_0044 = [
 def test_la_aritmetica_de_las_filas_demuestra_el_cuadro():
     demostrado = _cuadro_demostrado_por_aritmetica(CUADRO_0044)
     assert demostrado is not None
-    inicio, datos = demostrado
+    inicio, datos, _columna_texto = demostrado
     # La cabecera es solo la fila 0; las filas de sección no son datos.
     assert inicio == 1
     assert len(datos) == 3
@@ -217,32 +217,51 @@ def test_la_aritmetica_de_las_filas_demuestra_el_cuadro():
 def test_las_filas_de_seccion_no_entran_como_lineas():
     """Condición del cliente: "las líneas que salgan solo entran si pasan la
     comprobación aritmética de su fila". "Obra civil" no la pasa."""
-    _inicio, datos = _cuadro_demostrado_por_aritmetica(CUADRO_0044)
+    _inicio, datos, _columna = _cuadro_demostrado_por_aritmetica(CUADRO_0044)
     assert not any("Obra civil" in (c or "") for fila in datos for c in fila)
 
 
-def test_una_tabla_sin_columna_de_descripcion_no_se_demuestra():
-    """Defecto real encontrado por la auditoría del reproceso completo:
-    `2.23/28510.0098`/`6.22/28510.0051`/`0159` traen "código | cantidad |
-    precio | importe" y ni una designación. Sus filas cuadran (20 × 24,00 =
-    480,00) y entraron como 45 líneas de catálogo **sin descripción**, que es
-    lo que la comprobación permanente de `construir_linea_catalogo` existe
-    para impedir. Un código es un solo token con dígitos; una designación es
-    una frase."""
+def test_una_tabla_cuya_unica_columna_de_texto_es_la_referencia_entra_marcada():
+    """Decisión 5 del cliente, sesión 2026-09-19 (sexta parte). Hasta esta
+    sesión, `2.23/28510.0098`/`6.22/28510.0051`/`0159` ("código | cantidad |
+    precio | importe", ni una designación) se quedaban fuera enteros: sus
+    filas cuadran (20 × 24,00 = 480,00) pero entraban como líneas de catálogo
+    **sin descripción**. El cliente decide que la referencia se acepte como
+    Descripción del material, con la línea marcada -- así que la tabla entra y
+    la columna del código se devuelve señalada como referencia, no como
+    designación."""
     solo_codigos = [
         ["SFT01-2388L-PH-6920", "20", "24,00 €", "480,00 €"],
         ["SFT01-2389-PH-6920", "130", "18,00 €", "2.340,00 €"],
         ["SFT01-2390-PH-6920", "1.400", "8,00 €", "11.200,00 €"],
     ]
     assert _tripleta_que_cuadra(solo_codigos) is not None  # la aritmética sí cuadra
-    assert _cuadro_demostrado_por_aritmetica(solo_codigos) is None  # y aun así no entra
+    demostrado = _cuadro_demostrado_por_aritmetica(solo_codigos)
+    assert demostrado is not None
+    _inicio, datos, columna_texto = demostrado
+    assert len(datos) == 3
+    assert columna_texto.indice == 0 and columna_texto.es_designacion is False
 
 
-def test_una_fila_sin_descripcion_no_sale_aunque_su_tabla_si_sea_un_cuadro():
-    """`3.16/28510.0044` p.19: la fila "12.01" cuadra (1 × 1.980,50) pero su
-    celda de descripción vuelve vacía del reconocimiento óptico -- el rótulo
-    "Seguridad y Salud" cae en la fila de arriba. La tabla entra; esa fila
-    no."""
+def test_una_tabla_sin_ninguna_columna_de_texto_sigue_sin_demostrarse():
+    """La guarda que la decisión 5 NO afloja: una tabla de puras cifras no es
+    un cuadro de materiales, porque no dice qué material es ninguna de sus
+    filas."""
+    sin_texto = [
+        ["1", "20", "24,00 €", "480,00 €"],
+        ["2", "130", "18,00 €", "2.340,00 €"],
+        ["3", "1.400", "8,00 €", "11.200,00 €"],
+    ]
+    assert _cuadro_demostrado_por_aritmetica(sin_texto) is None
+
+
+def test_la_fila_sin_descripcion_hereda_el_rotulo_de_su_seccion():
+    """Decisión 4 del cliente, sesión 2026-09-19 (sexta parte).
+    `3.16/28510.0044` p.19: la fila "12.01" cuadra (1 × 1.980,50) y es la que
+    cierra el TOTAL declarado (822.343,17 + 1.980,50 = 824.323,67 €), pero su
+    celda de descripción vuelve vacía del reconocimiento óptico. El documento
+    sí imprime su rótulo: es el de su sección, en la fila de encima, cuyo
+    número (`12`) es el prefijo del suyo (`12.01`)."""
     filas = [
         ["09.01", "Instalación y puesta a punto de equipo SDH, armario ETSI", "90", "931,03 €",
          "83.792,70 €"],
@@ -252,8 +271,24 @@ def test_una_fila_sin_descripcion_no_sale_aunque_su_tabla_si_sea_un_cuadro():
     ]
     demostrado = _cuadro_demostrado_por_aritmetica(filas)
     assert demostrado is not None
-    _inicio, datos = demostrado
-    assert len(datos) == 1 and datos[0][0] == "09.01"
+    _inicio, datos, _columna = demostrado
+    assert [fila[0] for fila in datos] == ["09.01", "12.01"]
+    assert datos[1][1] == "Seguridad y Salud"
+
+
+def test_la_fila_sin_descripcion_no_hereda_de_una_seccion_con_otro_numero():
+    """La misma fila, cuando el rótulo de encima no es su sección: `13` no es
+    prefijo de `12.01`, así que no hay nada demostrado y la fila no sale."""
+    filas = [
+        ["09.01", "Instalación y puesta a punto de equipo SDH, armario ETSI", "90", "931,03 €",
+         "83.792,70 €"],
+        ["13", "Seguridad y Salud", "", "", ""],
+        ["12.01", "", "1", "1.980,50", "1.980,50 €"],
+    ]
+    demostrado = _cuadro_demostrado_por_aritmetica(filas)
+    assert demostrado is not None
+    _inicio, datos, _columna = demostrado
+    assert [fila[0] for fila in datos] == ["09.01"]
 
 
 def test_un_resumen_de_presupuesto_no_se_demuestra():

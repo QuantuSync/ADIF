@@ -66,6 +66,18 @@ _CODIGO_PRECIO_LONGITUD_MAXIMA = LineaCatalogo.codigo_precio.type.length
 _MATRICULA_LONGITUD = LineaCatalogo.matricula.type.length
 _MATRICULA_VALIDA_RE = re.compile(rf"^\d{{{_MATRICULA_LONGITUD - 1},{_MATRICULA_LONGITUD}}}$")
 
+# Bloque 1, decisión 2 del cliente (sesión 2026-09-19, sexta parte): la misma
+# forma más una sola letra final. No es una matrícula válida -- la celda se
+# queda vacía con su motivo -- pero el literal se conserva en la descripción
+# (ver el uso, en `_construir_campos`).
+_MATRICULA_CON_LETRA_FINAL_RE = re.compile(
+    rf"^\d{{{_MATRICULA_LONGITUD - 1},{_MATRICULA_LONGITUD}}}[A-Za-zÑñ]$"
+)
+
+
+def _marca_de_matricula_no_valida(literal: str) -> str:
+    return f"[matrícula impresa en el documento, no válida: {literal}]"
+
 
 # Solo la de 9 cifras: dentro de ruido pegado, 8 cifras seguidas también son
 # el trozo de una de 9.
@@ -1283,6 +1295,23 @@ def _construir_campos(
             motivo_revision = _acumular_motivo(
                 motivo_revision, f"valor de matrícula no reconocible, descartado: {matricula!r}"
             )
+            # Bloque 1, decisión 2 del cliente (sesión 2026-09-19, sexta
+            # parte): las matrículas con una letra al final (`69520000N`,
+            # `64551025O`) **no son matrículas válidas** y la celda se queda
+            # vacía, como hasta ahora -- pero el literal que el documento
+            # imprime no se puede perder, porque es lo único que identifica ese
+            # material en el pliego. El motivo de revisión no basta: no es
+            # ninguna de las 18 columnas del Excel. Se conserva, marcado como
+            # lo que es, al final de la Descripción del material, que es donde
+            # almacenes busca.
+            #
+            # Solo para esa forma exacta (8 o 9 cifras y una sola letra), no
+            # para cualquier celda descartada: un literal sin forma de
+            # matrícula es ruido de otra columna y ensuciaría la descripción.
+            # Medido sobre el corpus: 33 líneas de 4 expedientes
+            # (`6.17/28510.0116`, `6.19/28510.0115`/`0161`/`0163`).
+            if descripcion and _MATRICULA_CON_LETRA_FINAL_RE.match(matricula):
+                descripcion = f"{descripcion} {_marca_de_matricula_no_valida(matricula)}"
             matricula = None
 
     # Precio unitario, calculado antes que cantidad (bloque 4/5, hallazgo
@@ -1320,7 +1349,19 @@ def _construir_campos(
     # de siempre (docstring de `_recuperar_descripcion_columna_fantasma`):
     # sin esto, una fila de relleno real se recuperaría como si fuera una
     # fila de datos legítima solo por tener texto en la columna siguiente.
-    if not descripcion and precio_unitario is not None:
+    # Bloque 1, decisión 1 del cliente (sesión 2026-09-19, sexta parte): un
+    # cuadro cuya única columna de dinero es el IMPORTE del renglón no tiene
+    # columna de precio (`app.extraccion.mapeo_cabecera.corregir_columna_
+    # importe_tomada_por_precio`), así que la condición de arriba no la podría
+    # cumplir NUNCA y sus filas desplazadas se quedaban sin descripción -- y
+    # sin descripción no llegan a ser línea. El importe del renglón es
+    # exactamente la misma evidencia que se le pide al precio: que esta fila
+    # trae una cifra de dinero propia y no es relleno. Solo cuando no hay
+    # columna de precio: con ella, la condición sigue siendo la de siempre.
+    cifra_propia_de_la_fila = precio_unitario is not None or (
+        mapeo.get("precio_unitario") is None and _importe_de_fila(fila, mapeo) is not None
+    )
+    if not descripcion and cifra_propia_de_la_fila:
         recuperada = _recuperar_descripcion_columna_fantasma(fila, mapeo)
         if recuperada:
             descripcion = recuperada
@@ -2066,6 +2107,24 @@ MOTIVO_IMPORTE_SIN_CERRAR_EL_LOTE = (
     "precio el lote NO suma ninguno de los totales que el documento declara: no se reescribe nada "
     "(haría falta un dato del documento que aquí no se tiene), revisar contra el cuadro original"
 )
+# Bloque 1, decisión 1 del cliente (sesión 2026-09-19, sexta parte). El otro
+# desenlace posible del cuadro cuya única columna de dinero es el IMPORTE del
+# renglón (`app.extraccion.mapeo_cabecera.corregir_columna_importe_tomada_por_
+# precio`): ese cuadro no publica ningún precio unitario, así que el único que
+# podría escribirse es el que sale de la división -- y si la suma del lote no
+# cierra ningún total declarado, esa división no está demostrada. El cliente lo
+# dijo con todas las letras: "si no se confirma, esas filas se quedan fuera con
+# su motivo". Es un marcador de exclusión del entregable, como
+# `MOTIVO_MAPEO_INCOHERENTE` (`app.exportacion._sale_en_materiales`), no un
+# aviso más: la fila se conserva en base de datos con su traza, pero no sale al
+# Excel, porque lo único que podría escribir en su columna de precio sería el
+# importe de un renglón entero haciéndose pasar por el precio de una unidad.
+MOTIVO_IMPORTE_SIN_PRECIO_NI_CONFIRMACION = (
+    "el cuadro de precios de este documento no publica precio unitario -- su única columna de dinero es el "
+    "IMPORTE del renglón -- y el precio que saldría de dividirlo entre la cantidad no queda demostrado: "
+    "con él, la suma del lote no cuadra con ningún total declarado ni con el presupuesto de licitación "
+    "publicado de ese lote"
+)
 
 
 def importes_de_pie_de_tabla(filas: list[list[Optional[str]]], mapeo: dict[str, Optional[int]]) -> list[Decimal]:
@@ -2232,8 +2291,15 @@ def corregir_precio_con_importe_del_documento(
     condiciones y se reescriben, y cuántas cumplen la primera pero no la
     segunda (esas quedan exactamente como estaban, con su motivo).
 
-    Quita siempre de todas las líneas la marca transitoria
-    `importe_documento`, corrijan o no: nunca llega a la base de datos."""
+    Las líneas de un cuadro que **no publica precio unitario** (su única
+    columna de dinero es el IMPORTE del renglón) no pasan por aquí: las
+    resuelve antes `resolver_cuadros_sin_precio_propio`, que el llamador
+    invoca por separado -- ver su docstring y el orden en
+    `app.extraccion.pipeline_anejo`.
+
+    Quita siempre de todas las líneas las marcas transitorias
+    `importe_documento` y `precio_solo_en_la_columna_de_importe`, corrijan o
+    no: nunca llegan a la base de datos."""
     por_lote: dict[Optional[str], list[dict]] = {}
     for linea in lineas:
         por_lote.setdefault(linea.get("identificador_lote"), []).append(linea)
@@ -2243,6 +2309,7 @@ def corregir_precio_con_importe_del_documento(
         candidatas = [
             (linea, propuesto)
             for linea in del_lote
+            if not linea.get("precio_solo_en_la_columna_de_importe")
             for propuesto in [_precio_que_cuadra_el_renglon(linea.get("cantidad"), linea.get("importe_documento"))]
             if propuesto is not None and propuesto != linea.get("precio_unitario")
         ]
@@ -2263,7 +2330,73 @@ def corregir_precio_con_importe_del_documento(
 
     for linea in lineas:
         linea.pop("importe_documento", None)
+        linea.pop("precio_solo_en_la_columna_de_importe", None)
     return corregidas, solo_condicion_1
+
+
+def resolver_cuadros_sin_precio_propio(
+    lineas: list[dict], totales_por_lote: dict[Optional[str], list[Decimal]]
+) -> int:
+    """Decisión 1 del cliente (sesión 2026-09-19, sexta parte): el cuadro cuya
+    única columna de dinero es el IMPORTE del renglón. No publica precio
+    unitario, así que el único que se le puede poner es el de la división --
+    y solo si el documento lo demuestra.
+
+    Corre **antes** que `descartar_bloques_de_lote_que_no_cuadran` (ver el
+    orden en `app.extraccion.pipeline_anejo`): esa guarda juzga un bloque de
+    lote por la suma de cantidad x precio unitario de su lote, y hasta que
+    esto no ha corrido esas líneas no tienen precio ninguno. Con el orden al
+    revés, un cuadro de lote sin precio propio se descartaba entero por una
+    suma de cero -- medido en `3.21/28510.0098`, que perdía la línea de su
+    lote 3.
+
+    La comprobación es **por cuadro**, no por lote entero: es el cuadro del
+    lote el que tiene que sumar el total publicado del lote, y un documento
+    puede imprimir el mismo cuadro dos veces (`3.18/28510.0082_ANEJO_1`, p.7 y
+    p.238, idénticas salvo un asterisco en la cabecera). Sumar las dos daría
+    el doble del presupuesto y tiraría un cuadro que cuadra al céntimo. Cada
+    copia se comprueba sola y las dos escriben lo mismo, que es lo que después
+    funde `guardar_lineas_catalogo` por clave.
+
+    Todo o nada dentro del cuadro: si a una sola de sus filas le falta la
+    cantidad o su división no es exacta, la suma no es la del cuadro y no hay
+    nada demostrado. Devuelve cuántas líneas se han escrito con su precio."""
+    marcadas = [l for l in lineas if l.get("precio_solo_en_la_columna_de_importe")]
+    if not marcadas:
+        return 0
+    grupos: dict[tuple, list[dict]] = {}
+    for linea in marcadas:
+        grupos.setdefault((linea.get("identificador_lote"), linea.get("tabla_origen")), []).append(linea)
+    corregidas = 0
+    for (identificador, _tabla), grupo in grupos.items():
+        propuestos = {
+            id(linea): _precio_que_cuadra_el_renglon(linea.get("cantidad"), linea.get("importe_documento"))
+            for linea in grupo
+        }
+        totales = totales_por_lote.get(identificador) or []
+        if all(p is not None for p in propuestos.values()):
+            suma = sum((l["cantidad"] * propuestos[id(l)] for l in grupo), Decimal("0"))
+            if any(suma == total for total in totales):
+                for linea in grupo:
+                    _escribir_precio_corregido(linea, propuestos[id(linea)])
+                corregidas += len(grupo)
+                continue
+        _descartar_lineas_sin_precio_propio(grupo)
+    return corregidas
+
+
+def _descartar_lineas_sin_precio_propio(lineas: list[dict]) -> None:
+    """El desenlace que pidió el cliente para el cuadro sin precio unitario
+    propio cuando la aritmética no lo confirma: la fila se queda fuera del
+    entregable, con su motivo, en vez de publicar el importe de un renglón
+    entero como si fuera el precio de una unidad. Se conserva en base de datos
+    con su traza, como todo lo que se excluye."""
+    for linea in lineas:
+        linea["precio_unitario"] = INVALIDADO
+        linea["precio_adjudicado"] = None
+        linea["motivo_revision"] = _acumular_motivo_unico(
+            linea.get("motivo_revision"), MOTIVO_IMPORTE_SIN_PRECIO_NI_CONFIRMACION
+        )
 
 
 def _importe_de_fila(fila: list[Optional[str]], mapeo: dict[str, Optional[int]]) -> Optional[Decimal]:
@@ -2273,6 +2406,18 @@ def _importe_de_fila(fila: list[Optional[str]], mapeo: dict[str, Optional[int]])
     `corregir_precio_con_importe_del_documento` lo quita siempre antes de
     guardar."""
     bruto = _valor_en(fila, mapeo.get(CAMPO_IMPORTE))
+    if not bruto or _es_celda_vacia(bruto):
+        # Bloque 1, sesión 2026-09-19 (sexta parte): la columna de importes
+        # puede caer en su columna fantasma en una fila concreta, igual que la
+        # descripción, la cantidad y el precio -- caso real,
+        # `3.18/28510.0082_ANEJO_1.pdf` p.238, donde las seis filas con
+        # matrícula van un sitio a la izquierda de lo que su cabecera etiqueta.
+        # Misma recuperación y mismas guardas que las de siempre (solo la
+        # columna vecina, y solo si ningún otro campo del mapeo la reclama).
+        # Aquí no hace falta motivo: el importe no es un campo del catálogo,
+        # solo la cifra contra la que se comprueba la aritmética, y lo que se
+        # escriba a partir de él ya lleva el suyo.
+        bruto = _recuperar_columna_fantasma(fila, mapeo, CAMPO_IMPORTE, _parece_precio_recuperable)
     if not bruto or _es_celda_vacia(bruto):
         return None
     try:
@@ -2382,6 +2527,9 @@ _MARCAS_DE_ORIGEN = (
     # Bloque 2, sesión 2026-09-19: el precio de esta línea se recalculó desde
     # la columna de importes del documento, no salió literal de su celda.
     "precio_corregido_desde_importe",
+    # Bloque 1, decisión 5 del cliente (sesión 2026-09-19, sexta parte): la
+    # descripción de esta línea es la referencia del documento.
+    "descripcion_desde_referencia",
 )
 
 
