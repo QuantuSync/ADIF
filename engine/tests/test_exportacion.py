@@ -10,6 +10,7 @@ import pytest
 from app.conciliacion import (
     ACUERDO_MARCO_SIN_PRECIOS,
     APORTA_LINEAS,
+    COBERTURA_PARCIAL_DE_LOTES,
     PUBLICADO_EN_FICHA_DE_OTRO,
     COLUMNAS_CONCILIACION,
     DescuadreConciliacion,
@@ -702,7 +703,13 @@ def test_un_documento_escaneado_no_tapa_la_causa_real_del_expediente(db_session)
     """El caso que motivó el arreglo: `3.18/28510.0047` tiene un anejo
     escaneado, pero lo que le pasa está escrito en su propio motivo y es otra
     cosa. Antes, cualquier documento pasado por reconocimiento óptico lo
-    mandaba al cajón de los escaneados y tapaba la explicación real."""
+    mandaba al cajón de los escaneados y tapaba la explicación real.
+
+    Bloque 5, sesión 2026-09-19 (tercera parte): esa explicación real ya no
+    cae en "Otro" -- tiene situación propia (14 expedientes del mismo tipo,
+    por encima del mínimo de 3 que puso el cliente). Lo que este test
+    protege sigue siendo lo mismo: un documento escaneado no tapa la causa
+    real, y ahora se comprueba contra la situación con nombre."""
     _fila_unica(db_session)
     expediente = _expediente_leido(
         db_session, "3.18/28510.0047",
@@ -712,8 +719,10 @@ def test_un_documento_escaneado_no_tapa_la_causa_real_del_expediente(db_session)
     libro = openpyxl.load_workbook(io.BytesIO(generar_excel_catalogo(db_session)))
     filas = {f[0]: f for f in libro["Conciliación"].iter_rows(min_row=2, values_only=True)}
     fila = filas["3.18/28510.0047"]
-    assert fila[COLUMNAS_CONCILIACION.index("Situación")] == OTRO
-    assert "cobertura parcial" in fila[COLUMNAS_CONCILIACION.index("Motivo")]
+    assert fila[COLUMNAS_CONCILIACION.index("Situación")] == COBERTURA_PARCIAL_DE_LOTES
+    assert "solo se puede leer la baja o el importe de algunos" in fila[
+        COLUMNAS_CONCILIACION.index("Motivo")
+    ]
 
 
 def test_sin_anejo_ni_pliego_es_publicado_sin_cuadro_aunque_haya_un_escaneado(db_session):

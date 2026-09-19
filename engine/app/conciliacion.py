@@ -83,6 +83,22 @@ ESCANEADO_ILEGIBLE = "Documentos escaneados que no se han podido leer"
 # documentos.
 PUBLICADO_EN_FICHA_DE_OTRO = "Publicado dentro de la ficha de otro expediente"
 PENDIENTE_DE_PROCESAR = "Pendiente de procesar"
+# Bloque 5, sesión 2026-09-19 (tercera parte), encargo del cliente: partir
+# "Otro" en las causas reales que el propio sistema ya escribía en su motivo,
+# creando una situación nueva solo cuando hay al menos 3 expedientes del mismo
+# tipo (condición del cliente). Desglosados los 26 de "Otro" uno a uno contra
+# su motivo técnico y contra sus documentos, salen tres grupos que la cumplen
+# y dos que no (2 y 1 expedientes, que se quedan en "Otro" con su motivo, que
+# es exactamente para lo que "Otro" existe).
+#
+# Los tres son licitaciones por lotes o pedidos de acuerdo marco cuyos
+# documentos SÍ se han leído enteros: lo que falta no es lectura, es que el
+# documento que traería el precio de SU lote no está publicado bajo su número.
+# Decirlo así, y no "un motivo que no encaja en los anteriores", es lo que
+# permite al cliente preguntar a ADIF por el documento concreto que falta.
+MATRIZ_TAMPOCO_PUBLICA = "El acuerdo marco del que depende tampoco publica precios"
+BAJA_SOLO_EN_DOCUMENTO_DE_HERMANO = "Sus documentos son de expedientes hermanos y ninguno es el suyo"
+COBERTURA_PARCIAL_DE_LOTES = "Licitación por lotes de la que solo se conocen algunos lotes"
 OTRO = "Otro"
 
 SITUACIONES = (
@@ -92,6 +108,9 @@ SITUACIONES = (
     ACUERDO_MARCO_SIN_PRECIOS,
     ESCANEADO_ILEGIBLE,
     PUBLICADO_EN_FICHA_DE_OTRO,
+    MATRIZ_TAMPOCO_PUBLICA,
+    BAJA_SOLO_EN_DOCUMENTO_DE_HERMANO,
+    COBERTURA_PARCIAL_DE_LOTES,
     PENDIENTE_DE_PROCESAR,
     OTRO,
 )
@@ -274,6 +293,15 @@ def _porcentaje(valor: Optional[Decimal]) -> str:
 # igual pero siguen ("...: el expediente no trae ningún Anejo ni Pliego
 # técnico...") dicen otra cosa y tienen su propia rama.
 _MOTIVO_SIN_LINEAS_GENERICO = "no se extrajo ninguna línea de catálogo de los documentos descargados"
+# Bloque 5, sesión 2026-09-19 (tercera parte): los tres motivos técnicos que
+# el propio sistema ya escribía y que hasta hoy caían todos en "Otro". Se
+# comparan por subcadena porque cada uno lleva detrás sus cifras concretas
+# (cuántos lotes, cuántas bajas, qué códigos), que son justo lo que el
+# expediente aporta de particular y lo que sigue saliendo en la columna
+# "Motivo" para los que se queden en "Otro".
+_MOTIVO_MATRIZ_SIN_CUADRO = "tampoco tiene cuadro de precios ni baja"
+_MOTIVO_BAJA_DE_HERMANO = "en documento(s) compartido(s) con expediente(s) hermano(s)"
+_MOTIVO_COBERTURA_PARCIAL = "cobertura parcial:"
 
 
 @dataclass(frozen=True)
@@ -454,6 +482,44 @@ def _situacion(
             "Se han descargado y leído sus documentos, y ninguno trae un cuadro de precios unitarios: "
             "la Plataforma publica de este expediente la adjudicación y el contrato, pero no el anejo "
             "de precios. No es un fallo de lectura, es lo que hay publicado."
+        )
+
+    # Bloque 5, sesión 2026-09-19 (tercera parte). El orden importa y es el
+    # orden de las causas, igual que el resto de esta función:
+    #
+    # 1. La matriz va primero porque su texto CONTIENE el de la siguiente: el
+    #    motivo de un pedido cuya matriz no tiene cuadro arrastra literalmente
+    #    el motivo de la matriz ("la matriz X tampoco tiene cuadro de precios
+    #    ni baja: 2 baja(s) declarada(s) en documento(s) compartido(s)...").
+    #    Al revés, el pedido se clasificaría por la causa de su matriz.
+    # 2. "Documentos de hermanos" antes que "cobertura parcial" porque es más
+    #    específica: dice de quién son los documentos, no solo que faltan
+    #    lotes.
+    if _MOTIVO_MATRIZ_SIN_CUADRO in motivo_tecnico:
+        return MATRIZ_TAMPOCO_PUBLICA, (
+            f"Es un pedido que se hace contra el acuerdo marco {expediente.codigo_matriz or 'del que depende'}, "
+            "y ese acuerdo marco sí está publicado y sus documentos se han descargado y leído enteros. "
+            "El problema es que tampoco ellos traen un cuadro de precios unitarios ni una baja: el "
+            "precio de este pedido no está publicado ni aquí ni allí. Para completarlo haría falta que "
+            "ADIF facilitara el cuadro de precios del acuerdo marco."
+        )
+
+    if _MOTIVO_BAJA_DE_HERMANO in motivo_tecnico:
+        return BAJA_SOLO_EN_DOCUMENTO_DE_HERMANO, (
+            "Es uno de los lotes de una licitación, y los documentos que la Plataforma publica bajo su "
+            "número son en realidad los de sus lotes hermanos: cada uno declara su propio número de "
+            "contrato y ninguno es el de este expediente. Se han leído enteros, y por eso no se les "
+            "toma ni la baja ni el cuadro de precios -- serían los de otro lote. Para completarlo haría "
+            "falta el contrato o el anejo de precios de ESTE lote."
+        )
+
+    if _MOTIVO_COBERTURA_PARCIAL in motivo_tecnico:
+        return COBERTURA_PARCIAL_DE_LOTES, (
+            "Es una licitación repartida en varios lotes, y de los documentos publicados solo se puede "
+            "leer la baja o el importe de algunos de ellos -- no del que corresponde a este expediente. "
+            "Se han descargado y leído todos sus documentos: lo que no está publicado bajo este número "
+            "es el cuadro de precios de su lote. Para completarlo haría falta el anejo de precios o el "
+            "contrato de ese lote concreto."
         )
 
     return OTRO, (
