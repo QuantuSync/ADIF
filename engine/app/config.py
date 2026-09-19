@@ -71,6 +71,21 @@ class Settings(BaseSettings):
     # no completa nada -- ninguno de los dos rompe el resto del sistema.
     maestro_materiales_path: Optional[str] = None
 
+    # Bloque 2, sesión 2026-09-19 (sexta parte): las TRES entradas que el
+    # cliente tiene que mandarnos. Mismo mecanismo que todas las de arriba --
+    # una ruta montada por bind-mount, vacía por defecto, y sin ella el
+    # endpoint correspondiente no tiene nada que leer y no rompe nada. Ver
+    # `docs/entradas-pendientes-del-cliente.md` para qué forma espera cada una
+    # y qué hace el sistema si llega con otra.
+    #
+    # 1. La lista de contratos vigentes con remanente (83, según el cliente).
+    vigentes_remanente_path: Optional[str] = None
+    # 2. No lleva ruta propia: es el MISMO listado de estados de ADIF
+    #    (`estados_adif_path`, arriba) con una columna más de presupuesto de
+    #    licitación. Se sustituye el fichero y se vuelve a cargar.
+    # 3. El catálogo antiguo de materiales de ADIF, de formato desconocido.
+    catalogo_antiguo_path: Optional[str] = None
+
     # Recuperación de trabajos huérfanos (CONTEXTO.md sección 17, pendiente):
     # un trabajo `en_proceso` cuyo `bloqueado_en` supera este umbral se
     # reclama como si el worker que lo tenía hubiera desaparecido (contenedor

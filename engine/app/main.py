@@ -11,6 +11,8 @@ from app.extraccion.estado_sap import validar_ruta_estado_sap
 from app.extraccion.estados_adif import validar_ruta_estados_adif
 from app.extraccion.maestro_materiales import validar_ruta_maestro_materiales
 from app.extraccion.sap_desglose import validar_ruta_sap_desglose
+from app.extraccion.vigentes_remanente import validar_ruta_vigentes_remanente
+from app.catalogo_antiguo import validar_ruta_catalogo_antiguo
 from app.routers import catalogo, conciliacion, documentos, expedientes, health, mantenimiento, revision, trabajos
 
 logger = logging.getLogger("api")
@@ -35,6 +37,13 @@ validar_ruta_sap_desglose(settings.sap_desglose_path)
 # 2026-09-09): solo la API lo lee (POST /mantenimiento/maestro-materiales/
 # cargar), el worker no necesita esta ruta.
 validar_ruta_maestro_materiales(settings.maestro_materiales_path)
+
+# Bloque 2, sesión 2026-09-19 (sexta parte): las dos entradas que el cliente
+# tiene que mandarnos y que llevan ruta propia. Mismo criterio que las de
+# arriba: si la variable apunta a algo que no se puede abrir, fallar al
+# arrancar y no en la primera petición real.
+validar_ruta_vigentes_remanente(settings.vigentes_remanente_path)
+validar_ruta_catalogo_antiguo(settings.catalogo_antiguo_path)
 
 app = FastAPI(title="ADIF - Catalogo de materiales")
 

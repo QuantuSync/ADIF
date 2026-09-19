@@ -1,6 +1,6 @@
 from typing import Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -12,6 +12,10 @@ from app.extraccion.candidatos_matricula import calcular_candidatos
 from app.extraccion.descubrimiento_matriz import TIPO_TRABAJO as TIPO_TRABAJO_DESCUBRIMIENTO_PEDIDOS
 from app.extraccion.estado_sap import cargar_estado_sap
 from app.extraccion.estados_adif import cargar_estados_adif
+from app.extraccion.vigentes_remanente import cruzar_vigentes_con_remanente
+from app.catalogo_antiguo import comparar_con_catalogo_antiguo, generar_informe_catalogo_antiguo
+from app.conciliacion import construir_conciliacion
+from app.exportacion import contar_filas_de_materiales
 from app.extraccion.maestro_materiales import cargar_maestro_materiales, completar_unidades_desde_maestro
 from app.extraccion.ocr_relectura import TIPO_TRABAJO as TIPO_TRABAJO_OCR_RELECTURA
 from app.extraccion.sap_desglose import cargar_sap_desglose
@@ -29,6 +33,7 @@ from app.mantenimiento.programacion import (
 from app.models import Documento, TrabajoCola
 from app.queue import encolar_trabajo
 from app.schemas import (
+    CatalogoAntiguoResumenOut,
     EstadoMantenimientoOut,
     EstadosAdifCargaOut,
     EstadoSapCargaOut,
@@ -37,6 +42,7 @@ from app.schemas import (
     MaestroMaterialesCompletarOut,
     SapDesglosecargaOut,
     TrabajoOut,
+    VigentesRemanenteCruceOut,
 )
 from app.sindicacion.descubrimiento import TIPO_TRABAJO as TIPO_TRABAJO_SINDICACION_BACKFILL
 
@@ -401,6 +407,58 @@ def cargar_estados_de_adif(
     una diferencia deliberada: **no da de alta ningún expediente**. Ver el
     docstring del módulo."""
     return cargar_estados_adif(db, settings.estados_adif_path)
+
+
+@router.post("/mantenimiento/vigentes-remanente/cruzar", response_model=VigentesRemanenteCruceOut)
+def cruzar_vigentes_remanente(
+    buscar: bool = Query(
+        True,
+        description="Encolar la búsqueda en la Plataforma de los que no estén en la Conciliación.",
+    ),
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    """Bloque 2, sesión 2026-09-19 (sexta parte): el cruce de la lista de
+    contratos vigentes con remanente que ADIF tiene que enviarnos
+    (`VIGENTES_REMANENTE_PATH`, `app.extraccion.vigentes_remanente`).
+
+    Devuelve, para cada uno, su Situación en la Conciliación -- la MISMA lista
+    que escribe el Excel, construida aquí con el mismo recuento de filas de
+    "Materiales" -- y encola la búsqueda en la Plataforma de los que no
+    estén. Con `buscar=false` solo informa, sin tocar la red ni dar de alta
+    nada."""
+    conciliacion = construir_conciliacion(db, dict(contar_filas_de_materiales(db)))
+    return cruzar_vigentes_con_remanente(
+        db, settings.vigentes_remanente_path, conciliacion, buscar=buscar
+    ).to_dict()
+
+
+@router.get("/mantenimiento/catalogo-antiguo/resumen", response_model=CatalogoAntiguoResumenOut)
+def resumen_catalogo_antiguo(
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    """Las cifras del cruce con el catálogo antiguo de ADIF
+    (`CATALOGO_ANTIGUO_PATH`, `app.catalogo_antiguo`), sin generar el fichero."""
+    return comparar_con_catalogo_antiguo(db, settings.catalogo_antiguo_path).resumen.to_dict()
+
+
+@router.get("/mantenimiento/catalogo-antiguo/informe.xlsx")
+def informe_catalogo_antiguo(
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    """El informe de materiales que están en su catálogo y no en el nuestro,
+    al revés, y diferencias de precio. **Va aparte del entregable**, que es la
+    condición que puso el cliente: su propio fichero, nunca una hoja del Excel
+    del catálogo."""
+    informe = comparar_con_catalogo_antiguo(db, settings.catalogo_antiguo_path)
+    contenido = generar_informe_catalogo_antiguo(informe)
+    return Response(
+        content=contenido,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="informe_catalogo_antiguo_adif.xlsx"'},
+    )
 
 
 @router.post("/mantenimiento/sap-desglose/cargar", response_model=SapDesglosecargaOut)
