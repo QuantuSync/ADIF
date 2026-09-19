@@ -69,6 +69,7 @@ from app.extraccion.identidad_expediente import (
     fusionar_en,
 )
 from app.extraccion.invalidado import INVALIDADO
+from app.extraccion.lote_tabla import MOTIVO_TABLA_DEL_CONJUNTO
 from app.extraccion.lotes import (
     IdentidadContrato,
     LoteDeclarado,
@@ -124,11 +125,28 @@ def _lotes_candidatos_del_cuadro(expediente, lotes, lote_propio) -> Optional[dic
       convertiría un dato del conjunto de la licitación en un dato del lote 1,
       que es justo la clase de atribución equivocada que este sistema no hace
       (CONTEXTO.md sección 26, `6.24/28510.0088`).
+
+    **Y una guarda más, del 2026-09-19 (segunda parte): el lote único no es
+    el sentinela si su número es justo el que declara el título del
+    expediente.** `LOTE_UNICO` vale "1", el mismo texto que un lote REAL
+    llamado "Lote 1" (la trampa que ya avisa `_eliminar_lote_sentinela_
+    obsoleto`), y sin esta guarda el arreglo del título no era idempotente:
+    `6.22/28510.0011` ("Lote 1: Jefatura de Barcelona") se quedaba con su
+    único lote "1" en una pasada y en la siguiente ese "1" se volvía a leer
+    como sentinela, el reparto del cuadro volvía a partirlo en seis y el
+    expediente recuperaba los 20 cuadros de sus hermanos. Sus tres hermanos
+    `0012`-`0014` no lo sufrían solo porque sus lotes se llaman "2", "3" y
+    "4". Medido antes de aplicarla: los otros ocho expedientes del corpus a
+    los que alcanza esta guarda (título "Lote 1" y un único lote "1") tienen
+    hoy su intento de reparto **rechazado** por la garantía, así que no
+    intentarlo siquiera no les cambia ni una fila.
     """
     declarados = expediente.lotes_totales_declarados
     if not declarados or declarados <= 1 or lote_propio is not None:
         return None
     if len(lotes) != 1 or lotes[0].identificador_lote != LOTE_UNICO:
+        return None
+    if lotes[0].identificador_lote == _lote_declarado_en_el_titulo(expediente):
         return None
     sentinela = lotes[0]
     if (
@@ -144,10 +162,33 @@ def _el_cuadro_declara_todos_los_lotes(resultado, candidatos: dict) -> bool:
     """El intento solo vale si el cuadro de precios atribuye **todas** sus
     filas a un lote y cubre los N declarados. Con una sola fila huérfana se
     descarta: una huérfana se queda fuera del entregable, y este cambio no
-    puede quitar ni una fila de lo que ya salía."""
+    puede quitar ni una fila de lo que ya salía.
+
+    **Afinado (no aflojado) el 2026-09-19, decisión del cliente.** Con una
+    excepción, y solo una: las filas del **anejo de criterios técnicos que el
+    propio documento declara del conjunto de los lotes** (CONTEXTO.md sección
+    7, `MOTIVO_TABLA_DEL_CONJUNTO`) no cuentan como huérfanas aquí, porque
+    **no pueden tener lote por diseño**: son la lista de materiales de la
+    licitación entera, con su propia numeración, y quedarían huérfanas
+    exactamente igual se acepte o se rechace el reparto. Contarlas era un
+    error de categoría: rechazaba el intento por filas que no se pierden.
+
+    La garantía no se afloja en nada más -- una huérfana de verdad (banda
+    vacía, tabla separada, cabecera ilegible) sigue descartando el intento
+    entero. Medido antes de aplicarlo sobre los 29 candidatos vivos: entran
+    `6.22/28510.0173` (cuyas 183 huérfanas son las 183 de criterios) y
+    `6.25/28510.0171` (21 de 21), y **`4.25/28510.0132` sigue rechazado**
+    (sus 106 huérfanas son 93 de banda vacía y 13 de tabla separada, ninguna
+    de criterios) -- que era el único de los quince que perdía filas."""
     if not resultado.lineas:
         return False
-    identificadores = {linea.get("identificador_lote") for linea in resultado.lineas}
+    reparten_lote = [
+        linea for linea in resultado.lineas
+        if MOTIVO_TABLA_DEL_CONJUNTO not in (linea.get("motivo_revision") or "")
+    ]
+    if not reparten_lote:
+        return False
+    identificadores = {linea.get("identificador_lote") for linea in reparten_lote}
     if None in identificadores:
         return False
     return identificadores == set(candidatos)

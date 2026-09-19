@@ -2,6 +2,7 @@ import hashlib
 import re
 from dataclasses import dataclass
 from decimal import Decimal
+from itertools import permutations
 from typing import Callable, Optional
 
 from sqlalchemy.orm import Session
@@ -22,7 +23,12 @@ from app.extraccion.normalizacion import (
 )
 from app.extraccion.tabla import TablaExtraida
 from app.extraccion.texto import normalizar
-from app.extraccion.unidad_medida import es_unidad_conocida, limpiar_unidad, normalizar_unidad
+from app.extraccion.unidad_medida import (
+    es_marca_de_partida_alzada,
+    es_unidad_conocida,
+    limpiar_unidad,
+    normalizar_unidad,
+)
 from app.models import LineaCatalogo, Lote
 
 # `LineaCatalogo.codigo_precio` es `String(32)` (app/models.py) -- se lee del
@@ -1299,7 +1305,23 @@ def _construir_campos(
     # "Txkm" -> "t·km"); lo que decía la celda queda en
     # `unidad_medida_original` (`app.extraccion.unidad_medida`).
     unidad_medida_original = unidad_medida
-    if unidad_medida is not None:
+    if unidad_medida is not None and es_marca_de_partida_alzada(unidad_medida):
+        # Sesión 2026-09-19 (segunda parte, decisión del cliente): "PA" no es
+        # una unidad de medida sino el tipo de línea (ver
+        # `app.extraccion.unidad_medida.es_marca_de_partida_alzada`). La celda
+        # queda vacía y `app.celdas_vacias` pone el motivo -- "no aplica
+        # (partida alzada)" --, sin `motivo_revision`: no es un defecto de
+        # lectura, el documento dice exactamente lo que quiere decir. Lo que
+        # decía la celda se conserva en `unidad_medida_original`, que es
+        # donde vive siempre el literal del documento.
+        #
+        # `INVALIDADO`, no `None` (`app.extraccion.invalidado`): un `None`
+        # corriente no pisa un valor ya guardado, así que el "PA" que las 33
+        # filas tienen de pasadas anteriores sobreviviría al reproceso. Aquí
+        # la extracción SÍ ha mirado la celda y ha determinado que no es una
+        # unidad: hay que borrar lo que hubiera.
+        unidad_medida = INVALIDADO
+    elif unidad_medida is not None:
         unidad_medida = normalizar_unidad(unidad_medida)
 
     return "ok", {
@@ -1936,6 +1958,81 @@ def _escribir_precio_corregido(linea: dict, precio: Decimal) -> None:
     fragmento = linea.get("fragmento")
     if fragmento and not fragmento.startswith(MARCA_PRECIO_DESDE_IMPORTE):
         linea["fragmento"] = f"{MARCA_PRECIO_DESDE_IMPORTE} {fragmento}"
+
+
+# Sesión 2026-09-19 (segunda parte, decisión del cliente). Una tabla cuya
+# columna de descripción está **desplazada**: `pdfplumber` corta sus filas
+# más arriba de donde el documento las separa, así que la cola de cada
+# descripción cae en la celda de la fila siguiente.
+#
+# Caso real, `6.24/28510.0171_ANEJO_1.pdf`. El documento trae el mismo
+# material en dos tablas -- el cuadro de precios (p.18) y el anejo de
+# criterios/impacto del fallo (p.22) -- con los mismos códigos de precio y
+# las mismas matrículas:
+#
+#   p.18  P-01 "DISYUNTOR EXTRARRÁPIDO MODELO UR26ED64S DE SECHERON O EQUIVALENTE"
+#         P-02 "CONTACTO FIJO MODELO UR26ED64S DE SECHERON O EQUIVALENTE"
+#   p.22  P-01 "DISYUNTOR EXTRARRÁPIDO MODELO UR26ED64S DE"
+#         P-02 "SECHERON O EQUIVALENTE CONTACTO FIJO MODELO UR26ED64S DE"
+#
+# Las dos tablas dicen exactamente el mismo texto, cortado en sitios
+# distintos, y la de p.22 se escribía la última: en el Excel cada material
+# salía empezando por el final de la descripción del material ANTERIOR, que
+# para quien busca en almacenes es peor que una descripción corta.
+#
+# **La prueba es una identidad de cadenas, no un parecido.** Concatenadas en
+# orden, las descripciones de la tabla desplazada son un **prefijo estricto**
+# de las de la tabla buena (verificado en el caso real: 348 caracteres contra
+# 371, y lo que falta al final es exactamente la cola que la última fila
+# perdió). Dos textos cortados en sitios distintos coinciden así; dos tablas
+# de materiales distintos, no. Con menos de dos códigos compartidos no se
+# comprueba nada: una coincidencia de prefijo entre dos descripciones sueltas
+# sí podría ser casualidad.
+_MINIMO_CLAVES_COMPARTIDAS = 2
+
+
+def _texto_concatenado(lineas: list[dict]) -> str:
+    return " ".join(" ".join((l.get("descripcion") or "").split()) for l in lineas).strip()
+
+
+def corregir_descripcion_desplazada_entre_tablas(lineas: list[dict]) -> int:
+    """Cuando dos tablas del MISMO documento traen las mismas claves y el
+    texto concatenado de una es prefijo estricto del de la otra, la primera
+    tiene la columna de descripción desplazada: sus líneas se quedan con la
+    descripción de la tabla que no lo está.
+
+    No se inventa ningún texto ni se junta nada: se copia, para la misma
+    clave, la descripción que el mismo documento imprime en su otra tabla.
+    Devuelve cuántas líneas se han corregido."""
+    por_tabla: dict[tuple, list[dict]] = {}
+    for linea in lineas:
+        if linea.get("tabla_origen") is not None and linea.get("descripcion"):
+            por_tabla.setdefault(linea["tabla_origen"], []).append(linea)
+    if len(por_tabla) < 2:
+        return 0
+
+    def clave(linea: dict) -> tuple:
+        return (linea.get("identificador_lote"), linea.get("clave_linea"))
+
+    corregidas = 0
+    for origen_a, origen_b in permutations(sorted(por_tabla), 2):
+        lineas_a, lineas_b = por_tabla[origen_a], por_tabla[origen_b]
+        por_clave_b = {clave(l): l for l in lineas_b}
+        compartidas_a = [l for l in lineas_a if clave(l) in por_clave_b]
+        if len(compartidas_a) < _MINIMO_CLAVES_COMPARTIDAS:
+            continue
+        compartidas_b = [por_clave_b[clave(l)] for l in compartidas_a]
+        texto_a, texto_b = _texto_concatenado(compartidas_a), _texto_concatenado(compartidas_b)
+        if not texto_a or not texto_b or texto_a == texto_b:
+            continue
+        if not (texto_b.startswith(texto_a) and len(texto_a) < len(texto_b)):
+            continue
+        # `a` está desplazada: su texto es el mismo, cortado antes.
+        for linea, buena in zip(compartidas_a, compartidas_b):
+            if linea.get("descripcion") != buena.get("descripcion"):
+                linea["descripcion"] = buena["descripcion"]
+                corregidas += 1
+    return corregidas
 
 
 def corregir_precio_con_importe_del_documento(

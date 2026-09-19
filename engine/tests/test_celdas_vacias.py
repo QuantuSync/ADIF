@@ -10,6 +10,7 @@ from app.models import LineaCatalogo
 
 def _linea(**campos) -> LineaCatalogo:
     datos = dict(
+        codigo_precio="P-001",
         matricula="697500900", codigo_material="GUANTE", descripcion="GUANTE", cantidad=Decimal("30"),
         precio_unitario=Decimal("24"), baja_lote=Decimal("0.54"), precio_adjudicado=Decimal("11.04"),
         unidad_medida="UN", motivo_revision=None,
