@@ -45,6 +45,7 @@ from app.extraccion.mapeo_cabecera import (
     completar_matricula_por_contenido,
     corregir_confusion_matricula_codigo_precio,
     corregir_confusion_precio_cantidad,
+    completar_cantidad_por_contenido,
     derivar_mapeo_por_contenido,
     evaluar_coherencia_mapeo,
     heredar_mapeo_por_geometria,
@@ -247,6 +248,13 @@ def procesar_anejo(
     # ese mapeo, validado contra sus filas, antes de probar nada más. Como
     # `cache_estructural`, nunca sale de esta llamada.
     ultima_con_cabecera: Optional[tuple[dict[str, Optional[int]], tuple, bool]] = None
+    # Bloque 1, sesión 2026-09-19 (tercera parte): ¿alguna tabla de ESTE
+    # documento ha declarado ya, en su propia cabecera, una columna de
+    # cantidad? Es la única certeza que autoriza a buscarla por contenido en
+    # las tablas sin cabecera que vengan después (ver
+    # `completar_cantidad_por_contenido`). Se mira por documento, nunca entre
+    # documentos: el mismo criterio que la caché de firma estructural.
+    cantidad_declarada_en_el_documento = False
     tablas_con_cabecera = 0
     ultima_cabecera_vista: Optional[str] = None
     # Bloque 2, sesión 2026-09-19: los totales que el propio documento declara
@@ -569,6 +577,18 @@ def procesar_anejo(
                     if not sin_cabecera_propia and tabla.columnas_x:
                         ultima_con_cabecera = (mapeo, tabla.columnas_x, matricula_codigo_corregido)
                 tablas_procesadas += 1
+                # Bloque 1, sesión 2026-09-19 (tercera parte), encargo del
+                # cliente sobre las cantidades que faltan: una tabla con
+                # cabecera propia que declara `cantidad` autoriza a buscarla
+                # por contenido en las tablas SIN cabecera que vengan después
+                # en el mismo documento. Sin esa declaración no se busca nada
+                # (ver `completar_cantidad_por_contenido`).
+                if not sin_cabecera_propia and mapeo.get("cantidad") is not None:
+                    cantidad_declarada_en_el_documento = True
+                elif sin_cabecera_propia:
+                    mapeo = completar_cantidad_por_contenido(
+                        mapeo, tabla.filas, cantidad_declarada_en_el_documento
+                    )
                 # Bloque 2, sesión 2026-09-19: la columna de importes de esta
                 # tabla, si su cabecera la nombra sin ambigüedad, y los
                 # totales que el propio cuadro declara al pie. Los dos son

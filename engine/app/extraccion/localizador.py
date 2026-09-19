@@ -126,12 +126,46 @@ _CABECERA_CUADRO_PALABRAS = (
     ("precio", "importe"),
 )
 
+# Bloque 3, sesión 2026-09-19 (tercera parte), decisión del cliente sobre los
+# 15 expedientes de documentos escaneados: **la cantidad deja de ser
+# obligatoria también aquí**, en la etapa 3, o la página no se abre nunca y la
+# etapa 4 no llega a verla. Caso medido: `6.18/28510.0071` ANEJO_1, cuyas
+# páginas 12-17 traen el cuadro entero ("Designación | Plano | PRECIO", ~68
+# artículos) y quedaban fuera de las candidatas -- su densidad numérica es la
+# de un párrafo porque las designaciones son largas, y no hay matrícula ni
+# código de precio que las salve como continuación.
+#
+# La guarda que sustituye a la cantidad: la línea tiene que **parecer una
+# cabecera**, no prosa. Una cabecera de cuadro son tres o cuatro rótulos; una
+# frase de pliego que menciona de pasada "la descripción" y "el precio"
+# ("...el precio unitario de cada artículo según la descripción del presente
+# pliego...") pasa de largo de `_MAX_TOKENS_CABECERA`. Y abrir la página no
+# mete nada en el catálogo: quien decide si la tabla es un cuadro de verdad
+# sigue siendo `app.extraccion.tabla._filas_cuadro_sin_codigo`, con sus
+# propias guardas (descripción con letras, precio que es importe, pie de
+# totales que corta, la cuenta de cantidad × precio = importe cuando el
+# cuadro trae importe, y un mínimo de filas cuando no trae cantidad).
+_MAX_TOKENS_CABECERA = 10
+_CABECERA_CUADRO_SIN_CANTIDAD = (
+    ("descripcion", "concepto", "designacion", "denominacion"),
+    ("precio", "importe"),
+)
+
+
+def _linea_parece_cabecera(linea: str, palabras: tuple[tuple[str, ...], ...]) -> bool:
+    if not all(any(p in linea for p in grupo) for grupo in palabras):
+        return False
+    return len(linea.split()) <= _MAX_TOKENS_CABECERA
+
 
 def _tiene_linea_cabecera_cuadro(texto: str) -> bool:
-    return any(
+    lineas = list(map(normalizar, texto.splitlines()))
+    if any(
         all(any(p in linea for p in palabras) for palabras in _CABECERA_CUADRO_PALABRAS)
-        for linea in map(normalizar, texto.splitlines())
-    )
+        for linea in lineas
+    ):
+        return True
+    return any(_linea_parece_cabecera(linea, _CABECERA_CUADRO_SIN_CANTIDAD) for linea in lineas)
 
 
 def _identificadores_fila(texto: str) -> int:
@@ -162,7 +196,18 @@ _GRUPOS_MARCADORES: dict[str, tuple[str, ...]] = {
     # quedaba sin sus dos líneas de carril. Medido sobre el corpus: abre 3
     # páginas más, las dos de esa tabla y una sin tabla.
     "matricula": ("matricula", "mat."),
-    "descripcion": ("descripcion",),
+    # Bloque 3, sesión 2026-09-19 (tercera parte): "designacion" y
+    # "denominacion" son los otros dos nombres que el corpus da a esta misma
+    # columna -- `app.extraccion.tabla._COLUMNA_DESCRIPCION` ya los trataba
+    # como equivalentes desde la sesión 2026-09-15, pero este grupo de
+    # marcadores se había quedado solo con "descripcion". Caso medido:
+    # `6.18/28510.0064` ANEJO_1 p.10, cuya cabecera es "MATRÍC. |
+    # DESIGNACIÓN | ACREDITACIÓN FERROVIARIA | ET | CRÍTICO | PLANO DE
+    # REFERENCIA | PRECIO DE REFERENCIA" -- un cuadro de precios de libro,
+    # con un solo grupo reconocido ("precio") porque "MATRÍC." no llega a
+    # "mat." y "DESIGNACIÓN" no estaba aquí. Su tabla ya pasaba la etapa 4
+    # sin tocar nada; lo que faltaba era que la página se abriera.
+    "descripcion": ("descripcion", "designacion", "denominacion"),
 }
 
 
@@ -280,7 +325,17 @@ def localizar_paginas_candidatas(paginas: list[PaginaTexto]) -> ResultadoLocaliz
                 anterior_es_candidata = False
             continue
         grupos = _grupos_presentes(normalizar(pagina.texto))
-        if len(grupos) >= MIN_GRUPOS_MARCADORES:
+        # Bloque 3, sesión 2026-09-19 (tercera parte): la comprobación de
+        # línea de cabecera de cuadro solo vivía en la rama de densidad BAJA
+        # (era para un cuadro pequeño perdido en una página de prosa), así
+        # que una página con densidad ALTA y un solo grupo de marcadores se
+        # quedaba fuera aunque su primera línea fuera literalmente la
+        # cabecera del cuadro. Caso medido: `6.18/28510.0071` ANEJO_1 p.12-17
+        # -- densidad 0,26 (diez veces el umbral), línea "Designación Plano
+        # PRECIO", y un solo grupo ("precio") porque el cuadro no nombra
+        # matrícula, cantidad ni unidad. Es estrictamente más permisivo que
+        # la rama de densidad baja, que ya la aceptaba con menos señal.
+        if len(grupos) >= MIN_GRUPOS_MARCADORES or _tiene_linea_cabecera_cuadro(pagina.texto):
             candidatas.append(PaginaCandidata(pagina.numero, densidad, grupos))
             anterior_es_candidata = True
         elif anterior_es_candidata and (

@@ -65,6 +65,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Optional
 
 from app.extraccion.normalizacion import normalizar_guiones, parsear_importe_es
@@ -272,6 +273,64 @@ def _es_importe(celda: CELDA) -> bool:
         return False
 
 
+# Bloque 3, sesión 2026-09-19 (tercera parte), decisión del cliente sobre los
+# 15 expedientes de documentos escaneados: **la columna de cantidad deja de
+# ser obligatoria** para aceptar un cuadro sin código de precio ni matrícula.
+#
+# Por qué se exigía, y por qué ya no: la regla original (sesión 2026-09-15)
+# pedía descripción + cantidad + precio porque las tres juntas distinguen un
+# cuadro de precios de una tabla de resumen de presupuesto o de criterios. El
+# corpus de escaneados demuestra que hay cuadros de precios reales que **no
+# publican cantidad en absoluto**, y no por un fallo de lectura: los "Pedido
+# Abierto" declaran en su propio texto que no hay compromiso de compra en
+# firme ("al ser estas cantidades estimadas"), así que su anexo de precios es
+# una lista de designación, plano y precio. Casos medidos:
+# `6.18/28510.0071` ("DESIGNACIÓN | PLANO | PRECIO", 6 páginas, ~68
+# artículos), `3.16/28510.0156` p.19 ("REF. | DENOMINACIÓN | PRECIO") y
+# `3.19/28510.0201` p.10 ("CONCEPTO | PRECIO").
+#
+# Lo que sustituye a la cantidad como garantía, por condición explícita del
+# cliente: **cuando el cuadro trae su propia columna de IMPORTE además de la
+# de precio, cada fila tiene que cuadrar** (cantidad × precio = importe). Es
+# la misma prueba aritmética que ya autoriza `app.catalogo.
+# corregir_precio_con_importe_del_documento` y la descodificación de glifos
+# (CONTEXTO.md secciones 7 y 16): no se escribe un número que la aritmética
+# del propio documento contradiga. Una fila que no cuadra no entra, y con
+# ella se corta la tabla -- nunca se corrige nada aquí.
+#
+# Las demás guardas siguen intactas y son las que impiden que entre una tabla
+# de resumen: la descripción tiene que traer letras de verdad, el precio tiene
+# que ser un importe, y la primera fila con etiqueta de pie
+# ("Total", "Suma", "IVA", "Presupuesto"...) corta la tabla.
+_TOLERANCIA_IMPORTE = Decimal("0.01")
+_MIN_FILAS_CUADRO_SIN_CANTIDAD = 3
+
+
+def _importe_de(celda: CELDA) -> Optional[Decimal]:
+    if not celda:
+        return None
+    try:
+        return parsear_importe_es(celda)
+    except ValueError:
+        return None
+
+
+def _fila_cuadra_con_su_importe(
+    fila: FILA, cantidad: Optional[int], precio: int, importe: Optional[int]
+) -> bool:
+    """`True` si no hay nada que comprobar (el cuadro no trae importe, o no
+    trae cantidad, o esta fila deja alguno de los dos en blanco) o si la
+    cuenta sale. Nunca inventa ni corrige un valor."""
+    if importe is None or cantidad is None:
+        return True
+    valor_importe = _importe_de(fila[importe]) if importe < len(fila) else None
+    valor_precio = _importe_de(fila[precio]) if precio < len(fila) else None
+    valor_cantidad = _importe_de(fila[cantidad]) if cantidad < len(fila) else None
+    if None in (valor_importe, valor_precio, valor_cantidad):
+        return True
+    return abs(valor_cantidad * valor_precio - valor_importe) <= _TOLERANCIA_IMPORTE
+
+
 def _filas_cuadro_sin_codigo(filas: list[FILA]) -> Optional[list[FILA]]:
     cabecera = filas[0]
     descripcion = _columna_con(cabecera, _COLUMNA_DESCRIPCION)
@@ -279,8 +338,16 @@ def _filas_cuadro_sin_codigo(filas: list[FILA]) -> Optional[list[FILA]]:
     precio = _columna_con(cabecera, ("precio",))
     if precio is None:
         precio = _columna_con(cabecera, _COLUMNA_PRECIO)
-    if None in (descripcion, cantidad, precio) or len({descripcion, cantidad, precio}) < 3:
+    if descripcion is None or precio is None or descripcion == precio:
         return None
+    if cantidad is not None and cantidad in (descripcion, precio):
+        cantidad = None
+    # La columna de importes, solo si es una TERCERA columna distinta de la de
+    # precio: "PRECIO | IMPORTE" es un cuadro con las dos, "IMPORTE" a secas
+    # es el precio de la fila y no hay nada con qué contrastarlo.
+    importe = _columna_con(cabecera, ("importe",))
+    if importe is not None and importe in (descripcion, precio, cantidad):
+        importe = None
     datos: list[FILA] = []
     for fila in filas[1:]:
         texto = _texto_celda(fila[descripcion]) if descripcion < len(fila) else ""
@@ -288,7 +355,16 @@ def _filas_cuadro_sin_codigo(filas: list[FILA]) -> Optional[list[FILA]]:
             break
         if not (precio < len(fila) and _es_importe(fila[precio])):
             break
+        if not _fila_cuadra_con_su_importe(fila, cantidad, precio, importe):
+            break
         datos.append(fila)
+    # Sin columna de cantidad la señal es más débil, así que se exige un
+    # mínimo de filas: un cuadro de precios de verdad lista artículos, y con
+    # una o dos filas de "descripción + importe" no se distingue de un
+    # resumen de presupuesto. Con cantidad se mantiene el criterio de la
+    # sesión 2026-09-15, que aceptaba el cuadro de un solo artículo.
+    if cantidad is None and len(datos) < _MIN_FILAS_CUADRO_SIN_CANTIDAD:
+        return None
     return datos or None
 
 

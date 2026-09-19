@@ -552,6 +552,106 @@ def completar_codigo_precio_por_contenido(
     return completado
 
 
+# Bloque 1, sesión 2026-09-19 (tercera parte), encargo del cliente sobre las
+# cantidades que faltan. Causa raíz medida, no supuesta: en una tabla SIN
+# cabecera propia (una página de continuación), el mapeo lo resuelve el modelo
+# a partir de la cabecera vacía y 2-3 filas de ejemplo -- y si en esas 2-3
+# filas la celda de cantidad está vacía (lo normal en un cuadro cuya
+# "CANTIDAD ESTIMADA DE REFERENCIA" solo se rellena en unos pocos renglones),
+# el modelo no reclama ninguna columna para `cantidad`. Con `cantidad` sin
+# columna, `app.catalogo._recuperar_cantidad_columna_fantasma` **no llega a
+# dispararse nunca** (exige que la cabecera SÍ declare el campo), así que el
+# número queda en el PDF y la celda del Excel sale vacía con el motivo "no
+# consta" -- un motivo falso: el documento sí la publica.
+#
+# Medido sobre `6.20/28510.0042`/`0046`/`0047` (doc `ANEJO_abd69efbdd39b552`,
+# 61 páginas, 1.302 líneas): 1.222 líneas se construyen con el mapeo
+# `{'cantidad': None, 'matricula': 0, 'descripcion': 1, 'precio_unitario': 4}`
+# mientras la p.3, que SÍ trae cabecera, la declara en el índice 6
+# ("Cantidad estimada de referencia"). Segundo caso real, misma forma:
+# `6.22/28510.0125`/`0126` (doc `ANEJO_57694f5d5dacb236`), cuya p.15 declara
+# "CANTIDADES ESTIMADAS DE REFERENCIA" y cuyas páginas 16-20 la pierden al
+# cambiar el número de columnas.
+#
+# **La certeza es del propio documento, no de una heurística sobre el
+# contenido**: esta función solo se llama cuando otra tabla DEL MISMO
+# DOCUMENTO declaró una columna de cantidad en su cabecera
+# (`cantidad_declarada_en_el_documento`). Sin esa declaración no se completa
+# nada: una columna de enteros pequeños suelta podría ser cualquier cosa (el
+# radio de un aparato de vía, el peso en toneladas, un número de partida), y
+# esos tres casos existen de verdad en el corpus -- `6.21/28510.0108`-`0111`
+# p.5/p.17 traen "PESO en toneladas" y "17.000"/"10.000" de tipología, y su
+# documento NUNCA declara cantidad, así que aquí no entra.
+#
+# `_UMBRAL_RELLENO_MINIMO` de `clasificar_columnas` no sirve para esto: la
+# columna que se busca está vacía en el 95 % de sus filas por diseño del
+# propio cuadro. De ahí el predicado propio, y de ahí que exija el **100 %**
+# de sus valores no vacíos con forma de cantidad pequeña: sin separador de
+# miles (que dejaría entrar "03.361.140.1" y "17.000"), sin el símbolo de
+# euro, sin letras y con cuatro dígitos enteros como máximo (una matrícula
+# tiene 8 o 9).
+#
+# **Y sin decimales.** La primera versión aceptaba "3,3" y el reproceso
+# completo demostró que eso no vale: en el anejo de criterios de
+# `6.21/28510.0108`-`0111` alguna de sus tablas CON cabecera acaba con
+# `cantidad` mapeada (el modelo se lo asigna por las filas de ejemplo, aunque
+# ninguna cabecera del documento diga literalmente "cantidad"), así que la
+# guarda de "el documento la declara" no lo protegía. Y en sus páginas 7 y 8
+# la única columna que ningún campo reclama es el **PESO en toneladas** ("4",
+# "3,3", "2,9"): cinco líneas por expediente se llenaron con el peso del
+# aparato de vía como si fuera una cantidad de unidades. Una "cantidad estimada de referencia" de
+# este corpus es un recuento entero (0, 1, 2, 3, 13, 32.000); un peso lleva
+# decimales. Exigir enteros descarta esa columna por el "3,3" y deja pasar
+# las que sí son cantidades. Es una restricción deliberada: si algún día
+# aparece un cuadro con cantidades decimales en una tabla sin cabecera, esta
+# vía no lo recuperará -- y es preferible a escribir un peso en la columna de
+# cantidad.
+_CANTIDAD_PEQUENA_RE = re.compile(r"^\d{1,4}$")
+
+
+def _columna_parece_cantidad(indice: int, filas: list[list[Optional[str]]]) -> bool:
+    valores = [
+        fila[indice].strip()
+        for fila in filas
+        if indice < len(fila) and fila[indice] and fila[indice].strip()
+    ]
+    if not valores:
+        return False
+    return all(_CANTIDAD_PEQUENA_RE.match(v) for v in valores)
+
+
+def completar_cantidad_por_contenido(
+    mapeo: dict[str, Optional[int]],
+    filas: list[list[Optional[str]]],
+    cantidad_declarada_en_el_documento: bool,
+) -> dict[str, Optional[int]]:
+    """Hermana de `completar_matricula_por_contenido` y
+    `completar_codigo_precio_por_contenido`, para `cantidad` -- ver el
+    comentario de arriba para la causa raíz medida y por qué la certeza la
+    da el propio documento.
+
+    Con `cantidad` sin columna y el documento declarándola en otra de sus
+    tablas, si hay **exactamente una** columna que ningún otro campo reclama
+    y en la que **todos** los valores no vacíos tienen forma de cantidad
+    pequeña, se le asigna. Con cero o más de una, no se adivina."""
+    if not cantidad_declarada_en_el_documento:
+        return mapeo
+    if mapeo.get("cantidad") is not None or not filas:
+        return mapeo
+    reclamadas = {indice for indice in mapeo.values() if indice is not None}
+    num_columnas = max(len(fila) for fila in filas)
+    candidatas = [
+        indice
+        for indice in range(num_columnas)
+        if indice not in reclamadas and _columna_parece_cantidad(indice, filas)
+    ]
+    if len(candidatas) != 1:
+        return mapeo
+    completado = dict(mapeo)
+    completado["cantidad"] = candidatas[0]
+    return completado
+
+
 _TOLERANCIA_GEOMETRIA = 3.0
 
 

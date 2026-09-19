@@ -187,7 +187,16 @@ Cada documento cae por la primera etapa que lo resuelva. **No saltes etapas.**
    líneas que traen a la vez identificador de fila e importe entra aunque la
    prosa que rodea al cuadro baje su densidad (sesión 2026-09-15), igual que
    una con una línea que nombra a la vez descripción, cantidad y precio (la
-   cabecera de un cuadro de un solo artículo, misma sesión).
+   cabecera de un cuadro de un solo artículo, misma sesión). **Esa línea de
+   cabecera ya no necesita nombrar la cantidad, y se comprueba también cuando
+   la densidad es alta** (sesión 2026-09-19, tercera parte): el tope de diez
+   palabras sustituye a la exigencia de cantidad para que una frase de pliego
+   que menciona de pasada "la descripción" y "el precio" no abra la página, y
+   la comprobación solo vivía en la rama de densidad baja — `6.18/28510.0071`
+   p.12-17 tiene densidad 0,26, diez veces el umbral, y su primera línea es
+   literalmente "Designación Plano PRECIO". "Designación" y "Denominación"
+   cuentan ya como columna de descripción entre los marcadores, los otros dos
+   nombres que el corpus le da (`6.18/28510.0064`).
 4. **Extraer la tabla** con `pdfplumber` sobre esas páginas. Si una tabla sale
    sin ninguna fila de datos, segundo intento sin imantar las líneas
    verticales (`snap_x_tolerance` 1): el borde de una tabla vecina puede
@@ -196,9 +205,22 @@ Cada documento cae por la primera etapa que lo resuelva. **No saltes etapas.**
    valor por línea en cada celda: esos valores nunca se pegan en un número.
    Una tabla sin ninguna fila con código de precio ni matrícula de 9 dígitos
    es espuria, salvo que su primera fila nombre en columnas distintas la
-   descripción, la cantidad y el precio: entonces es un cuadro sin código y se
+   descripción y el precio: entonces es un cuadro sin código y se
    leen las filas con descripción e importe hasta el pie de totales (sesión
    2026-09-15, `docs/sesion-2026-09-15-criterio-28510-y-cuadros-sin-codigo.md`).
+   **La columna de cantidad dejó de ser obligatoria** (decisión del cliente,
+   sesión 2026-09-19 tercera parte): hay cuadros de precios reales que no
+   publican cantidad y no por un fallo de lectura — un "Pedido Abierto"
+   declara en su propio texto que no hay compromiso de compra en firme
+   ("al ser estas cantidades estimadas"), así que su anexo es una lista de
+   designación, plano y precio (`6.18/28510.0071`, ~68 artículos). Lo que la
+   sustituye como garantía, por condición del cliente: **cuando el cuadro trae
+   su propia columna de IMPORTE además de la de precio, cada fila tiene que
+   cuadrar** (cantidad × precio = importe, tolerancia de un céntimo) — la fila
+   que no cuadra no entra y corta la tabla, nunca se corrige nada —, y **sin
+   columna de cantidad se exigen tres filas como mínimo**, porque con una o dos
+   "descripción + importe" no se distingue de un resumen de presupuesto (con
+   cantidad sigue bastando una, el criterio de 2026-09-15).
 5. **Mapear cabecera → esquema.** Única etapa donde interviene el modelo. Ver sección 6.
 6. **Normalizar y derivar.** Ver secciones 7 y 8.
 
@@ -1987,8 +2009,12 @@ sobre el corpus: +2.316 líneas en 54 expedientes, ~10,75 $.
   sin descripción ("21% IVA 7.350,00 €" leído como 217.350 €). Catálogo
   34.210 → 35.323 líneas; Excel 15.351 → 15.998 filas, 0 materiales
   perdidos, auditoría con el único error de los 11 duplicados legítimos.
-  **Sin hacer:** el cruce con los 83 vigentes con remanente (el fichero no
-  llegó a estar en `Ejemplo/Input/`).
+  **Sin hacer:** el cruce con los 83 vigentes con remanente — el fichero
+  `Ejemplo/Input/EXPEDIENTES_VIGENTES_CON_REMANENTE.xlsx` no llegó a estar en
+  el repositorio, y se reconfirmó en la sesión 2026-09-19 (tercera parte) que
+  tampoco está escondido en ninguno de los cinco ficheros de entrada que sí
+  hay. Hace falta que el cliente lo reenvíe; el cruce en sí es una pasada
+  corta.
 - **Escaneados, código del material y pendientes antiguos (sesión
   2026-09-17, `docs/sesion-2026-09-17-escaneados-codigo-material.md`).**
   **Escaneados, solo análisis**: 140 documentos (5.298 páginas) en 113
@@ -2467,6 +2493,79 @@ sobre el corpus: +2.316 líneas en 54 expedientes, ~10,75 $.
   La regla del título no puede tocarlos sin inventar un lote; la pregunta es
   para ADIF.
 
+- **Sesión 2026-09-19 (tercera parte): las cantidades que faltan, los
+  escaneados que sí se leen y "Otro" partido en sus causas**
+  (`docs/sesion-2026-09-19-cantidades-escaneados-y-situaciones.md`). Excel
+  19.569 → **19.870 filas**, 363 → **373 expedientes**, 18 columnas, **0
+  expedientes desaparecidos y 0 materiales perdidos por matrícula**.
+  (1) **Las cantidades vacías son 6.645, no 889** (la cifra del cliente no
+  corresponde a ningún dato del sistema), todas con su motivo, y **6.352
+  (95,6 %) son legítimas** — clasificadas una a una contra su propio PDF,
+  localizando la fila por código de precio o matrícula exactos. Los grandes
+  son legítimos y verificados: el trío `6.20/28510.0042`/`0046`/`0047` tiene
+  columna "Cantidad estimada de referencia" y el documento la deja en blanco
+  en 1.216 de sus 1.294 filas; el anejo de criterios de
+  `6.21/28510.0108`-`0111` no tiene columna de cantidad y sus números sueltos
+  son el radio y el peso. **120 eran hueco real**, con causa raíz medida: en
+  una tabla sin cabecera propia el mapeo no reclama ninguna columna para
+  `cantidad` (el modelo ve 2-3 filas de ejemplo y en ellas la celda está
+  vacía), y con `cantidad` sin columna `_recuperar_cantidad_columna_fantasma`
+  **no llega a dispararse nunca**. Arreglado con
+  `completar_cantidad_por_contenido` (sección 5, etapa 4), autorizada solo
+  cuando otra tabla del MISMO documento declaró esa columna y solo si hay
+  exactamente una columna libre con **todos** sus valores enteros de hasta
+  cuatro dígitos. **La primera versión aceptaba decimales y estaba mal**: el
+  reproceso completo destapó que metía el peso en toneladas del aparato de vía
+  como cantidad en 5 líneas de cada uno de `6.21/28510.0108`-`0111`; las 20
+  celdas hubo que limpiarlas en base de datos porque **un `None` no pisa un
+  valor ya guardado** (mismo remedio que la sesión 2026-09-07). Cantidad vacía
+  6.645 → **6.424**; 513 celdas cambian (416 a `0`, que el documento imprime y
+  de las que el entregable ya traía 2.359 antes de esta sesión).
+  (2) **Los 83 vigentes con remanente: el grupo está registrado y el fichero
+  nunca llegó.** `Ejemplo/Input/EXPEDIENTES_VIGENTES_CON_REMANENTE.xlsx` no ha
+  estado en el repositorio en ningún momento (así lo dejó escrito la sesión
+  2026-09-16 noche), y se ha comprobado hoja a hoja que no está escondido en
+  ninguno de los cinco ficheros de entrada. No se inventa el grupo.
+  (3) **Los 15 escaneados ilegibles: coste 0 $** (los 15 ya tenían su lectura
+  en `cache_ocr_documento`), explicados uno a uno, y **7 pasan a aportar 182
+  filas**. Dos causas: el documento escaneado es el pliego administrativo y
+  pararse a las dos páginas es correcto; o su cuadro sí se leyó y lo rechazaba
+  la etapa 4 por no traer ni código ni matrícula ni cantidad. **Decisión del
+  cliente: la columna de cantidad deja de ser obligatoria** (sección 5, etapas
+  3 y 4), con la cuenta de la fila cuando el cuadro trae IMPORTE y un mínimo de
+  tres filas cuando no trae cantidad. Cuatro de los 15 no eran casos de
+  escaneado, y dos de esos cuatro sí tenían cuadro en un documento con capa de
+  texto (`6.19/28510.0131` +91 filas, `2.19/28510.0015` +3).
+  (4) **Los 64 publicados sin cuadro, revisados documento a documento** (192
+  documentos): **63 se confirman**, y los únicos que la cascada no abre son 42
+  pliegos administrativos, con su marcador. **1 sí lo tenía**:
+  `4.26/28510.0005`, cuadro de cinco conceptos de servicio, +10 filas.
+  (5) **Los 26 de "Otro" pasan a 4**, con tres situaciones nuevas de la
+  Conciliación (cobertura parcial de lotes 14, el acuerdo marco tampoco publica
+  precios 3, documentos de expedientes hermanos 3) y 2 que pasan a aportar
+  líneas. El orden de las ramas importa y está probado: el motivo de un pedido
+  cuya matriz tampoco tiene cuadro **arrastra íntegro** el motivo de la matriz.
+  (6) **Preguntas para ADIF** en
+  `docs/preguntas-cliente-lotes-del-titulo-y-ficheros-de-entrada.md`, con un
+  hallazgo que reorienta la de los once expedientes: **su título no sale de
+  ningún documento publicado, sale del propio SAP de ADIF** (ninguno de los 11
+  tiene traza de `nombre_proyecto`, y los 11 están en los dos listados que ADIF
+  envió). Más el inventario de los cinco ficheros de entrada, columna a
+  columna, con su origen: cuatro de SAP, uno de otro sistema de ADIF, ninguno
+  desconocido.
+  (7) **Reproceso completo con la red apagada: 517 expedientes, 18 min 34 s →
+  20 min 22 s, `descargas_lanzadas: 0`.** **1.202 tests** (1.171 antes).
+  **Auditoría: 0 errores, 6 avisos.** "Conciliación" cuadra con "Materiales"
+  (19.870 = 19.870), 0 expedientes sin Situación. Las 14 subidas de filas están
+  explicadas una a una y **ninguna baja**; las 4 celdas que cambian de valor
+  fuera de las cantidades, también. **Sin tocar, medido y anotado**: los 416
+  ceros de cantidad, 4 filas duplicadas que solo difieren en mayúsculas del
+  código de precio (`p-3`/`P-3`, y unificarlo dejaría sin precio a 2 filas
+  más), 5 descripciones de `4.26/28510.0005` con el espacio mapeado a `!`, el
+  precio adjudicado de `4.26/28510.0020` `P-12` (se deriva antes de conocerse
+  la baja de su lote) y el alias "elemento" que necesitaría
+  `3.17/28510.0028`.
+
 ---
 
 El registro histórico de hallazgos y decisiones de cada sesión vive en
@@ -2506,5 +2605,7 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `sesion-2026-09-18-verificacion-del-reparto-por-lotes.md`,
 `sesion-2026-09-19-precio-desde-importe-lotes-del-titulo-y-fusion.md`,
 `sesion-2026-09-19-decisiones-aplicadas-y-garantia-afinada.md`,
+`sesion-2026-09-19-cantidades-escaneados-y-situaciones.md`,
 `pregunta-cliente-contraguja-contraaguja.md`,
+`preguntas-cliente-lotes-del-titulo-y-ficheros-de-entrada.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.
