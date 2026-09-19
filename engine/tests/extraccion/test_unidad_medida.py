@@ -50,11 +50,20 @@ def test_normalizar_unidad_a_su_forma_unica(valor, esperado):
     assert normalizar_unidad(valor) == esperado
 
 
-@pytest.mark.parametrize("valor", ["PA", "P", "transporte", "ml", "PAA", "CJ", "pieza"])
+@pytest.mark.parametrize("valor", ["PA", "P", "transporte", "PAA", "CJ", "pieza"])
 def test_normalizar_unidad_no_inventa_equivalencias(valor):
-    # "PA" no es "ud", "P" y los códigos de SAP no tienen nombre completo, "ml"
-    # puede ser metro lineal o mililitro, "pieza" no se da por "ud".
+    # "PA" no es "ud", "P" y los códigos de SAP no tienen nombre completo,
+    # "pieza" no se da por "ud".
     assert normalizar_unidad(valor) == valor
+
+
+# Sesión 2026-09-19 (séptima parte, bloque 3): "ml" SÍ se unifica. La duda era
+# "metro lineal o mililitro" y el corpus la deshace -- las tres líneas que la
+# traen son obra civil medida a lo largo en un cuadro que usa m3 y m2 al lado
+# (`6.17/28510.0007` p.20). Ver el docstring de `app.extraccion.unidad_medida`.
+@pytest.mark.parametrize("valor", ["Ml", "ML", "ml", "m.l."])
+def test_metro_lineal_se_unifica_con_metro(valor):
+    assert normalizar_unidad(valor) == "m"
 
 
 def test_normalizar_unidad_es_idempotente():
