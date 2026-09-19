@@ -155,6 +155,20 @@ Consecuencias:
 | Precio unitario licitado | Cuadro de precios unitarios del anejo. |
 | Precio unitario adjudicado | Derivado. |
 
+**El precio adjudicado se rederiva al final de la extracción, nunca antes de
+conocer la baja de su lote** (encargo del cliente, sesión 2026-09-19 cuarta
+parte). `construir_linea_catalogo` lo deriva con la baja que se conoce al
+construir la línea, y hay dos vías que resuelven la baja DESPUÉS de que sus
+líneas estén guardadas: la herencia de acuerdo marco
+(`6.24/28510.0008`, baja del 54 %, 13 líneas) y la baja derivada de los
+importes de un lote (`4.26/28510.0020` lote 1, 1 línea). Por eso
+`app.catalogo.recalcular_precio_adjudicado` corre al cerrar el expediente, con
+las bajas ya definitivas, y rederiva desde cero toda línea **que tenga lote**
+(una huérfana no tiene de qué derivar y no llega al entregable). Medido sobre
+las 20.093 líneas con lote: **14 estaban afectadas por ese orden y 0 tenían
+cualquier otra incoherencia**. Un `None` sí borra el valor guardado, igual que
+en la construcción de la línea.
+
 **Guarda la baja en cada línea del catálogo**, aunque sea la misma para todo el lote.
 Permite consultar sin recomponer, deja el sistema preparado para los expedientes que
 no siguen este modelo, y hace la baja auditable en vez de implícita.
@@ -561,6 +575,21 @@ como parámetro que el llamador pueda desactivar.
   "no aplica a esta fila"**, no un valor ilegible — se trata como campo
   vacío (matrícula, cantidad, precio unitario), sin generar motivo de
   revisión.
+- **Una fuente puede escribir el espacio como `!`.** El `CONTRATO_1.pdf` de
+  `4.26/28510.0005` lo hace: sus ocho subconjuntos de Calibri producen
+  **137.841 `!` y 0 espacios** en 304 páginas, así que sus conceptos salían
+  `Precio!Mensual!de!Mantenimiento!`.
+  `app.catalogo._recomponer_espacios_del_signo_admiracion` los recompone, con
+  tres condiciones que se comprueban en la celda y no en la fuente (que este
+  módulo no ve): al menos dos `!`, **ningún espacio** y **ningún `(cid:``**.
+  La última es obligatoria: en ese mismo documento hay 8 `!` que son la letra
+  **"j"** ("juicio", "mejor", "baja", "adjudicación") en una fuente sin tabla
+  `ToUnicode`, y 75 de los 78 documentos del corpus que producen algún `!`
+  tienen alguna fuente que emite `!` y espacios a la vez, siempre por esa
+  misma razón. Medido antes de aplicarla: **5 descripciones** del corpus la
+  cumplen y **0 traen un `!` junto con un espacio**, así que no hay ni un caso
+  en el que tenga que decidir algo dudoso (decisión del cliente, sesión
+  2026-09-19 cuarta parte).
 
 ---
 
@@ -2566,6 +2595,52 @@ sobre el corpus: +2.316 líneas en 54 expedientes, ~10,75 $.
   la baja de su lote) y el alias "elemento" que necesitaría
   `3.17/28510.0028`.
 
+- **Sesión 2026-09-19 (cuarta parte): las cinco decisiones que quedaban
+  abiertas, contestadas por el cliente** (`docs/sesion-2026-09-19-espacios-del-
+  contrato-y-precio-adjudicado.md`). Tres se quedan como están y dos se
+  aplican. Excel 19.870 → **19.865 filas** (−5), 373 expedientes, 18 columnas,
+  **0 materiales perdidos por ninguna de las tres claves** (12.201 / 15.200 /
+  17.025, idénticas antes y después).
+  (1) **Los 416 ceros de cantidad se quedan**: es lo que imprime el documento,
+  y el entregable ya traía 2.359 antes. (2) **`p-3` frente a `P-3` no se
+  unifica**: los 4 duplicados se quedan, y con ellos los 2 precios que la
+  unificación habría vaciado. (5) **"elemento" no entra como alias de
+  descripción**: `3.17/28510.0028` se queda sin sus dos tablas de precios.
+  (3) **El espacio que el contrato de `4.26/28510.0005` escribe como `!`, con
+  la prueba que exigió el cliente** (sección 8 de este documento): contados
+  carácter a carácter los 304 páginas del documento, sus ocho subconjuntos de
+  Calibri producen **137.841 `!` y exactamente 0 espacios**, y no hay ningún
+  `¡`. El único `!` del documento que no es un espacio son **8 letras "j"** de
+  una fuente sin tabla `ToUnicode` en la p.49, y por eso la regla exige que la
+  celda no traiga `(cid:`. A nivel de corpus el fenómeno es amplio (**78 de
+  1.642 documentos producen algún `!`, 175.424 en total, y 75 de esos 78
+  tienen alguna fuente que emite `!` y espacios a la vez**), así que la regla
+  mira la celda y no la fuente. Medido antes de aplicarla: **5 descripciones**
+  la cumplen y **0 traen `!` junto con un espacio**. Efecto en el entregable:
+  `4.26/28510.0005` pasa de 10 filas a 5 porque las del contrato y las del
+  anejo coinciden ya en texto y la fusión por firma las une — **el duplicado
+  que la tercera parte dejó anotado desaparece, y las tres claves de
+  materiales distintos no se mueven**, que es la prueba de que no se pierde
+  nada.
+  (4) **El precio adjudicado ya no se calcula antes de conocer la baja de su
+  lote** (sección 4 de este documento), y no solo en la fila que lo destapó:
+  `app.catalogo.recalcular_precio_adjudicado` corre al cerrar el expediente y
+  rederiva desde cero toda línea con lote. Medido sobre las 20.093 líneas con
+  lote: **14 estaban afectadas por ese orden** —13 de `6.24/28510.0008`, cuya
+  baja del 54 % llega por la herencia de acuerdo marco, y 1 de
+  `4.26/28510.0020`, cuyo lote 1 tiene baja derivada de los importes— y **0
+  tenían cualquier otra incoherencia** (ni adjudicado rancio, ni descuadrado,
+  ni baja de línea distinta de la de su lote). Las 14 pasan de vacía a valor;
+  el entregable queda con 9.116 filas con precio adjudicado de 19.865.
+  (5) **Reproceso completo con la red apagada**: 517 expedientes, **20 min
+  24 s**, `descargas_lanzadas: 0`. **1.213 tests** (1.202 antes).
+  **Auditoría: 0 errores, 6 avisos** (el único que se mueve es precios
+  atípicos, 1.522 → 1.521, la copia que desaparece). "Conciliación" cuadra con
+  "Materiales" (19.865 = 19.865), 0 expedientes sin Situación, y el recuento
+  por Situación no cambia en ninguna de las once categorías. **Las dos únicas
+  diferencias del entregable están explicadas una a una**: las 5 filas
+  duplicadas de `4.26/28510.0005` y las 14 celdas de precio adjudicado.
+
 ---
 
 El registro histórico de hallazgos y decisiones de cada sesión vive en
@@ -2606,6 +2681,7 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `sesion-2026-09-19-precio-desde-importe-lotes-del-titulo-y-fusion.md`,
 `sesion-2026-09-19-decisiones-aplicadas-y-garantia-afinada.md`,
 `sesion-2026-09-19-cantidades-escaneados-y-situaciones.md`,
+`sesion-2026-09-19-espacios-del-contrato-y-precio-adjudicado.md`,
 `pregunta-cliente-contraguja-contraaguja.md`,
 `preguntas-cliente-lotes-del-titulo-y-ficheros-de-entrada.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.

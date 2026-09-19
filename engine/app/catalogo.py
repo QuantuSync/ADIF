@@ -791,6 +791,51 @@ def _recuperar_descripcion_ultimo_recurso(
 # huérfano) — sin este recorte, esas líneas se etiquetarían como "no consta"
 # en la web cuando el dato SÍ está en el documento, uno de los "falsos
 # huecos" que el bloque 3 pedía verificar antes de dar por buenos.
+# Decisión del cliente, sesión 2026-09-19 (cuarta parte): la fuente del
+# `CONTRATO_1` de `4.26/28510.0005` mapea el **espacio** al signo `!`, así que
+# sus cinco conceptos de servicio salían `Precio!Mensual!de!Mantenimiento!` --
+# para quien busca en almacenes, ilegible.
+#
+# **La condición que puso el cliente era demostrar que en esa fuente todos los
+# `!` son espacios, y está demostrada**: en ese documento (304 páginas), los
+# ocho subconjuntos de Calibri producen **137.832 `!` y exactamente 0
+# espacios**, mientras que los 35.000+ espacios reales de la página salen
+# todos de otras fuentes (Times, AdifFago, Arial...). Una fuente que nunca
+# emite un espacio y emite `!` a razón de uno por palabra no tiene otro
+# significado posible. No hay ningún `¡` en el documento, que es lo que
+# acompañaría a una exclamación real en castellano.
+#
+# **El único `!` del documento que NO es un espacio son ocho letras "j"** de
+# un subconjunto de `AdifFagoNoRegular` en la p.49, cuya fuente no trae tabla
+# `ToUnicode`: ahí el texto sale como `(cid:NN)` y el `!` es la "j" de
+# "juicio", "mejor", "baja" y "adjudicación". Por eso la regla **exige que la
+# celda no traiga ningún `(cid:`**: ese mundo es el de
+# `app.extraccion.glifos_cid`, no este, y esa página no produce ninguna línea
+# de catálogo.
+#
+# Las otras dos condiciones son las que hacen la regla demostrable sin mirar
+# la fuente, que es lo único que `app.catalogo` tiene delante: la celda no
+# puede traer **ningún espacio** (una descripción con palabras necesita
+# separadores; si no hay ninguno y sí hay `!`, los `!` son los separadores) y
+# tiene que traer **al menos dos** `!`.
+#
+# Medido sobre las 39.651 líneas del corpus antes de aplicarla: **5
+# descripciones** cumplen las tres condiciones, las cinco de
+# `4.26/28510.0005`, y **ninguna descripción del corpus trae un `!` junto con
+# un espacio** -- es decir, no hay ni un caso en el que esta regla tenga que
+# decidir. Tampoco hay ningún `!` en matrícula, código de precio ni unidad de
+# medida.
+_MIN_ADMIRACIONES_COMO_ESPACIO = 2
+
+
+def _recomponer_espacios_del_signo_admiracion(texto: str) -> str:
+    if texto.count("!") < _MIN_ADMIRACIONES_COMO_ESPACIO:
+        return texto
+    if " " in texto or "(cid:" in texto:
+        return texto
+    return re.sub(r"\s+", " ", texto.replace("!", " ")).strip()
+
+
 def _parece_cantidad_recuperable(texto: Optional[str]) -> bool:
     if not texto or _es_celda_vacia(texto):
         return False
@@ -1018,7 +1063,7 @@ def _construir_campos(
         # puntos de miles en una sola fila de la tabla. Mismo número, otra
         # forma de escribirlo -- nunca un valor ambiguo.
         matricula = matricula.replace(".", "")
-    descripcion = limpiar_texto_celda(_valor("descripcion")) or ""
+    descripcion = _recomponer_espacios_del_signo_admiracion(limpiar_texto_celda(_valor("descripcion")) or "")
     if descripcion and _es_concepto_de_presupuesto(descripcion):
         return "pie_de_tabla", None
     unidad_medida = limpiar_texto_celda(_unir_unidad_partida(_valor("unidad_medida")))
@@ -3008,6 +3053,71 @@ def podar_lineas_obsoletas_de_documento(
         db.delete(linea)
     db.flush()
     return len(candidatas)
+
+
+def recalcular_precio_adjudicado(db: Session, expediente_id: int) -> int:
+    """Encargo del cliente, sesión 2026-09-19 (cuarta parte): **el precio
+    adjudicado de una línea no puede calcularse antes de conocer la baja de su
+    lote**. Devuelve cuántas líneas cambian.
+
+    El defecto, medido: `construir_linea_catalogo` deriva
+    `precio_adjudicado = precio_unitario × (1 − baja)` con la baja que se
+    conoce **en el momento de construir la línea**, y hay dos vías por las que
+    la baja de un lote se resuelve DESPUÉS de que sus líneas ya estén
+    guardadas:
+
+    - La **herencia de acuerdo marco** (`app.extraccion.herencia_matriz`), que
+      corre después del bucle de documentos: `6.24/28510.0008` (guantes, baja
+      del 54 %) tenía sus 13 líneas con precio y sin adjudicado por esto.
+    - La **baja derivada de los importes** de un lote, que se calcula al
+      cerrar el expediente: `4.26/28510.0020` lote 1 (baja 2,5794 %), una
+      línea. Su adjudicado aparecía y desaparecía según qué documento
+      aportara la línea en cada pasada -- lo destapó la comparación de
+      entregables de la sesión 2026-09-19 (tercera parte).
+
+    Se llama al final de la extracción, cuando las bajas de los lotes ya son
+    definitivas, y **solo toca líneas que tienen lote**: una huérfana no tiene
+    de qué derivar, y dejarlas fuera evita cambiar datos de líneas que no
+    llegan al entregable.
+
+    No es "otra fuente" de precio adjudicado: es la MISMA derivación de
+    CONTEXTO.md sección 4, aplicada cuando ya se puede. `None` sí borra un
+    valor guardado, igual que en la construcción de la línea (sesión
+    2026-09-09, bloque 3): el adjudicado se recalcula desde cero en cada
+    pasada por diseño, así que un lote que pierde su baja tiene que dejar sus
+    líneas sin adjudicado."""
+    cambiadas = 0
+    filas = (
+        db.query(LineaCatalogo, Lote)
+        .join(Lote, Lote.id == LineaCatalogo.lote_id)
+        .filter(LineaCatalogo.expediente_id == expediente_id)
+        .all()
+    )
+    for linea, lote in filas:
+        baja = lote.baja_lote
+        if linea.precio_unitario is None or baja is None:
+            esperado = None
+        else:
+            esperado = linea.precio_unitario * (Decimal("1") - baja)
+        if not _mismo_importe(linea.precio_adjudicado, esperado):
+            linea.precio_adjudicado = esperado
+            cambiadas += 1
+        # La baja de la línea es la de su lote: "no hay una baja distinta por
+        # material dentro de un lote" (CONTEXTO.md sección 4).
+        if not _mismo_importe(linea.baja_lote, baja):
+            linea.baja_lote = baja
+            cambiadas += 1
+    return cambiadas
+
+
+def _mismo_importe(a: Optional[Decimal], b: Optional[Decimal]) -> bool:
+    """Comparación tolerante al redondeo de la columna: `precio_adjudicado` es
+    `numeric(14,4)`, así que el valor recién derivado trae más decimales que
+    el que se leyó de la base de datos y compararlos con `==` marcaría como
+    cambio cada línea en cada pasada."""
+    if a is None or b is None:
+        return a is None and b is None
+    return abs(Decimal(a) - Decimal(b)) <= Decimal("0.0001")
 
 
 def podar_lineas_heredadas_obsoletas(db: Session, expediente_id: int, ids_conservar: frozenset[int]) -> int:
