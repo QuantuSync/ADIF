@@ -14,12 +14,13 @@ a propósito (y cae al modelo) ante cualquier ambigüedad, en vez de adivinar.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from app.catalogo import _CODIGO_PRECIO_VALIDO_RE
+from app.catalogo import CAMPO_IMPORTE, _CODIGO_PRECIO_VALIDO_RE
 from app.extraccion.firma_cabecera import calcular_firma_cabecera
 from app.extraccion.firma_estructural import clasificar_columnas, tiene_forma_de_matricula
 from app.extraccion.normalizacion import limpiar_codigo_celda
@@ -774,3 +775,55 @@ def mapear_cabecera(
         mapeo=completar_columna_codigo_material(cabecera, mapeo_modelo), firma=firma, origen="modelo",
         llamada_modelo=True,
     )
+
+
+# Bloque 2, sesión 2026-09-19 (decisión del cliente): la columna de IMPORTE
+# del cuadro -- cantidad × precio unitario de cada renglón, tal como la
+# imprime el documento. No es un campo del catálogo y no se guarda: sirve
+# solo para la comprobación aritmética de
+# `app.catalogo.corregir_precio_con_importe_del_documento`, que es la única
+# vía por la que un precio puede reescribirse desde el propio documento.
+#
+# Campo opcional, fuera de `CAMPOS`, por el mismo motivo que
+# `CAMPO_CODIGO_MATERIAL`: el modelo nunca lo ve ni lo devuelve, así que
+# añadirlo no invalida ninguna respuesta ya cacheada.
+#
+# Coincidencia EXACTA del nombre, nunca "contiene". Medido sobre las
+# cabeceras reales ya cacheadas del corpus: "IMPORTE" (68 tablas), "TOTAL"
+# (11), "TOTALES" (6), "IMPORTE (€)" (4), "IMPORTE (€ Ejecución por
+# Contrata)" (2), "SUBTOTAL" (1). Deliberadamente FUERA: "IMPORTE UNITARIO"
+# (es un precio unitario, no el total del renglón), "IMPORTE COMPRA",
+# "IMPORTE 2024"/"IMPORTE 2025" e "IMPORTE REPARACIÓN" -- nombres de los que
+# no se puede afirmar que sean cantidad × precio de esa fila.
+_NOMBRES_COLUMNA_IMPORTE = frozenset({"importe", "importe total", "total importe", "total", "totales", "subtotal"})
+_PARENTESIS_RE = re.compile(r"\([^)]*\)")
+
+
+def _nombre_de_columna_importe(texto: str) -> bool:
+    """El nombre, sin su calificador entre paréntesis ("IMPORTE (€ Ejecución
+    por Contrata)" -> "importe"), es uno de los nombres cerrados de arriba."""
+    return _PARENTESIS_RE.sub(" ", texto).strip() in _NOMBRES_COLUMNA_IMPORTE
+
+
+def completar_columna_importe(
+    cabecera: list[Optional[str]], mapeo: dict[str, Optional[int]]
+) -> dict[str, Optional[int]]:
+    """La columna de importe de la tabla, si la cabecera la nombra sin
+    ambigüedad y no la reclama ya ningún campo del catálogo. Con cero o más
+    de una candidata no se adivina: sin columna de importe, la comprobación
+    aritmética simplemente no se puede hacer y ningún precio se toca.
+
+    No se guarda en la caché de firma: se recalcula desde la cabecera en cada
+    pasada, igual que `completar_columna_codigo_material`."""
+    if mapeo.get(CAMPO_IMPORTE) is not None:
+        return mapeo
+    normalizados = [normalizar(c) if c else "" for c in cabecera]
+    usadas = {col for col in mapeo.values() if col is not None}
+    candidatas = [
+        indice
+        for indice, texto in enumerate(normalizados)
+        if texto and _nombre_de_columna_importe(texto) and indice not in usadas
+    ]
+    if len(candidatas) != 1:
+        return mapeo
+    return {**mapeo, CAMPO_IMPORTE: candidatas[0]}

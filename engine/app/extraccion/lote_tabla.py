@@ -188,6 +188,14 @@ class ResultadoAsociacionLote:
     # `separada_por_paginas` con la franja, el título y la cola limpios (el
     # único caso en que se devuelve el motivo de "tabla separada").
     separada: bool = False
+    # Bloque 6, sesión 2026-09-19: el LOTE que la franja SÍ nombra sin
+    # ambigüedad cuando resulta no estar entre los declarados del expediente
+    # (la red de seguridad de `_asociar_por_texto`). No sirve para atribuir
+    # nada -- la tabla sigue huérfana --, pero sí para que sus páginas de
+    # continuación, que no traen ningún rastro propio, puedan decir de qué
+    # cuadro son en vez de quedarse con un "no se encontró ninguna cabecera"
+    # que es verdad y no explica nada. Ver `app.extraccion.pipeline_anejo`.
+    identificador_no_declarado: Optional[str] = None
 
 
 def _ultimo_lote_mencionado(texto: str) -> Optional[str]:
@@ -339,6 +347,7 @@ def _asociar_por_texto(texto_banda: str, identificadores_validos: Optional[set[s
                     "declarados del expediente"
                 ),
                 elegible_para_herencia=False,
+                identificador_no_declarado=identificador,
             )
         return ResultadoAsociacionLote(identificador_lote=identificador, motivo_ambiguo=None)
 
@@ -365,6 +374,7 @@ def _asociar_por_texto(texto_banda: str, identificadores_validos: Optional[set[s
                     "declarados del expediente"
                 ),
                 elegible_para_herencia=False,
+                identificador_no_declarado=resuelto,
             )
         return ResultadoAsociacionLote(identificador_lote=resuelto, motivo_ambiguo=None)
 

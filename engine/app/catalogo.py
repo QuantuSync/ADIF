@@ -1823,6 +1823,178 @@ def _importe_es(valor: Decimal) -> str:
     return f"{valor:.2f}".replace(".", ",") + " €"
 
 
+# Bloque 2, sesión 2026-09-19 (decisión del cliente, acotada). El único
+# mecanismo por el que un precio unitario puede reescribirse desde otra
+# columna del propio documento, y solo con LAS DOS condiciones a la vez:
+#
+# 1. el IMPORTE del renglón dividido entre su cantidad da exactamente el
+#    precio corregido (división exacta, sin residuo y con los decimales que
+#    caben en la columna);
+# 2. con ese precio, el lote suma exactamente uno de los totales que el
+#    propio documento declara al pie de su cuadro.
+#
+# Si falta cualquiera de las dos, la línea NO se corrige y va a revisión con
+# su motivo. Nunca se escribe un precio que no esté demostrado por la
+# aritmética del propio documento.
+#
+# Caso que lo motiva (`6.17/28510.0056`, lote 1, `P-7` "Encarriladora de
+# vía", sesión 2026-09-18 sexta parte): el reconocimiento óptico leyó
+# 56.555,91 € donde el PDF pone 56.455,91 €. El propio documento lo demuestra
+# dos veces -- 451.647,28 / 8 = 56.455,91, y con esa cifra el lote suma
+# 2.975.673,96 €, su Presupuesto de Ejecución Material exacto.
+CAMPO_IMPORTE = "importe"
+
+MARCA_PRECIO_DESDE_IMPORTE = "[precio recalculado desde el importe del documento]"
+MOTIVO_PRECIO_DESDE_IMPORTE = (
+    "precio unitario recalculado desde la columna de importes del propio documento: el precio impreso "
+    "no cuadra con su renglón y el que sí cuadra cierra además el total del lote al céntimo -- no salió "
+    "literal del cuadro de precios, confirmar contra el documento antes de darlo por bueno"
+)
+MOTIVO_IMPORTE_SIN_CERRAR_EL_LOTE = (
+    "el importe de este renglón dividido entre su cantidad no da el precio unitario impreso, pero con ese "
+    "precio el lote NO suma ninguno de los totales que el documento declara: no se reescribe nada "
+    "(haría falta un dato del documento que aquí no se tiene), revisar contra el cuadro original"
+)
+
+
+def importes_de_pie_de_tabla(filas: list[list[Optional[str]]], mapeo: dict[str, Optional[int]]) -> list[Decimal]:
+    """Los importes que el cuadro declara en sus filas de resumen
+    ("Presupuesto de Ejecución Material", "SUMA", "TOTAL LOTE 1", "IVA"...),
+    que `construir_linea_catalogo` descarta como líneas de catálogo -- son
+    exactamente "el total declarado en el documento" contra el que se
+    comprueba la condición 2.
+
+    Se devuelven TODOS los de la tabla, sin decidir cuál es cuál: son un
+    puñado de cifras de órdenes de magnitud distintos (ejecución material,
+    +gastos generales, +beneficio industrial, +IVA) y que una suma recién
+    corregida caiga al céntimo sobre una de ellas no ocurre por azar.
+    Adivinar por la etiqueta cuál es "el" total sería una regla más, y más
+    frágil, que no hace falta."""
+    indices = [i for i in (mapeo.get("precio_unitario"), mapeo.get(CAMPO_IMPORTE)) if i is not None]
+    importes: list[Decimal] = []
+    for fila in filas:
+        texto = " ".join((celda or "").replace("|", " ") for celda in fila)
+        etiqueta_descripcion = limpiar_texto_celda(_valor_en(fila, mapeo.get("descripcion"))) or ""
+        if not (_es_concepto_de_presupuesto(etiqueta_descripcion) or _es_concepto_de_presupuesto(texto)):
+            continue
+        for indice in indices:
+            bruto = _valor_en(fila, indice)
+            if not bruto or _es_celda_vacia(bruto):
+                continue
+            try:
+                importes.append(parsear_importe_es(bruto))
+            except (ValueError, ArithmeticError):
+                continue
+    return importes
+
+
+def _precio_que_cuadra_el_renglon(cantidad: Optional[Decimal], importe: Optional[Decimal]) -> Optional[Decimal]:
+    """Condición 1: `importe / cantidad`, solo si la división es EXACTA y el
+    resultado cabe en `lineas_catalogo.precio_unitario` (4 decimales). Con
+    residuo -- o con más decimales de los que se pueden guardar -- no hay
+    ningún precio demostrado, y se devuelve `None`: redondear aquí sería
+    inventar la cifra que esta regla existe para no inventar."""
+    if cantidad is None or importe is None or cantidad == 0:
+        return None
+    candidato = importe / cantidad
+    exponente = candidato.as_tuple().exponent
+    if not isinstance(exponente, int) or exponente < -4:
+        return None
+    if candidato * cantidad != importe:
+        return None
+    return candidato
+
+
+def _suma_del_lote(lineas: list[dict], correcciones: dict[int, Decimal]) -> Optional[Decimal]:
+    """`suma de cantidad x precio unitario` de TODAS las líneas del lote, con
+    las correcciones propuestas aplicadas. `None` si a alguna le falta la
+    cantidad o el precio: entonces el lote no se puede cerrar contra ningún
+    total y la condición 2 no se puede dar por cumplida (es el caso, real, de
+    los cuadros a los que el documento no les publica cantidad para todas sus
+    filas)."""
+    suma = Decimal("0")
+    for linea in lineas:
+        cantidad = linea.get("cantidad")
+        precio = correcciones.get(id(linea), linea.get("precio_unitario"))
+        if cantidad is None or not isinstance(precio, Decimal):
+            return None
+        suma += cantidad * precio
+    return suma
+
+
+def _escribir_precio_corregido(linea: dict, precio: Decimal) -> None:
+    """La misma marca en tres sitios que el reconocimiento óptico
+    (`app.extraccion.ocr.marcar_linea_reconocida`), porque es el mismo tipo
+    de hecho: este número no salió literal de su celda del cuadro."""
+    linea["precio_unitario"] = precio
+    baja = linea.get("baja_lote")
+    linea["precio_adjudicado"] = precio * (Decimal("1") - baja) if baja is not None else None
+    linea["precio_corregido_desde_importe"] = True
+    linea["motivo_revision"] = _acumular_motivo_unico(
+        linea.get("motivo_revision"), MOTIVO_PRECIO_DESDE_IMPORTE
+    )
+    fragmento = linea.get("fragmento")
+    if fragmento and not fragmento.startswith(MARCA_PRECIO_DESDE_IMPORTE):
+        linea["fragmento"] = f"{MARCA_PRECIO_DESDE_IMPORTE} {fragmento}"
+
+
+def corregir_precio_con_importe_del_documento(
+    lineas: list[dict], totales_por_lote: dict[Optional[str], list[Decimal]]
+) -> tuple[int, int]:
+    """Aplica la regla de arriba a las líneas de UN documento, lote a lote.
+    Devuelve `(corregidas, solo_condicion_1)`: cuántas cumplen las dos
+    condiciones y se reescriben, y cuántas cumplen la primera pero no la
+    segunda (esas quedan exactamente como estaban, con su motivo).
+
+    Quita siempre de todas las líneas la marca transitoria
+    `importe_documento`, corrijan o no: nunca llega a la base de datos."""
+    por_lote: dict[Optional[str], list[dict]] = {}
+    for linea in lineas:
+        por_lote.setdefault(linea.get("identificador_lote"), []).append(linea)
+
+    corregidas = solo_condicion_1 = 0
+    for identificador, del_lote in por_lote.items():
+        candidatas = [
+            (linea, propuesto)
+            for linea in del_lote
+            for propuesto in [_precio_que_cuadra_el_renglon(linea.get("cantidad"), linea.get("importe_documento"))]
+            if propuesto is not None and propuesto != linea.get("precio_unitario")
+        ]
+        if not candidatas:
+            continue
+        totales = totales_por_lote.get(identificador) or []
+        suma = _suma_del_lote(del_lote, {id(linea): propuesto for linea, propuesto in candidatas})
+        if suma is not None and any(suma == total for total in totales):
+            for linea, propuesto in candidatas:
+                _escribir_precio_corregido(linea, propuesto)
+            corregidas += len(candidatas)
+        else:
+            for linea, _propuesto in candidatas:
+                linea["motivo_revision"] = _acumular_motivo_unico(
+                    linea.get("motivo_revision"), MOTIVO_IMPORTE_SIN_CERRAR_EL_LOTE
+                )
+            solo_condicion_1 += len(candidatas)
+
+    for linea in lineas:
+        linea.pop("importe_documento", None)
+    return corregidas, solo_condicion_1
+
+
+def _importe_de_fila(fila: list[Optional[str]], mapeo: dict[str, Optional[int]]) -> Optional[Decimal]:
+    """El importe que el documento imprime para este renglón, si la tabla
+    trae columna de importes (`CAMPO_IMPORTE`). Viaja en la línea como marca
+    transitoria `importe_documento` -- no es un campo del catálogo y
+    `corregir_precio_con_importe_del_documento` lo quita siempre antes de
+    guardar."""
+    bruto = _valor_en(fila, mapeo.get(CAMPO_IMPORTE))
+    if not bruto or _es_celda_vacia(bruto):
+        return None
+    try:
+        return parsear_importe_es(bruto)
+    except (ValueError, ArithmeticError):
+        return None
+
+
 def construir_lineas_desde_tabla(
     tabla: TablaExtraida,
     mapeo: dict[str, Optional[int]],
@@ -1862,6 +2034,7 @@ def construir_lineas_desde_tabla(
                     continue
                 if not descripcion_dividida:
                     linea["motivo_revision"] = _acumular_motivo(linea["motivo_revision"], _MOTIVO_FILA_FUSIONADA)
+                linea["importe_documento"] = _importe_de_fila(sub_fila, mapeo)
                 resultado.append(linea)
             continue
 
@@ -1889,6 +2062,7 @@ def construir_lineas_desde_tabla(
         )
         if linea is None:
             continue
+        linea["importe_documento"] = _importe_de_fila(fila, mapeo)
         if precio_de_fila_siguiente is not None:
             saltadas.add(siguiente_precio)
             linea["motivo_revision"] = _acumular_motivo(linea["motivo_revision"], _MOTIVO_PRECIO_FILA_SIGUIENTE)
@@ -1919,6 +2093,9 @@ def construir_lineas_desde_tabla(
 # en cada pasada (ver `guardar_lineas_catalogo`).
 _MARCAS_DE_ORIGEN = (
     "heredado_de_matriz", "lote_heredado_de_pagina_anterior", "lote_del_expediente", "texto_reconocido",
+    # Bloque 2, sesión 2026-09-19: el precio de esta línea se recalculó desde
+    # la columna de importes del documento, no salió literal de su celda.
+    "precio_corregido_desde_importe",
 )
 
 
@@ -2425,6 +2602,10 @@ def guardar_lineas_catalogo(
         # vía de los glifos, pero se quita aquí igualmente -- es una marca de
         # trabajo, nunca una columna, y ningún llamador debe poder colarla.
         datos.pop("precio_glifos_sin_confirmar", None)
+        # Bloque 2, sesión 2026-09-19: mismo caso exacto -- el importe del
+        # renglón es la evidencia con la que `corregir_precio_con_importe_
+        # del_documento` comprueba el precio, no un dato del catálogo.
+        datos.pop("importe_documento", None)
         existente = (
             db.query(LineaCatalogo)
             .filter_by(lote_id=lote_id, expediente_id=datos["expediente_id"], clave_linea=datos["clave_linea"])

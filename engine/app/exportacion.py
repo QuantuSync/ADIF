@@ -331,6 +331,20 @@ _CATEGORIAS_MOTIVO = (
         "Que alguien mire el documento y confirme de qué lote es.",
     ),
     (
+        # Bloque 6, sesión 2026-09-19. Va ANTES que "no está entre los lotes
+        # declarados": las dos redacciones comparten esa frase y
+        # `_categoria_motivo` se queda con el primer marcador que casa. Es el
+        # motivo de la inmensa mayoría de las 2.752 líneas que el encargo
+        # daba por "deberían tener lote" -- medido tabla a tabla, son las
+        # páginas de continuación del cuadro de un lote hermano.
+        "continuación del cuadro del LOTE",
+        "continuación del cuadro de otro lote de la licitación",
+        "La tabla no lleva título de lote propio porque es la página siguiente del cuadro de un lote "
+        "hermano de la misma licitación. El material no es de este expediente: sale, con su lote, en el "
+        "expediente de ese otro lote y en el principal de la licitación.",
+        "Nada: la fila está donde le corresponde, en el expediente del lote que la compra.",
+    ),
+    (
         "no está entre los lotes declarados",
         "la tabla declara un lote no registrado en el expediente",
         "La tabla menciona un número de lote que no coincide con ninguno de los lotes ya confirmados de "
@@ -397,6 +411,25 @@ _EXPLICACIONES_MOTIVO[_CATEGORIA_DUPLICADO_SIN_PERDIDA] = (
 # las filas", ya falso (el vocabulario y la vía de modelo la rellenan en
 # torno a dos tercios del catálogo), y no contaba la columna REPUESTO del
 # propio documento, que ahora manda cuando existe.
+# Bloque 2, sesión 2026-09-19 (decisión del cliente, acotada). El único caso
+# en que el Precio unitario de una fila NO es el número impreso en su celda
+# del cuadro. Tiene que verse, igual que se ven las líneas de reconocimiento
+# óptico: aquí el recuento, y en cada línea su motivo de revisión y la marca
+# "[precio recalculado desde el importe del documento]" delante del fragmento
+# que la ancla.
+_ETIQUETA_PRECIO_DESDE_IMPORTE = (
+    "Líneas cuyo Precio unitario se ha recalculado desde la columna de importes del propio documento "
+    "(el precio impreso no cuadra con su renglón y el corregido cierra además el total del lote al céntimo)"
+)
+_NOTA_PRECIO_DESDE_IMPORTE = (
+    "Esas líneas llevan un precio que NO es el que imprime su celda del cuadro: el documento imprime un "
+    "precio que no cuadra con su propio renglón (cantidad × precio ≠ importe) y sí cuadra al dividir el "
+    "importe entre la cantidad. Solo se reescribe cuando se cumplen las dos condiciones a la vez: que esa "
+    "división sea exacta, y que con el precio corregido el lote sume exactamente uno de los totales que el "
+    "propio documento declara al pie de su cuadro. Si falta cualquiera de las dos, la línea se deja tal cual "
+    "y va a revisión. Cada línea corregida queda marcada y explicada en la cola de revisión."
+)
+
 _NOTA_CODIGO_MATERIAL = (
     "La columna \"Código del material\" se toma de la columna de tipo de pieza del propio cuadro de "
     "precios cuando el documento la trae (\"REPUESTO\": Semicambio, Aguja, Cruzamiento...). Si no la trae, "
@@ -571,6 +604,7 @@ def _escribir_resumen(
     incluir_pendientes_sin_lote: bool,
     con_valor_de_otro_lote: int = 0,
     del_anejo_de_criterios: int = 0,
+    precios_corregidos_desde_importe: int = 0,
     filas_conciliacion: Optional[list] = None,
     registro_publicado: Optional[RegistroPublicado] = None,
 ) -> None:
@@ -590,7 +624,14 @@ def _escribir_resumen(
         "para cada lote)",
         con_valor_de_otro_lote,
     ])
+    # Bloque 2, sesión 2026-09-19 (decisión del cliente): la fila corregida
+    # tiene que verse, igual que las de reconocimiento óptico. Se cuenta
+    # aquí, y cada línea lleva además su motivo y la marca en el fragmento.
+    hoja.append([_ETIQUETA_PRECIO_DESDE_IMPORTE, precios_corregidos_desde_importe])
     hoja.append([])
+    if precios_corregidos_desde_importe:
+        hoja.append([_NOTA_PRECIO_DESDE_IMPORTE, None])
+        hoja.append([])
     if incluir_pendientes_sin_lote:
         hoja.append(["Exportado con las líneas pendientes de revisión incluidas en \"Materiales\".", None])
     elif total_excluidas:
@@ -658,6 +699,10 @@ def generar_excel_catalogo(db: Session, incluir_pendientes_sin_lote: bool = Fals
     incluidas = 0
     con_valor_de_otro_lote = 0
     del_anejo_de_criterios = 0
+    # Bloque 2, sesión 2026-09-19: solo las que de verdad salen en
+    # "Materiales" -- una línea corregida que se quede fuera del entregable
+    # no tiene por qué contarse en su Resumen.
+    precios_corregidos_desde_importe = 0
     excluidas_por_categoria: Counter[str] = Counter()
     # Bloque 5, sesión 2026-09-18: las filas que de verdad se escriben en
     # "Materiales", por expediente. La hoja "Conciliación" se construye con
@@ -725,6 +770,8 @@ def generar_excel_catalogo(db: Session, incluir_pendientes_sin_lote: bool = Fals
             continue
         incluidas += 1
         lineas_por_expediente[expediente.id] += 1
+        if linea.precio_corregido_desde_importe:
+            precios_corregidos_desde_importe += 1
         # "El sistema nunca inventa una matriz. Si no cruza, se deja
         # vacío" (CONTEXTO.md sección 7): el "Código interno" sí sale del
         # Excel de códigos de ADIF, así que sin cruce no hay nada que
@@ -791,7 +838,7 @@ def generar_excel_catalogo(db: Session, incluir_pendientes_sin_lote: bool = Fals
 
     _escribir_resumen(
         libro, incluidas, excluidas_por_categoria, incluir_pendientes_sin_lote, con_valor_de_otro_lote,
-        del_anejo_de_criterios, filas_conciliacion, registro,
+        del_anejo_de_criterios, precios_corregidos_desde_importe, filas_conciliacion, registro,
     )
 
     buffer = io.BytesIO()

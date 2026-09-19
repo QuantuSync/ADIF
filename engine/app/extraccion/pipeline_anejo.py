@@ -28,6 +28,8 @@ from app.catalogo import (
     MOTIVO_MAPEO_INCOHERENTE,
     _acumular_motivo,
     construir_lineas_desde_tabla,
+    corregir_precio_con_importe_del_documento,
+    importes_de_pie_de_tabla,
     resolver_glifos_con_precio_de_otro_lote,
 )
 from app.extraccion.codigo_material import derivar_codigo_material_con_modelo
@@ -38,6 +40,7 @@ from app.extraccion.lote_tabla import MOTIVO_TABLA_DEL_CONJUNTO, asociar_lote_ta
 from app.extraccion.mapeo_cabecera import (
     cabecera_sin_senal,
     completar_codigo_precio_por_contenido,
+    completar_columna_importe,
     completar_matricula_por_contenido,
     corregir_confusion_matricula_codigo_precio,
     corregir_confusion_precio_cantidad,
@@ -78,6 +81,13 @@ class ResultadoProcesamientoAnejo:
     # totales) sino el mismo código de precio en otra tabla del mismo cuadro.
     # Se cuentan aparte porque la prueba es distinta y más débil.
     glifos_confirmados_por_otro_lote: int = 0
+    # Bloque 2, sesión 2026-09-19: líneas cuyo precio unitario se reescribió
+    # desde la columna de importes del documento (las dos condiciones del
+    # cliente cumplidas a la vez), y líneas que cumplen la primera pero no la
+    # segunda -- esas no se tocan y quedan con su motivo. El orquestador las
+    # cuenta para el resumen del ciclo.
+    precios_corregidos_desde_importe: int = 0
+    precios_importe_sin_cerrar_el_lote: int = 0
 
 
 # Sesión 2026-09-14 (`6.23/28510.0051_ANEJO_3_9d725c710163f3db.pdf`, "NOTA DE
@@ -198,6 +208,15 @@ def procesar_anejo(
     ultimo_lote_del_expediente = False
     en_anejo_del_conjunto = False
     anterior_de_otro_lote = False
+    # Bloque 6, sesión 2026-09-19: el LOTE que la última tabla con cabecera
+    # nombró y que NO está entre los declarados de este expediente (es el
+    # cuadro de un lote hermano). Se arrastra a sus páginas de continuación
+    # -- que no traen ningún rastro propio -- solo para poder decir de qué
+    # cuadro son. **Nunca atribuye nada**: esas líneas siguen huérfanas, que
+    # es lo correcto, porque el material es del hermano. Medido sobre las
+    # 2.752 líneas de las causas C y D del encargo: esto es lo que son
+    # prácticamente todas (ver `docs/sesion-2026-09-19-...`).
+    ultimo_lote_ajeno: Optional[str] = None
     # (página, fondo) de la última tabla procesada de este documento.
     ultima_tabla: Optional[tuple[int, float]] = None
     # Bloque 3 (caché de tablas sin cabecera, sesión de auditoría
@@ -225,6 +244,12 @@ def procesar_anejo(
     ultima_con_cabecera: Optional[tuple[dict[str, Optional[int]], tuple, bool]] = None
     tablas_con_cabecera = 0
     ultima_cabecera_vista: Optional[str] = None
+    # Bloque 2, sesión 2026-09-19: los totales que el propio documento declara
+    # al pie del cuadro de cada lote ("Presupuesto de Ejecución Material",
+    # "SUMA", "TOTAL LOTE N"...). Es la condición 2 de la corrección de precio
+    # desde la columna de importes, y se acumula por lote y por documento
+    # porque el cuadro de un lote puede ocupar varias tablas y varias páginas.
+    totales_por_lote: dict[Optional[str], list[Decimal]] = {}
 
     with pdfplumber.open(ruta_pdf) as pdf:
         localizacion = localizar_paginas_candidatas(paginas_texto)
@@ -275,6 +300,17 @@ def procesar_anejo(
                     # Sin ningún rastro de lote en la franja, el título ni la
                     # cola: franja limpia (heredable) o tabla separada.
                     sin_rastro = resultado_asociacion.elegible_para_herencia or resultado_asociacion.separada
+                    if resultado_asociacion.identificador_no_declarado is not None:
+                        # La franja de ESTA tabla nombra un lote hermano: sus
+                        # continuaciones son de ese cuadro, no de este
+                        # expediente (bloque 6, sesión 2026-09-19).
+                        ultimo_lote_ajeno = resultado_asociacion.identificador_no_declarado
+                    elif not sin_rastro or resultado_asociacion.separada:
+                        # Esta tabla sí trae rastro propio (resuelto, del
+                        # conjunto, o ambiguo de verdad) o arranca una
+                        # secuencia nueva tras páginas sin tabla: la cadena de
+                        # continuaciones del cuadro ajeno se corta aquí.
+                        ultimo_lote_ajeno = None
                     if identificador_lote is not None:
                         ultimo_lote_del_expediente = False
                         en_anejo_del_conjunto = anterior_de_otro_lote = False
@@ -301,6 +337,24 @@ def procesar_anejo(
                         motivo_ambiguo = MOTIVO_TABLA_DEL_CONJUNTO
                     elif sin_rastro and resultado_asociacion.separada:
                         anterior_de_otro_lote = False
+                    elif (
+                        resultado_asociacion.elegible_para_herencia
+                        and ultimo_lote_ajeno is not None
+                    ):
+                        # Bloque 6, sesión 2026-09-19: la franja de esta tabla
+                        # no trae ningún rastro de lote y la tabla anterior,
+                        # contigua, era el cuadro de un lote hermano -- esta
+                        # es su continuación. **No se le atribuye ningún
+                        # lote** (sería meter el material del hermano en este
+                        # expediente, justo lo contrario del bloque 3), pero
+                        # la línea deja de decir "no se encontró ninguna
+                        # cabecera" y pasa a decir de qué cuadro es, que es
+                        # lo que quien revise necesita saber.
+                        motivo_ambiguo = (
+                            f"continuación del cuadro del LOTE {ultimo_lote_ajeno}, que no está entre los "
+                            "lotes declarados de este expediente: el material es de un lote hermano de la "
+                            "misma licitación y sale en el expediente de ese lote, no en este"
+                        )
                     if (
                         identificador_lote is None
                         and lote_propio is not None
@@ -510,6 +564,17 @@ def procesar_anejo(
                     if not sin_cabecera_propia and tabla.columnas_x:
                         ultima_con_cabecera = (mapeo, tabla.columnas_x, matricula_codigo_corregido)
                 tablas_procesadas += 1
+                # Bloque 2, sesión 2026-09-19: la columna de importes de esta
+                # tabla, si su cabecera la nombra sin ambigüedad, y los
+                # totales que el propio cuadro declara al pie. Los dos son
+                # solo para la comprobación aritmética de más abajo -- el
+                # importe no es un campo del catálogo y nunca se guarda. Se
+                # calcula sobre el mapeo YA final (con sus correcciones), y
+                # nunca se cachea: la columna sale de la cabecera cada vez.
+                mapeo = completar_columna_importe(tabla.cabecera, mapeo)
+                totales_por_lote.setdefault(identificador_lote, []).extend(
+                    importes_de_pie_de_tabla(tabla.filas, mapeo)
+                )
                 lineas_tabla = construir_lineas_desde_tabla(
                     tabla, mapeo, documento_origen_id, expediente_id, baja_lote,
                     orden_inicial=len(lineas),
@@ -671,6 +736,18 @@ def procesar_anejo(
     # no: nunca puede llegar a `guardar_lineas_catalogo`.
     glifos_confirmados_por_otro_lote = resolver_glifos_con_precio_de_otro_lote(lineas)
 
+    # Bloque 2, sesión 2026-09-19 (decisión del cliente, acotada): el precio
+    # que el documento imprime mal, reescrito desde su propia columna de
+    # importes -- y solo cuando las DOS condiciones se cumplen a la vez (ver
+    # `corregir_precio_con_importe_del_documento`). Va aquí, con el documento
+    # entero ya leído, porque la condición 2 es el total del LOTE, que puede
+    # repartirse en varias tablas. Después de los glifos a propósito: un
+    # precio recién descodificado también entra en la comprobación. La
+    # llamada quita siempre la marca transitoria `importe_documento`.
+    precios_corregidos, precios_sin_cerrar_el_lote = corregir_precio_con_importe_del_documento(
+        lineas, totales_por_lote
+    )
+
     # `Código del material`, vía de modelo (CONTEXTO.md sección 6, bloque 5 de
     # la sesión de vocabulario): `construir_lineas_desde_tabla` (dentro de
     # `construir_linea_catalogo`) ya intentó el vocabulario determinista sin
@@ -692,4 +769,6 @@ def procesar_anejo(
         tablas_sin_lote=tablas_sin_lote,
         lineas_con_aviso=lineas_con_aviso,
         glifos_confirmados_por_otro_lote=glifos_confirmados_por_otro_lote,
+        precios_corregidos_desde_importe=precios_corregidos,
+        precios_importe_sin_cerrar_el_lote=precios_sin_cerrar_el_lote,
     )
