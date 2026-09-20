@@ -3,6 +3,9 @@
 Bloque 4 del encargo de la sesión 2026-09-19 (sexta parte): **todas** las
 preguntas abiertas, reunidas en un solo documento, cada una con su contexto,
 los expedientes y filas afectados, y qué haremos según lo que contesten.
+**Ampliado con las cuatro de la séptima parte** (12 a 15: las unidades
+`transporte` y `P`, las matrículas que el maestro no recoge y las tres erratas
+de matrícula del propio pliego).
 
 **Esto no es un mensaje para el cliente.** Es la información medida para que
 la pregunta la formule quien habla con ADIF. Cada cifra está medida contra la
@@ -36,6 +39,10 @@ aquí; este los índice y añade lo que faltaba:
 | 9 | `6.26/28510.0064` lote 3 `P-2` | Precio | 1 línea |
 | 10 | "Comentarios": fila a fila o nota única | Una columna del Excel | Todo el Excel |
 | 11 | `Precio unitario`: ¿licitado o adjudicado? | La columna 9 del Excel | Todo el Excel |
+| 12 | `transporte` como unidad de medida | Unidad de medida | 15 líneas |
+| 13 | Qué es la unidad `P` del maestro de materiales | Unidad de medida | 3 líneas |
+| 14 | Las matrículas que el maestro no recoge | Matrícula del material | 2.893 líneas |
+| 15 | Las tres erratas de matrícula del propio documento | Matrícula del material | 7 líneas |
 
 ---
 
@@ -375,3 +382,116 @@ el adjudicado en su columna aparte, o al revés?
   sus nombres ni su orden. Afecta a las 9.116 filas que tienen precio
   adjudicado; las demás quedarían sin precio, porque su lote no tiene baja
   conocida — eso hay que decírselo antes de hacerlo.
+
+---
+
+## 12 — `transporte` como unidad de medida
+
+**El hecho.** 15 líneas del entregable (`6.21/28510.0108`-`0112`, tres
+conceptos repetidos entre cinco expedientes hermanos) llevan `transporte` en la
+columna "Unidad de medida". No es un valor colado de otra columna: el cuadro de
+precios escribe **`€/transporte`** en su columna de precio, exactamente igual
+que escribe `€/Ton*km` en las filas que sí se pagan por tonelada-kilómetro.
+Es el denominador del precio: lo que cuesta cada transporte.
+
+Las tres líneas son "Importe mínimo de un transporte por ferrocarril"
+(10.000,00 €), "Transporte por camión especial hasta 300 Km de distancia"
+(1.900,00 €) y "… a una distancia mayor a 300 Km" (6.400,00 €).
+
+**Qué preguntar.** ¿`transporte` se queda como unidad, o prefieren otra cosa?
+
+**Qué haremos según contesten.**
+
+- *Se queda*: nada. Es el comportamiento de hoy y lo que imprime el documento.
+- *`viaje`*: se unifica a esa palabra, un cambio de vocabulario de una línea.
+  El literal seguiría en `unidad_medida_original`.
+- *Vacía con su motivo*: se pierde un dato que el documento sí publica, y las
+  15 filas quedarían con la unidad en blanco.
+- **No es `t·km`**, y eso conviene decírselo: `t·km` es la unidad de las OTRAS
+  filas del mismo cuadro. Poner `t·km` aquí diría que 1.900,00 € es el precio
+  de un camión **por tonelada y kilómetro**, cuando es el precio del viaje
+  entero.
+
+---
+
+## 13 — Qué es la unidad `P` del maestro de materiales
+
+**El hecho.** Tres líneas del entregable (`6.20/28510.0042`/`0046`/`0047`,
+matrícula `612860020`, "PLACA NERVADA PN-60- 1:20") tienen `P` en la columna
+"Unidad de medida". **Ese valor no sale de ningún documento**: el cuadro de
+precios de esas filas no tiene columna de unidad (`MATRÍCULA | DESIGNACIÓN |
+PLANO | ET | PRECIO`, comprobado contra la imagen). Llega del maestro de
+materiales que ADIF nos envió, donde la "UM base" de esa matrícula es `P`.
+
+**16 materiales del maestro usan `P`**, y el fichero no trae en ninguna parte
+el nombre completo de ese código.
+
+**Qué preguntar.** ¿Qué unidad es `P` en SAP?
+
+**Qué haremos según contesten.**
+
+- *Nos dan el nombre*: entra en el vocabulario de unidades con su forma única,
+  como `ud` o `t`, y las tres celdas pasan a mostrarla.
+- *No lo saben / no importa*: se queda el código tal cual, que es lo que ADIF
+  tiene registrado. Nunca se traduce por analogía.
+
+---
+
+## 14 — Las matrículas que el maestro no recoge
+
+**El hecho.** **2.893 líneas del entregable** llevan una matrícula que el
+documento publica y el maestro de materiales de ADIF no recoge: **382** con el
+formato antiguo de 8 cifras y **2.511** de 9 cifras. Están comprobadas contra
+la imagen de los PDF —no son errores de lectura— y se entregan literales, cada
+una con su motivo.
+
+**Salvedad medida**: el motivo lo llevan **2.882** de esas 2.893. Las 11
+restantes están fuera del maestro y no lo llevan — nueve son líneas heredadas
+de un acuerdo marco, que se guardan sin `motivo_revision` evaluado, y dos son
+copias sueltas de una matrícula que en su mismo expediente sí lo lleva en las
+demás apariciones. Está localizado línea a línea en
+`docs/sesion-2026-09-19-matriculas-contra-el-maestro-y-unidades.md`, y **no se
+ha tocado**: añadirles el motivo cambia datos del catálogo.
+
+El maestro está **incompleto artículo a artículo**, no por familias: de las
+1.133 matrículas de 9 cifras que faltan, solo 12 no tienen ninguna compañera en
+el maestro con sus cuatro primeras cifras, y un pliego llega a comprar 28
+referencias correlativas de las que el maestro trae 5. Medición completa en
+`docs/matriculas-8-digitos-y-el-maestro.md` y
+`docs/matriculas-de-9-digitos-fuera-del-maestro.md`.
+
+**Qué preguntar.** ¿Pueden enviarnos un maestro completo, o al menos decirnos
+de qué fecha y de qué transacción sale el que tenemos? Y: ¿existe una tabla de
+equivalencia entre el formato de 8 cifras y el de 9?
+
+**Qué haremos según contesten.**
+
+- *Maestro nuevo*: se recarga por el endpoint de siempre y el motivo
+  desaparece solo de las filas que ya figuren. Nada que programar.
+- *Tabla de equivalencia*: se aplica **por clave exacta**, nunca por parecido.
+  Lo que este sistema no hará en ningún caso es deducirla: `64571017` casa por
+  sufijo con `645710170` (una palomilla) y con `645710175` (unas antenas), y
+  en `6.17/28510.0023` conviven `66441037` y `664410373` con descripción
+  idéntica, dos fabricantes y dos precios.
+- *No hay nada más*: las filas se quedan como están, con su motivo, que ya
+  explica el caso a quien abra el Excel.
+
+---
+
+## 15 — Las tres erratas de matrícula del propio documento
+
+**El hecho.** Tres matrículas que el pliego imprime mal, comprobadas contra su
+imagen. No son fallos de lectura y el sistema no las toca.
+
+| Expediente(s) | Lo que imprime | Lo que parece que quiso decir | Por qué |
+|---|---|---|---|
+| `6.20/28510.0042`/`0046`/`0047` p.12 | `61286119` (8 cifras) | `612860119` | Toda su columna es de 9 cifras y la designación es "PLACA NERVADA ESPECIAL PNE-60-119" |
+| `6.18/28510.0003` y `6.20/28510.0040` p.11 | `642190440` | `642910440` | Las otras siete filas del cuadro son `6429104xx`, y el maestro trae `642910440` con la misma pieza |
+| `6.22/28510.0094` y `6.22/28510.0126` p.24, `P-138` | `6110500075` (**10 cifras**) | `611050075` | Las filas siguientes son `611050076`, `611050077`, `611050078`. Hoy el sistema se queda con las nueve primeras (`611050007`) y lo marca; ninguno de los dos números está en el maestro, así que no se ha creado ningún cruce falso |
+
+**Qué preguntar.** ¿Confirman que son erratas del pliego y cuál es la matrícula
+buena de cada una?
+
+**Qué haremos según contesten.** Se corrigen **una a una, por confirmación
+suya**, nunca por la inferencia de arriba. Si no lo confirman, se quedan
+literales: el catálogo entrega lo que publica el documento.

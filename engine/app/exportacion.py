@@ -50,7 +50,12 @@ from openpyxl.styles import Alignment
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.catalogo import MOTIVO_IMPORTE_SIN_PRECIO_NI_CONFIRMACION, MOTIVO_MAPEO_INCOHERENTE
+from app.catalogo import (
+    MOTIVO_IMPORTE_SIN_PRECIO_NI_CONFIRMACION,
+    MOTIVO_MAPEO_INCOHERENTE,
+    MOTIVO_MATRICULA_8_FUERA_DEL_MAESTRO,
+    MOTIVO_MATRICULA_FUERA_DEL_MAESTRO,
+)
 from app.presupuestos_adif import (
     COLUMNAS as COLUMNAS_PRESUPUESTOS,
     NOMBRE_HOJA as NOMBRE_HOJA_PRESUPUESTOS,
@@ -478,6 +483,28 @@ _NOTA_DESCRIPCION_DESDE_REFERENCIA = (
     "marcada y explicada en la cola de revisión."
 )
 
+# Bloques 1 y 2, sesión 2026-09-19 (séptima parte, decisión del cliente): la
+# matrícula que el documento imprime y el maestro de materiales de ADIF no
+# recoge se queda literal, y la fila lleva su motivo. El motivo por línea vive
+# en la cola de revisión; aquí va el recuento, para que quien abra el Excel
+# sepa cuántas filas son y por qué, sin tener que entrar en la web.
+_ETIQUETA_MATRICULA_8_FUERA_DEL_MAESTRO = (
+    "Líneas cuya Matrícula del material tiene el formato antiguo de 8 dígitos y no figura en el maestro "
+    "actual de ADIF"
+)
+_ETIQUETA_MATRICULA_FUERA_DEL_MAESTRO = (
+    "Líneas cuya Matrícula del material (9 dígitos) no figura en el maestro de materiales de ADIF"
+)
+_NOTA_MATRICULAS_FUERA_DEL_MAESTRO = (
+    "Esas matrículas son las que imprime el documento publicado, comprobadas contra su imagen, y se "
+    "entregan literales: no se completan ni se corrigen para que casen con el maestro, porque el parecido "
+    "no demuestra nada (\"64571017\" casa a la vez con una palomilla y con unas antenas). Las de 8 dígitos "
+    "son el formato antiguo de ADIF, de pliegos de 2016-2018. Las de 9 son del formato de hoy, y lo que "
+    "falta es su fila en el maestro: ese listado está incompleto artículo a artículo dentro de familias que "
+    "sí conoce -- un pliego llega a comprar 28 referencias correlativas de las que el maestro trae 5. El "
+    "día que ADIF envíe un maestro más completo, estas filas dejan de contarse aquí solas."
+)
+
 _NOTA_PRESUPUESTOS_ADIF = (
     "Esta hoja compara dos cifras que NO se mezclan nunca: el presupuesto de licitación que ADIF publica en "
     "su listado de estados, y el importe de licitación que este sistema leyó de un documento publicado en la "
@@ -691,6 +718,8 @@ def _escribir_resumen(
     del_anejo_de_criterios: int = 0,
     precios_corregidos_desde_importe: int = 0,
     descripciones_desde_referencia: int = 0,
+    matriculas_8_fuera_del_maestro: int = 0,
+    matriculas_fuera_del_maestro: int = 0,
     filas_conciliacion: Optional[list] = None,
     registro_publicado: Optional[RegistroPublicado] = None,
 ) -> None:
@@ -715,7 +744,12 @@ def _escribir_resumen(
     # aquí, y cada línea lleva además su motivo y la marca en el fragmento.
     hoja.append([_ETIQUETA_PRECIO_DESDE_IMPORTE, precios_corregidos_desde_importe])
     hoja.append([_ETIQUETA_DESCRIPCION_DESDE_REFERENCIA, descripciones_desde_referencia])
+    hoja.append([_ETIQUETA_MATRICULA_8_FUERA_DEL_MAESTRO, matriculas_8_fuera_del_maestro])
+    hoja.append([_ETIQUETA_MATRICULA_FUERA_DEL_MAESTRO, matriculas_fuera_del_maestro])
     hoja.append([])
+    if matriculas_8_fuera_del_maestro or matriculas_fuera_del_maestro:
+        hoja.append([_NOTA_MATRICULAS_FUERA_DEL_MAESTRO, None])
+        hoja.append([])
     if precios_corregidos_desde_importe:
         hoja.append([_NOTA_PRECIO_DESDE_IMPORTE, None])
         hoja.append([])
@@ -848,6 +882,8 @@ def generar_excel_catalogo(db: Session, incluir_pendientes_sin_lote: bool = Fals
     # no tiene por qué contarse en su Resumen.
     precios_corregidos_desde_importe = 0
     descripciones_desde_referencia = 0
+    matriculas_8_fuera_del_maestro = 0
+    matriculas_fuera_del_maestro = 0
     excluidas_por_categoria: Counter[str] = Counter()
     # Bloque 5, sesión 2026-09-18: las filas que de verdad se escriben en
     # "Materiales", por expediente. La hoja "Conciliación" se construye con
@@ -917,6 +953,10 @@ def generar_excel_catalogo(db: Session, incluir_pendientes_sin_lote: bool = Fals
             precios_corregidos_desde_importe += 1
         if linea.descripcion_desde_referencia:
             descripciones_desde_referencia += 1
+        if linea.motivo_revision and MOTIVO_MATRICULA_8_FUERA_DEL_MAESTRO in linea.motivo_revision:
+            matriculas_8_fuera_del_maestro += 1
+        elif linea.motivo_revision and MOTIVO_MATRICULA_FUERA_DEL_MAESTRO in linea.motivo_revision:
+            matriculas_fuera_del_maestro += 1
         # "El sistema nunca inventa una matriz. Si no cruza, se deja
         # vacío" (CONTEXTO.md sección 7): el "Código interno" sí sale del
         # Excel de códigos de ADIF, así que sin cruce no hay nada que
@@ -986,6 +1026,7 @@ def generar_excel_catalogo(db: Session, incluir_pendientes_sin_lote: bool = Fals
     _escribir_resumen(
         libro, incluidas, excluidas_por_categoria, incluir_pendientes_sin_lote, con_valor_de_otro_lote,
         del_anejo_de_criterios, precios_corregidos_desde_importe, descripciones_desde_referencia,
+        matriculas_8_fuera_del_maestro, matriculas_fuera_del_maestro,
         filas_conciliacion, registro,
     )
 

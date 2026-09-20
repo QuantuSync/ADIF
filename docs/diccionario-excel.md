@@ -133,6 +133,24 @@ que la celda se queda vacía — pero el literal **no se pierde**: va al final d
 la Descripción del material, entre corchetes y diciendo lo que es
 (`[matrícula impresa en el documento, no válida: 69520000N]`). 33 filas.
 
+**Dos avisos sobre las matrículas que sí salen, y que el Resumen cuenta.** Hay
+filas cuya matrícula es correcta —es la que imprime el pliego, comprobada
+contra la imagen del documento— y que **no aparecen en el maestro de
+materiales que ADIF nos envía**. Salen igual, con su matrícula literal, y
+llevan su explicación:
+
+| Aviso | Qué significa |
+|---|---|
+| *matrícula con formato antiguo de 8 dígitos, no figura en el maestro actual de ADIF* | El pliego es de 2016-2018 y usa el formato de 8 cifras (`59020019`). El maestro de hoy solo trae de 9. **382 filas de 20 expedientes** |
+| *no figura en el maestro de materiales de ADIF* | La matrícula es de 9 cifras, del formato actual, y el maestro sencillamente no la trae. No es un fallo de lectura ni una errata: ese listado está incompleto **artículo a artículo** dentro de familias que sí conoce — hay un pliego que compra 28 referencias correlativas de las que el maestro trae 5. **2.500 filas de 55 expedientes** |
+
+**Lo que NO se hace, y conviene saberlo**: no se "completa" ni se corrige
+ninguna matrícula para que case con el maestro. Añadir un dígito al final de
+`64571017` da a la vez `645710170`, que es una palomilla, y `645710175`, que
+son unas antenas: el parecido no demuestra nada. La medición completa está en
+`docs/matriculas-8-digitos-y-el-maestro.md` y
+`docs/matriculas-de-9-digitos-fuera-del-maestro.md`.
+
 ### 6. Descripción del material
 
 **Qué es.** La designación del artículo, **literal del documento**. Es lo que
@@ -283,6 +301,20 @@ significan nada: pueden ser metros de cable o toneladas de balasto.
 **De dónde sale.** De la columna de unidad del cuadro; si el documento no la
 trae, del maestro de materiales de SAP por matrícula exacta (**nunca pisa** una
 unidad leída de un documento real).
+
+**Tres valores de esta columna que sorprenden y tienen explicación:**
+
+- **`m` donde el documento escribe `Ml`**: `Ml` es metro lineal, y se unifica
+  con `m` como `UD.`/`UN` se unifican con `ud`. Son 3 filas de obra civil
+  (lámina geotextil, muro de contención, zona de paso), en un cuadro que usa
+  `m3` y `m2` para volumen y superficie en las filas de al lado.
+- **`transporte`**: el cuadro escribe el precio como `€/transporte`, igual que
+  escribe `€/Ton*km` en las filas de al lado. Es el denominador del precio: lo
+  que se paga por cada transporte. 15 filas de `6.21/28510.0108`-`0112`.
+- **`P`**: es el único valor de esta columna que **no sale de ningún
+  documento**. El cuadro de esas 3 filas no publica unidad, y el valor viene
+  del maestro de materiales de ADIF, donde la unidad base de esa matrícula es
+  `P` — un código propio de SAP cuyo nombre completo el listado no trae.
 
 **Cuándo queda vacío.**
 
@@ -456,6 +488,8 @@ Las cifras del propio Excel y, sobre todo, **por qué hay líneas que no están 
 | Líneas con Cantidad o Precio unitario pendiente | El documento da un valor distinto para cada lote |
 | Líneas cuyo Precio unitario se ha recalculado desde la columna de importes | Ver abajo |
 | Líneas cuya Descripción del material es la referencia del documento | Ver abajo |
+| Líneas cuya Matrícula tiene el formato antiguo de 8 dígitos y no figura en el maestro actual de ADIF | Ver la columna 5 |
+| Líneas cuya Matrícula (9 dígitos) no figura en el maestro de materiales de ADIF | Ver la columna 5 |
 
 Después, una tabla de **tres columnas** —*Qué ha pasado* / *Líneas* / *Qué
 haría falta para resolverlo*— con una fila por cada causa. Las causas, en
@@ -476,7 +510,7 @@ Dos de esas categorías merecen leerse:
   cantidad no queda demostrada. Para no inventar valores, esas filas se
   descartan del Excel aunque sigan guardadas.
 
-### Las dos marcas que el Resumen cuenta
+### Las cuatro marcas que el Resumen cuenta
 
 **"Precio unitario recalculado desde la columna de importes del propio
 documento".** El precio que imprime la celda no cuadra con su propio renglón
@@ -491,9 +525,15 @@ de precios no publica ninguna descripción en prosa: su única columna de texto
 es la referencia del artículo. No falta ninguna descripción — el documento no
 publica otra.
 
-Las dos marcas, además de contarse aquí, van en el motivo de revisión de cada
-línea y en el fragmento de traza que la ancla a su documento, igual que las
-líneas leídas por reconocimiento óptico.
+**"Matrícula que no figura en el maestro de materiales de ADIF"**, en sus dos
+variantes (8 y 9 dígitos). La matrícula que el documento imprime se entrega
+literal; lo que falta es su fila en el listado de materiales de ADIF. Ver la
+columna 5, "Matrícula del material". El día que ADIF mande un maestro más
+completo, estas dos cifras bajan solas.
+
+Las cuatro marcas, además de contarse aquí, van en el motivo de revisión de
+cada línea; las dos primeras, además, en el fragmento de traza que la ancla a
+su documento, igual que las líneas leídas por reconocimiento óptico.
 
 ---
 
