@@ -495,18 +495,27 @@ se entrega literal, con su motivo** (sesión 2026-09-19, séptima parte, bloques
 1 y 2). Dos motivos, porque explican dos cosas distintas: *"matrícula con
 formato antiguo de 8 dígitos, no figura en el maestro actual de ADIF"* (382
 filas, 20 expedientes, pliegos de 2016-2018) y *"no figura en el maestro de
-materiales de ADIF"* (2.500 filas, formato de 9 cifras; son 2.511 las que
-están fuera del maestro, en 55 expedientes — las 11 de diferencia son líneas
-que la herencia de acuerdo marco guarda sin `motivo_revision` evaluado, más
-dos copias sueltas, todas localizadas en el registro de la sesión).
-`app.catalogo.matriculas_fuera_del_maestro` los calcula contra
+materiales de ADIF"* (2.511 filas, 55 expedientes, formato de 9 cifras).
+`app.catalogo._anotar_motivo_de_maestro` los calcula contra
 `maestro_materiales` con **una consulta por llamada a
-`guardar_lineas_catalogo`**, no una por línea, y `motivo_revision` se recalcula
-entero en cada pasada: el día que ADIF mande un maestro más completo, el motivo
-se retira solo. **Sin maestro cargado no se escribe nada** —sin listado contra
-el que comprobar no se puede afirmar que una matrícula no figure en él— y
-**ninguno de los dos excluye la línea del entregable**: la fila sale en
-"Materiales" con su matrícula. El Resumen del Excel lleva los dos recuentos.
+`guardar_lineas_catalogo`**, no una por línea.
+
+**Se anota sobre la fila ya escrita, no sobre los datos entrantes**, y la
+distinción costó 11 filas (cierre de esa sesión). Calcularlo antes se dejaba
+fuera dos caminos: la **herencia de acuerdo marco**, que omite
+`motivo_revision` de sus datos a propósito porque ahí la ausencia significa
+"no evaluado" (9 filas), y la fila **cuya matrícula guardada no es la que trae
+la pasada**, porque un `None` corriente no pisa un valor ya conocido (2
+filas). Mirando la fila terminada se anota lo que el Excel va a mostrar, que
+es lo único que tiene sentido explicar.
+
+El motivo **se quita antes de volver a ponerse**: así se retira solo el día
+que ADIF mande un maestro más completo, también en las líneas heredadas, que
+no recalculan su `motivo_revision` en cada pasada. **Sin maestro cargado no
+toca nada** —ni pone ni quita: sin listado contra el que comprobar no se puede
+afirmar que una matrícula no figure en él— y **ninguno de los dos excluye la
+línea del entregable**: la fila sale en "Materiales" con su matrícula. El
+Resumen del Excel lleva los dos recuentos.
 
 **Y no se completa ni se corrige ninguna matrícula por parecido**, que es la
 otra mitad de la decisión y está medida. Añadir un dígito al final de
@@ -939,6 +948,26 @@ contra esos.
 desde qué ruta se construyó un contenedor (`docker inspect --format
 '{{json .Config.Labels}}'`) antes de asumir que un cambio de código no se
 reflejó tras un rebuild. Detalle en `docs/decisiones.md` sección 28.
+
+**Regla: si ha cambiado el código, reconstruir la imagen ANTES de reprocesar
+o de exportar.** `/engine` no está montado en volumen — se copia dentro de la
+imagen al construirla (`build: ./engine` en `docker-compose.yml`; el
+`docker-compose.override.yml` solo monta los ficheros de entrada de
+`Ejemplo/Input`). Sin `docker compose build api worker` y un `docker compose
+up -d api worker` detrás, el worker reprocesa con el código viejo y la API
+exporta con el código viejo, y las dos cosas salen verdes y creíbles:
+
+- un reproceso "de verificación" que no ejerce el arreglo que se acaba de
+  escribir, así que no demuestra nada;
+- un Excel al que le faltan las columnas, los recuentos o los motivos nuevos,
+  sin ningún aviso.
+
+Lo mismo vale para las pruebas: `docker compose run api pytest` corre contra
+la imagen, no contra el árbol de trabajo. Pasó en el cierre de la sesión
+2026-09-19 (séptima parte), y es la razón por la que el reproceso completo de
+esa sesión hubo que repetirlo: **el reproceso que vale es el que corre con el
+código final**. Si el reproceso y el arreglo son de la misma sesión, el orden
+es: arreglar → pruebas → **construir** → reprocesar → exportar → comparar.
 
 ---
 
@@ -3064,15 +3093,27 @@ materiales**: es el mejor argumento para tenerlo cargado.
   (5) **`Ml` es metro lineal y se unifica con `m`**; `transporte` y `P` se
   quedan como están, y son preguntas para ADIF (12 a 15 de
   `docs/preguntas-pendientes-cliente.md`).
-  (6) **Cierre**: **1.328 pruebas**; reproceso completo con la red apagada de
-  517 expedientes en **21 min 40 s**, `descargas_lanzadas: 0`; **20.062 filas**
-  (20.035 antes, +27, **ningún expediente pierde filas y ningún material
-  desaparece** — las 51 matrículas que cambian son las lecturas corregidas);
-  "Conciliación" cuadra con "Materiales" (20.062 = 20.062); **auditoría: 0
-  errores, 6 avisos**, y el error que dejó el reproceso
-  (`lineas_cambian_sin_cambiar_documentos` en los tres expedientes releídos)
-  **se apagó solo**, sin reprocesar, al pasar el recuento nuevo a ser el de
-  referencia.
+  (6) **El propio cierre destapó un defecto**: 2.511 filas del entregable
+  están fuera del maestro y solo 2.500 llevaban el motivo. Las 11 eran dos
+  caminos por los que el motivo, calculado sobre los datos entrantes, no
+  llegaba a escribirse: **9 líneas heredadas de un acuerdo marco** (la
+  herencia deja `motivo_revision` fuera de su diccionario a propósito) y **2
+  filas cuya matrícula guardada no era la de esa pasada** (un `None` corriente
+  no pisa un valor ya conocido). Arreglado moviendo el cálculo al final, sobre
+  la fila ya escrita: lo que se anota es lo que el Excel va a mostrar. 11 → 0.
+  (7) **Cierre**: **1.334 pruebas**; reproceso completo con la red apagada de
+  517 expedientes en **20 min 37 s**, `descargas_lanzadas: 0`, **con la imagen
+  reconstruida con el código final** (el de la noche anterior no valía: había
+  corrido con el código de antes de los cambios del día — de ahí la regla de
+  la sección 13); **20.062 filas** (20.035 antes, +27, **ningún expediente
+  pierde filas y ningún material desaparece** — las 51 matrículas que cambian
+  son las lecturas corregidas); "Conciliación" cuadra con "Materiales"
+  (20.062 = 20.062); **auditoría: 0 errores, 6 avisos**, y el error que dejó
+  el primer reproceso (`lineas_cambian_sin_cambiar_documentos` en los tres
+  expedientes releídos) **se apagó solo**, sin reprocesar, al pasar el
+  recuento nuevo a ser el de referencia. El Excel del arreglo y el de antes
+  se diferencian en **una sola celda de todo el libro**: el contador del
+  Resumen, 2.500 → 2.511.
 
 ---
 

@@ -445,13 +445,10 @@ formato antiguo de 8 cifras y **2.511** de 9 cifras. Están comprobadas contra
 la imagen de los PDF —no son errores de lectura— y se entregan literales, cada
 una con su motivo.
 
-**Salvedad medida**: el motivo lo llevan **2.882** de esas 2.893. Las 11
-restantes están fuera del maestro y no lo llevan — nueve son líneas heredadas
-de un acuerdo marco, que se guardan sin `motivo_revision` evaluado, y dos son
-copias sueltas de una matrícula que en su mismo expediente sí lo lleva en las
-demás apariciones. Está localizado línea a línea en
-`docs/sesion-2026-09-19-matriculas-contra-el-maestro-y-unidades.md`, y **no se
-ha tocado**: añadirles el motivo cambia datos del catálogo.
+Las **2.893** lo llevan. Once se quedaban sin él por dónde se calculaba el
+motivo (líneas heredadas de un acuerdo marco y filas cuya matrícula guardada
+no era la de la última pasada); está corregido y comprobado en el cierre de
+la sesión.
 
 El maestro está **incompleto artículo a artículo**, no por familias: de las
 1.133 matrículas de 9 cifras que faltan, solo 12 no tienen ninguna compañera en

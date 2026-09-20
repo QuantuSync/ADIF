@@ -2,10 +2,11 @@
 
 Continúa `docs/sesion-2026-09-19-decisiones-del-cliente-entradas-y-mantenimiento.md`.
 Cuatro bloques, los cuatro terminados. **La sesión se paró a petición del
-cliente con el bloque 4 empezado y se retomó la mañana del 2026-09-20**: el
-reproceso completo es de la noche del 19 y no se repitió; el Excel, la
-comparación y la auditoría en cero son de la mañana siguiente. La sección del
-bloque 4 lo desglosa.
+cliente con el bloque 4 empezado y se retomó la mañana del 2026-09-20.** El
+cierre destapó un defecto propio —11 filas del entregable fuera del maestro
+sin su motivo— y obligó a repetir el reproceso completo, porque el de la noche
+anterior había corrido con el código de antes. La sección del bloque 4 lo
+desglosa.
 
 Regla de la sesión: commit y push a main al terminar cada bloque, con las
 pruebas en verde; verificación reprocesando solo los expedientes afectados, y
@@ -104,13 +105,13 @@ en su línea el motivo:
 > *matrícula con formato antiguo de 8 dígitos, no figura en el maestro actual
 > de ADIF*
 
-`app.catalogo.matriculas_fuera_del_maestro` lo calcula contra la tabla
+`app.catalogo._anotar_motivo_de_maestro` lo calcula contra la tabla
 `maestro_materiales`, **una consulta por llamada a `guardar_lineas_catalogo`**,
 no una por línea. Va ahí y no en `_construir_campos` porque el maestro vive en
 base de datos y esa función no ve la sesión. Cuatro condiciones:
 
-1. **Idempotente**: `motivo_revision` se recalcula entero en cada pasada, así
-   que reprocesar no duplica el texto ni deja el motivo pegado.
+1. **Idempotente**: el motivo se quita antes de volver a ponerse, así que
+   reprocesar no duplica el texto ni deja el motivo pegado.
 2. **Se retira solo**: el día que ADIF mande un maestro que ya las traiga, el
    motivo desaparece sin tocar código. Probado.
 3. **Sin maestro cargado no escribe nada.** Sin listado contra el que
@@ -299,42 +300,127 @@ llegan al entregable.)
 ## Bloque 4 — Cierre
 
 La sesión se paró a mano con este bloque empezado y se retomó la mañana
-siguiente (2026-09-20). Lo que sigue son las cifras del cierre completo; al
-final de la sección queda escrito qué se midió en cada mitad, porque el
-reproceso completo —la parte cara— es de la noche anterior y no se repitió.
+siguiente (2026-09-20). **El cierre se hizo dos veces, y la segunda es la que
+vale**: la primera exportó, comparó y cuadró, pero el reproceso completo que
+tenía detrás era de la noche anterior, **anterior a los cambios del día**. Ver
+"Por qué hubo que reprocesar otra vez".
+
+### El defecto que encontró el propio cierre: 11 filas sin motivo
+
+Comparar el Excel contra el maestro fila a fila sacó una diferencia de 11:
+**2.511 filas del entregable están fuera del maestro y solo 2.500 llevaban el
+motivo**. No era un error de medición. Eran dos caminos por los que el motivo
+no llegaba a escribirse, y los dos venían de lo mismo: **calcularlo sobre los
+datos entrantes en vez de sobre la fila ya escrita**.
+
+- **9 eran líneas heredadas de un acuerdo marco.** `app.extraccion.herencia_matriz`
+  deja `motivo_revision` fuera de su diccionario **a propósito**: ahí la
+  ausencia significa "no se ha evaluado", no "no hay motivo", y por eso el
+  bucle de actualización no lo toca. Un motivo calculado sobre ese
+  diccionario no llegaba nunca a esas filas. Eran la matrícula `642950151` en
+  ocho expedientes (`6.20/28510.0040`, `6.22/28510.0074`, `6.22/28510.0161`,
+  `6.23/28510.0017`, `6.23/28510.0079`, `6.23/28510.0110`, `6.26/28510.0032`,
+  `6.26/28510.0071`) y `642190440` en `6.20/28510.0040`.
+- **2 eran filas cuya matrícula guardada no es la que traía la pasada.** Un
+  `None` corriente no pisa un valor ya conocido, así que una pasada que no
+  reconoce la celda (`'6,111E+09'`) deja intacta la matrícula que escribió
+  otra: la fila se entrega con una matrícula que el diccionario de esa pasada
+  no tenía. Eran `611050007` en `6.22/28510.0094` y `619050222` en
+  `6.22/28510.0125`.
+
+**El arreglo es mover el cálculo al final**, sobre las filas ya escritas
+(`app.catalogo._anotar_motivo_de_maestro`). Mirando la fila terminada, las dos
+causas desaparecen a la vez, porque lo que se anota es **lo que el Excel va a
+mostrar**. Sigue siendo una consulta por llamada a `guardar_lineas_catalogo`,
+no una por línea.
+
+Y sigue siendo reversible, que era la condición difícil: el motivo **se quita
+antes de volver a ponerse**, así que se retira solo el día que ADIF mande un
+maestro más completo —también en las heredadas, que no recalculan su
+`motivo_revision`—. Sin maestro cargado no toca nada: **ni pone ni quita**.
+
+Seis pruebas nuevas, una por condición: la heredada lleva el motivo; en la
+heredada se retira solo; no pisa el motivo que la fila ya tenía; la matrícula
+que la pasada no reconoce lo lleva igual; sin maestro no se borra lo escrito;
+y una matrícula que cambia de longitud al corregirse la lectura cambia de
+motivo sin quedarse los dos pegados.
+
+Una de las seis salió en rojo a la primera, y el rojo tenía razón: en el
+**camino normal** el motivo sí desaparece si el maestro deja de estar
+cargado, y no por esta función sino porque `_construir_campos` reconstruye
+`motivo_revision` entero en cada pasada. Es comportamiento de siempre y
+coherente con la misma regla —sin el listado no se puede afirmar nada—, así
+que lo que se corrigió fue la prueba, para que dijera la verdad y dejara
+escrito el matiz.
+
+### Por qué hubo que reprocesar otra vez
+
+`/engine` **no está montado en volumen**: el código se copia dentro de la
+imagen al construirla. El primer cierre enseñó una cara del descuido —hubo
+que reconstruir la imagen para que el Excel saliera con los contadores nuevos
+del Resumen— y dejó la otra sin ver: **el reproceso completo de la noche
+anterior había corrido con el código de antes de los cambios del día**. Un
+reproceso que no ejerce el código que se acaba de escribir no verifica nada,
+por verde que salga.
+
+Queda escrito como regla en `CONTEXTO.md` sección 13. El orden es **arreglar
+→ pruebas → construir → reprocesar → exportar → comparar**.
 
 ### Pruebas
 
-**1.328 pasan**, ninguna saltada (1.304 al cerrar la sexta parte, **+24**).
-Las nuevas están en `engine/tests/test_matriculas_y_unidades_2026_09_19_septima.py`
-(24: las 21 de los bloques 1 a 3 y 3 del Resumen del Excel) y tres reescritas
-o añadidas en `engine/tests/extraccion/test_unidad_medida.py` (la que
-codificaba explícitamente que "ml" no se unificaba, que es justo la decisión
-que cambia).
+**1.334 pasan**, ninguna saltada (1.304 al cerrar la sexta parte, **+30**).
+Las de esta sesión están en `engine/tests/test_matriculas_y_unidades_2026_09_19_septima.py`
+(30: 21 de los bloques 1 a 3, 3 del Resumen del Excel y 6 de las 11 filas) y
+tres reescritas o añadidas en `engine/tests/extraccion/test_unidad_medida.py`.
 
-### El reproceso completo, con la red apagada
+### El reproceso completo, con la red apagada y con el código final
 
 `POST /mantenimiento/ejecutar` con `forzar: true`, `sindicacion_desactivada:
-true` y `busqueda_desactivada: true`. **Uno solo**, como pedía la regla de la
-sesión (ciclo 30254).
+true` y `busqueda_desactivada: true`, **con la imagen reconstruida con todo lo
+del día** (ciclo 30774).
 
-| | |
-|---|---|
-| Expedientes reextraídos | **517** (519 evaluados) |
-| Tiempo | **21 min 40 s** (1.300,2 s) |
-| `descargas_lanzadas` | **0** |
-| `saltados_descarga` | 519 |
-| `descubrimiento` / `descubrimiento_busqueda` | `None` / `None` |
+| | Ciclo 30254 (noche del 19) | **Ciclo 30774 (el que vale)** |
+|---|---|---|
+| Código | anterior a los cambios del día | **el final, arreglo de las 11 incluido** |
+| Expedientes reextraídos | 517 (519 evaluados) | **517** (519 evaluados) |
+| Tiempo | 21 min 40 s | **20 min 37 s** (1.237,1 s) |
+| `descargas_lanzadas` | 0 | **0** |
+| `saltados_descarga` | 519 | 519 |
+| `descubrimiento` / `descubrimiento_busqueda` | `None` / `None` | `None` / `None` |
 
 ### El entregable
 
 ```
-C:\dev\ADIF\catalogo_adif_2026-09-20-matriculas-y-unidades.xlsx
+C:\dev\ADIF\catalogo_adif_2026-09-20-motivos-completos.xlsx
 ```
 
-1.958.194 bytes, 3 min 11 s de generación, tres hojas ("Materiales",
-"Conciliación", "Resumen"), **18 columnas**, las mismas y en el mismo orden
-que el Excel anterior.
+1.958.193 bytes, 3 min 14 s de generación, tres hojas ("Materiales",
+"Conciliación", "Resumen"), **18 columnas**, las mismas y en el mismo orden de
+siempre.
+
+### La comparación: la única diferencia es la admitida
+
+Contra `catalogo_adif_2026-09-20-matriculas-y-unidades.xlsx`, el Excel de
+antes del arreglo, comparando **celda a celda, fila a fila, en el mismo
+orden**:
+
+| Hoja | Diferencias |
+|---|---|
+| **Materiales** | 20.062 → 20.062 filas, mismas columnas, **0 celdas distintas** |
+| **Conciliación** | 534 → 534 filas, **0 filas cambian** |
+| **Resumen** | **una sola línea**: "Líneas cuya Matrícula del material (9 dígitos) no figura en el maestro de materiales de ADIF", **2.500 → 2.511** |
+
+Ninguna otra. Que "Materiales" no cambie en una sola celda es lo que tenía que
+pasar: el motivo por línea vive en la cola de revisión, no en ninguna columna
+del entregable — el Excel solo lo cuenta, en el Resumen.
+
+**La comprobación en base de datos, que es donde el arreglo se ve**: las
+líneas del entregable con matrícula de nueve cifras fuera del maestro y **sin**
+el motivo pasan de **11 a 0**. En toda la base de datos, el motivo de 9 cifras
+pasa de 5.265 a **5.276** líneas (las 11), y el de 8 cifras se queda en **382**.
+
+Y contra el Excel de partida, el que trajo el cliente, las diferencias son las
+mismas que se midieron en el primer cierre y no se han movido:
 
 ### La comparación con `catalogo_adif_2026-09-19-decisiones-y-entradas.xlsx`
 
@@ -383,35 +469,12 @@ tablas recuperadas) y la unidad vacía 7.604 → **7.605** (+1, la línea
 recuperada de `6.19/28510.0207`). +26 y +1 son las 27 filas nuevas. **17
 unidades distintas**, una menos porque `Ml` ya no existe.
 
-### El Resumen del Excel: los dos motivos nuevos
+### El Resumen del Excel: los dos motivos
 
 | | |
 |---|---:|
 | Líneas con matrícula de 8 dígitos fuera del maestro | **382** |
-| Líneas con matrícula de 9 dígitos fuera del maestro | **2.500** |
-
-### Una diferencia de 11 filas que hay que dejar escrita
-
-La medición del bloque 2 dice **2.511** filas del entregable con matrícula de
-nueve cifras fuera del maestro, y el Resumen cuenta **2.500** con el motivo.
-Las dos cifras son correctas y la diferencia está localizada: **11 filas están
-fuera del maestro y no llevan el motivo.**
-
-- **9 son líneas heredadas de un acuerdo marco** (`heredado_de_matriz`). La
-  herencia (`app.extraccion.herencia_matriz`) deja `motivo_revision` fuera de
-  `datos` a propósito, porque ahí "no hay motivo" significa "no se ha
-  evaluado", y `guardar_lineas_catalogo` solo anota el motivo donde ese campo
-  ya viene evaluado (`if "motivo_revision" in datos`). Son la matrícula
-  `642950151` en ocho expedientes (`6.20/28510.0040`, `6.22/28510.0074`,
-  `6.22/28510.0161`, `6.23/28510.0017`, `6.23/28510.0079`, `6.23/28510.0110`,
-  `6.26/28510.0032`, `6.26/28510.0071`) y `642190440` en `6.20/28510.0040`.
-- **2 son copias sueltas** de una matrícula que en ese mismo expediente sí
-  lleva el motivo en sus otras apariciones: `611050007` en `6.22/28510.0094`
-  (la copia cuya celda el sistema descartó por ilegible, `6,111E+09`) y
-  `619050222` en `6.22/28510.0125`.
-
-**No se ha tocado.** Añadir el motivo a esas 11 filas cambia datos del
-catálogo y no estaba en el encargo. Anotado para el cliente.
+| Líneas con matrícula de 9 dígitos fuera del maestro | **2.511** |
 
 ### Conciliación, cuadre y recuento por Situación
 
@@ -437,6 +500,8 @@ posterior: sin él no habría Excel.
 
 ### Auditoría: **0 errores**, 6 avisos
 
+La ejecutó el propio ciclo 30774 al terminar.
+
 | Categoría | Gravedad | Afectados |
 |---|---|---:|
 | `sin_lote` | aviso | 19.758 líneas en 118 expedientes |
@@ -446,31 +511,26 @@ posterior: sin él no habría Excel.
 | `importe_licitacion_repetido_en_el_mismo_expediente` | aviso | 8 |
 | `lineas_duplicadas_codigo_precio_distinto` | aviso | 12 grupos, 26 líneas, 4 expedientes |
 
-Los seis son los de siempre. **El error que quedó anoche ha desaparecido
-solo, sin reprocesar nada**, que es exactamente lo que se predijo: era
+Los seis son los de siempre y ninguno se mueve. **El error que había dejado el
+reproceso de la noche anterior ya no aparece**: era
 `lineas_cambian_sin_cambiar_documentos` en `6.18/28510.0003`,
 `6.20/28510.0040` y `6.19/28510.0207`, los tres expedientes a los que esta
-sesión les releyó páginas con `claude-opus-5`. La comprobación mira
+sesión les releyó páginas con `claude-opus-5`. Esa comprobación mira
 `documentos` y el recuento de líneas, no `cache_ocr_documento`, así que vio
-cambiar las líneas sin cambiar el documento. Al pasar el recuento nuevo a ser
-el de referencia, el aviso se apagó. **No se arregló con otro reproceso.**
+cambiar las líneas sin cambiar el documento. Se apagó sola, sin reprocesar
+nada, en cuanto el recuento nuevo pasó a ser el de referencia — y el reproceso
+del código final ya no lo levanta, porque esta vez el recuento no se movió.
 
 Totales de la auditoría: 40.043 líneas, 612 expedientes. Columnas vacías:
 `lote_id` 49,34 %, `cantidad` 48,42 %, `codigo_precio` 34,41 %,
 `unidad_medida` 27,51 %, `precio_unitario` 2,90 %.
 
-### Qué se midió en cada mitad
-
-Porque la sesión se partió en dos y conviene que quede claro qué es de cuándo:
+### Qué se hizo en cada mitad
 
 | | Noche del 19 | Mañana del 20 |
 |---|---|---|
 | Bloques 1, 2 y 3 | completos y subidos | — |
-| Reproceso completo | **hecho** (ciclo 30254) | no se repitió |
-| Pruebas | 1.328 | 1.328, vueltas a pasar con la imagen reconstruida |
-| Excel | — | exportado, comparado y cuadrado |
+| Pruebas | 1.328 | **1.334** (+6, las 11 filas) |
+| Reproceso completo | ciclo 30254, con el código de antes | **ciclo 30774, con el código final** |
+| Excel | — | dos: el primero destapó el defecto, el segundo es el entregable |
 | Auditoría | 6 avisos y 1 error | 6 avisos, **0 errores** |
-
-La imagen del contenedor se reconstruyó antes de exportar: el código no está
-montado en volumen, así que los dos contadores nuevos del Resumen no habrían
-salido en el Excel sin ese paso.

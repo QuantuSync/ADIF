@@ -142,7 +142,7 @@ llevan su explicación:
 | Aviso | Qué significa |
 |---|---|
 | *matrícula con formato antiguo de 8 dígitos, no figura en el maestro actual de ADIF* | El pliego es de 2016-2018 y usa el formato de 8 cifras (`59020019`). El maestro de hoy solo trae de 9. **382 filas de 20 expedientes** |
-| *no figura en el maestro de materiales de ADIF* | La matrícula es de 9 cifras, del formato actual, y el maestro sencillamente no la trae. No es un fallo de lectura ni una errata: ese listado está incompleto **artículo a artículo** dentro de familias que sí conoce — hay un pliego que compra 28 referencias correlativas de las que el maestro trae 5. **2.500 filas de 55 expedientes** |
+| *no figura en el maestro de materiales de ADIF* | La matrícula es de 9 cifras, del formato actual, y el maestro sencillamente no la trae. No es un fallo de lectura ni una errata: ese listado está incompleto **artículo a artículo** dentro de familias que sí conoce — hay un pliego que compra 28 referencias correlativas de las que el maestro trae 5. **2.511 filas de 55 expedientes** |
 
 **Lo que NO se hace, y conviene saberlo**: no se "completa" ni se corrige
 ninguna matrícula para que case con el maestro. Añadir un dígito al final de
