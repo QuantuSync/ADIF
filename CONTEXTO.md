@@ -475,6 +475,50 @@ un valor del vocabulario de unidades conocidas**
 (`app.extraccion.unidad_medida`, sesión 2026-09-15): cualquier otro se
 descarta y la línea va a revisión.
 
+**"Ml" es metro lineal y se unifica con "m"** (sesión 2026-09-19, séptima
+parte, bloque 3). No se hacía por una duda —"ml puede ser metro lineal o
+mililitro"— que el corpus deshace: las **tres** líneas que la traen son obra
+civil medida a lo largo (`6.17/28510.0007` p.20: lámina geotextil 800 Ml, muro
+de contención 400 Ml, zona de paso 400 Ml) en un cuadro que usa `m3` y `m2`
+para volumen y superficie en las filas de al lado. El literal se conserva en
+`unidad_medida_original`, así que la unificación es reversible y se ve. La
+compuesta `m/l` sigue sin tocarse. **`transporte` (15 líneas) y `P` (3) se
+quedan como están**: la primera es el denominador que escribe el propio cuadro
+(`€/transporte`, junto a `€/Ton*km` en la misma tabla); la segunda es el único
+valor de esa columna que no sale de ningún documento —el cuadro no publica
+unidad y llega del maestro de materiales, donde la "UM base" de `612860020` es
+`P`, un código de SAP sin nombre completo en el fichero—. Las dos son
+preguntas para ADIF (`docs/preguntas-pendientes-cliente.md`, 12 y 13).
+
+**La matrícula que el documento imprime y el maestro de materiales no recoge
+se entrega literal, con su motivo** (sesión 2026-09-19, séptima parte, bloques
+1 y 2). Dos motivos, porque explican dos cosas distintas: *"matrícula con
+formato antiguo de 8 dígitos, no figura en el maestro actual de ADIF"* (382
+filas, 20 expedientes, pliegos de 2016-2018) y *"no figura en el maestro de
+materiales de ADIF"* (2.500 filas, formato de 9 cifras; son 2.511 las que
+están fuera del maestro, en 55 expedientes — las 11 de diferencia son líneas
+que la herencia de acuerdo marco guarda sin `motivo_revision` evaluado, más
+dos copias sueltas, todas localizadas en el registro de la sesión).
+`app.catalogo.matriculas_fuera_del_maestro` los calcula contra
+`maestro_materiales` con **una consulta por llamada a
+`guardar_lineas_catalogo`**, no una por línea, y `motivo_revision` se recalcula
+entero en cada pasada: el día que ADIF mande un maestro más completo, el motivo
+se retira solo. **Sin maestro cargado no se escribe nada** —sin listado contra
+el que comprobar no se puede afirmar que una matrícula no figure en él— y
+**ninguno de los dos excluye la línea del entregable**: la fila sale en
+"Materiales" con su matrícula. El Resumen del Excel lleva los dos recuentos.
+
+**Y no se completa ni se corrige ninguna matrícula por parecido**, que es la
+otra mitad de la decisión y está medida. Añadir un dígito al final de
+`64571017` da `645710170` (una palomilla) y `645710175` (unas antenas); en
+`6.17/28510.0023` p.11 conviven `66441037` y `664410373` con la **misma
+descripción**, dos fabricantes y dos precios; y el test de "a un dígito con
+descripción que confirma" **no discrimina**: lo cumple el 22,2 % de las
+matrículas que faltan del maestro y el **41,5 %** de 1.500 tomadas al azar del
+propio maestro, que por definición no son erratas. Detalle en
+`docs/matriculas-8-digitos-y-el-maestro.md` y
+`docs/matriculas-de-9-digitos-fuera-del-maestro.md`.
+
 Añadir internamente, aunque no salgan al Excel como columna propia:
 `codigo_precio`, `documento_origen`, `pagina`, `fragmento`, `confianza`,
 `estado_revision`.
@@ -952,7 +996,17 @@ que vuelve con error o vacía se deja como estaba) y **queda escrito de dónde
 sale cada página** (`modelo` dentro de `CacheOcrDocumento.paginas`; el `modelo`
 de la caché sigue siendo el base, que es el que gobierna su validez). No se
 dispara solo ni tiene programación propia: es una decisión por documento,
-tomada mirando la lectura que hay.
+tomada mirando la lectura que hay. **Usado por segunda vez en la sesión
+2026-09-19 (séptima parte)**, y esta vez para arreglar matrículas mal leídas:
+cuatro páginas de tres documentos (`6.19/28510.0207` pp.13 y 15,
+`6.17/28510.0023` p.9, `6.19/28510.0196` p.28, `6.18/28510.0003` p.11) por unos
+0,09 $ en total. Los dos fallos que corrige merecen quedar escritos porque no
+se parecen: en unas el modelo **perdía el último dígito** (`645710150` leído
+`64571015`), y la truncadura llegó a fundir dos líneas distintas en una; en
+otra devolvía **diez cifras** (`6429110100` por `642910100`) y el sistema se
+quedaba con las nueve primeras, produciendo una matrícula inexistente con forma
+impecable. **Ninguno de los dos se ve sin cruzar contra el maestro de
+materiales**: es el mejor argumento para tenerlo cargado.
 
 ---
 
@@ -2980,6 +3034,46 @@ tomada mirando la lectura que hay.
   abren con datos reales, sin un banner de error ni un error de consola;
   `/conciliacion` da las mismas cifras que el Excel, Situación a Situación.
 
+- **Sesión 2026-09-19 (séptima parte): las matrículas contra el maestro de
+  materiales y las unidades raras** (`docs/sesion-2026-09-19-matriculas-contra-el-maestro-y-unidades.md`,
+  cerrada la mañana del 20). El cliente cruzó por su cuenta el Excel contra el
+  maestro de ADIF y trajo tres cifras; **las tres se reproducen exactas**.
+  (1) **Las 390 filas con matrícula de 8 cifras: el documento las imprime
+  así**, comprobado contra la imagen de las 31 páginas que las aportan, en 18
+  de los 20 expedientes. Se quedan literales con su motivo. **Hay páginas que
+  mezclan las dos longitudes** en la misma tabla, y hay erratas del propio
+  pliego en documentos con capa de texto: no es un problema de lectura.
+  (2) **34 matrículas sí eran lectura mala y están arregladas**, todas de
+  reconocimiento óptico, por dos fallos distintos: el dígito perdido
+  (`645710150` → `64571015`, que llegó a fundir dos líneas en una) y las diez
+  cifras (`6429110100` por `642910100`), que el sistema recortaba a nueve
+  produciendo una matrícula inexistente **de forma impecable**. Ninguno de los
+  dos se ve sin cruzar contra el maestro. Cuatro páginas releídas con
+  `claude-opus-5` por 0,09 $; la relectura va por página, así que arreglar una
+  matrícula arregló de paso las otras 24 de su página en `6.17/28510.0023`.
+  (3) **Ninguna matrícula completada ni corregida por parecido**, y está
+  medido: el test de "a un dígito con descripción que confirma" lo cumple el
+  22,2 % de las que faltan del maestro y el **41,5 %** de 1.500 tomadas al azar
+  del propio maestro. La tabla de candidatas de las de 8 cifras (386 pares: 2
+  confirman, 5 dudosas, 25 no casan, 354 sin candidata) está en `docs/`, y los
+  dos que "confirman" los desmiente el propio documento.
+  (4) **El maestro está incompleto artículo a artículo, no por familias**:
+  solo 12 de las 1.133 matrículas que faltan no tienen compañera con sus
+  cuatro primeras cifras, y `6.18/28510.0116` compra 28 referencias
+  correlativas de las que el maestro trae 5.
+  (5) **`Ml` es metro lineal y se unifica con `m`**; `transporte` y `P` se
+  quedan como están, y son preguntas para ADIF (12 a 15 de
+  `docs/preguntas-pendientes-cliente.md`).
+  (6) **Cierre**: **1.328 pruebas**; reproceso completo con la red apagada de
+  517 expedientes en **21 min 40 s**, `descargas_lanzadas: 0`; **20.062 filas**
+  (20.035 antes, +27, **ningún expediente pierde filas y ningún material
+  desaparece** — las 51 matrículas que cambian son las lecturas corregidas);
+  "Conciliación" cuadra con "Materiales" (20.062 = 20.062); **auditoría: 0
+  errores, 6 avisos**, y el error que dejó el reproceso
+  (`lineas_cambian_sin_cambiar_documentos` en los tres expedientes releídos)
+  **se apagó solo**, sin reprocesar, al pasar el recuento nuevo a ser el de
+  referencia.
+
 ---
 
 El registro histórico de hallazgos y decisiones de cada sesión vive en
@@ -3023,6 +3117,9 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `sesion-2026-09-19-espacios-del-contrato-y-precio-adjudicado.md`,
 `sesion-2026-09-19-residuales-cobertura-de-lotes-y-conciliacion-en-la-web.md`,
 `sesion-2026-09-19-decisiones-del-cliente-entradas-y-mantenimiento.md`,
+`sesion-2026-09-19-matriculas-contra-el-maestro-y-unidades.md`,
+`matriculas-8-digitos-y-el-maestro.md`,
+`matriculas-de-9-digitos-fuera-del-maestro.md`,
 `entradas-pendientes-del-cliente.md`,
 `mantenimiento-sin-supervision.md`,
 `preguntas-pendientes-cliente.md`,

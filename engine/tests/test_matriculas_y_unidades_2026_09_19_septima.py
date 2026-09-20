@@ -9,6 +9,10 @@ dígito para que casen con el maestro**: `64571017` casa a la vez con
 
 Bloque 3 — "Ml" es metro lineal y se unifica con "m".
 """
+import io
+from decimal import Decimal
+
+import openpyxl
 import pytest
 
 from app.catalogo import (
@@ -18,7 +22,7 @@ from app.catalogo import (
     guardar_lineas_catalogo,
     matriculas_fuera_del_maestro,
 )
-from app.exportacion import _sale_en_materiales
+from app.exportacion import _sale_en_materiales, generar_excel_catalogo
 from app.extraccion.unidad_medida import (
     es_unidad_conocida,
     limpiar_unidad,
@@ -233,3 +237,69 @@ def test_transporte_sigue_siendo_la_unidad_que_imprime_el_documento():
     # columna: se queda como está mientras el cliente no diga otra cosa.
     assert es_unidad_conocida("€/transporte")
     assert normalizar_unidad(limpiar_unidad("€/transporte")) == "transporte"
+
+
+# --------------------------------------------------------------------------
+# El Excel: los dos motivos nuevos, contados en el Resumen
+# --------------------------------------------------------------------------
+
+
+def _linea(lote, clave, matricula, motivo):
+    return LineaCatalogo(
+        expediente_id=lote.expediente_id, lote_id=lote.id, clave_linea=clave,
+        orden_aparicion=0, matricula=matricula, descripcion="FUSIBLE AT - CA",
+        precio_unitario=Decimal("116.15"), motivo_revision=motivo,
+    )
+
+
+def _resumen(db_session):
+    libro = openpyxl.load_workbook(io.BytesIO(generar_excel_catalogo(db_session)))
+    return libro, [
+        (str(f[0].value), f[1].value if len(f) > 1 else None)
+        for f in libro["Resumen"].iter_rows()
+        if f[0].value is not None
+    ]
+
+
+def test_el_resumen_cuenta_las_dos_familias_de_matricula_por_separado(db_session):
+    lote = _lote(db_session)
+    db_session.add_all([
+        _linea(lote, "A", "59020019", MOTIVO_MATRICULA_8_FUERA_DEL_MAESTRO),
+        _linea(lote, "B", "645710175", MOTIVO_MATRICULA_FUERA_DEL_MAESTRO),
+        _linea(lote, "C", "645710176", MOTIVO_MATRICULA_FUERA_DEL_MAESTRO),
+    ])
+    db_session.commit()
+
+    libro, filas = _resumen(db_session)
+
+    ocho = [v for t, v in filas if "formato antiguo de 8 dígitos" in t]
+    nueve = [v for t, v in filas if "(9 dígitos) no figura en el maestro" in t]
+    assert ocho == [1]
+    assert nueve == [2]
+    # Y las tres líneas salen en "Materiales" con su matrícula: el motivo
+    # explica, no excluye.
+    assert libro["Materiales"].max_row == 4
+
+
+def test_el_resumen_explica_por_que_no_se_completan(db_session):
+    lote = _lote(db_session)
+    db_session.add(_linea(lote, "A", "59020019", MOTIVO_MATRICULA_8_FUERA_DEL_MAESTRO))
+    db_session.commit()
+
+    _, filas = _resumen(db_session)
+
+    texto = "\n".join(t for t, _ in filas)
+    assert "no se completan ni se corrigen" in texto
+    assert "64571017" in texto
+
+
+def test_sin_ninguna_linea_asi_el_resumen_no_escribe_la_nota(db_session):
+    lote = _lote(db_session)
+    db_session.add(_linea(lote, "A", "601200010", None))
+    db_session.commit()
+
+    _, filas = _resumen(db_session)
+
+    texto = "\n".join(t for t, _ in filas)
+    assert "no se completan ni se corrigen" not in texto
+    assert [v for t, v in filas if "formato antiguo de 8 dígitos" in t] == [0]
