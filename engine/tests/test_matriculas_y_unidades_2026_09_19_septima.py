@@ -303,3 +303,141 @@ def test_sin_ninguna_linea_asi_el_resumen_no_escribe_la_nota(db_session):
     texto = "\n".join(t for t, _ in filas)
     assert "no se completan ni se corrigen" not in texto
     assert [v for t, v in filas if "formato antiguo de 8 dígitos" in t] == [0]
+
+
+# --------------------------------------------------------------------------
+# Las 11 filas que se quedaban sin motivo (cierre de la sesión, 2026-09-20)
+#
+# El motivo se calculaba sobre `datos`, antes de escribir la fila. Dos
+# caminos se le escapaban, y entre los dos dejaban 11 filas del entregable
+# fuera del maestro y sin explicación. Ahora se calcula sobre la fila ya
+# escrita, que es lo que el Excel muestra.
+# --------------------------------------------------------------------------
+
+
+def _heredada(lote, matricula, motivo=None):
+    """Una línea como la que escribe `app.extraccion.herencia_matriz`: sin
+    `motivo_revision` en el diccionario, porque ahí la ausencia significa "no
+    se ha evaluado" y no debe pisar lo que la fila tuviera."""
+    datos = {
+        "clave_linea": f"P-{matricula}",
+        "expediente_id": lote.expediente_id,
+        "orden_aparicion": 0,
+        "matricula": matricula,
+        "descripcion": "CABLE CONEXIÓN FLEXIBLE 120 MM2",
+        "precio_unitario": Decimal("12.34"),
+        "heredado_de_matriz": True,
+    }
+    if motivo is not None:
+        datos["motivo_revision"] = motivo
+    return datos
+
+
+def test_la_linea_heredada_de_un_acuerdo_marco_tambien_lleva_el_motivo(db_session):
+    # Nueve de las once: `642950151` en ocho expedientes y `642190440` en
+    # `6.20/28510.0040`. Son líneas que el pedido no lee de su propio
+    # documento, sino que copia de su matriz, y salen en "Materiales" con su
+    # matrícula como cualquier otra -- así que necesitan la misma explicación.
+    _maestro(db_session, "642950150")
+    lote = _lote(db_session)
+
+    guardar_lineas_catalogo(db_session, lote.id, [_heredada(lote, "642950151")])
+    db_session.commit()
+
+    guardada = db_session.query(LineaCatalogo).filter_by(lote_id=lote.id).one()
+    assert guardada.heredado_de_matriz
+    assert guardada.motivo_revision == MOTIVO_MATRICULA_FUERA_DEL_MAESTRO
+
+
+def test_en_la_heredada_el_motivo_tambien_se_retira_solo(db_session):
+    # La condición que más importa de las cuatro: el motivo tiene que irse
+    # solo el día que ADIF mande un maestro más completo. En estas líneas
+    # `motivo_revision` no se recalcula de cero en cada pasada, así que hay
+    # que quitarlo explícitamente antes de volver a ponerlo.
+    _maestro(db_session, "642950150")
+    lote = _lote(db_session)
+    guardar_lineas_catalogo(db_session, lote.id, [_heredada(lote, "642950151")])
+    db_session.commit()
+
+    _maestro(db_session, "642950151")
+    guardar_lineas_catalogo(db_session, lote.id, [_heredada(lote, "642950151")])
+    db_session.commit()
+
+    guardada = db_session.query(LineaCatalogo).filter_by(lote_id=lote.id).one()
+    assert not guardada.motivo_revision
+
+
+def test_en_la_heredada_el_motivo_no_pisa_el_que_la_fila_ya_tenia(db_session):
+    # Quitar y poner el motivo del maestro no puede llevarse por delante el
+    # resto: la herencia deja `motivo_revision` fuera de `datos` justamente
+    # para no tocarlo.
+    _maestro(db_session, "642950150")
+    lote = _lote(db_session)
+    guardar_lineas_catalogo(
+        db_session, lote.id, [_heredada(lote, "642950151", motivo="cantidad es 0")]
+    )
+    db_session.commit()
+
+    guardar_lineas_catalogo(db_session, lote.id, [_heredada(lote, "642950151")])
+    db_session.commit()
+
+    guardada = db_session.query(LineaCatalogo).filter_by(lote_id=lote.id).one()
+    assert guardada.motivo_revision == f"cantidad es 0; {MOTIVO_MATRICULA_FUERA_DEL_MAESTRO}"
+
+
+def test_la_matricula_que_la_pasada_no_reconoce_pero_la_fila_conserva(db_session):
+    # Las otras dos: `611050007` en `6.22/28510.0094` y `619050222` en
+    # `6.22/28510.0125`. Una pasada que no reconoce la celda deja `matricula`
+    # a `None`, y un `None` corriente no pisa un valor ya conocido -- así que
+    # la fila se entrega con la matrícula que escribió otra pasada. El motivo
+    # tiene que hablar de ESA, la que el Excel enseña.
+    _maestro(db_session, "611050075")
+    lote = _lote(db_session)
+    _guardar(db_session, lote, [["P-001", "611050007", "CARRIL UIC-54", "UN", "1", "10,00"]])
+
+    # Segunda pasada: la celda viene ilegible y la matrícula se descarta.
+    _guardar(db_session, lote, [["P-001", "6,111E+09", "CARRIL UIC-54", "UN", "1", "10,00"]])
+
+    guardada = db_session.query(LineaCatalogo).filter_by(lote_id=lote.id).one()
+    assert guardada.matricula == "611050007"
+    assert MOTIVO_MATRICULA_FUERA_DEL_MAESTRO in guardada.motivo_revision
+
+
+def test_sin_maestro_cargado_la_heredada_conserva_el_motivo_que_ya_tenia(db_session):
+    # Simétrico de "sin maestro no se escribe nada": sin listado contra el
+    # que comprobar, esta función ni pone ni quita.
+    #
+    # Ojo con el alcance: esto vale para la línea heredada, que es la que no
+    # recalcula su `motivo_revision`. En el camino normal el motivo SÍ
+    # desaparece si el maestro deja de estar cargado, y no por esta función
+    # sino porque `_construir_campos` reconstruye `motivo_revision` entero en
+    # cada pasada -- comportamiento de siempre y coherente con la misma
+    # regla: sin el listado no se puede afirmar nada sobre la matrícula.
+    _maestro(db_session, "642950150")
+    lote = _lote(db_session)
+    guardar_lineas_catalogo(db_session, lote.id, [_heredada(lote, "642950151")])
+    db_session.commit()
+
+    db_session.query(MaestroMaterial).delete()
+    db_session.commit()
+    guardar_lineas_catalogo(db_session, lote.id, [_heredada(lote, "642950151")])
+    db_session.commit()
+
+    guardada = db_session.query(LineaCatalogo).filter_by(lote_id=lote.id).one()
+    assert guardada.motivo_revision == MOTIVO_MATRICULA_FUERA_DEL_MAESTRO
+
+
+def test_si_la_matricula_cambia_de_longitud_el_motivo_cambia_con_ella(db_session):
+    # Lo que hizo esta misma sesión 34 veces: corregir una lectura que perdía
+    # un dígito. La fila pasa de "formato antiguo de 8 dígitos" al motivo de
+    # 9, sin quedarse los dos pegados.
+    _maestro(db_session, "111111111")
+    lote = _lote(db_session)
+    _guardar(db_session, lote, [["P-001", "64571017", "ANTENAS DE ARQUEO", "UN", "1", "70,00"]])
+    guardada = db_session.query(LineaCatalogo).filter_by(lote_id=lote.id).one()
+    assert MOTIVO_MATRICULA_8_FUERA_DEL_MAESTRO in guardada.motivo_revision
+
+    _guardar(db_session, lote, [["P-001", "645710175", "ANTENAS DE ARQUEO", "UN", "1", "70,00"]])
+
+    guardada = db_session.query(LineaCatalogo).filter_by(lote_id=lote.id).one()
+    assert guardada.motivo_revision == MOTIVO_MATRICULA_FUERA_DEL_MAESTRO

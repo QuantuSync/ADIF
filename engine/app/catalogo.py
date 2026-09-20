@@ -132,6 +132,27 @@ def motivo_de_matricula_fuera_del_maestro(matricula: str) -> str:
     )
 
 
+_MOTIVOS_DE_MAESTRO = (
+    MOTIVO_MATRICULA_8_FUERA_DEL_MAESTRO,
+    MOTIVO_MATRICULA_FUERA_DEL_MAESTRO,
+)
+
+
+def _fijar_motivo_de_maestro(motivo: Optional[str], esperado: Optional[str]) -> Optional[str]:
+    """Deja en `motivo` exactamente el motivo de maestro que toca (`esperado`,
+    o ninguno), sin tocar el resto de motivos que la línea traiga.
+
+    Quitar antes de poner es lo que hace que el motivo **se retire solo** el
+    día que ADIF mande un maestro más completo, también en las líneas que no
+    recalculan su `motivo_revision` en cada pasada (las heredadas de un
+    acuerdo marco). Y quitar los dos motivos, no solo el esperado, cubre el
+    caso de una matrícula que cambia de longitud al corregirse una lectura."""
+    partes = [p for p in (motivo or "").split("; ") if p and p not in _MOTIVOS_DE_MAESTRO]
+    if esperado:
+        partes.append(esperado)
+    return "; ".join(partes) or None
+
+
 # Solo la de 9 cifras: dentro de ruido pegado, 8 cifras seguidas también son
 # el trozo de una de 9.
 _MATRICULA_INCRUSTADA_RE = re.compile(rf"\d{{{_MATRICULA_LONGITUD}}}")
@@ -2971,6 +2992,49 @@ def _limpiar_huerfana_superada(
         db.delete(huerfana)
 
 
+def _anotar_motivo_de_maestro(db: Session, objetos: list[LineaCatalogo]) -> None:
+    """Bloques 1 y 2, sesión 2026-09-19 (séptima parte): anota en cada línea
+    tocada si su matrícula no figura en el maestro de materiales de ADIF.
+
+    Se hace **al final y sobre la fila ya escrita**, no antes sobre `datos`,
+    y la razón es un defecto real medido en el cierre de esa sesión: 11 filas
+    del entregable estaban fuera del maestro y no llevaban el motivo.
+
+    - **9 eran líneas heredadas de un acuerdo marco.** La herencia
+      (`app.extraccion.herencia_matriz`) deja `motivo_revision` fuera de
+      `datos` a propósito, porque ahí "no hay motivo" significa "no se ha
+      evaluado" — así que un motivo calculado sobre `datos` nunca llegaba a
+      escribirse en ellas.
+    - **2 eran filas cuya matrícula guardada no es la que traía la pasada.**
+      Un `None` corriente no pisa un valor ya conocido (CONTEXTO.md
+      sección 9), así que una pasada que no reconoce la celda deja intacta la
+      matrícula que otra escribió: la fila se entrega con una matrícula que
+      `datos` no tenía.
+
+    Mirando la fila terminada, las dos causas desaparecen a la vez: lo que se
+    anota es lo que el Excel va a mostrar. Sigue siendo **una consulta por
+    llamada** y sigue siendo **idempotente y reversible**: el motivo se quita
+    antes de volver a ponerlo, así que se retira solo el día que ADIF mande un
+    maestro que ya traiga esas matrículas, también en las heredadas.
+
+    **Sin maestro cargado no toca nada** — ni pone ni quita. Sin listado
+    contra el que comprobar no se puede afirmar que una matrícula no figure
+    en él, y borrar el motivo de miles de filas por el hueco de una fuente de
+    entrada sería tan falso como escribirlo."""
+    if db.query(MaestroMaterial).limit(1).first() is None:
+        return
+    fuera = matriculas_fuera_del_maestro(db, (obj.matricula for obj in objetos))
+    for obj in objetos:
+        esperado = (
+            motivo_de_matricula_fuera_del_maestro(obj.matricula)
+            if obj.matricula in fuera
+            else None
+        )
+        nuevo = _fijar_motivo_de_maestro(obj.motivo_revision, esperado)
+        if nuevo != obj.motivo_revision:
+            obj.motivo_revision = nuevo
+
+
 def guardar_lineas_catalogo(
     db: Session, lote_id: Optional[int], lineas: list[dict], ids_vivas: frozenset[int] = frozenset()
 ) -> ResultadoGuardadoCatalogo:
@@ -3077,24 +3141,7 @@ def guardar_lineas_catalogo(
     fusion_material = lote_id is not None
     combinadas = _combinar_por_clave(lineas, permitir_fusion_material=fusion_material)
     claves_de_esta_llamada = {datos["clave_linea"] for datos in combinadas}
-    # Bloque 1, sesión 2026-09-19 (séptima parte): una consulta por llamada,
-    # no una por línea. Va aquí y no en `_construir_campos` porque el maestro
-    # vive en base de datos y esa función no ve la sesión; `motivo_revision`
-    # se recalcula entero en cada pasada (ver el bucle de actualización más
-    # abajo), así que anotarlo aquí es idempotente.
-    fuera_del_maestro = matriculas_fuera_del_maestro(
-        db, (datos.get("matricula") for datos in combinadas)
-    )
     for datos in combinadas:
-        # Solo donde `motivo_revision` ya es un campo evaluado de la línea:
-        # la herencia de acuerdo marco (`app.extraccion.herencia_matriz`) lo
-        # deja deliberadamente fuera de `datos` porque ahí significa "no se
-        # ha evaluado", y colarlo aquí pisaría el motivo que la línea tuviera.
-        if "motivo_revision" in datos and datos.get("matricula") in fuera_del_maestro:
-            datos["motivo_revision"] = _acumular_motivo_unico(
-                datos.get("motivo_revision"),
-                motivo_de_matricula_fuera_del_maestro(datos["matricula"]),
-            )
         # Transitorio, nunca una columna de `LineaCatalogo` -- se retira
         # antes de que `datos` se use para crear/actualizar la fila real,
         # y se guarda aparte para la limpieza de huérfana superada de más
@@ -3234,7 +3281,9 @@ def guardar_lineas_catalogo(
                     # de matriz (`app.extraccion.herencia_matriz`), que ni
                     # siquiera incluye esta clave en `datos` -- ahí sí es
                     # "no evaluado", y este bucle nunca la toca porque no
-                    # aparece en `datos.items()`.
+                    # aparece en `datos.items()`. (El motivo de matrícula
+                    # fuera del maestro es la excepción, y por eso se anota
+                    # aparte al final: `_anotar_motivo_de_maestro`.)
                     setattr(existente, campo, valor)
                 elif valor is INVALIDADO:
                     # Bloque 3, sesión 2026-09-11 (mismo mecanismo ya
@@ -3356,6 +3405,7 @@ def guardar_lineas_catalogo(
             _limpiar_huerfana_superada(
                 db, datos["expediente_id"], clave_huerfana_hipotetica, datos.get("documento_origen_id")
             )
+    _anotar_motivo_de_maestro(db, objetos_tocados)
     # `flush()`, no `commit()` (docstring: el llamador decide cuándo): las
     # líneas recién creadas no tienen `id` hasta que el `INSERT` viaja a
     # postgres, y el llamador necesita esos `id` YA (bloque 4, sesión
