@@ -69,7 +69,7 @@ import openpyxl
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.extraccion.unidad_medida import es_unidad_conocida, normalizar_unidad
+from app.extraccion.unidad_medida import es_marca_de_partida_alzada, es_unidad_conocida, normalizar_unidad
 from app.models import LineaCatalogo, MaestroMaterial
 
 COLUMNA_MATRICULA = "Material"
@@ -236,31 +236,37 @@ def _normalizada(unidad: Optional[str]) -> Optional[str]:
     return _SINONIMOS_UNIDAD.get(texto, texto)
 
 
-def completar_unidades_desde_maestro(db: Session) -> ResumenCompletarUnidades:
-    """Dos pasadas sobre toda línea con matrícula, nunca solo las que faltan:
+def aplicar_unidades_del_maestro(db: Session, lineas) -> ResumenCompletarUnidades:
+    """La unidad del maestro sobre estas líneas, mirando la fila ya escrita.
 
-    1. Sin unidad propia: la rellena desde el maestro (`lineas_completadas`)
-       y marca `unidad_medida_completada_desde_maestro = True` -- mismo
-       comportamiento que antes.
-    2. Con unidad propia que no coincide con la del maestro: NUNCA la pisa
-       (encargo explícito del cliente, bloque 1) -- anota la unidad del
-       maestro en `unidad_medida_discrepancia_maestro` para que quede en
-       trazabilidad y pueda revisarse, y cuenta en
-       `discrepancias_detectadas`. Si coincide (incluida una discrepancia
-       anotada en una pasada anterior que ya no aplica, p. ej. tras
-       recargar el maestro), limpia la marca en vez de dejarla obsoleta."""
+    Sesión 2026-09-22: deja de ser solo un paso manual y corre dentro del
+    proceso automático -- al guardar las líneas de cada documento
+    (`app.catalogo.guardar_lineas_catalogo`) y al final de cada ciclo de
+    mantenimiento --, así que el reproceso la aplica siempre. Tres reglas:
+
+    1. **La unidad del documento manda siempre.** Una línea con unidad propia
+       nunca se pisa; si el maestro da otra, se anota la discrepancia.
+    2. Sin unidad propia, la del maestro por matrícula exacta, marcada con
+       `unidad_medida_completada_desde_maestro` para que la fila lo diga.
+    3. **Una unidad que vino del maestro se recalcula**, no se hereda: si la
+       matrícula ya no está en el maestro (o ya no es la misma), la unidad se
+       retira. Si la marca sigue puesta es porque ningún documento ha traído
+       unidad -- el guardado la quita en cuanto una pasada la trae.
+
+    La partida alzada (`PA` en la celda de unidad) no recibe unidad del
+    maestro: su celda es "no aplica". **Sin maestro cargado no toca nada.**"""
     resumen = ResumenCompletarUnidades()
-    lineas = db.execute(
-        select(LineaCatalogo).where(LineaCatalogo.matricula.is_not(None))
-    ).scalars().all()
-
-    if not lineas:
+    lineas = [
+        linea for linea in lineas
+        if linea.matricula is not None or linea.unidad_medida_completada_desde_maestro
+    ]
+    if not lineas or db.query(MaestroMaterial).limit(1).first() is None:
         return resumen
 
-    matriculas = {linea.matricula for linea in lineas}
+    matriculas = {linea.matricula for linea in lineas if linea.matricula is not None}
     maestros = db.execute(
         select(MaestroMaterial).where(MaestroMaterial.matricula.in_(matriculas))
-    ).scalars().all()
+    ).scalars().all() if matriculas else []
     # Sesión 2026-09-15 (cuarta parte): la unidad del maestro pasa el mismo
     # vocabulario que la del documento -- "001" (una fila del maestro) no es
     # una unidad.
@@ -271,9 +277,24 @@ def completar_unidades_desde_maestro(db: Session) -> ResumenCompletarUnidades:
     }
 
     for linea in lineas:
-        unidad_maestro = unidad_por_matricula.get(linea.matricula)
+        unidad_maestro = unidad_por_matricula.get(linea.matricula) if linea.matricula else None
+
+        if linea.unidad_medida_completada_desde_maestro:
+            if unidad_maestro is None:
+                linea.unidad_medida = None
+                linea.unidad_medida_original = None
+                linea.unidad_medida_completada_desde_maestro = None
+                continue
+            if linea.unidad_medida_original != unidad_maestro:
+                linea.unidad_medida = normalizar_unidad(unidad_maestro)
+                linea.unidad_medida_original = unidad_maestro
+            if linea.unidad_medida_discrepancia_maestro is not None:
+                linea.unidad_medida_discrepancia_maestro = None
+            continue
 
         if linea.unidad_medida is None:
+            if linea.unidad_medida_original and es_marca_de_partida_alzada(linea.unidad_medida_original):
+                continue
             resumen.lineas_evaluadas += 1
             if unidad_maestro is None:
                 resumen.sin_matricula_en_maestro += 1
@@ -294,5 +315,20 @@ def completar_unidades_desde_maestro(db: Session) -> ResumenCompletarUnidades:
             linea.unidad_medida_discrepancia_maestro = unidad_maestro
         resumen.discrepancias_detectadas += 1
 
+    return resumen
+
+
+def completar_unidades_desde_maestro(db: Session) -> ResumenCompletarUnidades:
+    """`aplicar_unidades_del_maestro` sobre todo el catálogo: el paso manual
+    de siempre (`POST /mantenimiento/maestro-materiales/completar-unidades`),
+    y el que corre al final de cada ciclo de mantenimiento, para las líneas
+    que esa pasada no ha vuelto a guardar (un maestro recién recargado)."""
+    lineas = db.execute(
+        select(LineaCatalogo).where(
+            (LineaCatalogo.matricula.is_not(None))
+            | (LineaCatalogo.unidad_medida_completada_desde_maestro.is_(True))
+        )
+    ).scalars().all()
+    resumen = aplicar_unidades_del_maestro(db, lineas)
     db.commit()
     return resumen

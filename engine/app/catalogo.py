@@ -14,6 +14,7 @@ from app.extraccion.glifos_cid import (
     tiene_glifos_cid,
 )
 from app.extraccion.invalidado import INVALIDADO
+from app.extraccion.maestro_materiales import aplicar_unidades_del_maestro
 from app.extraccion.normalizacion import (
     limpiar_codigo_celda,
     limpiar_texto_celda,
@@ -3400,6 +3401,11 @@ def guardar_lineas_catalogo(
                     setattr(existente, campo, None)
                 elif valor is not None:
                     setattr(existente, campo, valor)
+            # Sesión 2026-09-22: la unidad del documento manda siempre sobre la
+            # del maestro. Si esta pasada trae una (o `PA`, que la invalida),
+            # la marca de "viene del maestro" deja de ser verdad.
+            if datos.get("unidad_medida") is not None:
+                existente.unidad_medida_completada_desde_maestro = None
             # Sesión 2026-09-15: las marcas de origen también se recalculan en
             # cada pasada, como `motivo_revision` -- con "un `None` no pisa",
             # un `True` de una pasada vieja se quedaba para siempre: las
@@ -3494,6 +3500,9 @@ def guardar_lineas_catalogo(
                 db, datos["expediente_id"], clave_huerfana_hipotetica, datos.get("documento_origen_id")
             )
     _anotar_motivo_de_maestro(db, objetos_tocados)
+    # Sesión 2026-09-22: la unidad del maestro, dentro del proceso automático
+    # y sobre la fila terminada, por la misma razón que el motivo de arriba.
+    aplicar_unidades_del_maestro(db, objetos_tocados)
     # `flush()`, no `commit()` (docstring: el llamador decide cuándo): las
     # líneas recién creadas no tienen `id` hasta que el `INSERT` viaja a
     # postgres, y el llamador necesita esos `id` YA (bloque 4, sesión

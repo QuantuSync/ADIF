@@ -260,7 +260,8 @@ def test_discrepancia_obsoleta_se_limpia_si_deja_de_aplicar(db_session, excel_ma
     assert linea.unidad_medida_discrepancia_maestro is None
 
 
-def test_no_completa_si_la_matricula_no_esta_en_el_maestro(db_session):
+def test_no_completa_si_la_matricula_no_esta_en_el_maestro(db_session, excel_maestro):
+    cargar_maestro_materiales(db_session, excel_maestro)
     linea = _crear_linea(db_session, matricula="999999999", unidad_medida=None)
 
     resumen = completar_unidades_desde_maestro(db_session)

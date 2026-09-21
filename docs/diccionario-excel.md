@@ -310,8 +310,15 @@ indexado (arriba).
 significan nada: pueden ser metros de cable o toneladas de balasto.
 
 **De dónde sale.** De la columna de unidad del cuadro; si el documento no la
-trae, del maestro de materiales de SAP por matrícula exacta (**nunca pisa** una
-unidad leída de un documento real).
+trae, del maestro de materiales de ADIF por matrícula exacta. **La unidad del
+documento manda siempre**: la del maestro nunca pisa una unidad leída de un
+documento real, y si un documento la trae después, sustituye a la del maestro.
+
+**Cuando la unidad viene del maestro, la fila lo dice**: en "Motivo de las
+celdas vacías" lleva *"Unidad de medida: del maestro de materiales de ADIF (el
+documento no la publica)"*. Así se distingue, fila a fila, una unidad leída del
+documento de una completada desde el maestro. Se aplica en cada reproceso, sin
+ningún paso manual (desde el 22/09/2026).
 
 **Tres valores de esta columna que sorprenden y tienen explicación:**
 
@@ -322,10 +329,11 @@ unidad leída de un documento real).
 - **`transporte`**: el cuadro escribe el precio como `€/transporte`, igual que
   escribe `€/Ton*km` en las filas de al lado. Es el denominador del precio: lo
   que se paga por cada transporte. 15 filas de `6.21/28510.0108`-`0112`.
-- **`P`**: es el único valor de esta columna que **no sale de ningún
-  documento**. El cuadro de esas 3 filas no publica unidad, y el valor viene
-  del maestro de materiales de ADIF, donde la unidad base de esa matrícula es
-  `P` — un código propio de SAP cuyo nombre completo el listado no trae.
+- **`P`**: el único valor de esta columna que **solo** aparece como unidad del
+  maestro (lleva la nota de arriba). El cuadro de esas filas (placa nervada,
+  `612860020`) no publica unidad, y en el maestro de materiales de ADIF la
+  unidad base de esa matrícula es `P` — un código propio de SAP cuyo nombre
+  completo el listado no trae.
 
 **Cuándo queda vacío.**
 
@@ -386,9 +394,14 @@ convierte un hueco en una explicación.
 Muchas entradas llevan además un detalle entre paréntesis que dice exactamente
 cuál de las causas posibles es la de esa fila.
 
-**Una entrada que no es de una celda vacía**: en los cuadros que solo publican
-"cantidad mínima por pedido" y "pedido inicial", la fila dice aquí cuál de las
-dos es su Cantidad y qué trae la otra (ver la columna 8, "Cantidad").
+**Dos entradas que no son de una celda vacía**:
+
+- en los cuadros que solo publican "cantidad mínima por pedido" y "pedido
+  inicial", la fila dice aquí cuál de las dos es su Cantidad y qué trae la otra
+  (ver la columna 8, "Cantidad");
+- cuando la Unidad de medida no sale del documento sino del maestro de
+  materiales de ADIF, la fila lo dice aquí (ver la columna 13, "Unidad de
+  medida").
 
 **Por qué la celda se queda vacía en vez de traer un marcador de texto**:
 poner "N/D" en la columna de Precio unitario la convertiría en texto y rompería

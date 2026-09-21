@@ -133,6 +133,11 @@ _COLUMNA_DE_CAMPO = {
 }
 
 
+TEXTO_UNIDAD_DEL_MAESTRO = (
+    "Unidad de medida: del maestro de materiales de ADIF (el documento no la publica)"
+)
+
+
 def _texto_celdas_vacias(
     linea: LineaCatalogo, identificador_lote: Optional[str], expediente=None, modelo_precio=None
 ) -> Optional[str]:
@@ -152,6 +157,11 @@ def _texto_celdas_vacias(
     otra_cantidad = extraer_texto_otra_cantidad(linea.motivo_revision)
     if otra_cantidad:
         partes.append(otra_cantidad)
+    # Sesión 2026-09-22, encargo del cliente: la Unidad de medida que no sale
+    # del documento sino del maestro de materiales de ADIF tampoco está vacía,
+    # pero la fila tiene que decirlo.
+    if linea.unidad_medida_completada_desde_maestro and linea.unidad_medida:
+        partes.append(TEXTO_UNIDAD_DEL_MAESTRO)
     return "; ".join(partes) or None
 
 
