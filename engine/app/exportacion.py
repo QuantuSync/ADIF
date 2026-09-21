@@ -329,6 +329,18 @@ _SIN_MOTIVO = "sin_motivo_registrado"
 # del Resumen, fuera de "pendientes de revisión".
 _CATEGORIA_CRITERIOS = "anejo de criterios técnicos, común a todos los lotes"
 _CATEGORIAS_MOTIVO = (
+    # Sesión 2026-09-21 (tercera parte), bloque 2: el anejo que trae los
+    # cuadros de todos los lotes, repartido por sus rótulos cuando el
+    # expediente sabe qué lote es (`orquestador._quedarse_con_el_lote_propio`).
+    (
+        "este expediente es su lote",
+        "cuadro de otro lote de la licitación, en un anejo común a todos los lotes",
+        "El documento trae los cuadros de precios de todos los lotes de la licitación, cada uno con su "
+        "rótulo «LOTE N», y este expediente es solo uno de esos lotes (lo dice el anuncio de la Plataforma). "
+        "Estas filas son del cuadro de otro lote: no son de este expediente.",
+        "Nada, si el expediente de ese otro lote está en el catálogo (allí salen). Si no lo está, habría que "
+        "darlo de alta para que su material salga en «Materiales».",
+    ),
     (
         "banda vacía",
         "banda vacía: posible continuación de tabla partida entre páginas",
