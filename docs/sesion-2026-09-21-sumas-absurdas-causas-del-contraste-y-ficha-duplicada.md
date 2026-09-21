@@ -250,3 +250,144 @@ hora de la búsqueda sin resultado de la forma con guion bajo (13:28:06),
 nada. `fusionar_en` mueve los lotes por atributo, y al borrar el duplicado la
 relación `Expediente.lotes`, ya cargada, les ponía `expediente_id` a NULL. La
 función nueva los mueve con un UPDATE.
+
+---
+
+## Bloque 4 — Cierre
+
+### Pruebas, imagen y reproceso
+
+- **1.369 pruebas en verde** (1.362 antes de la sesión).
+- Imágenes `api`, `worker` y `web` **reconstruidas con el código final**
+  (`4eb6954`), desde `/mnt/c/dev/ADIF`.
+- **Un único reproceso completo con la red apagada** (trabajo 32004,
+  `forzar`, sindicación y búsqueda desactivadas): 517 expedientes, **21 min
+  33 s** de ciclo, **`descargas_lanzadas: 0`**, 0 fallos. Los reprocesos
+  anteriores de la sesión fueron solo de los afectados (9 en el bloque 1, 178
+  en el bloque 2).
+
+### Auditoría: 0 errores
+
+La auditoría del propio ciclo dio **1 error**,
+`lineas_cambian_sin_cambiar_documentos` en `6.21/28510.0130` (+37 líneas sin
+lote: la tabla del lote 8, que con el arreglo de "LLOTE" se guarda) y
+`6.22/28510.0146` (−3 líneas sin lote). Los dos son del bloque 2, y la
+auditoría compara con su ejecución anterior, de antes del reproceso de
+verificación. La regla "cualquier subida es error" se deja intacta a
+propósito. **Repetida con el recuento nuevo como referencia: 0 errores, 6
+avisos**, los mismos seis de la sesión anterior.
+
+### El entregable, descargado desde la web
+
+`C:\dev\ADIF\catalogo_adif_2026-09-21-causas-del-contraste.xlsx`. Se descargó
+con Chromium desde `/catalogo`, pulsando "Exportar Excel", sin avisos de
+error ni errores de consola. **Es idéntico a la exportación de la API salvo la
+fecha de creación**: de las 12 entradas del `.xlsx` la única distinta es
+`docProps/core.xml`, y dentro de ella solo `created`/`modified`.
+
+### Comparación con `catalogo_adif_2026-09-20-motivos-completos.xlsx`
+
+| | 20/09 | 21/09 (segunda parte) |
+|---|---:|---:|
+| Hojas | Materiales, Conciliación, Resumen | + Contraste de presupuestos |
+| Filas de "Materiales" | 20.062 | **19.857** (−205) |
+| Columnas de "Materiales" | 18 | 18, las mismas |
+| Expedientes con filas | — | los mismos, **ninguno desaparece** |
+| Expedientes que pierden filas | — | **5, los cinco explicados** |
+| Filas que cambian alguna celda | — | **60, todas explicadas** |
+| Filas nuevas | — | 0 |
+
+**Cada diferencia de "Materiales", explicada:**
+
+| Expediente | Filas | Qué cambia | Por qué |
+|---|---:|---|---|
+| `6.21/28510.0058`, `0135`, `0137`, `0138` | −42 cada uno | Salen las tablas de los lotes 4 y 8 | La cabecera "LLOTE 4"/"LLOTE 8" (bloque 2). Esas tablas ya no heredan el lote 3 o 7; ningún expediente tiene los lotes 4 u 8, y se quedan pendientes, sin lote, con su motivo. **Decisión del cliente en esta sesión** |
+| `6.21/28510.0136` | −37 | Sale la tabla del lote 8 | Lo mismo (este no tenía lote 3) |
+| `6.20/28510.0042`, `0046`, `0047` | 14 cada uno | Cantidad 33.601.014 / 33.611.302 → vacía | La referencia E.T. leída como cantidad antes del 2026-09-10 (bloque 1) |
+| `6.25/28510.0019`, `0041`, `6.24/28510.0188` | 1 cada uno | Cantidad de la partida alzada (116.000 / 22.532,4) → vacía | El importe tomado como cantidad (bloque 1) |
+| `6.20/28510.0096` (2), `6.21/28510.0002`, `0003` (1 cada uno) | 4 | Cantidad → vacía, y el importe pasa a Precio unitario (y con él el Precio adjudicado) | La partida de repuestos, que salía sin precio (bloque 1) |
+| `6.24/28510.0171` | 6 | Cantidad 26/0/0/0/6/0 → 125/72/72/62/70/48 | La cantidad estimada y no la obligatoria del pedido inicial (bloque 2) |
+| `6.25/28510.0203` | 2 | Cantidad 200/50 → 600/200 | Lo mismo |
+| `6.25/28510.0218` | 3 | Dos partidas alzadas: cantidad vacía → 1; P-07 del lote 3: 10 → vacía, "pendiente" | Lo mismo: la columna estimada imprime 1 en la partida, y para P-07 da una cantidad distinta de la "cantidad mínima" (10) de la otra tabla, así que la guarda de choques deja la celda vacía |
+
+**Los materiales, por las tres claves de siempre:**
+
+| Clave | 20/09 | 21/09 | Perdidos |
+|---|---:|---:|---:|
+| expediente + matrícula | 12.231 | 12.035 | 196, **todos** de los cinco expedientes de "LLOTE" |
+| expediente + descripción + precio | 17.957 | 17.753 | 208: los 204 de "LLOTE" y las 4 partidas cuyo precio pasa de vacío a su importe (su clave cambia; siguen ahí) |
+| expediente + lote + descripción | 19.664 | 19.468 | 196, **todos** de "LLOTE" |
+
+En el catálogo entero desaparecen **37 matrículas** y 43 pares de
+descripción y precio, todos de las tablas de los lotes 4 y 8. **Es la única
+excepción a "ningún material puede desaparecer"**: se preguntó al cliente, y
+eligió mantener el arreglo. Esas filas siguen en la base de datos, con su
+motivo, en la categoría del Resumen "La tabla menciona un número de lote que
+no coincide con ninguno de los lotes ya confirmados".
+
+**El resto del libro:**
+
+- **"Conciliación"**: 534 filas; cambian solo las cinco de "LLOTE", en la
+  columna de líneas y en su frase. **Cuadra con "Materiales": 19.857 =
+  19.857**, 0 expedientes sin Situación y el recuento por Situación sin
+  cambios.
+- **"Resumen"**: líneas 20.062 → 19.857; pendientes de revisión 6.345 → 6.561
+  (+216 = 205 de "LLOTE" + 37 nuevas de `0130` − 26 borradas); celdas
+  "pendiente" 191 → 192 (`6.25/28510.0218` P-07); expedientes confirmados no
+  publicados 56 → 55 (la ficha unificada del bloque 3). Las cuatro categorías
+  de pendientes se redistribuyen entre sí por las mismas 216 líneas.
+- **"Contraste de presupuestos"**: la hoja nueva de la primera parte, ahora con
+  la causa de cada lote.
+
+### La hoja "Contraste de presupuestos", antes y después
+
+| Resultado | Antes (entregable de la primera parte) | Después |
+|---|---:|---:|
+| Cuadra al céntimo | 233 | **249** |
+| Cuadra con diferencia menor del 0,01 % | 13 | 13 |
+| No cuadra | 139 | — |
+| No cuadra: lectura del catálogo pendiente de corregir | — | 10 |
+| No cuadra: el presupuesto publicado es otra cifra | — | 0 |
+| No cuadra: cantidades estimadas, el presupuesto es un máximo | — | 80 |
+| No cuadra: faltan líneas del lote en el catálogo | — | 27 |
+| No cuadra: el presupuesto incluye partidas que el cuadro no trae | — | 2 |
+| No cuadra: discrepancia del propio documento | — | 6 |
+| No cuadra: causa sin determinar | — | 0 |
+| No se puede cerrar: faltan cantidades | 100 | 98 |
+| **Total** | 485 | 485 |
+
+### La web da las mismas cifras que el Excel
+
+Leído con Chromium, como lo pinta el navegador:
+
+- **`/conciliacion`**: 534 filas, suma de líneas 19.857, 0 filas que no
+  coincidan con la hoja; los once botones con el recuento del Excel.
+- **`/contraste-presupuestos`**: 485 filas, 0 que no coincidan en resultado ni
+  en suma; los once botones (incluidos los dos a 0) con el recuento del Excel,
+  y "Qué significa cada resultado" desplegable.
+- Ningún aviso de error, ningún error de consola.
+
+## Pendiente de decisión del cliente (no se ha tocado nada)
+
+1. **Las 10 lecturas malas pendientes**, cada una con su causa en la hoja: el
+   reparto por lotes de los anejos escaneados (5 lotes), los rótulos de lote
+   dentro de una tabla ya aceptada (2), los dos precios de oferta que se
+   quedan guardados (2; se podrían limpiar como en el bloque 1, pero no se ha
+   escrito ni borrado ningún precio sin pedirlo) y `2.23/28510.0138` (1).
+2. **Las 27 "faltan líneas"**: filas que el documento trae y el catálogo no
+   (la partida alzada de varios lotes, P-1 del lote 2 del balasto, filas
+   idénticas que el catálogo funde, precios con punto decimal a la inglesa,
+   P-030b...). Recuperarlas metería líneas: no entraba en el encargo.
+3. **Qué columna es la "Cantidad"** cuando el cuadro solo trae "cantidad
+   mínima por pedido" y "pedido inicial" (la familia de las grifas, los
+   aisladores, los detectores...). Hoy es la mínima por pedido. Ninguna de las
+   dos es la cantidad total, así que no es una lectura mala demostrada: es una
+   decisión.
+4. **Los materiales de los lotes 4 y 8 de la familia `6.21/28510.0058`**:
+   saldrán en "Materiales" el día que ADIF diga de qué expediente es cada lote
+   (es la pregunta de los títulos que declaran un lote que no está entre los
+   suyos).
+5. **Los valores viejos que un `None` no pisa**: esta sesión ha encontrado dos
+   formas (la E.T. del 2026-09-10 y los precios de oferta). Medir cuántos quedan
+   en todo el catálogo exige extraer el corpus entero sin guardar y comparar
+   celda a celda; no se ha hecho.
