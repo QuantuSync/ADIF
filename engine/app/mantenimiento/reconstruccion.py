@@ -109,15 +109,10 @@ def reconstruir(db: Session, manejadores: dict) -> dict:
         raise RuntimeError("la cola de la base aparte tiene otro trabajo por delante del ciclo")
     ejecutar_trabajo(db, siguiente, manejadores)
     db.refresh(siguiente)
-    # La unidad que el maestro de materiales completa no la escribe la
-    # extracción: es un paso aparte que en producción se lanza a mano
-    # (`POST /mantenimiento/maestro-materiales/completar-unidades`). Sin él,
-    # la comparación daría como "valor viejo" las ~3.500 unidades completadas.
-    from app.extraccion.maestro_materiales import completar_unidades_desde_maestro
-
-    unidades = completar_unidades_desde_maestro(db)
+    # La unidad del maestro de materiales la aplica el propio ciclo desde la
+    # sesión 2026-09-22 (va en `resultado["unidades_desde_maestro"]`).
     return {"trabajo": siguiente.id, "estado": siguiente.estado.value, "resultado": siguiente.resultado,
-            "error": siguiente.error, "unidades_desde_maestro": vars(unidades)}
+            "error": siguiente.error}
 
 
 def exportar(db: Session, ruta: Path) -> None:
@@ -131,7 +126,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--vaciar", action="store_true", help="quita todo lo extraído de la base aparte")
     parser.add_argument("--reconstruir", action="store_true", help="un ciclo forzado y sin red")
     parser.add_argument("--completar-unidades", action="store_true",
-                        help="solo el paso de las unidades del maestro (ya incluido en --reconstruir)")
+                        help="solo el paso de las unidades del maestro (ya incluido en el ciclo)")
     parser.add_argument("--exportar", type=Path, help="escribe el Excel del catálogo en esta ruta")
     args = parser.parse_args(argv)
 

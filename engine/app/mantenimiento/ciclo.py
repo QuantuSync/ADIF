@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.interfaces.document_storage import DocumentStorage
 from app.interfaces.model_provider import ModelProvider
+from app.extraccion.maestro_materiales import completar_unidades_desde_maestro
 from app.mantenimiento.auditoria import TIPO_TRABAJO as TIPO_TRABAJO_AUDITORIA
 from app.mantenimiento.frescura import (
     debe_descargar,
@@ -90,6 +91,9 @@ class ResumenCiclo:
     # None solo si encolarla o ejecutarla fallara (nunca debe impedir que el
     # resto del ciclo se dé por bueno: ver el manejo de errores más abajo).
     auditoria: Optional[dict] = field(default=None)
+    # Sesión 2026-09-22: resumen de `completar_unidades_desde_maestro` al
+    # final del ciclo.
+    unidades_desde_maestro: Optional[dict] = field(default=None)
 
     def to_dict(self) -> dict:
         return {
@@ -107,6 +111,7 @@ class ResumenCiclo:
             "duracion_segundos": round(self.duracion_segundos, 3),
             "descubrimiento": self.descubrimiento,
             "descubrimiento_busqueda": self.descubrimiento_busqueda,
+            "unidades_desde_maestro": self.unidades_desde_maestro,
             "auditoria": self.auditoria,
         }
 
@@ -315,6 +320,18 @@ def ejecutar_ciclo_mantenimiento(
         ejecutar_trabajo(db, siguiente, manejadores)
         resumen.trabajos_drenados += 1
         _renovar_bloqueo(db, trabajo)
+
+    # Sesión 2026-09-22: la unidad del maestro de materiales, dentro del
+    # proceso automático. El guardado de cada documento ya la aplica a sus
+    # filas; esta pasada global recoge las que este ciclo no ha vuelto a
+    # guardar (un maestro recién recargado), antes de la auditoría y de
+    # cualquier exportación. Un fallo aquí no tira el ciclo.
+    try:
+        resumen.unidades_desde_maestro = completar_unidades_desde_maestro(db).to_dict()
+    except Exception as exc:  # noqa: BLE001
+        db.rollback()
+        logger.warning("unidades del maestro de fin de ciclo fallaron, se continúa sin ellas: %s", exc)
+        resumen.unidades_desde_maestro = {"error": str(exc)}
 
     # BLOQUE 1, sesión de auditoría automática (2026-09-08): "que corra sola
     # al terminar cada ciclo de mantenimiento" -- se encola DESPUÉS de que el
