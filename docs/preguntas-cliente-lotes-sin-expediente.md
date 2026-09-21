@@ -1,7 +1,7 @@
 # Pregunta 17 — Los materiales de los lotes que no están en el catálogo
 
 Anejo de la pregunta 17 de `docs/preguntas-pendientes-cliente.md`. Medido
-contra la base de datos de producción el 22/09/2026. Una tabla por lote de la
+contra la base de datos de producción el 21/09/2026. Una tabla por lote de la
 licitación: los materiales **distintos** de las filas guardadas sin lote
 (la misma matrícula y descripción en el anejo y en el contrato cuenta una vez).
 La última columna dice si la matrícula aparece en alguna otra fila de

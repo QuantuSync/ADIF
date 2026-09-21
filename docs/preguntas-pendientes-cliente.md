@@ -526,7 +526,7 @@ Cantidad no se ha cambiado.
 inicial. Casi todos son de 2019 (`6.19/28510.0115`, `0126`, `0134`, `0135`,
 `0136`, `0157`-`0163`, `0166`, `0167`, `0175`, `0177`, `0181`, `0195`,
 `0202`, `0215`, `0231`) más `6.20/28510.0025` y `0028`. Las siete filas de
-`6.19/28510.0177` (p.22) que no llevaban la nota la llevan desde el 22/09/2026
+`6.19/28510.0177` (p.22) que no llevaban la nota la llevan desde el 21/09/2026
 (su tabla empieza en una fila con dos matrículas en la misma celda, que el
 sistema tomaba por una cabecera nueva).
 
@@ -552,7 +552,7 @@ salen en "Materiales"**. Siguen guardadas en la base de datos, sin lote y con
 su motivo, y aparecerían el mismo día que sepamos qué expediente es cada lote.
 
 **Afectado.** Cinco casos. Las filas son las que salieron de "Materiales" el
-21/09/2026 (bloque 2 de esa sesión, con la decisión del cliente de aplicar el
+21/09/2026 (bloque 2 de la tercera parte de la sesión de ese día, con la decisión del cliente de aplicar el
 reparto a todos) y las de los lotes 4 y 8 de `6.21/28510.0058`, que salieron
 el mismo día al leer bien su rótulo ("LLOTE 4", "LLOTE 8"). La lista completa
 de materiales de cada lote, con matrícula, descripción, precio y unidad, está

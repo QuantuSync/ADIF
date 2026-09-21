@@ -318,7 +318,7 @@ documento real, y si un documento la trae después, sustituye a la del maestro.
 celdas vacías" lleva *"Unidad de medida: del maestro de materiales de ADIF (el
 documento no la publica)"*. Así se distingue, fila a fila, una unidad leída del
 documento de una completada desde el maestro. Se aplica en cada reproceso, sin
-ningún paso manual (desde el 22/09/2026).
+ningún paso manual (desde el 21/09/2026).
 
 **Tres valores de esta columna que sorprenden y tienen explicación:**
 

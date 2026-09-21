@@ -157,7 +157,7 @@ def _texto_celdas_vacias(
     otra_cantidad = extraer_texto_otra_cantidad(linea.motivo_revision)
     if otra_cantidad:
         partes.append(otra_cantidad)
-    # Sesión 2026-09-22, encargo del cliente: la Unidad de medida que no sale
+    # Sesión 2026-09-21 (cuarta parte), encargo del cliente: la Unidad de medida que no sale
     # del documento sino del maestro de materiales de ADIF tampoco está vacía,
     # pero la fila tiene que decirlo.
     if linea.unidad_medida_completada_desde_maestro and linea.unidad_medida:
