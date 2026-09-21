@@ -29,6 +29,7 @@ from typing import Optional
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.catalogo import _MOTIVO_FILA_REPETIDA_EN_EL_CUADRO
 from app.extraccion.firma_cabecera import calcular_firma_cabecera
 from app.models import (
     DocumentoExpediente,
@@ -203,6 +204,9 @@ def _check_duplicadas_exactas(db: Session) -> list[Hallazgo]:
             func.count(LineaCatalogo.id)
             .filter(LineaCatalogo.codigo_precio.is_(None))
             .label("sin_codigo"),
+            func.count(LineaCatalogo.id)
+            .filter(LineaCatalogo.motivo_revision.contains(_MOTIVO_FILA_REPETIDA_EN_EL_CUADRO))
+            .label("repetidas_por_el_documento"),
         )
         .join(Expediente, Expediente.id == LineaCatalogo.expediente_id)
         .where(
@@ -226,7 +230,12 @@ def _check_duplicadas_exactas(db: Session) -> list[Hallazgo]:
     # todos son distintos entre sí. Basta una sin código, o dos que repitan
     # código, para que el grupo sea un error de extracción.
     legitimos = [f for f in filas if f.sin_codigo == 0 and f.codigos_distintos == f.n]
-    defectuosos = [f for f in filas if not (f.sin_codigo == 0 and f.codigos_distintos == f.n)]
+    # Sesión 2026-09-21 (tercera parte): la fila que el propio cuadro repite y
+    # que se conserva porque con ella el lote cuadra con su presupuesto
+    # (`app.extraccion.filas_repetidas`) lleva su marca; un grupo en el que
+    # todas las filas menos una la llevan es el documento, no la extracción.
+    repetidas = [f for f in filas if f not in legitimos and f.repetidas_por_el_documento == f.n - 1]
+    defectuosos = [f for f in filas if f not in legitimos and f not in repetidas]
 
     hallazgos: list[Hallazgo] = []
     if defectuosos:
@@ -244,6 +253,23 @@ def _check_duplicadas_exactas(db: Session) -> list[Hallazgo]:
                 expedientes=expedientes,
                 total_afectados=total_expedientes,
                 detalle={"grupos": len(defectuosos), "lineas": total_lineas},
+            )
+        )
+    if repetidas:
+        expedientes, total_expedientes = _limitar_expedientes(f.codigo_expediente for f in repetidas)
+        total_lineas = sum(f.n for f in repetidas)
+        hallazgos.append(
+            Hallazgo(
+                categoria="lineas_repetidas_por_el_propio_cuadro",
+                gravedad="aviso",
+                mensaje=(
+                    f"{len(repetidas)} grupo(s) de filas idénticas que el propio cuadro repite en la misma tabla, "
+                    f"conservadas porque con ellas el lote cuadra con su presupuesto -- {total_lineas} línea(s) "
+                    f"en total."
+                ),
+                expedientes=expedientes,
+                total_afectados=total_expedientes,
+                detalle={"grupos": len(repetidas), "lineas": total_lineas},
             )
         )
     if legitimos:

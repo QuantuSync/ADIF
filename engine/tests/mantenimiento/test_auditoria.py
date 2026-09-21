@@ -135,6 +135,27 @@ def test_duplicadas_con_una_sola_sin_codigo_siguen_siendo_error(db_session):
     assert hallazgo["gravedad"] == "error"
 
 
+def test_la_fila_que_el_propio_cuadro_repite_es_aviso_y_no_error(db_session):
+    """Sesión 2026-09-21 (tercera parte): la repetición conservada porque con
+    ella el lote cuadra lleva su marca (`app.extraccion.filas_repetidas`)."""
+    from app.catalogo import _MOTIVO_FILA_REPETIDA_EN_EL_CUADRO
+
+    exp = _expediente(db_session)
+    lote = _lote(db_session, exp.id)
+    for i, motivo in enumerate((None, _MOTIVO_FILA_REPETIDA_EN_EL_CUADRO)):
+        _linea(
+            db_session, exp.id, lote.id, clave_linea=f"clave-r-{i}-{next(_contador_clave)}", codigo_precio=None,
+            matricula=None, descripcion="GUANTE JUBA", cantidad=Decimal("100"), precio_unitario=Decimal("1.5"),
+            motivo_revision=motivo,
+        )
+
+    resultado = ejecutar_auditoria(db_session, _trabajo(db_session))
+
+    categorias = {h["categoria"]: h["gravedad"] for h in resultado["hallazgos"]}
+    assert "lineas_duplicadas_exactas" not in categorias
+    assert categorias["lineas_repetidas_por_el_propio_cuadro"] == "aviso"
+
+
 def test_duplicadas_con_codigos_de_precio_distintos_son_aviso(db_session):
     """Los 11 grupos reales del corpus (`0051`/`0060`, `4.25/28510.0132`):
     el propio documento repite el material con dos claves propias."""
