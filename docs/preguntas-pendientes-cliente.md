@@ -30,7 +30,7 @@ aquí; este los índice y añade lo que faltaba:
 |---|---|---|---:|
 | 1 | CONTRAGUJA frente a CONTRAAGUJA | Descripción del material | 540 líneas |
 | 2 | Los 11 expedientes cuyo título de SAP nombra un lote que sus contratos no publican | Lote | 11 expedientes |
-| 3 | La numeración de lotes desplazada de `3.22/28510.0009` y `3.21/28510.0096` | Lote y precios | 2 expedientes |
+| 3 | La numeración de lotes desplazada de `3.21/28510.0096` (`3.22/28510.0009` quedó contestada por el documento el 21/09) | Lote y precios | 1 expediente |
 | 4 | El código de las traviesas | Código del material | 1.963 líneas |
 | 5 | La lista de códigos internos de almacenes y las palabras para excluir por título | Qué sale en el entregable | Sin medir hasta tenerla |
 | 6 | Qué ficheros de entrada podemos seguir usando | Todas las columnas de cruce | 5 ficheros |
@@ -43,6 +43,7 @@ aquí; este los índice y añade lo que faltaba:
 | 13 | Qué es la unidad `P` del maestro de materiales | Unidad de medida | 3 líneas |
 | 14 | Las matrículas que el maestro no recoge | Matrícula del material | 2.893 líneas |
 | 15 | Las tres erratas de matrícula del propio documento | Matrícula del material | 7 líneas |
+| 16 | La Cantidad de los cuadros con «cantidad mínima por pedido» y «pedido inicial» | Cantidad | 451 líneas, 22 expedientes |
 
 ---
 
@@ -132,11 +133,15 @@ crearía uno que ningún documento les asigna.
 adjudicación no numeran los lotes igual**, y no hay ningún documento que diga
 cuál de las dos numeraciones manda.
 
-`3.22/28510.0009` — lotes registrados **2** (71.000,00 €) y **3**
-(21.500,00 €), los que declaran sus contratos. Su cuadro de precios está
-partido en bloques rotulados "LOTE 1", "LOTE 2"... y la suma de cada bloque no
-cuadra con el presupuesto del lote del mismo número. 15 líneas, 8 de ellas sin
-lote.
+`3.22/28510.0009` — **contestada por el propio documento (sesión 2026-09-21,
+tercera parte), ya no hace falta preguntarla.** El cuadro rotula cada tabla
+con su lote ("LOTE 2 - EQUIPOS PARA REPARACIÓN DE REGLAS…", "LOTE 3 - EQUIPOS
+Y HERRAMIENTAS…", ANEJO p.7) y con esos rótulos el lote 2 suma 71.000,00 € y
+el lote 3 21.500,00 €, exactamente los presupuestos de sus contratos. La
+discrepancia era nuestra: el lote de cada tabla salía de la franja de texto de
+encima ("El presupuesto base del lote 1 es de…"), no del rótulo de la propia
+tabla. Desde esa sesión el rótulo de la tabla manda y los dos lotes cuadran al
+céntimo.
 
 `3.21/28510.0096` — lotes registrados **1** (22.200,00 €) y **2**
 (8.250,00 €). Su `ANEJO_1` p.6 imprime **dos** cuadros y **rotula los dos
@@ -492,3 +497,44 @@ buena de cada una?
 **Qué haremos según contesten.** Se corrigen **una a una, por confirmación
 suya**, nunca por la inferencia de arriba. Si no lo confirman, se quedan
 literales: el catálogo entrega lo que publica el documento.
+
+---
+
+## 16 — La Cantidad de los cuadros con «cantidad mínima por pedido» y «pedido inicial»
+
+**El hecho.** Hay cuadros de precios que no publican la cantidad que se va a
+comprar. Traen dos columnas: la **cantidad mínima a suministrar por pedido** y
+el **pedido inicial** (la familia de las grifas, los aisladores, los
+detectores, la regulación de tensión…). Ninguna de las dos es la cantidad
+total del contrato; el presupuesto es un techo de gasto.
+
+La columna **Cantidad** del Excel trae una de las dos, la que el sistema tomó
+por cantidad al leer la tabla. **Casi siempre es la mínima por pedido, pero no
+siempre**, y a veces cambia dentro del mismo cuadro: en las grifas
+(`6.19/28510.0135`, `0175`, `0177`), la página con la cabecera da la mínima y
+las páginas siguientes, escaneadas, el pedido inicial.
+
+Desde el 21/09/2026, **cada una de esas filas dice cuál de las dos es y qué
+trae la otra**, en la columna "Motivo de las celdas vacías": *"Cantidad: es la
+columna «CANTIDAD MÍNIMA A SUMINISTRAR POR PEDIDO» del cuadro, no la cantidad
+total a comprar; su columna «PEDIDO INICIAL» trae 200 en esta fila"*. La
+Cantidad no se ha cambiado.
+
+**Afectado.** **451 filas de "Materiales" en 22 expedientes** (Excel del
+21/09/2026): en 406 la Cantidad es la mínima por pedido y en 45 el pedido
+inicial. Casi todos son de 2019 (`6.19/28510.0115`, `0126`, `0134`, `0135`,
+`0136`, `0157`-`0163`, `0166`, `0167`, `0175`, `0177`, `0181`, `0195`,
+`0202`, `0215`, `0231`) más `6.20/28510.0025` y `0028`. Siete filas de
+`6.19/28510.0177` (p.22) todavía no llevan la nota: su tabla empieza en una
+fila con dos matrículas pegadas en la misma celda, que el sistema toma por una
+cabecera nueva. Queda anotado para corregirlo (hace falta un reproceso).
+
+**Qué preguntar.** ¿Qué quieren ver en la columna Cantidad de estos cuadros:
+la mínima por pedido, el pedido inicial, o ninguna de las dos (celda vacía con
+su motivo, porque ninguna es la cantidad total)?
+
+**Qué haremos según contesten.** Es un cambio de una regla y un reproceso: la
+columna elegida se toma siempre, en todas las páginas del cuadro, y la otra
+sigue diciéndose en el motivo. Si prefieren la celda vacía, las dos cifras van
+al motivo.
+
