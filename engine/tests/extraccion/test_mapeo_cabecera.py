@@ -751,3 +751,41 @@ def test_completar_codigo_precio_no_adivina_con_una_columna_que_no_lo_es():
               "unidad_medida": None, "cantidad": None, "precio_unitario": 3}
     filas2 = [["P-1", "P-2", "Rodillo", "366,00 €"]]
     assert completar_codigo_precio_por_contenido(mapeo2, filas2)["codigo_precio"] is None
+
+
+# --- Sesión 2026-09-21 (segunda parte): dos columnas de cantidad ---
+
+
+def test_la_cantidad_es_la_estimada_y_no_la_obligatoria_del_pedido_inicial():
+    # `6.24/28510.0171` ANEJO_1.pdf p.18 (cabecera cacheada 182): la columna
+    # estimada sale partida, "CANTIDADE S", y el reparto voraz le daba la
+    # cantidad a la obligatoria. Con la estimada el lote cuadra al céntimo.
+    from app.extraccion.mapeo_cabecera import corregir_cantidad_obligatoria_por_estimada
+
+    cabecera = [
+        "CODIFICACIÓN DEL PRECIO", "Nº MATRÍCULA", "DESCRIPCIÓN", "UNIDAD\nDE\nMEDIDA", None,
+        "CANTIDADES A INCLUIR OBLIGATORIAMEN TE EN EL PEDIDO INIC IAL", None, None,
+        "CANTIDADE S ESTIMADAS DE REFERENCIA", None, "PRECIO\nUNITARIO DE\nREFERENCIA",
+    ]
+    mapeo = intentar_mapeo_determinista(cabecera)
+    assert mapeo["cantidad"] == 5  # el defecto que se corrige
+
+    assert corregir_cantidad_obligatoria_por_estimada(cabecera, mapeo)["cantidad"] == 8
+
+
+def test_la_cantidad_que_ya_es_la_estimada_no_se_toca():
+    from app.extraccion.mapeo_cabecera import corregir_cantidad_obligatoria_por_estimada
+
+    cabecera = ["CÓDIGO DE PRECIO", "DESCRIPCIÓN", "UNIDAD DE MEDIDA", "CANTIDADES A INCLUIR OBLIGATORIAMENTE",
+                "CANTIDADES ESTIMADAS DE REFERENCIA", "PRECIO UNITARIO DE REFERENCIA"]
+    mapeo = intentar_mapeo_determinista(cabecera)
+    assert corregir_cantidad_obligatoria_por_estimada(cabecera, mapeo) == mapeo
+    assert mapeo["cantidad"] == 4
+
+
+def test_sin_columna_estimada_la_obligatoria_se_queda():
+    from app.extraccion.mapeo_cabecera import corregir_cantidad_obligatoria_por_estimada
+
+    cabecera = ["CÓDIGO DE PRECIO", "DESCRIPCIÓN", "CANTIDADES A INCLUIR OBLIGATORIAMENTE", "PRECIO UNITARIO"]
+    mapeo = intentar_mapeo_determinista(cabecera)
+    assert corregir_cantidad_obligatoria_por_estimada(cabecera, mapeo) == mapeo

@@ -88,7 +88,14 @@ from typing import Optional
 # lote se quedaba las de los dos lotes.
 _ORDINAL = r"(?:N\s*[º°o]|[Nº°])?\.?"
 
-_LOTE_CABECERA_RE = re.compile(r"\bLOTE\s*" + _ORDINAL + r"\s*(\d{1,2})\b", re.IGNORECASE)
+# Sesión 2026-09-21 (segunda parte): la negrita simulada que duplica la
+# primera letra (ver `_LOTE_EN_TEXTO_PREVIO_RE`, más abajo) también cae en la
+# cabecera que va justo encima de la tabla: "LLOTE 8 – SUJECIONES" y "LLOTE 4 -
+# PLACAS DE ASIENTO DE CAUCHO" (`6.21/28510.0058`, CONTRATO_2.pdf p.119 y
+# p.117). Sin la "L" doble, esas dos tablas heredaban el lote de la página
+# anterior, y el lote 7 sumaba 1.353.000 € (143.000 del lote 7 + 1.210.000 del
+# 8) y el lote 3, 462.000 € (440.000 + 22.000 del 4).
+_LOTE_CABECERA_RE = re.compile(r"\bL?LOTE\s*" + _ORDINAL + r"\s*(\d{1,2})\b", re.IGNORECASE)
 
 # Frase con la que abre el anejo de criterios técnicos de una licitación por
 # lotes (plantilla de ADIF, 55 documentos del corpus): "El presente documento
@@ -130,7 +137,7 @@ MOTIVO_TABLA_DEL_CONJUNTO = (
 # lote 2, SUR." (`6.22/28510.0125`/`0126`, ANEJO_1 y los dos Contratos) --
 # con los dos puntos solamente, las tablas de esos tres documentos quedaban
 # ambiguas en cuanto el expediente pasó a saber cuál es su lote.
-_LOTE_CABECERA_FUERTE_RE = re.compile(r"\bLOTE\s*" + _ORDINAL + r"\s*(\d{1,2})\s*(?::|\.(?!\d))", re.IGNORECASE)
+_LOTE_CABECERA_FUERTE_RE = re.compile(r"\bL?LOTE\s*" + _ORDINAL + r"\s*(\d{1,2})\s*(?::|\.(?!\d))", re.IGNORECASE)
 _LOTE_REFERENCIA_URGENCIA_RE = re.compile(
     r"\b(?:del|por el)\s+lote\s*" + _ORDINAL + r"\s*(\d{1,2})\b", re.IGNORECASE
 )

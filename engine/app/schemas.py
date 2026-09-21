@@ -613,6 +613,8 @@ class FilaContrasteOut(BaseModel):
 class RecuentoContrasteOut(BaseModel):
     resultado: str
     lotes: int
+    # Qué significa, en una frase (`app.contraste_presupuestos.SIGNIFICADO`).
+    significado: str = ""
 
 
 class LoteFueraOut(BaseModel):
