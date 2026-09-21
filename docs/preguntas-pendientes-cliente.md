@@ -44,7 +44,7 @@ aquí; este los índice y añade lo que faltaba:
 | 14 | Las matrículas que el maestro no recoge | Matrícula del material | 2.893 líneas |
 | 15 | Las tres erratas de matrícula del propio documento | Matrícula del material | 7 líneas |
 | 16 | La Cantidad de los cuadros con «cantidad mínima por pedido» y «pedido inicial» | Cantidad | 451 líneas, 22 expedientes |
-| 17 | A qué expediente pertenecen los lotes cuyas filas no están en ningún expediente del catálogo | Filas que no llegan al entregable | 595 filas: 390 del reparto por lotes y 205 de los lotes 4 y 8 de `6.21/28510.0058` |
+| 17 | A qué expediente pertenecen los lotes cuyas filas no están en ningún expediente del catálogo | Filas que no llegan al entregable | 5 licitaciones: 336 + 32 + 20 + 2 filas del reparto por lotes y 205 de los lotes 4 y 8 de `6.21/28510.0058` |
 
 ---
 
