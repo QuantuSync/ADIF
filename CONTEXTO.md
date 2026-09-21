@@ -313,6 +313,21 @@ Cada documento cae por la primera etapa que lo resuelva. **No saltes etapas.**
    cuadro (2 × 24.780 = 49.560,00 €, y el propio anejo declara las dos cosas).
    Sin presupuesto publicado, el cuadro se queda fuera; una tabla que mezcla
    importes de verdad y cifras peladas se descarta entera.
+   **Tres reglas de la sesión 2026-09-21 (segunda parte)**, cada una
+   demostrada porque su lote pasa a cuadrar al céntimo con el presupuesto:
+   - **Con dos columnas de cantidad, la cantidad es la estimada**: "CANTIDADES
+     A INCLUIR OBLIGATORIAMENTE EN EL PEDIDO (INICIAL)" frente a "CANTIDADES
+     ESTIMADAS DE REFERENCIA" (`corregir_cantidad_obligatoria_por_estimada`,
+     sobre el mapeo final venga de donde venga).
+   - **La oferta del adjudicatario no es un cuadro de licitación**: desde el
+     título "JUSTIFICACIÓN DE LA PROPOSICIÓN ECONÓMICA" hasta su "TOTAL
+     OFERTADO (SIN IVA)", como mucho 5 páginas, una fila con precio no entra
+     (`paginas_de_la_oferta`); el modelo en blanco, sin precio, sigue.
+   - **La cantidad recuperada de una columna fantasma nunca lleva `€`**: si la
+     fila no tiene precio, ese importe es su precio (la partida alzada de un
+     solo importe, que salía 116.000 × 116.000).
+   Y la cabecera de lote con la "L" doble de la negrita simulada ("LLOTE 8")
+   vale igual encima de la tabla que en el texto entre tablas.
 5. **Mapear cabecera → esquema.** Única etapa donde interviene el modelo. Ver sección 6.
 6. **Normalizar y derivar.** Ver secciones 7 y 8.
 
@@ -634,6 +649,19 @@ El presupuesto de cada lote que publican los documentos se guarda en
 `Lote.importe_licitacion`**: ese campo interviene en la baja, en la prueba del
 reparto por lotes y en los precios que un presupuesto demuestra, y rellenarlo
 cambiaría datos del catálogo. Es una comprobación: no cambia nada.
+
+**Un lote que no cuadra dice por qué** (sesión 2026-09-21, segunda parte). No
+hay "No cuadra" a secas: hay siete resultados, uno por causa (lectura del
+catálogo pendiente, otra cifra, cantidades estimadas, faltan líneas, partidas
+fuera del cuadro, discrepancia del documento, sin determinar), y la
+explicación es una línea con la cifra que lo demuestra. La causa vive en
+`app.contraste_presupuestos._CAUSAS_COMPROBADAS` y **solo se escribe si la
+suma y el presupuesto son los que se comprobaron** contra el documento; si
+cambia cualquiera, la fila pasa a "causa sin determinar". El significado de
+cada resultado está escrito una sola vez (`SIGNIFICADO`) y lo usan la hoja, la
+API y la web. **El caso más frecuente, 80 de los 125, no es un error de
+nadie**: el cuadro da cantidades de referencia o por pedido y el presupuesto
+es un techo de gasto.
 
 ### Cruce con el Excel de códigos
 
@@ -3209,6 +3237,36 @@ materiales**: es el mejor argumento para tenerlo cargado.
   **Regla nueva (sección 13): el entregable es siempre el Excel descargado
   desde la web.**
 
+- **Sesión 2026-09-21 (segunda parte): las sumas absurdas, la causa de cada lote
+  que no cuadra y la ficha duplicada**
+  (`docs/sesion-2026-09-21-sumas-absurdas-causas-del-contraste-y-ficha-duplicada.md`).
+  Excel 20.062 → **19.857 filas**, 18 columnas, ningún expediente desaparece.
+  (1) **Las tres sumas absurdas eran dos defectos**: la referencia E.T.
+  (`03.360.101.4`) leída como cantidad antes del 2026-09-10 y conservada porque
+  **un `None` no pisa un valor guardado** (42 celdas del trío
+  `6.20/28510.0042`), y el único importe de una partida alzada tomado a la vez
+  como cantidad y como precio (116.000 × 116.000), arreglado en código (sección
+  5, etapa 4). 49 celdas limpiadas en base de datos, con los dos criterios
+  medidos; los lotes pasan a cuadrar al céntimo. **Las 941 cantidades con
+  forma de año siguen siendo reales**: 631 en "Materiales", todas con su cifra
+  en su propia fila o en la fila del cuadro de su expediente. (2) **Los 139
+  "No cuadra", clasificados contra el documento**: 24 lecturas malas (14
+  arregladas —la "L" doble de "LLOTE", la cantidad estimada frente a la
+  obligatoria del pedido inicial—, 10 pendientes con su causa), 80 de
+  cantidades estimadas, 27 con líneas que faltan, 2 con partidas fuera del
+  cuadro, 6 discrepancias del documento y 0 por comparar con otra cifra. Cada
+  fila lleva su causa como resultado propio (sección 7). **Decisión del
+  cliente**: el arreglo de "LLOTE" se mantiene aunque saque de "Materiales" las
+  tablas de los lotes 4 y 8 de la familia `6.21/28510.0058` (205 filas, 37
+  matrículas), que ningún expediente tiene; siguen en la base de datos,
+  pendientes. (3) **`6.25/28510.5001/01` y `6.25/28510.5001_01`, una sola ficha**
+  con la forma de la barra (`unificar_ficha_duplicada`, sin perder ningún
+  campo). (4) **Cierre**: 1.369 pruebas; un reproceso completo con la red
+  apagada, 517 expedientes, 21 min 33 s, `descargas_lanzadas: 0`; auditoría
+  0 errores y 6 avisos; entregable descargado desde la web, idéntico a la API
+  salvo la fecha; "Conciliación" 19.857 = 19.857; las dos vistas de la web,
+  iguales al Excel fila a fila.
+
 ---
 
 El registro histórico de hallazgos y decisiones de cada sesión vive en
@@ -3263,5 +3321,6 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `preguntas-cliente-lotes-del-titulo-y-ficheros-de-entrada.md`,
 `sesion-2026-09-21-contraste-de-presupuestos-en-ejecucion-y-clasificacion.md`,
 `expedientes-en-ejecucion-adif.md`,
+`sesion-2026-09-21-sumas-absurdas-causas-del-contraste-y-ficha-duplicada.md`,
 `propuesta-clasificacion-tipo-material.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.
