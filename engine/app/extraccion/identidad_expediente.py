@@ -201,6 +201,61 @@ def _documentos_de(db: Session, expediente_id: int) -> frozenset[int]:
     )
 
 
+def unificar_ficha_duplicada(db: Session, duplicado: Expediente, canonico: Expediente) -> str:
+    """Sesión 2026-09-21 (segunda parte), bloque 3: dos fichas del mismo
+    expediente escrito con dos separadores distintos, `6.25/28510.5001/01`
+    (la forma de ADIF en su listado de expedientes en ejecución) y
+    `6.25/28510.5001_01` (dada de alta el 2026-09-03 desde un nombre de
+    carpeta, con solo la primera barra recuperada). Se unifican **sin perder
+    nada de ninguna de las dos**: cada campo que el canónico no tiene lo toma
+    del duplicado, la fecha de alta es la más antigua de las dos, los enlaces a
+    documentos y las trazas del duplicado pasan al canónico si no los tiene
+    ya, y el resto (lotes, líneas, trabajos de cola, sindicación, pedidos) lo
+    mueve `fusionar_en`. No se deja ni una fila apuntando al código viejo."""
+    rellenados = []
+    for columna in Expediente.__table__.columns.keys():
+        if columna in ("id", "codigo_expediente", "updated_at"):
+            continue
+        propio, ajeno = getattr(canonico, columna), getattr(duplicado, columna)
+        if ajeno is None:
+            continue
+        if columna == "created_at":
+            if propio is None or ajeno < propio:
+                canonico.created_at = ajeno
+                rellenados.append(columna)
+        elif propio is None:
+            setattr(canonico, columna, ajeno)
+            rellenados.append(columna)
+    ya_enlazados = set(_documentos_de(db, canonico.id))
+    for enlace in db.execute(
+        select(DocumentoExpediente).where(DocumentoExpediente.expediente_id == duplicado.id)
+    ).scalars().all():
+        if enlace.documento_id not in ya_enlazados:
+            enlace.expediente_id = canonico.id
+    db.execute(
+        update(TrazaOrigen)
+        .where(TrazaOrigen.entidad_tipo == "expediente", TrazaOrigen.entidad_id == duplicado.id)
+        .values(entidad_id=canonico.id)
+    )
+    # Los lotes que el canónico no tiene pasan con un UPDATE, no por atributo:
+    # al borrar el duplicado, la relación `Expediente.lotes` ya cargada dejaba
+    # su `expediente_id` a NULL (lo destapó la propia unificación real).
+    identificadores_canonicos = select(Lote.identificador_lote).where(Lote.expediente_id == canonico.id)
+    db.execute(
+        update(Lote)
+        .where(Lote.expediente_id == duplicado.id, Lote.identificador_lote.not_in(identificadores_canonicos))
+        .values(expediente_id=canonico.id)
+    )
+    db.flush()
+    db.expire(duplicado)
+    codigo_viejo = duplicado.codigo_expediente
+    fusionar_en(db, duplicado, canonico)
+    return (
+        f"ficha {codigo_viejo} unificada con {canonico.codigo_expediente}: es el mismo expediente con otro "
+        f"separador; campos tomados de la ficha unificada: {', '.join(rellenados) or 'ninguno'}"
+    )
+
+
 def fusionar_en(db: Session, duplicado: Expediente, canonico: Expediente) -> str:
     """Pasa al expediente canónico todo lo que cuelga del duplicado y borra
     el duplicado. Devuelve el texto para el registro del ciclo.

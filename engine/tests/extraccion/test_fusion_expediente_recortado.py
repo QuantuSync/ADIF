@@ -105,3 +105,44 @@ def test_la_fusion_no_deja_nada_apuntando_al_codigo_viejo(db_session):
     # Y ningún documento se pierde: los dos siguen colgando del canónico.
     assert db_session.query(DocumentoExpediente).filter_by(expediente_id=completo.id).count() == 2
     assert db_session.query(Documento).count() == 2
+
+
+def test_la_ficha_con_otro_separador_se_unifica_sin_perder_nada(db_session):
+    """Sesión 2026-09-21 (segunda parte), bloque 3: `6.25/28510.5001_01` (alta
+    del 2026-09-03 desde un nombre de carpeta) y `6.25/28510.5001/01` (la forma
+    de ADIF) son la misma ficha. Gana la de la barra y no se pierde nada de la
+    otra: su lote, sus trabajos de cola, su fecha de alta, más antigua."""
+    from datetime import datetime, timezone
+
+    from app.extraccion.identidad_expediente import unificar_ficha_duplicada
+    from app.models import TrabajoCola
+
+    documento = _documento(db_session, "g")
+    guion = _expediente(
+        db_session, "6.25/28510.5001_01", [documento], titulo=None,
+        created_at=datetime(2026, 9, 3, tzinfo=timezone.utc),
+    )
+    barra = _expediente(
+        db_session, "6.25/28510.5001/01", [], titulo="Suministro de repuestos de engrasadores",
+        codigo_interno="24037", created_at=datetime(2026, 9, 7, tzinfo=timezone.utc),
+    )
+    db_session.add(Lote(expediente_id=guion.id, identificador_lote="1"))
+    db_session.add(TrabajoCola(tipo="descargar_expediente", expediente_id=guion.id))
+    db_session.commit()
+    # Con la relación ya cargada, como en la unificación real: sin mover los
+    # lotes por UPDATE, borrar el duplicado les ponía `expediente_id` a NULL.
+    assert len(guion.lotes) == 1
+
+    texto = unificar_ficha_duplicada(db_session, guion, barra)
+
+    assert db_session.query(Expediente).filter_by(codigo_expediente="6.25/28510.5001_01").count() == 0
+    unida = db_session.query(Expediente).filter_by(codigo_expediente="6.25/28510.5001/01").one()
+    assert unida.nombre_proyecto == "Suministro de repuestos de engrasadores"
+    assert unida.codigo_interno == "24037"
+    assert unida.created_at.date().isoformat() == "2026-09-03"
+    assert [l.identificador_lote for l in db_session.query(Lote).filter_by(expediente_id=unida.id)] == ["1"]
+    assert db_session.query(TrabajoCola).filter_by(expediente_id=unida.id).count() == 1
+    assert [d.documento_id for d in db_session.query(DocumentoExpediente).filter_by(expediente_id=unida.id)] == [
+        documento.id
+    ]
+    assert "created_at" in texto

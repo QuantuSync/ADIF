@@ -208,3 +208,45 @@ El significado de cada resultado vive en un solo sitio
 recuento, lo devuelve la API y lo pinta la pantalla `/contraste-presupuestos`
 (en cada botón y en "Qué significa cada resultado"). El diccionario del Excel
 lo recoge.
+
+---
+
+## Bloque 3 — La ficha duplicada de `6.25/28510.5001/01`
+
+Las dos fichas, antes de unificar:
+
+| Campo | `6.25/28510.5001/01` (id 375) | `6.25/28510.5001_01` (id 45) |
+|---|---|---|
+| Título | Suministro de repuestos de equipos de engrasadores de pestaña… | — |
+| Código interno | 24037 (cruza por su fila propia) | — (no cruza) |
+| Estado del contrato (SAP) | En ejecución | — |
+| En ejecución según ADIF | Sí, acta de 26/03/2025 (listado del 21/09) | — |
+| Estado | `sin_publicar` | `sin_publicar` |
+| Última búsqueda sin resultado | 18/09 13:27:34 | 18/09 13:28:06 |
+| Alta | **07/09/2026** | **03/09/2026** |
+| Lotes | ninguno | 1 (el "1" del sistema, vacío) |
+| Trabajos de cola | 5 | 9 (6 extracciones del 03/09 y 3 búsquedas) |
+| Líneas, documentos, trazas | ninguna | ninguna |
+
+**De dónde sale la del guion bajo.** No está en ningún fichero de entrada. Se
+dio de alta el 03/09 desde un nombre de carpeta (`6.25_28510.5001_01`) al que
+solo se le devolvió la primera barra. La regla de carpetas de hoy
+(`app.ingesta_local._CARPETA_EXPEDIENTE_RE`) ya no admite ese nombre, así que
+no hay ninguna vía que la vuelva a crear.
+
+**Cómo se unificó.** Con la forma de la barra, la del listado de ADIF, y con
+una función nueva y probada, `app.extraccion.identidad_expediente.
+unificar_ficha_duplicada`. Cada campo que la de la barra no tiene lo toma de
+la otra, y la fecha de alta es la más antigua de las dos. Los enlaces a
+documentos y las trazas pasan si no los tiene ya, y el resto (lotes, líneas,
+trabajos, sindicación, pedidos) lo mueve `fusionar_en`, la de la sesión
+2026-09-19. Resultado: **una ficha**, `6.25/28510.5001/01`, con alta del
+03/09, su lote y los 14 trabajos de cola. Después **ninguna fila de ninguna
+tabla** apunta a la ficha borrada. Solo se ha perdido una cifra redundante: la
+hora de la búsqueda sin resultado de la forma con guion bajo (13:28:06),
+32 segundos después de la de la barra. Queda escrita arriba.
+
+**Un defecto al hacerlo, corregido.** El primer intento falló sin guardar
+nada. `fusionar_en` mueve los lotes por atributo, y al borrar el duplicado la
+relación `Expediente.lotes`, ya cargada, les ponía `expediente_id` a NULL. La
+función nueva los mueve con un UPDATE.
