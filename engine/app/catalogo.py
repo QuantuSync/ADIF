@@ -3266,6 +3266,15 @@ def guardar_lineas_catalogo(
                 if existente is not None:
                     consulta = consulta.filter(LineaCatalogo.id != existente.id)
                 duplicados_por_firma = consulta.order_by(LineaCatalogo.id).all()
+                # Sesión 2026-09-21 (tercera parte): la fila que el propio
+                # cuadro repite, conservada con su marca, no tiene firma
+                # (`_firma_material`) -- tampoco puede ser el duplicado de su
+                # gemela en la base, o una pasada la fundía y la siguiente la
+                # volvía a crear.
+                duplicados_por_firma = [
+                    d for d in duplicados_por_firma
+                    if _MOTIVO_FILA_REPETIDA_EN_EL_CUADRO not in (d.motivo_revision or "")
+                ]
                 # Sesión 2026-09-14 (tercera parte): una línea que ESTA MISMA
                 # pasada ya guardó desde otro documento (`ids_vivas`) con otro
                 # código propio no es un resto de una pasada anterior -- es
