@@ -44,6 +44,7 @@ aquí; este los índice y añade lo que faltaba:
 | 14 | Las matrículas que el maestro no recoge | Matrícula del material | 2.893 líneas |
 | 15 | Las tres erratas de matrícula del propio documento | Matrícula del material | 7 líneas |
 | 16 | La Cantidad de los cuadros con «cantidad mínima por pedido» y «pedido inicial» | Cantidad | 451 líneas, 22 expedientes |
+| 17 | A qué expediente pertenecen los lotes cuyas filas no están en ningún expediente del catálogo | Filas que no llegan al entregable | 390 filas del 21/09 y los lotes 4 y 8 de `6.21/28510.0058` |
 
 ---
 
@@ -524,10 +525,10 @@ Cantidad no se ha cambiado.
 21/09/2026): en 406 la Cantidad es la mínima por pedido y en 45 el pedido
 inicial. Casi todos son de 2019 (`6.19/28510.0115`, `0126`, `0134`, `0135`,
 `0136`, `0157`-`0163`, `0166`, `0167`, `0175`, `0177`, `0181`, `0195`,
-`0202`, `0215`, `0231`) más `6.20/28510.0025` y `0028`. Siete filas de
-`6.19/28510.0177` (p.22) todavía no llevan la nota: su tabla empieza en una
-fila con dos matrículas pegadas en la misma celda, que el sistema toma por una
-cabecera nueva. Queda anotado para corregirlo (hace falta un reproceso).
+`0202`, `0215`, `0231`) más `6.20/28510.0025` y `0028`. Las siete filas de
+`6.19/28510.0177` (p.22) que no llevaban la nota la llevan desde el 22/09/2026
+(su tabla empieza en una fila con dos matrículas en la misma celda, que el
+sistema tomaba por una cabecera nueva).
 
 **Qué preguntar.** ¿Qué quieren ver en la columna Cantidad de estos cuadros:
 la mínima por pedido, el pedido inicial, o ninguna de las dos (celda vacía con
@@ -538,3 +539,54 @@ columna elegida se toma siempre, en todas las páginas del cuadro, y la otra
 sigue diciéndose en el motivo. Si prefieren la celda vacía, las dos cifras van
 al motivo.
 
+---
+
+## 17 — A qué expediente pertenecen los lotes que no están en el catálogo
+
+**El hecho.** Algunos cuadros de precios publican los materiales de **todos
+los lotes de una licitación**, y cada expediente del catálogo es uno solo de
+esos lotes. El sistema reparte el cuadro: cada expediente se queda con las
+filas de su lote, y las de los demás lotes salen en el expediente de ese lote.
+Pero **cuando ese otro lote no es ningún expediente del catálogo, sus filas no
+salen en "Materiales"**. Siguen guardadas en la base de datos, sin lote y con
+su motivo, y aparecerían el mismo día que sepamos qué expediente es cada lote.
+
+**Afectado.** Cinco casos. Las filas son las que salieron de "Materiales" el
+21/09/2026 (bloque 2 de esa sesión, con la decisión del cliente de aplicar el
+reparto a todos) y las de los lotes 4 y 8 de `6.21/28510.0058`, que salieron
+el mismo día al leer bien su rótulo ("LLOTE 4", "LLOTE 8"). La lista completa
+de materiales de cada lote, con matrícula, descripción, precio y unidad, está
+en `docs/preguntas-cliente-lotes-sin-expediente.md`.
+
+| Caso | Expediente del catálogo (su lote) | Lotes de la licitación sin expediente | Filas fuera de "Materiales" | Materiales distintos |
+|---|---|---|---:|---:|
+| A | `6.20/28510.0041`, repuestos de aparatos de vía de alta velocidad (lote 2) | 1 | 336 | 336 |
+| B | `6.19/28510.0231` (lote 4) y `6.20/28510.0025` (lote 5), regulación de la tensión, 6 lotes | 1, 2, 3 y 6 | 32 | 32 |
+| C | `3.23/28510.0135`, maquinaria y herramientas del Centro de Tecnología de Vía, 8 lotes (lotes 2 y 6) | 1, 3, 4, 5, 7 y 8 | 20 | 30 |
+| D | `3.22/28510.0048`, equipos del Laboratorio Central, 5 lotes (lotes 1, 3 y 5) | 2 | 2 | 2 |
+| E | `6.21/28510.0058` y sus hermanos `0130`, `0135`, `0137`, `0138`, pequeño material de vía, 9 lotes | 4 y 8 | 42 por expediente | 42 (5 del lote 4, 37 del lote 8) |
+
+Detalles que el cliente debe conocer al leer la tabla:
+
+- **Caso B**: los dos expedientes publican el mismo anejo escaneado, así que
+  las 32 filas están guardadas dos veces (una en cada uno), pero son 32
+  materiales.
+- **Caso C**: las 20 filas son las que salieron el 21/09; los 30 materiales
+  distintos incluyen los de esos seis lotes que ya estaban fuera antes. El
+  cuadro aparece dos veces (anejo pp.24-26 y contrato pp.133-136).
+- **Caso E**: el título de `6.21/28510.0137` dice "Lote 8. Sujeciones", el de
+  `0135` "Lote 6" y el de `0138` "Lote 9", pero los cinco expedientes tienen en
+  el sistema los lotes 1, 3 y 7 del cuadro. Es la pregunta 2 (títulos que
+  nombran un lote que sus contratos no publican). **Tampoco están en ningún
+  expediente los lotes 2, 5, 6 y 9 de esa licitación**; sus filas ya estaban
+  fuera de "Materiales" antes del 21/09.
+
+**Qué preguntar.** Para cada licitación, **¿qué número de expediente tiene
+cada uno de los lotes de la tabla?** Si alguno no llegó a adjudicarse, o se
+declaró desierto, basta con saberlo.
+
+**Qué haremos según contesten.** Dar de alta los expedientes que falten (o
+corregir el lote de los que ya están, en el caso E) y reprocesar. El reparto
+ya está hecho: cada fila sabe de qué lote es, así que entrará en "Materiales"
+en el expediente de su lote sin tocar nada más. Un lote desierto se queda como
+está, con su motivo.
