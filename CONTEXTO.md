@@ -610,6 +610,31 @@ es la hoja **"Presupuestos ADIF"** del Excel (`app.presupuestos_adif`), que solo
 se escribe cuando hay algún presupuesto cargado. Hoy el listado que tenemos no
 trae esa columna y la hoja no existe.
 
+**El contraste de presupuestos** (sesión 2026-09-21, bloque 1,
+`app.contraste_presupuestos`, hoja **"Contraste de presupuestos"** detrás de
+"Conciliación"): la suma de cantidad × precio de las filas de "Materiales" de
+cada lote contra el presupuesto de licitación publicado de ese lote. Tres
+reglas que no se rompen:
+
+1. **Se compara con la cifra equivalente.** Los precios de un cuadro son sin
+   IVA, así que con la base sin IVA; y si la suma × 1,15 da esa base **a un
+   céntimo** (el del redondeo: el documento suma por separado el 9 % de gastos
+   generales y el 6 % de beneficio industrial), con la ejecución material, la
+   que declara el documento o la base ÷ 1,15.
+2. **Qué cifra es lo dice la etiqueta con la que se publica** ("sin impuestos",
+   "IVA excluido", "sin IVA", la columna "Base imponible" de la LC.27,
+   comprobada en las 95 del corpus), **nunca que la cuenta salga**. Si la
+   etiqueta no lo dice, la fila empieza por "No se puede saber con certeza".
+3. **Un "1" que pone el sistema no es el "Lote 1" de la licitación**: a ese
+   lote solo le vale el presupuesto del expediente entero.
+
+El presupuesto de cada lote que publican los documentos se guarda en
+**`presupuestos_lote_documento`** (migración **0042**,
+`app.extraccion.presupuesto_lote`, al final de cada extracción), **nunca en
+`Lote.importe_licitacion`**: ese campo interviene en la baja, en la prueba del
+reparto por lotes y en los precios que un presupuesto demuestra, y rellenarlo
+cambiaría datos del catálogo. Es una comprobación: no cambia nada.
+
 ### Cruce con el Excel de códigos
 
 El anuncio PCSP trae **los dos códigos escritos en campos fijos**:
@@ -922,6 +947,14 @@ no Edge.
    para lo único que existe. No se sondea periódicamente, a diferencia de las
    otras cuatro pantallas.
 
+9. **El Contraste de presupuestos** (`/contraste-presupuestos`,
+   `GET /contraste-presupuestos`, sesión 2026-09-21): la hoja del Excel del
+   mismo nombre, una fila por lote, filtrable por resultado y con el recuento
+   de cada uno y de los lotes que no entran, con el mismo diseño que la de
+   Conciliación. **Suma las mismas filas que "Materiales"**
+   (`app.contraste_presupuestos.lineas_de_materiales_por_lote`, mismos filtros
+   y mismo criterio de inclusión). Tampoco se sondea.
+
 El catálogo muestra las mismas columnas que el Excel, con el mismo nombre:
 "Código de precio" y "Código del material" son dos columnas distintas (el
 rótulo "Código" a secas de antes de la sesión 2026-09-19 quinta parte las
@@ -983,6 +1016,14 @@ exporta con el código viejo, y las dos cosas salen verdes y creíbles:
   escribir, así que no demuestra nada;
 - un Excel al que le faltan las columnas, los recuentos o los motivos nuevos,
   sin ningún aviso.
+
+**Regla: el entregable es siempre el Excel descargado desde la web** (desde la
+pantalla del catálogo, con el navegador, pulsando "Exportar Excel", igual que
+lo haría el cliente; decisión del cliente, sesión 2026-09-21). No el que
+devuelve la API a una llamada directa ni uno generado a mano: es el único que
+prueba que lo que el cliente descarga es lo que se ha comprobado. La
+exportación de la API sirve de contraste: las dos tienen que ser idénticas
+salvo la fecha de creación del fichero (`docProps/core.xml`).
 
 Lo mismo vale para las pruebas: `docker compose run api pytest` corre contra
 la imagen, no contra el árbol de trabajo. Pasó en el cierre de la sesión
@@ -3137,6 +3178,37 @@ materiales**: es el mejor argumento para tenerlo cargado.
   se diferencian en **una sola celda de todo el libro**: el contador del
   Resumen, 2.500 → 2.511.
 
+- **Sesión 2026-09-21: el contraste de presupuestos visible, el listado de
+  expedientes en ejecución de ADIF y la propuesta de clasificación por tipo de
+  material** (`docs/sesion-2026-09-21-contraste-de-presupuestos-en-ejecucion-y-clasificacion.md`).
+  (1) **Hoja "Contraste de presupuestos" y pantalla `/contraste-presupuestos`**
+  (sección 7). Compara cada lote con la cifra equivalente, y el tipo de cifra lo
+  dice la etiqueta publicada. **485 lotes: 233 cuadran al céntimo, 13 con
+  diferencia menor del 0,01 %, 139 no cuadran y 100 no se pueden cerrar por
+  falta de cantidades**; 55 no entran, con su motivo. El presupuesto por lote
+  faltaba en 215 de los 540 lotes y se lee ahora de los documentos a su propia
+  tabla (migración 0042), sin tocar el catálogo. **El caso del ×1,15 obligó a
+  un céntimo de margen**: el documento suma el 9 % y el 6 % redondeados por
+  separado. (2) **Listado interno de ADIF de expedientes en ejecución** (sección
+  7): 121 expedientes, 112 del 28510; columna 12 de "Conciliación", **111 de
+  los 112 en la hoja, 85 con líneas y 26 sin ellas; solo falta
+  `6.25/28510.5001/01`, sin publicar**, exactamente el cruce del cliente.
+  Migración 0043; cada versión nueva se carga con un comando. (3) **Propuesta de
+  clasificación: familias de 4 cifras de la matrícula** (175 con filas, 67 % de
+  homogeneidad, nombres sacados de las denominaciones del maestro), **sin
+  tocar "Código del material"**: `docs/propuesta-clasificacion-tipo-material.md`
+  y un Excel aparte. De las 6.553 filas sin matrícula, 334 se asignan con
+  certeza. (4) **Cierre**: 1.360 pruebas; un reproceso completo con la red
+  apagada, porque el bloque 1 añade un paso a la extracción (517 expedientes,
+  22 min 2 s, `descargas_lanzadas: 0`); **auditoría con 0 errores y 6 avisos**.
+  El entregable, **descargado desde la web**, es idéntico a la exportación de
+  la API salvo la fecha de creación. "Materiales" es **idéntica fila a fila** a
+  la del 20/09 (20.062); las únicas diferencias son la hoja nueva, la columna
+  nueva y una línea del Resumen. "Conciliación" cuadra (20.062 = 20.062), y
+  las dos vistas de la web dan, fila a fila, las mismas cifras que el Excel.
+  **Regla nueva (sección 13): el entregable es siempre el Excel descargado
+  desde la web.**
+
 ---
 
 El registro histórico de hallazgos y decisiones de cada sesión vive en
@@ -3189,4 +3261,7 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `diccionario-excel.md`,
 `pregunta-cliente-contraguja-contraaguja.md`,
 `preguntas-cliente-lotes-del-titulo-y-ficheros-de-entrada.md`,
+`sesion-2026-09-21-contraste-de-presupuestos-en-ejecucion-y-clasificacion.md`,
+`expedientes-en-ejecucion-adif.md`,
+`propuesta-clasificacion-tipo-material.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.

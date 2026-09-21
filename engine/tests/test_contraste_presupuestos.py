@@ -433,3 +433,20 @@ def test_una_cifra_guardada_sin_traza_se_demuestra_con_el_documento_que_dice_la_
     [fila] = _contraste(db_session).filas
     assert fila.tipo_cifra.startswith(INCIERTO)
     assert fila.presupuesto_publicado == Decimal("593375.00")
+
+
+def test_las_filas_del_lote_que_no_salen_en_materiales_se_dicen(db_session):
+    """`6.25/28510.0097` lote 2: sus filas sin cantidad no salen en
+    "Materiales" (mapeo incoherente), así que no se suman; la fila lo dice."""
+    from app.catalogo import MOTIVO_MAPEO_INCOHERENTE
+
+    expediente = _expediente(db_session, importe=Decimal("1000"))
+    documento = _documento(db_session, expediente, "ADJUDICACION_1.pdf")
+    lote = _lote(db_session, expediente, "1", importe=Decimal("1000"))
+    _traza(db_session, "expediente", expediente.id, documento, "Presupuesto de licitación: 1.000,00 €")
+    _linea(db_session, expediente, lote, "5", "100")
+    fuera = _linea(db_session, expediente, lote, None, "10")
+    fuera.motivo_revision = MOTIVO_MAPEO_INCOHERENTE
+    [fila] = _contraste(db_session).filas
+    assert (fila.lineas, fila.lineas_sin_cantidad, fila.resultado) == (1, 0, NO_CUADRA)
+    assert "1 fila(s) de este lote están en la base de datos pero no salen" in fila.explicacion

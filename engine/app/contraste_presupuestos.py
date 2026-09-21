@@ -470,7 +470,8 @@ def _porcentaje_exacto(suma: Decimal, presupuesto: Decimal) -> Optional[int]:
 
 
 def _comparar(
-    expediente: Expediente, lote: Lote, lineas: list[LineaCatalogo], presupuesto: _Presupuesto
+    expediente: Expediente, lote: Lote, lineas: list[LineaCatalogo], presupuesto: _Presupuesto,
+    lineas_fuera_de_materiales: int = 0,
 ) -> FilaContraste:
     suma = Decimal("0")
     sin_cantidad = sin_precio = partidas_una_vez = 0
@@ -559,6 +560,14 @@ def _comparar(
                 f"La suma es {int(suma / base):,} veces el presupuesto: revisar las cantidades y los "
                 "precios de este lote contra el documento.".replace(",", ".")
             )
+    if lineas_fuera_de_materiales:
+        # `6.25/28510.0097` lotes 2 y 3: sus conjuntos de contrapesos no traen
+        # cantidad y su tabla no sale en "Materiales" (mapeo incoherente). Sin
+        # decirlo, "No cuadra" parecería un fallo de atribución.
+        explicacion.append(
+            f"Además, {lineas_fuera_de_materiales} fila(s) de este lote están en la base de datos pero no "
+            "salen en \"Materiales\" (el Resumen explica por qué se dejan fuera), y no se suman."
+        )
     if partidas_una_vez:
         explicacion.append(
             f"Incluye {partidas_una_vez} partida(s) alzada(s) sin cantidad, contada(s) una vez por su "
@@ -608,6 +617,16 @@ def construir_contraste(
         ).scalars()
     }
     fuentes = _Fuentes(db, set(expedientes))
+    # Todas las filas de cada lote que pasan los filtros del entregable, salgan
+    # o no en "Materiales": la diferencia son las que se dejan fuera.
+    en_el_entregable = Counter(
+        lote_id
+        for (lote_id,) in db.execute(
+            filtros_del_entregable(select(LineaCatalogo.lote_id)).where(
+                LineaCatalogo.lote_id.in_(lineas_por_lote)
+            )
+        )
+    )
 
     contraste = Contraste()
     for lote_id, lineas in lineas_por_lote.items():
@@ -622,7 +641,10 @@ def construir_contraste(
             contraste.fuera.append(LoteFuera(expediente.codigo_expediente, lote.identificador_lote,
                                              len(lineas), motivo or SIN_PRESUPUESTO))
             continue
-        contraste.filas.append(_comparar(expediente, lote, lineas, presupuesto))
+        contraste.filas.append(_comparar(
+            expediente, lote, lineas, presupuesto,
+            lineas_fuera_de_materiales=max(0, en_el_entregable[lote_id] - len(lineas)),
+        ))
 
     contraste.filas.sort(key=lambda f: (f.codigo_expediente, _clave_lote(f.lote)))
     contraste.fuera.sort(key=lambda f: (f.codigo_expediente, _clave_lote(f.lote)))
