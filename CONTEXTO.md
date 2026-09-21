@@ -1053,6 +1053,57 @@ prueba que lo que el cliente descarga es lo que se ha comprobado. La
 exportación de la API sirve de contraste: las dos tienen que ser idénticas
 salvo la fecha de creación del fichero (`docProps/core.xml`).
 
+### Reconstrucción en paralelo: los valores viejos que ningún reproceso ve
+
+**Un `None` no pisa un valor guardado** (sección 9), así que una celda que
+escribió un código anterior ya corregido sobrevive a cualquier reproceso. La
+única forma de verla es reconstruir el catálogo desde cero en una base aparte,
+con el código actual, y comparar. Hay que repetirlo **después de cualquier
+cambio importante del código** (sesión 2026-09-21, tercera parte,
+`app.mantenimiento.reconstruccion`). Pasos, desde WSL y con la imagen ya
+reconstruida:
+
+1. **Copia de producción en una base aparte** (el nombre tiene que llevar
+   `reconstruccion`, o el módulo se niega a correr):
+   `docker exec adif-postgres-1 sh -c "dropdb -U adif --if-exists adif_reconstruccion && createdb -U adif adif_reconstruccion && pg_dump -U adif -Fc adif > /tmp/prod.dump && pg_restore -U adif -d adif_reconstruccion --no-owner /tmp/prod.dump"`.
+2. **Red aislada**: `docker network create --internal adif_reconstruccion_red`
+   y `docker network connect --alias postgres adif_reconstruccion_red adif-postgres-1`.
+   Una red `--internal` no tiene salida a Internet: ni Plataforma ni modelo.
+   Si una cabecera o una primera palabra no está en caché, ese documento falla
+   en vez de llamar a nada — y eso también es un hallazgo.
+3. **Vaciar lo extraído y reconstruir, dos pasadas**, en un contenedor de la
+   imagen `adif-worker` conectado solo a esa red, con
+   `DATABASE_URL=…/adif_reconstruccion`, el volumen `adif_documentos` en solo
+   lectura y la caché de modelo de `engine/.cache_modelo_dev` en solo lectura:
+   `python -m app.mantenimiento.reconstruccion --vaciar --reconstruir --exportar /salida/pasada1.xlsx`
+   y después `--reconstruir --exportar /salida/pasada2.xlsx`. `--vaciar` quita
+   líneas, lotes, trazas, presupuestos por lote, importes y bajas del
+   expediente y lo que la extracción anota en cada documento, y deja
+   documentos, **las cuatro cachés** (texto, reconocimiento óptico, mapeo de
+   cabecera, código de material), los listados de entrada y la sindicación.
+   `--reconstruir` es un ciclo forzado con las cuatro vías de red apagadas más
+   el paso de las unidades del maestro, que en producción se lanza a mano.
+   **La segunda pasada es obligatoria**: varias reglas solo se activan sobre
+   el estado que deja la primera (la del lote del título necesita que el
+   expediente ya cargue con más de un lote), y la comparación que vale es la
+   del estado estable. Cada pasada tarda lo que un reproceso completo (~22 min).
+4. **Comparar** el Excel de la segunda pasada con el de producción, celda a
+   celda, y las dos bases línea a línea por `expediente + lote + clave_linea`
+   (`engine/scripts/reconstruccion/compara_excel.py A.xlsx B.xlsx salida.json`
+   en el anfitrión, y `compara_bd.py salida.json` en un contenedor de esa red).
+5. **Clasificar cada diferencia contra el documento, nunca por su dirección.**
+   Que producción tenga un valor y la reconstrucción no, no basta: se mira si
+   el valor está en las celdas de su propia fila (su fragmento). Si no está,
+   es un **valor viejo** y se corrige escribiendo lo que da el código actual
+   (vaciar incluido), con un `UPDATE` que comprueba el valor esperado línea a
+   línea. Si está, es el código actual el que ya no lo lee: **no se toca** y
+   se anota como fallo de lectura. Las confirmaciones manuales de la cola de
+   revisión no se tocan nunca. Con más de 200 celdas viejas, se enseña la
+   clasificación al cliente antes de corregir.
+
+Lo que no se vacía, a propósito: el título, la matriz y el cruce con el
+listado de códigos, porque también los escriben los listados de entrada.
+
 Lo mismo vale para las pruebas: `docker compose run api pytest` corre contra
 la imagen, no contra el árbol de trabajo. Pasó en el cierre de la sesión
 2026-09-19 (séptima parte), y es la razón por la que el reproceso completo de
