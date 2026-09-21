@@ -481,6 +481,9 @@ La última columna dice si la matrícula aparece en alguna otra fila de
 
 ### E. 6.21/28510.0058
 
+`6.21/28510.0136` (lote 7) guarda también, sin lote, las mismas tablas (10 filas
+del lote 4 y 74 del lote 8). Los materiales son los mismos.
+
 
 **Lote 4** — 5 materiales distintos; filas guardadas sin lote: `6.21/28510.0058` 10, `6.21/28510.0130` 10, `6.21/28510.0135` 10, `6.21/28510.0137` 10, `6.21/28510.0138` 10; páginas 5, 117
 

@@ -44,7 +44,7 @@ aquí; este los índice y añade lo que faltaba:
 | 14 | Las matrículas que el maestro no recoge | Matrícula del material | 2.893 líneas |
 | 15 | Las tres erratas de matrícula del propio documento | Matrícula del material | 7 líneas |
 | 16 | La Cantidad de los cuadros con «cantidad mínima por pedido» y «pedido inicial» | Cantidad | 451 líneas, 22 expedientes |
-| 17 | A qué expediente pertenecen los lotes cuyas filas no están en ningún expediente del catálogo | Filas que no llegan al entregable | 390 filas del 21/09 y los lotes 4 y 8 de `6.21/28510.0058` |
+| 17 | A qué expediente pertenecen los lotes cuyas filas no están en ningún expediente del catálogo | Filas que no llegan al entregable | 595 filas: 390 del reparto por lotes y 205 de los lotes 4 y 8 de `6.21/28510.0058` |
 
 ---
 
@@ -564,7 +564,7 @@ en `docs/preguntas-cliente-lotes-sin-expediente.md`.
 | B | `6.19/28510.0231` (lote 4) y `6.20/28510.0025` (lote 5), regulación de la tensión, 6 lotes | 1, 2, 3 y 6 | 32 | 32 |
 | C | `3.23/28510.0135`, maquinaria y herramientas del Centro de Tecnología de Vía, 8 lotes (lotes 2 y 6) | 1, 3, 4, 5, 7 y 8 | 20 | 30 |
 | D | `3.22/28510.0048`, equipos del Laboratorio Central, 5 lotes (lotes 1, 3 y 5) | 2 | 2 | 2 |
-| E | `6.21/28510.0058` y sus hermanos `0130`, `0135`, `0137`, `0138`, pequeño material de vía, 9 lotes | 4 y 8 | 42 por expediente | 42 (5 del lote 4, 37 del lote 8) |
+| E | `6.21/28510.0058` y sus hermanos `0130` a `0138`, pequeño material de vía, 9 lotes | 4 y 8 | 205 (42 en cada uno de `0058`, `0135`, `0137` y `0138`; 37 en `0136`) | 42 (5 del lote 4, 37 del lote 8) |
 
 Detalles que el cliente debe conocer al leer la tabla:
 
@@ -575,8 +575,10 @@ Detalles que el cliente debe conocer al leer la tabla:
   distintos incluyen los de esos seis lotes que ya estaban fuera antes. El
   cuadro aparece dos veces (anejo pp.24-26 y contrato pp.133-136).
 - **Caso E**: el título de `6.21/28510.0137` dice "Lote 8. Sujeciones", el de
-  `0135` "Lote 6" y el de `0138` "Lote 9", pero los cinco expedientes tienen en
-  el sistema los lotes 1, 3 y 7 del cuadro. Es la pregunta 2 (títulos que
+  `0130` "Lote 1", el de `0135` "Lote 6", el de `0136` "Lote 7" y el de `0138`
+  "Lote 9", pero `0058`, `0135`, `0137` y `0138` tienen en el sistema los lotes
+  1, 3 y 7 del cuadro. Las 205 filas son 42 materiales repetidos en cada
+  expediente de la familia. Es la pregunta 2 (títulos que
   nombran un lote que sus contratos no publican). **Tampoco están en ningún
   expediente los lotes 2, 5, 6 y 9 de esa licitación**; sus filas ya estaban
   fuera de "Materiales" antes del 21/09.
