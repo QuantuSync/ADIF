@@ -134,7 +134,17 @@ COLUMNAS_CONCILIACION = [
     "Baja y de dónde sale",
     "Situación",
     "Motivo",
+    # Bloque 2, sesión 2026-09-21: la fecha de firma del acta de inicio según
+    # el listado INTERNO de ADIF de expedientes en ejecución
+    # (`app.extraccion.en_ejecucion_adif`). Al final y separada de las dos
+    # columnas de estado a propósito: es una tercera fuente, y como el
+    # listado de estados, no interviene en decidir si el expediente consta
+    # publicado ni en su Situación.
+    "En ejecución según ADIF",
 ]
+
+# Figura en el listado de ADIF, pero su fila no trae fecha de acta de inicio.
+EN_EJECUCION_SIN_FECHA = "En el listado, sin fecha de firma del acta de inicio"
 
 # `cbc-place-ext:ContractFolderStatusCode` del XML CODICE de la sindicación
 # (`app.sindicacion.atom_parser`). Un código que no esté aquí se escribe tal
@@ -171,6 +181,9 @@ class FilaConciliacion:
     baja: str
     situacion: str
     motivo: str
+    # "DD/MM/AAAA" (firma del acta de inicio), `EN_EJECUCION_SIN_FECHA`, o
+    # `None` si no figura en el listado de expedientes en ejecución de ADIF.
+    en_ejecucion_adif: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -193,6 +206,11 @@ class RegistroPublicado:
     # la hoja). Se cuentan aparte para que la frase del registro no vuelva a
     # llamarlos "no publicados" sin más.
     expedientes_en_ficha_de_otro: int = 0
+    # Bloque 2, sesión 2026-09-21: de qué versión del listado de expedientes
+    # en ejecución de ADIF sale la columna "En ejecución según ADIF", y
+    # cuántas filas de la hoja la llevan.
+    listado_en_ejecucion_adif: Optional[str] = None
+    en_ejecucion_adif_en_la_hoja: int = 0
 
 
 def _periodo_legible(periodo: str) -> str:
@@ -246,6 +264,9 @@ def describir_registro_publicado(db: Session, filas: list[FilaConciliacion]) -> 
         if any(fragmento_en_codigo(codigo, d) for d in departamentos)
     ]
     en_ficha_de_otro = sum(1 for codigo in no_publicados if codigo in en_la_hoja)
+    listados = sorted(
+        {n for (n,) in db.execute(select(Expediente.en_ejecucion_adif_listado).distinct()).all() if n}
+    )
     return RegistroPublicado(
         departamentos=departamentos,
         periodos_sindicacion=periodos,
@@ -256,6 +277,8 @@ def describir_registro_publicado(db: Session, filas: list[FilaConciliacion]) -> 
         expedientes_publicados=len(filas),
         expedientes_no_publicados=len(no_publicados) - en_ficha_de_otro,
         expedientes_en_ficha_de_otro=en_ficha_de_otro,
+        listado_en_ejecucion_adif=", ".join(listados) or None,
+        en_ejecucion_adif_en_la_hoja=sum(1 for fila in filas if fila.en_ejecucion_adif),
     )
 
 
@@ -769,9 +792,20 @@ def construir_conciliacion(
                                  nombre_documento),
                 situacion=situacion,
                 motivo=motivo,
+                en_ejecucion_adif=_texto_en_ejecucion(expediente),
             )
         )
     return filas
+
+
+def _texto_en_ejecucion(expediente: Expediente) -> Optional[str]:
+    """Solo lo que dice el listado de ADIF: la fecha de firma del acta de
+    inicio, o que figura sin ella. Nada de esto se usa para la Situación."""
+    if not expediente.en_ejecucion_adif:
+        return None
+    if expediente.acta_inicio_adif is None:
+        return EN_EJECUCION_SIN_FECHA
+    return expediente.acta_inicio_adif.strftime("%d/%m/%Y")
 
 
 class DescuadreConciliacion(RuntimeError):

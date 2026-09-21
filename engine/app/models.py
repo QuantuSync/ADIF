@@ -5,6 +5,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     Column,
+    Date,
     DateTime,
     Enum,
     ForeignKey,
@@ -298,6 +299,18 @@ class Expediente(Base):
     # comparación entre los dos es la hoja "Presupuestos ADIF" del Excel
     # (`app.presupuestos_adif`).
     presupuesto_licitacion_adif = Column(Numeric(14, 4), nullable=True)
+    # Bloque 2, sesión 2026-09-21 (migración 0043): el listado INTERNO de ADIF
+    # de sus expedientes en ejecución, con la fecha de firma del acta de
+    # inicio (`app.extraccion.en_ejecucion_adif`, ver su docstring para la
+    # procedencia). Otra fuente, otro campo: no es `estado_adif` ni
+    # `estado_contrato_sap`. **Nunca decide si un expediente está publicado.**
+    # `en_ejecucion_adif` es `True` si figura en el último listado cargado
+    # (con fecha o sin ella) y `None` si no; `acta_inicio_adif` es su fecha,
+    # vacía cuando el listado la trae en blanco; `en_ejecucion_adif_listado`,
+    # el fichero del que sale. Cada carga sustituye entera a la anterior.
+    en_ejecucion_adif = Column(Boolean, nullable=True)
+    acta_inicio_adif = Column(Date, nullable=True)
+    en_ejecucion_adif_listado = Column(String(128), nullable=True)
     # Migración 0031 (sesión 2026-09-15): cuándo y con qué versión de la
     # lógica de búsqueda (`app.mantenimiento.frescura.VERSION_LOGICA_BUSQUEDA`)
     # confirmó la Plataforma que no tiene este expediente. Solo con

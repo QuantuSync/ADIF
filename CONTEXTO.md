@@ -688,6 +688,28 @@ módulo y campo propios en vez de reutilizar `estado_sap`:
    estado coincide en los 212). Compartir campo dejaría cada valor sin
    procedencia.
 
+### Listado de expedientes en ejecución de ADIF (21/09/2026)
+
+**Procedencia, tal cual.** Es el **listado interno de ADIF** de sus
+expedientes en ejecución, con la **fecha de firma del acta de inicio**. Lo
+compartió Isa, de ADIF, en el grupo de trabajo el **18/09/2026** y lo reenvió
+ordenado el **21/09/2026**. **No sale de la Plataforma.** Está en
+`Ejemplo/Input/expedientes_en_ejecucion_adif_20260921.csv` (121 expedientes:
+112 del 28510 y 9 de otros departamentos, que quedan fuera del alcance y no se
+cargan).
+
+Fuente de entrada permanente: `app.extraccion.en_ejecucion_adif`, migración
+**0043** (`expedientes.en_ejecucion_adif`, `acta_inicio_adif`,
+`en_ejecucion_adif_listado`) y `POST /mantenimiento/en-ejecucion-adif/cargar`.
+**Una versión nueva se incorpora dejándola en `Ejemplo/Input` con su fecha en
+el nombre y ejecutando ese comando**: se carga la de fecha más reciente y
+sustituye entera a la anterior. Se muestra en su propia columna de
+"Conciliación", **"En ejecución según ADIF"**, la última, separada de las dos
+de estado. Las mismas tres reglas duras que el listado de estados: **nunca
+decide si un expediente consta publicado** (ni su Situación), **nunca da de
+alta un expediente** y **nunca escribe en otra columna de estado**. Detalle y
+cruce en `docs/expedientes-en-ejecucion-adif.md`.
+
 ### Qué puede y qué no puede saber el sistema sobre el estado de un expediente
 
 **Decisión del cliente, 18/09/2026, Isabel Ibáñez (ADIF), por escrito en el

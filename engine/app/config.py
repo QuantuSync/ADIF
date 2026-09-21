@@ -56,6 +56,17 @@ class Settings(BaseSettings):
     # columnas: NUNCA decide si un expediente está publicado.
     estados_adif_path: Optional[str] = None
 
+    # Bloque 2, sesión 2026-09-21: el listado interno de ADIF de expedientes
+    # en ejecución, con la fecha de firma del acta de inicio
+    # (`app.extraccion.en_ejecucion_adif`). A diferencia de las rutas de
+    # arriba, esto es una CARPETA (`Ejemplo/Input` montada entera): cada
+    # versión nueva llega con su fecha en el nombre
+    # (`expedientes_en_ejecucion_adif_AAAAMMDD.csv`) y se carga la más
+    # reciente, así que incorporarla es dejarla ahí y ejecutar el comando, sin
+    # tocar `docker-compose`. Fuente de relleno de una columna: NUNCA decide
+    # si un expediente está publicado.
+    en_ejecucion_adif_dir: Optional[str] = None
+
     # Bloque 6, cambios del cliente tras revisar el catálogo: desglose de
     # SAP con las matrículas concretas de cada contrato (app.extraccion.
     # sap_desglose) -- mismo mecanismo que las dos rutas de arriba. Solo lo

@@ -28,6 +28,7 @@ type FilaConciliacion = {
   baja: string;
   situacion: string;
   motivo: string;
+  en_ejecucion_adif: string | null;
 };
 
 type RecuentoSituacion = { situacion: string; expedientes: number };
@@ -42,6 +43,8 @@ type Registro = {
   expedientes_publicados: number;
   expedientes_no_publicados: number;
   expedientes_en_ficha_de_otro: number;
+  listado_en_ejecucion_adif: string | null;
+  en_ejecucion_adif_en_la_hoja: number;
 };
 
 type Respuesta = {
@@ -201,6 +204,9 @@ export default function ConciliacionPanel({ apiUrl }: { apiUrl: string }) {
                   <th>Baja y de dónde sale</th>
                   <th>Situación</th>
                   <th>Motivo</th>
+                  <th title="Fecha de firma del acta de inicio según el listado interno de ADIF de expedientes en ejecución. No sale de la Plataforma y no interviene en la Situación.">
+                    En ejecución según ADIF
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -243,6 +249,7 @@ export default function ConciliacionPanel({ apiUrl }: { apiUrl: string }) {
                     <td className="descripcion">
                       <span title={f.motivo}>{f.motivo}</span>
                     </td>
+                    <td className="mono">{f.en_ejecucion_adif ?? ""}</td>
                   </tr>
                 ))}
               </tbody>
@@ -271,6 +278,18 @@ export default function ConciliacionPanel({ apiUrl }: { apiUrl: string }) {
               {datos.registro.expedientes_no_publicados} no aparecen al buscarlos por su número, y{" "}
               {datos.registro.expedientes_en_ficha_de_otro} de esos sí tienen sus documentos
               publicados dentro de la ficha de otro expediente.
+            </p>
+            <p className="muted">
+              {datos.registro.listado_en_ejecucion_adif ? (
+                <>
+                  &quot;En ejecución según ADIF&quot; sale del listado interno de ADIF{" "}
+                  <span className="mono">{datos.registro.listado_en_ejecucion_adif}</span>, no de la
+                  Plataforma: {datos.registro.en_ejecucion_adif_en_la_hoja} expedientes de esta lista
+                  figuran en él. No interviene en la situación ni en qué consta publicado.
+                </>
+              ) : (
+                <>Todavía no se ha cargado ningún listado de expedientes en ejecución de ADIF.</>
+              )}
             </p>
           </div>
         </>

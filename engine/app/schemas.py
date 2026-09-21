@@ -384,6 +384,29 @@ class EstadoSapCargaOut(BaseModel):
     expedientes_sin_cambios: int = 0
 
 
+class EnEjecucionAdifCargaOut(BaseModel):
+    """Resumen de `POST /mantenimiento/en-ejecucion-adif/cargar` (bloque 2,
+    sesión 2026-09-21). `configurado=False`: `EN_EJECUCION_ADIF_DIR` no apunta
+    a ninguna carpeta; `fichero=None` con `configurado=True`: la carpeta no
+    tiene ningún `expedientes_en_ejecucion_adif_AAAAMMDD.csv`. Como el listado
+    de estados, **no da de alta ningún expediente**: los que no casan salen en
+    `codigos_sin_expediente`."""
+
+    configurado: bool
+    fichero: Optional[str] = None
+    filas_leidas: int = 0
+    filas_sin_codigo: int = 0
+    otros_departamentos: int = 0
+    del_departamento: int = 0
+    sin_fecha_de_acta: int = 0
+    cargados: int = 0
+    sin_expediente_en_el_sistema: int = 0
+    codigos_sin_expediente: list[str] = []
+    codigos_otros_departamentos: list[str] = []
+    fechas_no_legibles: list[str] = []
+    retirados: int = 0
+
+
 class EstadosAdifCargaOut(BaseModel):
     """Resumen de `POST /mantenimiento/estados-adif/cargar` (bloque 1, sesión
     2026-09-18 continuación): mismo criterio que `EstadoSapCargaOut` --
@@ -529,6 +552,7 @@ class FilaConciliacionOut(BaseModel):
     baja: str
     situacion: str
     motivo: str
+    en_ejecucion_adif: Optional[str] = None
 
 
 class RecuentoSituacionOut(BaseModel):
@@ -552,6 +576,8 @@ class RegistroPublicadoOut(BaseModel):
     expedientes_publicados: int = 0
     expedientes_no_publicados: int = 0
     expedientes_en_ficha_de_otro: int = 0
+    listado_en_ejecucion_adif: Optional[str] = None
+    en_ejecucion_adif_en_la_hoja: int = 0
 
 
 class ConciliacionOut(BaseModel):
