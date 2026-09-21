@@ -198,3 +198,46 @@ def test_un_decimal_con_punto_solo_se_lee_si_la_fila_cuadra():
     _inicio, datos, _columna, recuperadas = _cuadro_demostrado_por_aritmetica(filas)
     assert [f[2] for f in datos] == ["18", "12,5", "9"]
     assert recuperadas == ("SFT01-2391-PH-6920",)
+
+
+def test_la_fila_repetida_conservada_sigue_ahi_en_la_segunda_pasada(db_session):
+    # Idempotencia: al guardar la gemela, la búsqueda por firma en la base no
+    # puede tomar la fila repetida (que no tiene firma) por su duplicado.
+    from app.catalogo import construir_lineas_desde_tabla, guardar_lineas_catalogo
+    from app.models import Expediente, LineaCatalogo, Lote
+
+    expediente = Expediente(codigo_expediente="2.23/28510.9999")
+    db_session.add(expediente)
+    db_session.commit()
+    lote = Lote(expediente_id=expediente.id, identificador_lote="1")
+    db_session.add(lote)
+    db_session.commit()
+    mapeo = {"codigo_precio": None, "matricula": None, "descripcion": 1, "unidad_medida": None, "cantidad": 0,
+             "precio_unitario": 2}
+    tabla = TablaExtraida(
+        cabecera=["CANTIDAD", "DESCRIPCIÓN", "PRECIO"],
+        filas=[["100", "GUANTE JUBA JUNIT", "1,50 €"], ["100", "GUANTE JUBA JUNIT", "1,50 €"]],
+        pagina=8, bbox=(0, 0, 1, 1),
+    )
+
+    eco = TablaExtraida(cabecera=["CANTIDAD", "DESCRIPCIÓN", "PRECIO"], filas=[["100", "GUANTE JUBA JUNIT", "1,50 €"]],
+                        pagina=5, bbox=(0, 0, 1, 1))
+
+    def _pasada():
+        # La misma fila, antes, en la otra tabla del documento (el eco), y
+        # repetida en el cuadro del presupuesto.
+        del_eco = construir_lineas_desde_tabla(eco, mapeo, None, expediente.id, None, orden_inicial=0)
+        lineas = del_eco + construir_lineas_desde_tabla(tabla, mapeo, None, expediente.id, None, orden_inicial=5)
+        for linea in lineas:
+            linea["identificador_lote"] = "1"
+            linea["tabla_origen"] = (1, 1) if linea in del_eco else (1, 2)
+        conservar_filas_repetidas_que_cierran_el_lote(lineas, {"1": Decimal("300")})
+        for linea in lineas:
+            linea.pop("identificador_lote")
+        guardar_lineas_catalogo(db_session, lote.id, lineas)
+        db_session.commit()
+        return db_session.query(LineaCatalogo).filter_by(lote_id=lote.id).count()
+
+    assert _pasada() == 2
+    assert _pasada() == 2
+    assert _pasada() == 2
