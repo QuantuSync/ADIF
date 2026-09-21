@@ -21,6 +21,7 @@ _TABLAS = [
     models.LineaCatalogo.__table__,
     models.TrazaOrigen.__table__,
     models.TrabajoCola.__table__,
+    models.PresupuestoLoteDocumento.__table__,
 ]
 
 

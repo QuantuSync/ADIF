@@ -37,6 +37,7 @@ from app.catalogo import (
     podar_lineas_heredadas_obsoletas,
     podar_lineas_obsoletas_de_documento,
 )
+from app.extraccion.presupuesto_lote import registrar_presupuestos_de_lote
 from app.extraccion.baja import (
     BajaDeclarada,
     elegir_baja_preferida,
@@ -2087,6 +2088,16 @@ def ejecutar_extraccion_expediente(
         lineas_adjudicado_recalculado = recalcular_precio_adjudicado(db, expediente.id)
         if lineas_adjudicado_recalculado:
             db.commit()
+        # Bloque 1, sesión 2026-09-21: el presupuesto de cada lote tal como lo
+        # publican sus documentos, para el contraste de presupuestos. Su propia
+        # tabla, nunca `Lote.importe_licitacion` (ver
+        # `app.extraccion.presupuesto_lote`): no toca nada del catálogo. Sin
+        # documentos también corre, para vaciar lo de una pasada anterior.
+        registrar_presupuestos_de_lote(
+            db, expediente.id,
+            [] if sin_documentos else [(item.documento.id, item.paginas) for item in items],
+        )
+        db.commit()
 
         if motivo_revision is None and total_lineas == 0:
             if sin_documentos:

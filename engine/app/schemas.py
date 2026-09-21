@@ -560,3 +560,53 @@ class ConciliacionOut(BaseModel):
     situaciones: list[RecuentoSituacionOut]
     filas: list[FilaConciliacionOut]
     registro: RegistroPublicadoOut
+
+
+# Bloque 1, sesión 2026-09-21: la hoja "Contraste de presupuestos" del Excel,
+# campo a campo (`app.contraste_presupuestos.FilaContraste`), con el mismo
+# nombre que su columna.
+class FilaContrasteOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    codigo_expediente: str
+    lote: str
+    presupuesto_publicado: Decimal
+    tipo_cifra: str
+    cifra_comparada: Decimal
+    documento: Optional[str] = None
+    pagina: Optional[int] = None
+    suma_lineas: Decimal
+    diferencia: Decimal
+    diferencia_relativa: Optional[Decimal] = None
+    lineas: int
+    lineas_sin_cantidad: int
+    resultado: str
+    explicacion: str
+
+
+class RecuentoContrasteOut(BaseModel):
+    resultado: str
+    lotes: int
+
+
+class LoteFueraOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    codigo_expediente: str
+    lote: str
+    lineas: int
+    motivo: str
+
+
+class RecuentoFueraOut(BaseModel):
+    motivo: str
+    lotes: int
+
+
+class ContrasteOut(BaseModel):
+    total: int
+    resultados: list[RecuentoContrasteOut]
+    filas: list[FilaContrasteOut]
+    fuera_total: int
+    fuera: list[RecuentoFueraOut]
+    lotes_fuera: list[LoteFueraOut]
