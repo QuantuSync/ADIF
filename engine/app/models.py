@@ -914,3 +914,37 @@ class CandidatoMatricula(Base):
     calculado_en = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     linea_catalogo = relationship("LineaCatalogo", back_populates="candidatos_matricula")
+
+
+class PresupuestoLoteDocumento(Base):
+    """Presupuesto de licitación de un lote tal como lo publica un documento
+    ya descargado (bloque 1, sesión 2026-09-21, migración 0042).
+
+    **Solo lo lee el contraste de presupuestos** (`app.contraste_presupuestos`).
+    No es `Lote.importe_licitacion` ni lo rellena: ese campo interviene en la
+    baja, en la prueba del reparto por lotes y en los precios que un
+    presupuesto demuestra, y escribirlo desde aquí cambiaría datos del
+    catálogo. Una fila por aparición (documento, página y redacción), así que
+    un mismo lote puede tener varias: si dicen cifras distintas, el contraste
+    no elige ninguna. Se reescriben enteras en cada extracción del expediente
+    (`app.extraccion.presupuesto_lote.registrar_presupuestos_de_lote`)."""
+
+    __tablename__ = "presupuestos_lote_documento"
+    __table_args__ = (Index("ix_presupuestos_lote_documento_expediente", "expediente_id"),)
+
+    id = Column(Integer, primary_key=True)
+    expediente_id = Column(Integer, ForeignKey("expedientes.id"), nullable=False)
+    # `None` en las de ejecución material: el documento no dice de qué lote
+    # es, y el contraste solo la liga a uno si la aritmética lo demuestra.
+    identificador_lote = Column(String(64), nullable=True)
+    # La cifra tal como la publica el documento: base sin IVA en las tres
+    # redacciones de lote, ejecución material en `ejecucion_material`.
+    importe = Column(Numeric(14, 4), nullable=False)
+    importe_con_iva = Column(Numeric(14, 4), nullable=True)
+    # "anuncio" | "contrato" | "lista_sin_iva" | "ejecucion_material": qué
+    # redacción del documento la declara (ver `app.extraccion.presupuesto_lote`).
+    redaccion = Column(String(32), nullable=False)
+    documento_id = Column(Integer, ForeignKey("documentos.id"), nullable=False)
+    pagina = Column(Integer, nullable=True)
+    fragmento = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

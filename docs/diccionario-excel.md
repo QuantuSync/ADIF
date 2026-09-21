@@ -32,6 +32,7 @@ en cualquier momento y sale igual.
 |---|---|
 | **Materiales** | El catálogo. Una fila por artículo, lote y expediente |
 | **Conciliación** | Una fila por expediente publicado del departamento, aporte líneas o no, con qué se descargó, qué se leyó y por qué no aportó nada si no lo hizo |
+| **Contraste de presupuestos** | Una fila por lote: la suma de cantidad × precio de sus filas de "Materiales" contra el presupuesto de licitación que se publica para ese lote, con qué cifra es, de qué documento y página sale, y si cuadra |
 | **Resumen** | Las cifras del Excel y la explicación, en lenguaje llano, de por qué hay líneas que no están en "Materiales" |
 | **Presupuestos ADIF** | *Solo aparece cuando ADIF nos manda su listado de estados con la columna de presupuesto de licitación.* Compara ese presupuesto con el importe que el sistema lee de los documentos |
 
@@ -472,6 +473,85 @@ cargados y su fecha, cuándo fue la última búsqueda directa y cuántos
 expedientes devolvió, y el reparto entre publicados / no publicados /
 publicados dentro de la ficha de otro. Una cifra de cobertura sin decir de
 cuándo es no sirve para decidir nada.
+
+---
+
+## Hoja "Contraste de presupuestos" — las 14 columnas
+
+**Para qué existe.** Es la comprobación de que las filas de cada lote son las de
+ese lote y están bien leídas: si la suma de cantidad × precio de un lote cae
+**exactamente** sobre el presupuesto que se publicó para él, una atribución
+equivocada o una cifra mal leída no producen eso por casualidad. Se hizo a mano
+sobre 70 lotes el 18/09/2026; desde el 21/09/2026 la calcula el sistema para
+**todo lote con filas en "Materiales" que tenga un presupuesto publicado**.
+
+**Qué suma.** Las filas de "Materiales" de ese lote, exactamente las mismas. Una
+partida alzada sin cantidad cuenta una vez por su importe: es cantidad 1 por
+definición.
+
+**Contra qué cifra.** Siempre contra la **cifra equivalente**. Los precios de un
+cuadro son sin IVA, así que se compara con la base de licitación **sin IVA**. La
+excepción la demuestra la aritmética: si la suma × 1,15 da esa base a un
+céntimo, el cuadro está a precios de **ejecución material** y la base le suma un
+15 % de gastos generales y beneficio industrial; entonces se compara con la
+ejecución material que declara el propio documento, o con la base ÷ 1,15 si
+ninguno la declara. El céntimo de margen es el del redondeo: el documento
+redondea los gastos generales y el beneficio industrial por separado.
+
+**Qué cifra es cada presupuesto lo dice la etiqueta con la que se publicó**,
+nunca que la cuenta salga: el anuncio de la Plataforma escribe las dos ("Importe
+… Importe (sin impuestos) …"), el Contrato dice "(IVA excluido)", la lista de
+lotes del pliego "sin IVA", la propuesta de adjudicación la pone en la columna
+"Base imponible" y la sindicación de la Plataforma trae sus dos campos, "sin
+impuestos" y "con impuestos". Si la etiqueta no lo dice, la fila empieza por
+*"No se puede saber con certeza"* y explica por qué, en vez de suponerlo.
+
+| # | Columna | Qué es |
+|---|---|---|
+| 1 | Código de expediente | |
+| 2 | Lote | |
+| 3 | Presupuesto publicado | La cifra tal como se publicó para ese lote |
+| 4 | Qué cifra es | Base de licitación sin IVA, con IVA, o ejecución material; o *No se puede saber con certeza* y por qué |
+| 5 | Cifra con la que se compara | La equivalente: la misma cifra, o la ejecución material cuando el cuadro está a esos precios |
+| 6 | Documento | El documento del que sale el presupuesto publicado, o *Sindicación de la Plataforma (boletín MM/AAAA)* |
+| 7 | Página | La página de ese documento (vacía si viene de la sindicación) |
+| 8 | Suma de sus líneas (cantidad × precio) | |
+| 9 | Diferencia (€) | Suma − cifra comparada |
+| 10 | Diferencia (%) | Sobre la cifra comparada |
+| 11 | Líneas | Las filas de ese lote en "Materiales" |
+| 12 | Líneas sin cantidad | Las que el documento no da con cantidad (sin contar las partidas alzadas) |
+| 13 | Resultado | Ver la tabla de abajo |
+| 14 | Explicación | En una frase qué pasa; en los lotes comprobados a mano, lo que se comprobó contra el documento |
+
+### Los cuatro resultados
+
+| Resultado | Qué significa |
+|---|---|
+| **Cuadra al céntimo** | La suma es exactamente la cifra comparada |
+| **Cuadra con diferencia menor del 0,01 %** | No es exacta, pero la diferencia es menor de una diezmilésima del presupuesto |
+| **No cuadra** | La diferencia es mayor. No dice quién está mal: el cuadro del propio documento puede pasarse de su presupuesto (hay cinco casos comprobados a mano), o el lote puede tener filas de más o de menos. La explicación da la pista cuando la aritmética la da (*"la suma es exactamente el 90 % del presupuesto"*, *"la suma es 22 veces el presupuesto"*) |
+| **No se puede cerrar: faltan cantidades** | Alguna fila del lote no trae cantidad (o precio) en el documento, así que la suma está incompleta |
+
+### Los lotes que no entran
+
+Debajo de la tabla, el recuento de los lotes con filas en "Materiales" que no
+tienen fila aquí, por su motivo:
+
+- **Ningún documento ni la sindicación publican presupuesto para este lote.**
+- **El expediente tiene varios lotes y solo se publica el presupuesto del
+  conjunto**: comparar un lote con el total no diría nada.
+- **Sus documentos publican cifras distintas para este lote**: no se elige
+  ninguna.
+- **Sus líneas son el cuadro del acuerdo marco del que cuelga**: ese cuadro se
+  contrasta en la fila del acuerdo marco; contra el presupuesto de un pedido no
+  tiene sentido.
+
+Un "Lote 1" que el sistema pone porque el expediente no declara lotes **no es el
+"Lote 1" de la licitación**: para ese lote solo vale el presupuesto del
+expediente entero.
+
+**Esta hoja no cambia nada del catálogo.** La misma información está en la web,
+en la pantalla *Contraste de presupuestos*, filtrable por resultado.
 
 ---
 

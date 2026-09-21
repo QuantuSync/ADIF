@@ -7,6 +7,7 @@ const ENLACES = [
   { href: "/", etiqueta: "Expedientes" },
   { href: "/catalogo", etiqueta: "Catálogo" },
   { href: "/conciliacion", etiqueta: "Conciliación" },
+  { href: "/contraste-presupuestos", etiqueta: "Contraste de presupuestos" },
   { href: "/revision", etiqueta: "Cola de revisión" },
   { href: "/revision/candidatos-matricula", etiqueta: "Candidatos de matrícula" },
   { href: "/mantenimiento", etiqueta: "Mantenimiento" },

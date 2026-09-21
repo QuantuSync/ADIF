@@ -22,6 +22,7 @@ _TABLAS = [
     models.SapDesgloseLinea.__table__,
     models.MaestroMaterial.__table__,
     models.CandidatoMatricula.__table__,
+    models.PresupuestoLoteDocumento.__table__,
 ]
 
 

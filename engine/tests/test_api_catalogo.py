@@ -43,6 +43,8 @@ _TABLAS = [
     # funcione en producción.
     models.SindicacionExpediente.__table__,
     models.CacheOcrDocumento.__table__,
+    # Y la hoja "Contraste de presupuestos" (sesión 2026-09-21, bloque 1).
+    models.PresupuestoLoteDocumento.__table__,
 ]
 
 

@@ -13,7 +13,7 @@ from app.extraccion.maestro_materiales import validar_ruta_maestro_materiales
 from app.extraccion.sap_desglose import validar_ruta_sap_desglose
 from app.extraccion.vigentes_remanente import validar_ruta_vigentes_remanente
 from app.catalogo_antiguo import validar_ruta_catalogo_antiguo
-from app.routers import catalogo, conciliacion, documentos, expedientes, health, mantenimiento, revision, trabajos
+from app.routers import catalogo, conciliacion, contraste_presupuestos, documentos, expedientes, health, mantenimiento, revision, trabajos
 
 logger = logging.getLogger("api")
 
@@ -91,6 +91,7 @@ app.include_router(expedientes.router)
 app.include_router(trabajos.router)
 app.include_router(catalogo.router)
 app.include_router(conciliacion.router)
+app.include_router(contraste_presupuestos.router)
 app.include_router(revision.router)
 app.include_router(documentos.router)
 app.include_router(mantenimiento.router)

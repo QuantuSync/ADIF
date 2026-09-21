@@ -62,6 +62,14 @@ from app.presupuestos_adif import (
     construir_presupuestos_adif,
 )
 from app.catalogo_consulta import consultar_catalogo, filtros_del_entregable
+from app.contraste_presupuestos import (
+    COLUMNAS as COLUMNAS_CONTRASTE,
+    MOTIVOS_FUERA as MOTIVOS_FUERA_CONTRASTE,
+    NOMBRE_HOJA as NOMBRE_HOJA_CONTRASTE,
+    RESULTADOS as RESULTADOS_CONTRASTE,
+    Contraste,
+    construir_contraste,
+)
 from app.celdas_vacias import ETIQUETA_MOTIVO, PENDIENTE, celdas_vacias
 from app.conciliacion import (
     COLUMNAS_CONCILIACION,
@@ -625,6 +633,66 @@ def _escribir_presupuestos_adif(libro: Workbook, filas: list) -> None:
     hoja.append([_NOTA_PRESUPUESTOS_ADIF, None])
 
 
+# Bloque 1, sesión 2026-09-21: la suma de cantidad × precio de cada lote
+# contra su presupuesto publicado. Ver `app.contraste_presupuestos`, en
+# particular contra qué cifra se compara y cómo se sabe qué cifra es.
+_NOTA_CONTRASTE = (
+    "Una fila por lote con filas en \"Materiales\" y un presupuesto de licitación publicado para ese "
+    "lote. La suma es la de cantidad × precio unitario de sus filas de \"Materiales\", exactamente "
+    "las mismas. Se compara con la cifra equivalente: los precios de un cuadro son sin IVA, así que "
+    "con la base de licitación sin IVA; y si la suma multiplicada por 1,15 da esa base a un céntimo, "
+    "el cuadro está a precios de ejecución material y se compara con la ejecución material. Qué cifra "
+    "es cada presupuesto lo dice la etiqueta con la que se publicó; si la etiqueta no lo dice, la fila "
+    "lo avisa en vez de suponerlo. Una partida alzada sin cantidad cuenta una vez: es cantidad 1 por "
+    "definición. Esta hoja es una comprobación: no cambia ningún dato del catálogo."
+)
+
+
+def _escribir_contraste(libro: Workbook, contraste: Contraste) -> None:
+    hoja = libro.create_sheet(NOMBRE_HOJA_CONTRASTE)
+    hoja.append(list(COLUMNAS_CONTRASTE))
+    for fila in contraste.filas:
+        hoja.append([
+            _celda_texto_o_espacio(fila.codigo_expediente),
+            _celda_texto_o_espacio(fila.lote),
+            _celda_numero(fila.presupuesto_publicado),
+            _celda_texto_o_espacio(fila.tipo_cifra),
+            _celda_numero(fila.cifra_comparada),
+            _celda_texto_o_espacio(fila.documento),
+            fila.pagina,
+            _celda_numero(fila.suma_lineas),
+            _celda_numero(fila.diferencia),
+            _celda_numero(fila.diferencia_relativa),
+            fila.lineas,
+            fila.lineas_sin_cantidad,
+            _celda_texto_o_espacio(fila.resultado),
+            _celda_texto_o_espacio(fila.explicacion),
+        ])
+    for columna, ancho in zip("ABCDEFGHIJKLMN", (20, 8, 18, 40, 18, 30, 8, 20, 16, 12, 8, 10, 30, 90)):
+        hoja.column_dimensions[columna].width = ancho
+    for indice in range(2, hoja.max_row + 1):
+        for columna in (3, 5, 8, 9):
+            hoja.cell(row=indice, column=columna).number_format = _FORMATO_IMPORTE
+        hoja.cell(row=indice, column=10).number_format = "0.0000%"
+        for columna in (4, 14):
+            celda = hoja.cell(row=indice, column=columna)
+            celda.alignment = Alignment(wrap_text=True, vertical="top")
+    hoja.append([])
+    hoja.append([_NOTA_CONTRASTE, None])
+    hoja.append([])
+    hoja.append(["Resultado", "Lotes", None])
+    por_resultado = contraste.por_resultado()
+    for resultado in RESULTADOS_CONTRASTE:
+        hoja.append([resultado, por_resultado[resultado], None])
+    hoja.append(["Total de lotes contrastados", len(contraste.filas), None])
+    hoja.append([])
+    hoja.append(["Lotes con filas en \"Materiales\" que no entran en el contraste, y por qué", "Lotes", None])
+    por_motivo = contraste.por_motivo_fuera()
+    for motivo in MOTIVOS_FUERA_CONTRASTE:
+        hoja.append([motivo, por_motivo[motivo], None])
+    hoja.append(["Total de lotes que no entran", len(contraste.fuera), None])
+
+
 def _escribir_bloque_conciliacion(hoja, filas: list, registro: RegistroPublicado) -> None:
     """El recuento por Situación y, como pidió el cliente, **de qué fecha es
     el registro de lo publicado y qué cubre**, escrito en el propio Excel
@@ -891,6 +959,9 @@ def generar_excel_catalogo(db: Session, incluir_pendientes_sin_lote: bool = Fals
     # pudieran discrepar, la hoja dejaría de servir para lo único que existe
     # (docstring de `app.conciliacion`).
     lineas_por_expediente: Counter[int] = Counter()
+    # Bloque 1, sesión 2026-09-21: las mismas filas, por lote, para la hoja
+    # "Contraste de presupuestos" -- que sume exactamente lo que se entrega.
+    lineas_por_lote: dict[int, list[LineaCatalogo]] = {}
 
     # Bloque de medición del hallazgo de sesión (ver comentario de
     # `_CATEGORIA_DUPLICADO_SIN_PERDIDA` más arriba): antes de decidir qué
@@ -949,6 +1020,8 @@ def generar_excel_catalogo(db: Session, incluir_pendientes_sin_lote: bool = Fals
             continue
         incluidas += 1
         lineas_por_expediente[expediente.id] += 1
+        if lote is not None:
+            lineas_por_lote.setdefault(lote.id, []).append(linea)
         if linea.precio_corregido_desde_importe:
             precios_corregidos_desde_importe += 1
         if linea.descripcion_desde_referencia:
@@ -1021,6 +1094,7 @@ def generar_excel_catalogo(db: Session, incluir_pendientes_sin_lote: bool = Fals
     comprobar_cuadre(filas_conciliacion, incluidas)
     registro = describir_registro_publicado(db, filas_conciliacion)
     _escribir_conciliacion(libro, filas_conciliacion)
+    _escribir_contraste(libro, construir_contraste(db, lineas_por_lote))
     _escribir_presupuestos_adif(libro, construir_presupuestos_adif(db))
 
     _escribir_resumen(
