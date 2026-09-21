@@ -788,7 +788,7 @@ def procesar_anejo(
                 # Una cabecera de verdad (no una fila de datos tomada por
                 # cabecera, que trae una matrícula) abre un cuadro nuevo: con
                 # las dos columnas, su nota; sin ellas, ninguna. Sesión
-                # 2026-09-22: una celda puede traer varias matrículas
+                # 2026-09-21: una celda puede traer varias matrículas
                 # ("64315045O 64810014Z", `6.19/28510.0177` p.22, escaneada).
                 cabecera_de_verdad = not sin_cabecera_propia and not any(
                     _es_celda_de_matriculas(c) for c in tabla.cabecera

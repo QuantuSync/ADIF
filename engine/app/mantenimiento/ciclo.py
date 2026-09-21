@@ -91,7 +91,7 @@ class ResumenCiclo:
     # None solo si encolarla o ejecutarla fallara (nunca debe impedir que el
     # resto del ciclo se dé por bueno: ver el manejo de errores más abajo).
     auditoria: Optional[dict] = field(default=None)
-    # Sesión 2026-09-22: resumen de `completar_unidades_desde_maestro` al
+    # Sesión 2026-09-21 (cuarta parte): resumen de `completar_unidades_desde_maestro` al
     # final del ciclo.
     unidades_desde_maestro: Optional[dict] = field(default=None)
 
@@ -321,7 +321,7 @@ def ejecutar_ciclo_mantenimiento(
         resumen.trabajos_drenados += 1
         _renovar_bloqueo(db, trabajo)
 
-    # Sesión 2026-09-22: la unidad del maestro de materiales, dentro del
+    # Sesión 2026-09-21 (cuarta parte): la unidad del maestro de materiales, dentro del
     # proceso automático. El guardado de cada documento ya la aplica a sus
     # filas; esta pasada global recoge las que este ciclo no ha vuelto a
     # guardar (un maestro recién recargado), antes de la auditoría y de

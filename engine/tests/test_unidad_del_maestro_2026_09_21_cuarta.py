@@ -1,4 +1,4 @@
-"""Sesión 2026-09-22, bloque 1: la unidad del maestro de materiales dentro del
+"""Sesión 2026-09-21 (cuarta parte), bloque 1: la unidad del maestro de materiales dentro del
 proceso automático.
 
 Hasta ahora era un paso manual (`completar-unidades`) que no se volvía a lanzar

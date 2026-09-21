@@ -110,7 +110,7 @@ def reconstruir(db: Session, manejadores: dict) -> dict:
     ejecutar_trabajo(db, siguiente, manejadores)
     db.refresh(siguiente)
     # La unidad del maestro de materiales la aplica el propio ciclo desde la
-    # sesión 2026-09-22 (va en `resultado["unidades_desde_maestro"]`).
+    # sesión 2026-09-21, cuarta parte (va en `resultado["unidades_desde_maestro"]`).
     return {"trabajo": siguiente.id, "estado": siguiente.estado.value, "resultado": siguiente.resultado,
             "error": siguiente.error}
 

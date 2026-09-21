@@ -3401,7 +3401,7 @@ def guardar_lineas_catalogo(
                     setattr(existente, campo, None)
                 elif valor is not None:
                     setattr(existente, campo, valor)
-            # Sesión 2026-09-22: la unidad del documento manda siempre sobre la
+            # Sesión 2026-09-21 (cuarta parte): la unidad del documento manda siempre sobre la
             # del maestro. Si esta pasada trae una (o `PA`, que la invalida),
             # la marca de "viene del maestro" deja de ser verdad.
             if datos.get("unidad_medida") is not None:
@@ -3500,7 +3500,7 @@ def guardar_lineas_catalogo(
                 db, datos["expediente_id"], clave_huerfana_hipotetica, datos.get("documento_origen_id")
             )
     _anotar_motivo_de_maestro(db, objetos_tocados)
-    # Sesión 2026-09-22: la unidad del maestro, dentro del proceso automático
+    # Sesión 2026-09-21 (cuarta parte): la unidad del maestro, dentro del proceso automático
     # y sobre la fila terminada, por la misma razón que el motivo de arriba.
     aplicar_unidades_del_maestro(db, objetos_tocados)
     # `flush()`, no `commit()` (docstring: el llamador decide cuándo): las

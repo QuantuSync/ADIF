@@ -239,7 +239,7 @@ def _normalizada(unidad: Optional[str]) -> Optional[str]:
 def aplicar_unidades_del_maestro(db: Session, lineas) -> ResumenCompletarUnidades:
     """La unidad del maestro sobre estas líneas, mirando la fila ya escrita.
 
-    Sesión 2026-09-22: deja de ser solo un paso manual y corre dentro del
+    Sesión 2026-09-21 (cuarta parte): deja de ser solo un paso manual y corre dentro del
     proceso automático -- al guardar las líneas de cada documento
     (`app.catalogo.guardar_lineas_catalogo`) y al final de cada ciclo de
     mantenimiento --, así que el reproceso la aplica siempre. Tres reglas:
