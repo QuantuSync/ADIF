@@ -64,7 +64,7 @@ siempre "Cod" con esa capitalización exacta.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from typing import Optional
 
@@ -141,6 +141,26 @@ class TablaExtraida:
     # 6) tiene que seguir siendo la misma para los N bloques de un cuadro que
     # repite la misma cabecera de columnas en cada lote.
     titulo_propio: str = ""
+    # Sesión 2026-09-21 (tercera parte), bloque 2 del encargo: el rótulo
+    # «LOTE N» que una tabla YA ACEPTADA trae en una de sus propias filas --
+    # como primera fila, encima de la cabecera de columnas (`3.22/28510.0048`),
+    # o en medio de los datos, abriendo el bloque de cada lote
+    # (`3.23/28510.0135`, lotes 2 a 8 en la misma caja). Lo lee la etapa 3.5
+    # igual que `titulo_propio`, y por la misma razón va aparte de `cabecera`.
+    # A diferencia de `titulo_propio` no marca las filas para la comprobación
+    # aritmética de `descartar_bloques_de_lote_que_no_cuadran`: esas filas ya
+    # salían antes, solo se decide a qué lote pertenecen (ver
+    # `_partir_tabla_aceptada_por_rotulos`).
+    rotulo_de_lote: str = ""
+    # Sesión 2026-09-21 (tercera parte), bloque 3 del encargo: códigos de
+    # precio de filas que la tabla dejaba en su cabecera y que se han
+    # recuperado como datos (`_fila_con_el_codigo_en_la_cabecera`). Sus líneas
+    # solo se quedan si con ellas el lote cuadra con su presupuesto publicado
+    # (`app.extraccion.pipeline_anejo.descartar_recuperadas_que_no_cuadran`).
+    codigos_recuperados: tuple[str, ...] = ()
+    # Misma sesión y misma prueba: el texto literal de la celda de referencia
+    # de filas recuperadas por `_referencia_sin_palabras` (ver ahí).
+    referencias_recuperadas: tuple[str, ...] = ()
     # Bloque 1, decisión 5 del cliente (sesión 2026-09-19, sexta parte): el
     # índice de la columna que hace de descripción en un cuadro cuya ÚNICA
     # columna de texto es la referencia de la herramienta ("SFT01-2388L-PH-6920",
@@ -181,6 +201,62 @@ def _admite_matricula_8(filas: list[FILA]) -> bool:
         return True
     con_8 = sum(1 for fila in filas if any(_MATRICULA_8_RE.match(c) for c in _celdas_limpias(fila)))
     return con_8 >= _MIN_FILAS_MATRICULA_8
+
+
+_CODIGO_AL_FINAL_RE = re.compile(r"\s([A-Za-z]{1,4})-?(\d{1,4})$")
+_CODIGO_PARTES_RE = re.compile(r"^([A-Za-z]{1,4})-?(\d{1,4})$")
+
+
+def _fila_con_el_codigo_en_la_cabecera(filas: list[FILA], indice_datos: int) -> Optional[tuple[int, int, str]]:
+    """Sesión 2026-09-21 (tercera parte), bloque 3 del encargo: la extracción
+    puede pegar el código de precio de la PRIMERA fila a la celda de la
+    cabecera que tiene encima -- "CODIFICACIÓN DEL PRECIO P-1" --, y dejar la
+    fila con esa celda vacía (`6.25/28510.0141` ANEJO_1.pdf p.23, el cuadro
+    del LOTE 2). Como la tabla empieza a leer en la primera fila con código,
+    esa fila se quedaba en la cabecera y el lote perdía su P-1 (61.000 t ×
+    10,85 € = 661.850,00 €).
+
+    Solo cuando todo esto se cumple a la vez: la celda de cabecera de la
+    columna del código termina en un código; ese código es el ANTERIOR al de
+    la primera fila con código (mismo prefijo, número uno menos: "P-1" antes
+    de "P-2"); y justo encima de esa primera fila hay UNA fila con esa celda
+    vacía y el resto rellenas como las filas de datos. Devuelve (índice de la
+    fila, columna del código, código). La línea que sale de ahí pasa además la
+    prueba del presupuesto del lote (`codigos_recuperados`)."""
+    primera = filas[indice_datos]
+    columna = next(
+        (i for i, celda in enumerate(primera) if celda and _CODIGO_PARTES_RE.match(re.sub(r"\s+", "", celda))),
+        None,
+    )
+    if columna is None or indice_datos < 1:
+        return None
+    prefijo, numero = _CODIGO_PARTES_RE.match(re.sub(r"\s+", "", primera[columna])).groups()
+    anterior = int(numero) - 1
+    if anterior < 1:
+        return None
+    candidata = indice_datos - 1
+    fila = filas[candidata]
+    rellenas = lambda f: sum(1 for i, c in enumerate(f) if i != columna and (c or "").strip())  # noqa: E731
+    if rellenas(fila) < rellenas(primera) or rellenas(fila) < 2:
+        return None
+    # Segunda forma, `6.24/28510.0185` p.22: la fila trae su propio código,
+    # pero con un sufijo en minúscula ("P-030b", el anterior a "P-031") que no
+    # cuenta como código de fila de datos, así que se quedaba de cabecera.
+    propio = re.sub(r"\s+", "", fila[columna] or "")
+    if propio:
+        sufijo = re.match(r"^([A-Za-z]{1,4})-?0*(\d{1,4})([a-z])$", propio)
+        if sufijo and sufijo.group(1).upper() == prefijo.upper() and int(sufijo.group(2)) == anterior:
+            return candidata, columna, propio
+        return None
+    if indice_datos < 2:
+        return None
+    for cabecera in filas[:candidata]:
+        texto = re.sub(r"\s+", " ", cabecera[columna] or "").strip() if columna < len(cabecera) else ""
+        final = _CODIGO_AL_FINAL_RE.search(texto)
+        if final and final.group(1).upper() == prefijo.upper() and int(final.group(2)) == anterior:
+            codigo = f"{final.group(1)}-{final.group(2)}" if "-" in primera[columna] else final.group(1) + final.group(2)
+            return candidata, columna, codigo
+    return None
 
 
 def _indice_primera_fila_datos(filas: list[FILA]) -> int | None:
@@ -684,6 +760,47 @@ def _tiene_columna_de_descripcion(
     return ColumnaDeTexto(referencia, False) if referencia is not None else None
 
 
+# Sesión 2026-09-21 (tercera parte), bloque 3 del encargo: en un cuadro de
+# REFERENCIAS (`ColumnaDeTexto.es_designacion` falso), una referencia puede no
+# tener ninguna secuencia de tres letras -- "R-245-12T3-M-PH-4340",
+# "RC-12-WK-H1X" (`2.23/28510.0098` p.9, cuatro filas que cuadran y sin las
+# que el cuadro no llega a su "Total 35.760,00 €"). Una referencia de verdad
+# mezcla letras y cifras: al menos dos letras y una cifra, y ni una celda de
+# puras cifras ni un texto sin cifras. Estas filas salen marcadas
+# (`referencias_recuperadas`) y solo se quedan si con ellas el lote cuadra.
+_LETRA_RE = re.compile(r"[a-zñ]")
+_CIFRA_RE = re.compile(r"\d")
+
+
+# Misma sesión, `6.22/28510.0051`/`0159` p.9: el cuadro escribe los miles con
+# punto ("2.160") y los decimales también con punto ("12.5", "8.5"), y una
+# celda "12.5" no se lee. La aritmética de la propia fila lo decide: la celda
+# se reescribe con coma solo si así la fila cuadra al céntimo (140 × 12,5 =
+# 1.750). Estas filas también salen marcadas (`referencias_recuperadas`).
+_DECIMAL_CON_PUNTO_RE = re.compile(r"^\s*(\d{1,3})\.(\d{1,2})\s*$")
+
+
+def _con_decimal_con_punto(fila: FILA, tripleta: tuple[int, int, int]) -> Optional[FILA]:
+    nueva = list(fila)
+    cambiada = False
+    for i in tripleta:
+        celda = _valor_celda(fila, i)
+        if _numero_de_celda(celda) is None and celda and _DECIMAL_CON_PUNTO_RE.match(celda):
+            nueva[i] = celda.strip().replace(".", ",")
+            cambiada = True
+    if not cambiada:
+        return None
+    valores = [_numero_de_celda(_valor_celda(nueva, i)) for i in tripleta]
+    if any(v is None for v in valores):
+        return None
+    cantidad, precio, importe = valores
+    return nueva if abs(cantidad * precio - importe) <= Decimal("0.01") else None
+
+
+def _referencia_sin_palabras(texto: str) -> bool:
+    return len(_LETRA_RE.findall(texto)) >= 2 and bool(_CIFRA_RE.search(texto))
+
+
 def _fila_trae_descripcion(fila: FILA, fuera: list[int]) -> bool:
     return any(_LETRAS_RE.search(_texto_celda(_valor_celda(fila, i))) for i in fuera)
 
@@ -779,7 +896,7 @@ def _hereda_de_la_fila_de_seccion(
 
 def _cuadro_demostrado_por_aritmetica(
     filas: list[FILA],
-) -> Optional[tuple[int, list[FILA], "ColumnaDeTexto"]]:
+) -> Optional[tuple[int, list[FILA], "ColumnaDeTexto", tuple[str, ...]]]:
     """(dónde acaba la cabecera, filas de datos) de una tabla que se demuestra
     sola por la aritmética de sus filas, o `None`.
 
@@ -821,10 +938,25 @@ def _cuadro_demostrado_por_aritmetica(
     if inicio is None:
         return None
     datos: list[FILA] = []
+    recuperadas: list[str] = []
     for indice in range(inicio, len(filas)):
         fila = filas[indice]
         if es_dato(fila):
             datos.append(fila)
+            continue
+        con_decimal = None if cuadra(fila) else _con_decimal_con_punto(fila, tripleta)
+        candidata = con_decimal if con_decimal is not None else fila
+        if con_decimal is not None and es_dato(con_decimal):
+            datos.append(con_decimal)
+            recuperadas.append(_valor_celda(con_decimal, columna_texto.indice))
+            continue
+        if (
+            not columna_texto.es_designacion
+            and cuadra(candidata)
+            and _referencia_sin_palabras(_texto_celda(_valor_celda(candidata, columna_texto.indice)))
+        ):
+            datos.append(candidata)
+            recuperadas.append(_valor_celda(candidata, columna_texto.indice))
             continue
         # Decisión 4 del cliente: la fila que cuadra y a la que solo le falta
         # la descripción, cuando el rótulo de su sección la imprime justo
@@ -833,7 +965,7 @@ def _cuadro_demostrado_por_aritmetica(
             heredada = _hereda_de_la_fila_de_seccion(filas, indice, tripleta, fuera)
             if heredada is not None and _fila_trae_descripcion(heredada, fuera):
                 datos.append(heredada)
-    return (inicio, datos, columna_texto) if datos else None
+    return (inicio, datos, columna_texto, tuple(recuperadas)) if datos else None
 
 
 # Bloque 3, sesión 2026-09-19 (quinta parte), los 14 de "cobertura parcial de
@@ -933,6 +1065,56 @@ def _bloques_por_fila_de_lote(
     return bloques
 
 
+def _partir_tabla_aceptada_por_rotulos(tabla, filas: list[FILA], unica: TablaExtraida) -> Optional[list[TablaExtraida]]:
+    """Sesión 2026-09-21 (tercera parte), bloque 2 del encargo: una tabla que
+    las vías de siempre aceptan puede traer el rótulo de su lote en una de sus
+    propias filas -- encima de la cabecera de columnas o entre sus datos, una
+    fila por lote --, y hasta hoy ese rótulo no decidía nada: el lote salía de
+    la franja de encima, que en `3.22/28510.0048` dice "El presupuesto base
+    del lote 1 es de…" justo encima del cuadro del LOTE 2, y en
+    `3.23/28510.0135` los lotes 3 a 8 se quedaban en el 2.
+
+    Se parte la tabla por esas filas: cada tramo de datos queda con el rótulo
+    que lo abre (`rotulo_de_lote`), y el tramo anterior al primer rótulo de
+    los datos se queda con el de la cabecera, si lo hay, o sin ninguno (y la
+    etapa 3.5 decide como siempre, por la franja o la herencia). **Ninguna
+    fila entra ni sale**: son exactamente las filas que la tabla ya daba, en
+    el mismo orden y con la misma cabecera -- y con ella la misma firma y el
+    mismo mapeo --; las filas-rótulo no eran datos. `None` si la tabla no trae
+    ningún rótulo propio."""
+    posicion = {id(fila): i for i, fila in enumerate(filas)}
+    if not unica.filas or any(id(fila) not in posicion for fila in unica.filas):
+        return None
+    primera_de_datos = posicion[id(unica.filas[0])]
+    rotulos_cabecera = [_etiqueta_de_lote(f) for f in filas[:primera_de_datos]]
+    rotulos_cabecera = [r for r in rotulos_cabecera if r is not None]
+    rotulo = rotulos_cabecera[-1] if rotulos_cabecera else ""
+    tramos: list[tuple[str, list[FILA], int, int]] = []
+    actual: list[FILA] = []
+    inicio = primera_de_datos
+    for fila in unica.filas:
+        etiqueta = _etiqueta_de_lote(fila)
+        if etiqueta is None:
+            actual.append(fila)
+            continue
+        if actual:
+            tramos.append((rotulo, actual, inicio, posicion[id(fila)]))
+        rotulo, actual, inicio = etiqueta, [], posicion[id(fila)]
+    if actual:
+        tramos.append((rotulo, actual, inicio, posicion[id(actual[-1])] + 1))
+    if not any(r for r, *_ in tramos):
+        return None
+    return [
+        replace(
+            unica,
+            filas=datos,
+            bbox=_bbox_de_filas(tabla, desde, hasta) if len(tramos) > 1 else unica.bbox,
+            rotulo_de_lote=r,
+        )
+        for r, datos, desde, hasta in tramos
+    ]
+
+
 def _tablas_extraidas(
     tabla, pagina, presupuestos_declarados: tuple[Decimal, ...] = ()
 ) -> list[TablaExtraida]:
@@ -948,8 +1130,11 @@ def _tablas_extraidas(
         # La partición por lotes se prueba SOLO cuando ninguna de las vías de
         # siempre acepta la tabla: así no puede quitar ni una fila de las que
         # ya salen (su propia garantía aritmética sí descarta las que ella
-        # misma recupera, `descartar_bloques_de_lote_que_no_cuadran`).
-        return [unica]
+        # misma recupera, `descartar_bloques_de_lote_que_no_cuadran`). Una
+        # tabla aceptada solo se parte por los rótulos de lote de sus propias
+        # filas, sin quitar ni añadir ninguna (sesión 2026-09-21, tercera
+        # parte, `_partir_tabla_aceptada_por_rotulos`).
+        return _partir_tabla_aceptada_por_rotulos(tabla, filas, unica) or [unica]
     if filas and not _es_modelo_de_oferta_en_blanco(filas):
         bloques = _bloques_por_fila_de_lote(filas, presupuestos_declarados)
         if bloques is not None:
@@ -988,7 +1173,7 @@ def _tabla_extraida(
             demostrado = _cuadro_demostrado_por_aritmetica(filas)
             if demostrado is None:
                 return None  # tabla espuria: ni código de precio ni cabecera de cuadro
-            inicio_datos, filas_que_cuadran, columna_texto = demostrado
+            inicio_datos, filas_que_cuadran, columna_texto, referencias_recuperadas = demostrado
             return TablaExtraida(
                 cabecera=_combinar_filas_cabecera(filas[:inicio_datos]),
                 filas=filas_que_cuadran,
@@ -996,6 +1181,7 @@ def _tabla_extraida(
                 bbox=tuple(tabla.bbox),
                 columnas_x=_columnas_x(tabla),
                 columna_referencia=None if columna_texto.es_designacion else columna_texto.indice,
+                referencias_recuperadas=referencias_recuperadas,
             )
         return TablaExtraida(
             cabecera=_combinar_filas_cabecera(filas[:1]),
@@ -1003,6 +1189,28 @@ def _tabla_extraida(
             pagina=pagina.page_number,
             bbox=tuple(tabla.bbox),
             columnas_x=_columnas_x(tabla),
+        )
+    recuperada = _fila_con_el_codigo_en_la_cabecera(filas, indice_datos)
+    if recuperada is not None:
+        indice_fila, columna, codigo = recuperada
+        fila = list(filas[indice_fila])
+        fila[columna] = codigo
+        # El código sale también de la celda de cabecera: es de la fila, no
+        # del rótulo de la columna, y dejarlo cambiaría la firma de la cabecera.
+        cabecera = [
+            [
+                _CODIGO_AL_FINAL_RE.sub("", re.sub(r"\s+", " ", c)).strip() if i == columna and c else c
+                for i, c in enumerate(f)
+            ]
+            for f in filas[:indice_fila]
+        ]
+        return TablaExtraida(
+            cabecera=_combinar_filas_cabecera(cabecera),
+            filas=[fila] + filas[indice_datos:],
+            pagina=pagina.page_number,
+            bbox=tuple(tabla.bbox),
+            columnas_x=_columnas_x(tabla),
+            codigos_recuperados=(codigo,),
         )
     return TablaExtraida(
         cabecera=_combinar_filas_cabecera(filas[:indice_datos]),

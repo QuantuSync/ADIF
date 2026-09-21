@@ -2187,6 +2187,11 @@ def _importe_es(valor: Decimal) -> str:
 # dos veces -- 451.647,28 / 8 = 56.455,91, y con esa cifra el lote suma
 # 2.975.673,96 €, su Presupuesto de Ejecución Material exacto.
 CAMPO_IMPORTE = "importe"
+# Sesión 2026-09-21 (tercera parte): ver `app.extraccion.filas_repetidas`.
+_MOTIVO_FILA_REPETIDA_EN_EL_CUADRO = (
+    "fila que el propio cuadro repite, idéntica, en la misma tabla: se conserva porque con ella el lote suma "
+    "exactamente su presupuesto de licitación publicado"
+)
 
 MARCA_PRECIO_DESDE_IMPORTE = "[precio recalculado desde el importe del documento]"
 MOTIVO_PRECIO_DESDE_IMPORTE = (
@@ -2518,6 +2523,53 @@ def _importe_de_fila(fila: list[Optional[str]], mapeo: dict[str, Optional[int]])
         return None
 
 
+def rotulo_de_columna(cabecera: Optional[list], indice: Optional[int]) -> Optional[str]:
+    """El rótulo de una columna tal como lo imprime la cabecera, con los saltos
+    de línea de la celda colapsados en espacios."""
+    if cabecera is None or indice is None or indice >= len(cabecera) or not cabecera[indice]:
+        return None
+    return re.sub(r"\s+", " ", str(cabecera[indice])).strip() or None
+
+
+def texto_otra_cantidad(rotulo_cantidad: str, rotulo_otra: str, valor_otra: Optional[str]) -> str:
+    """El motivo que lleva la fila de un cuadro con «cantidad mínima por
+    pedido» y «pedido inicial» (sesión 2026-09-21, tercera parte). Empieza por
+    `PREFIJO_OTRA_CANTIDAD` para que el Excel lo encuentre dentro del motivo de
+    revisión (`extraer_texto_otra_cantidad`)."""
+    otra = f"trae {valor_otra}" if valor_otra else "no trae ningún valor"
+    return (
+        f"{PREFIJO_OTRA_CANTIDAD}«{rotulo_cantidad}» del cuadro, no la cantidad total a comprar; "
+        f"su columna «{rotulo_otra}» {otra} en esta fila"
+    )
+
+
+PREFIJO_OTRA_CANTIDAD = "Cantidad: es la columna "
+_OTRA_CANTIDAD_RE = re.compile(re.escape(PREFIJO_OTRA_CANTIDAD) + r"«[^»]*» del cuadro, no la cantidad total a "
+                               r"comprar; su columna «[^»]*» (?:trae .*?|no trae ningún valor) en esta fila")
+
+
+def extraer_texto_otra_cantidad(motivo_revision: Optional[str]) -> Optional[str]:
+    encontrado = _OTRA_CANTIDAD_RE.search(motivo_revision or "")
+    return encontrado.group(0) if encontrado else None
+
+
+def _anotar_otra_cantidad(linea: dict, fila: list[Optional[str]], otra_cantidad: Optional[tuple[int, str, str]]) -> None:
+    """`otra_cantidad` es (columna, rótulo de la Cantidad, rótulo de la otra),
+    de `app.extraccion.mapeo_cabecera.columna_de_la_otra_cantidad`. Va aparte
+    del mapeo a propósito: una columna del mapeo cuenta como "reclamada" para
+    las recuperaciones de columna fantasma, y esto no puede cambiar ni un
+    dato de la fila, solo su motivo."""
+    if otra_cantidad is None:
+        return
+    indice_otra, rotulo_cantidad, rotulo_otra = otra_cantidad
+    valor = limpiar_texto_celda(_valor_en(fila, indice_otra))
+    if valor and _es_celda_vacia(valor):
+        valor = None
+    linea["motivo_revision"] = _acumular_motivo(
+        linea.get("motivo_revision"), texto_otra_cantidad(rotulo_cantidad, rotulo_otra, valor)
+    )
+
+
 def construir_lineas_desde_tabla(
     tabla: TablaExtraida,
     mapeo: dict[str, Optional[int]],
@@ -2525,6 +2577,7 @@ def construir_lineas_desde_tabla(
     expediente_id: int,
     baja_lote: Optional[Decimal],
     orden_inicial: int,
+    otra_cantidad: Optional[tuple[int, str, str]] = None,
 ) -> list[dict]:
     # Una fila de pie de tabla (CONTEXTO.md sección 2, sesión de rodaje
     # 2026-09-03) devuelve None de `construir_linea_catalogo`: se descarta
@@ -2558,6 +2611,7 @@ def construir_lineas_desde_tabla(
                 if not descripcion_dividida:
                     linea["motivo_revision"] = _acumular_motivo(linea["motivo_revision"], _MOTIVO_FILA_FUSIONADA)
                 linea["importe_documento"] = _importe_de_fila(sub_fila, mapeo)
+                _anotar_otra_cantidad(linea, sub_fila, otra_cantidad)
                 resultado.append(linea)
             continue
 
@@ -2586,6 +2640,7 @@ def construir_lineas_desde_tabla(
         if linea is None:
             continue
         linea["importe_documento"] = _importe_de_fila(fila, mapeo)
+        _anotar_otra_cantidad(linea, fila, otra_cantidad)
         if precio_de_fila_siguiente is not None:
             saltadas.add(siguiente_precio)
             linea["motivo_revision"] = _acumular_motivo(linea["motivo_revision"], _MOTIVO_PRECIO_FILA_SIGUIENTE)
@@ -2693,6 +2748,12 @@ def _firma_material(datos: dict) -> Optional[tuple]:
     verificable por un humano, y muy preferible a perder un material real
     sin dejar rastro."""
     if _MOTIVO_FILA_FUSIONADA in (datos.get("motivo_revision") or ""):
+        return None
+    # Sesión 2026-09-21 (tercera parte): la fila que el propio cuadro repite y
+    # que se conserva porque con ella el lote cuadra (`app.extraccion.
+    # filas_repetidas`) tampoco tiene firma: fundirla con su gemela es
+    # justo lo que la hacía desaparecer.
+    if _MOTIVO_FILA_REPETIDA_EN_EL_CUADRO in (datos.get("motivo_revision") or ""):
         return None
     matricula = datos.get("matricula")
     descripcion = datos.get("descripcion")

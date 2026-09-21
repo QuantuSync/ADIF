@@ -151,3 +151,31 @@ def test_extraer_campos_pcsp_para_expediente_documento_de_un_solo_lote_no_cambia
 
     assert motivo is None
     assert importe_como_decimal(campos.importe_licitacion) == Decimal("145100")
+
+
+# --- Sesión 2026-09-21 (tercera parte): qué lote de la licitación es el expediente ---
+
+
+def test_lote_propio_por_objeto_da_el_numero_sin_ceros_y_todos_los_lotes():
+    from app.extraccion.lotes_pcsp import lote_propio_por_objeto
+
+    paginas = extraer_texto(fx.ANUNCIO_PCSP_DOS_LOTES_SIN_DESGLOSE)
+
+    assert lote_propio_por_objeto(paginas, _OBJETO_LOTE_2) == ("2", ("1", "2"))
+    assert lote_propio_por_objeto(paginas, _OBJETO_LOTE_1) == ("1", ("1", "2"))
+
+
+def test_lote_propio_por_objeto_sin_emparejar_no_adivina():
+    from app.extraccion.lotes_pcsp import lote_propio_por_objeto
+
+    paginas = extraer_texto(fx.ANUNCIO_PCSP_DOS_LOTES_SIN_DESGLOSE)
+
+    assert lote_propio_por_objeto(paginas, None) is None
+    assert lote_propio_por_objeto(paginas, "Suministro de otra cosa") is None
+
+
+def test_lote_propio_por_objeto_con_un_solo_lote_no_aplica():
+    from app.extraccion.lotes_pcsp import lote_propio_por_objeto
+
+    pagina = PaginaTexto(numero=1, texto="Nº Lote: 001\nObjeto del Contrato: Un único lote.\nPresupuesto...")
+    assert lote_propio_por_objeto([pagina], "Un único lote.") is None

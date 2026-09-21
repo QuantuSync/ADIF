@@ -37,7 +37,13 @@ from app.catalogo import (
     podar_lineas_heredadas_obsoletas,
     podar_lineas_obsoletas_de_documento,
 )
-from app.extraccion.presupuesto_lote import registrar_presupuestos_de_lote
+from app.extraccion.presupuesto_lote import (
+    ANUNCIO as PRESUPUESTO_DE_ANUNCIO,
+    CONTRATO as PRESUPUESTO_DE_CONTRATO,
+    LISTA_SIN_IVA as PRESUPUESTO_DE_LISTA_SIN_IVA,
+    leer_presupuestos_de_lote,
+    registrar_presupuestos_de_lote,
+)
 from app.extraccion.baja import (
     BajaDeclarada,
     elegir_baja_preferida,
@@ -51,7 +57,11 @@ from app.extraccion.campos_lc27 import (
     extraer_objeto_contrato_lc27,
 )
 from app.extraccion.campos_pcsp import CampoAnclado, CODIGO_EXPEDIENTE_RE, extraer_campos_anuncio_pcsp, importe_como_decimal
-from app.extraccion.lotes_pcsp import extraer_campos_pcsp_para_expediente, extraer_ventanas_multi_lote_pcsp
+from app.extraccion.lotes_pcsp import (
+    extraer_campos_pcsp_para_expediente,
+    extraer_ventanas_multi_lote_pcsp,
+    lote_propio_por_objeto,
+)
 from app.extraccion.clasificador import clasificar, es_pliego_sin_precios
 from app.extraccion.cruce_codigos import (
     AutoreferenciaMatrizError,
@@ -99,6 +109,7 @@ from app.models import (
     Lote,
     ModeloPrecio,
     OrigenDocumento,
+    SindicacionExpediente,
     TipoDocumento,
     TrabajoCola,
     TrazaOrigen,
@@ -540,6 +551,93 @@ def _como_lineas_de_otro_expediente(
         linea["precio_adjudicado"] = None
         convertidas.append(linea)
     return convertidas
+
+
+def _lote_de_la_licitacion_por_objeto(
+    expediente: Expediente, items: list["_Documento"]
+) -> Optional[tuple[str, tuple[str, ...]]]:
+    """Sesión 2026-09-21 (tercera parte), bloque 2 del encargo: qué lote de la
+    licitación es este expediente según el bloque «Nº Lote» de su Anuncio de
+    la Plataforma cuyo objeto es su título (`app.extraccion.lotes_pcsp.
+    lote_propio_por_objeto`), y todos los lotes del anuncio. Todos los
+    anuncios que lo digan tienen que decir lo mismo; si discrepan, `None`."""
+    encontrados = {
+        lote_propio_por_objeto(item.paginas, expediente.nombre_proyecto)
+        for item in items
+        if item.tipo == TipoDocumento.anuncio_pcsp
+    } - {None}
+    return next(iter(encontrados)) if len(encontrados) == 1 else None
+
+
+def _quedarse_con_el_lote_propio(resultado, propio: str, identificador_del_expediente: str):
+    """El anejo repartido por sus rótulos «LOTE N» (bloque 2 del encargo): las
+    filas del lote de este expediente pasan a su lote; las de los demás lotes
+    se conservan sin lote, con su motivo, y no salen en «Materiales» -- son
+    los cuadros de sus lotes hermanos. Las del anejo de criterios del
+    conjunto (sin lote por diseño) no se tocan."""
+    for linea in resultado.lineas:
+        identificador = linea.get("identificador_lote")
+        if identificador == propio:
+            linea["identificador_lote"] = identificador_del_expediente
+        elif identificador is not None:
+            linea["identificador_lote"] = None
+            linea["clave_linea"] = linea["clave_huerfana_hipotetica"]
+            linea["motivo_revision"] = _acumular_motivo(
+                linea.get("motivo_revision"),
+                f"tabla del LOTE {identificador} de la licitación: este expediente es su lote {propio} (bloque "
+                f"«Nº Lote» del anuncio de la Plataforma cuyo objeto es su título), así que no es suya y se "
+                "conserva sin lote",
+            )
+            linea["lote_heredado_de_pagina_anterior"] = None
+            linea["lote_del_expediente"] = None
+            linea["baja_lote"] = None
+            linea["precio_adjudicado"] = None
+    return resultado
+
+
+def _presupuestos_publicados_por_lote(
+    db: Session, expediente: Expediente, lotes: list[Lote], items: list["_Documento"]
+) -> dict[str, Decimal]:
+    """Sesión 2026-09-21 (tercera parte), bloque 3 del encargo: el presupuesto
+    de licitación publicado de cada lote, para la prueba de la partida alzada
+    recuperada (`app.extraccion.partida_alzada_del_lote`). El del lote si ya lo
+    tiene; si no, el que sus documentos publican con etiqueta de base sin IVA
+    (`app.extraccion.presupuesto_lote`, la misma lectura del contraste de
+    presupuestos), solo si es una cifra única. El lote único del sistema no es
+    el "Lote 1" de la licitación (CONTEXTO.md sección 7): a él solo le vale lo
+    que ya tiene. Va aparte de `presupuestos_por_lote` a propósito: aquel activa
+    la guarda de `descartar_bloques_de_lote_que_no_cuadran`, y ampliarlo
+    cambiaría lo que esa guarda descarta."""
+    publicados = {l.identificador_lote: l.importe_licitacion for l in lotes if l.importe_licitacion is not None}
+    if len(lotes) == 1 and lotes[0].identificador_lote == LOTE_UNICO:
+        # Al lote único le vale el presupuesto del expediente entero: el suyo, o
+        # el "sin impuestos" de la sindicación de la Plataforma, la misma cifra
+        # con la que lo compara el contraste de presupuestos.
+        if LOTE_UNICO not in publicados:
+            sindicacion = db.execute(
+                select(SindicacionExpediente).where(SindicacionExpediente.expediente_id == expediente.id)
+            ).scalar_one_or_none()
+            if sindicacion is not None and sindicacion.importe_licitacion_sin_impuestos:
+                publicados[LOTE_UNICO] = Decimal(sindicacion.importe_licitacion_sin_impuestos)
+        return publicados
+    for identificador, cifra in _presupuestos_leidos_de_los_documentos(
+        items, {l.identificador_lote for l in lotes}
+    ).items():
+        publicados.setdefault(identificador, cifra)
+    return publicados
+
+
+def _presupuestos_leidos_de_los_documentos(items: list["_Documento"], identificadores: set[str]) -> dict[str, Decimal]:
+    """El presupuesto sin IVA que los documentos publican para cada lote
+    (`app.extraccion.presupuesto_lote`), solo cuando es una cifra única."""
+    leidos: dict[str, set[Decimal]] = {}
+    for item in items:
+        for leido in leer_presupuestos_de_lote(item.paginas):
+            if leido.identificador_lote in identificadores and leido.redaccion in (
+                PRESUPUESTO_DE_ANUNCIO, PRESUPUESTO_DE_CONTRATO, PRESUPUESTO_DE_LISTA_SIN_IVA,
+            ):
+                leidos.setdefault(leido.identificador_lote, set()).add(leido.importe)
+    return {identificador: next(iter(cifras)) for identificador, cifras in leidos.items() if len(cifras) == 1}
 
 
 def _eliminar_lotes_de_hermanos(db: Session, expediente_id: int, identificadores: set[str]) -> None:
@@ -1461,6 +1559,8 @@ def ejecutar_extraccion_expediente(
             # `procesar_anejo(lote_propio=...)`), y lo que dice de sí mismo
             # cada Contrato archivado con él.
             lote_propio: Optional[str] = None
+            # Sesión 2026-09-21 (tercera parte): ver `_lote_de_la_licitacion_por_objeto`.
+            reparto_por_objeto: Optional[tuple[str, tuple[str, ...]]] = None
             identidades_por_documento = {
                 # Ya calculada en `_clasificar_documentos` (migración 0038):
                 # recorrer otra vez el documento entero costaba lo mismo tres
@@ -1667,6 +1767,15 @@ def ejecutar_extraccion_expediente(
                 lote = _obtener_o_crear_lote(db, expediente.id, identificador_implicito)
                 if identidad_propia is not None:
                     lote.codigo_expediente_lote = identidad_propia.codigo_expediente_lote
+                else:
+                    # Sesión 2026-09-21 (tercera parte), bloque 2 del encargo:
+                    # sin Contrato que diga qué lote es, el bloque «Nº Lote»
+                    # del anuncio cuyo objeto es su título lo dice -- y con
+                    # él, los cuadros de sus documentos se pueden repartir
+                    # por sus rótulos «LOTE N» (más abajo, en el bucle de
+                    # documentos, con la misma garantía de todo o nada que
+                    # `_lotes_candidatos_del_cuadro`).
+                    reparto_por_objeto = _lote_de_la_licitacion_por_objeto(expediente, items)
                 lote.baja_lote = baja_efectiva
                 lote.importe_licitacion = importe_licitacion
                 lote.importe_adjudicacion = importe_adjudicacion
@@ -1790,6 +1899,16 @@ def ejecutar_extraccion_expediente(
             # y se procesa como siempre. Esa garantía es la que hace que esto
             # no necesite medirse expediente a expediente antes de activarse.
             lotes_candidatos_del_cuadro = _lotes_candidatos_del_cuadro(expediente, lotes, lote_propio)
+            # El reparto por el lote del anuncio solo con el lote único del
+            # sistema y ningún otro camino que haya dicho ya cuál es el suyo.
+            if (
+                lote_propio is not None
+                or lotes_candidatos_del_cuadro is not None
+                or len(lotes) != 1
+                or lotes[0].identificador_lote != LOTE_UNICO
+            ):
+                reparto_por_objeto = None
+            documentos_repartidos_por_objeto: list[str] = []
             lotes_por_identificador = {l.identificador_lote: l.id for l in lotes}
             # Los lotes de los hermanos siguen contando para asociar cada
             # tabla a su "LOTE N" (si no, sus tablas se leerían como de un
@@ -1819,6 +1938,7 @@ def ejecutar_extraccion_expediente(
             # que recupera la partición de un cuadro en bloques de lote
             # (`app.extraccion.pipeline_anejo.descartar_bloques_de_lote_que_no_cuadran`).
             presupuestos_por_lote = {l.identificador_lote: l.importe_licitacion for l in lotes}
+            presupuestos_publicados_por_lote = _presupuestos_publicados_por_lote(db, expediente, lotes, items)
 
             # Etapas 3-6: el cuadro de precios se busca por contenido en TODOS
             # los documentos, nunca solo en los clasificados como "anejo"
@@ -1882,6 +2002,12 @@ def ejecutar_extraccion_expediente(
                             lote_propio=lote_propio, documento_de_otro_lote=de_otro_lote,
                             presupuestos_declarados=presupuestos_declarados,
                             presupuestos_por_lote=presupuestos_por_lote,
+                            # Los lotes que el cuadro va a identificar todavía no
+                            # existen: su presupuesto publicado, el que leen sus
+                            # documentos (sesión 2026-09-21, tercera parte).
+                            presupuestos_publicados_por_lote=_presupuestos_leidos_de_los_documentos(
+                                items, set(lotes_candidatos_del_cuadro)
+                            ),
                         )
                         if _el_cuadro_declara_todos_los_lotes(tentativo, lotes_candidatos_del_cuadro):
                             resultado = tentativo
@@ -1891,6 +2017,38 @@ def ejecutar_extraccion_expediente(
                             db.commit()
                             lotes = list(expediente.lotes)
                             lotes_del_cuadro.append(item.documento.nombre_archivo)
+                    if resultado is None and reparto_por_objeto is not None:
+                        # Sesión 2026-09-21 (tercera parte), bloque 2 del
+                        # encargo: los anejos que traen los cuadros de todos
+                        # los lotes de la licitación, cada uno bajo su rótulo
+                        # «LOTE N» (`6.19/28510.0135`, `0175`, `0177`: las
+                        # grifas; `6.19/28510.0231`, `6.20/28510.0025`: la
+                        # regulación de tensión, los dos escaneados). Se
+                        # reparten por geometría y rótulo, nunca por
+                        # proximidad, y solo si el propio cuadro atribuye
+                        # TODAS sus filas a uno de los lotes del anuncio y los
+                        # cubre todos (`_el_cuadro_declara_todos_los_lotes`):
+                        # con una sola fila sin lote, se procesa como siempre.
+                        propio, numeros = reparto_por_objeto
+                        # Los lotes del anuncio y todos los que declara la
+                        # licitación ("6 LOTES"): el anuncio de formalización de
+                        # `6.19/28510.0231` solo trae los bloques de los lotes 4
+                        # y 5, pero su anejo trae los seis cuadros.
+                        declarados = expediente.lotes_totales_declarados or 0
+                        candidatos = {
+                            numero: None
+                            for numero in sorted({*numeros, *(str(n) for n in range(1, declarados + 1))}, key=int)
+                        }
+                        tentativo = procesar_anejo(
+                            io.BytesIO(contenido), item.paginas, item.documento.id, expediente.id,
+                            {**candidatos, propio: lotes[0].baja_lote}, db, model_provider,
+                            documento_de_otro_lote=de_otro_lote,
+                            presupuestos_declarados=presupuestos_declarados,
+                            presupuestos_por_lote={propio: lotes[0].importe_licitacion},
+                        )
+                        if _el_cuadro_declara_todos_los_lotes(tentativo, candidatos):
+                            resultado = _quedarse_con_el_lote_propio(tentativo, propio, LOTE_UNICO)
+                            documentos_repartidos_por_objeto.append(item.documento.nombre_archivo)
                     if resultado is None:
                         resultado = procesar_anejo(
                             io.BytesIO(contenido), item.paginas, item.documento.id, expediente.id,
@@ -1898,6 +2056,7 @@ def ejecutar_extraccion_expediente(
                             lote_propio=lote_propio, documento_de_otro_lote=de_otro_lote,
                             presupuestos_declarados=presupuestos_declarados,
                             presupuestos_por_lote=presupuestos_por_lote,
+                            presupuestos_publicados_por_lote=presupuestos_publicados_por_lote,
                         )
                     if resultado.lineas and item.reconocido:
                         for linea in resultado.lineas:
@@ -1980,6 +2139,15 @@ def ejecutar_extraccion_expediente(
                         "que no se pudo interpretar, marcadas para revisión",
                     )
 
+            if documentos_repartidos_por_objeto:
+                motivo_revision = _acumular_motivo(
+                    motivo_revision,
+                    f"este expediente es el lote {reparto_por_objeto[0]} de la licitación (bloque «Nº Lote» del "
+                    "anuncio de la Plataforma cuyo objeto es su título): de "
+                    + ", ".join(documentos_repartidos_por_objeto)
+                    + " se quedan solo las filas del cuadro rotulado con ese lote; las de los demás lotes se "
+                    "conservan sin lote",
+                )
             if lotes_del_cuadro:
                 motivo_revision = _acumular_motivo(
                     motivo_revision,
