@@ -49,9 +49,11 @@ Contra la hoja "Conciliación":
 
 `6.25/28510.5001/01` no falta porque el sistema no lo conozca. Está como
 `sin_publicar`: se buscó en la Plataforma y no apareció. La hoja solo lista lo
-que consta publicado, y este listado no puede cambiar eso. Hay además una
-segunda ficha, `6.25/28510.5001_01`, también `sin_publicar`, que parece el
-mismo código escrito con `_`. **No se ha tocado**; queda anotada.
+que consta publicado, y este listado no puede cambiar eso. Había además una
+segunda ficha, `6.25/28510.5001_01`, también `sin_publicar`: el mismo código
+escrito con `_`. **Unificada el 21/09/2026 (segunda parte, bloque 3)** con la
+forma de la barra, que es la del listado de ADIF, sin perder nada de ninguna
+de las dos (`app.extraccion.identidad_expediente.unificar_ficha_duplicada`).
 
 Situación de los 26 que no aportan líneas: 11 *"Los precios están en un
 acuerdo marco que no está publicado"*, 10 *"Publicado sin cuadro de precios"*,
