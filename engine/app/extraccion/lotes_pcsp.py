@@ -192,6 +192,26 @@ def emparejar_ventana_por_nombre_proyecto(
     return None
 
 
+def lote_propio_por_objeto(
+    paginas: list[PaginaTexto], nombre_proyecto: Optional[str]
+) -> Optional[tuple[str, tuple[str, ...]]]:
+    """Sesión 2026-09-21 (tercera parte): qué lote de la licitación es este
+    expediente, según el bloque «Nº Lote: NNN» cuyo objeto es su título
+    (`emparejar_ventana_por_nombre_proyecto`, el mismo emparejamiento que ya
+    le da su presupuesto), y los números de todos los lotes del anuncio.
+    `None` si el documento no agrupa al menos dos lotes o si no casa con
+    ninguno sin ambigüedad. Números sin ceros a la izquierda ("002" -> "2"),
+    que es como los escribe un cuadro ("LOTE 2")."""
+    ventanas = extraer_ventanas_multi_lote_pcsp(paginas)
+    if len(ventanas) < 2:
+        return None
+    ventana = emparejar_ventana_por_nombre_proyecto(ventanas, nombre_proyecto)
+    if ventana is None:
+        return None
+    numeros = tuple(sorted({str(int(v.numero_lote)) for v in ventanas}, key=int))
+    return str(int(ventana.numero_lote)), numeros
+
+
 def extraer_campos_pcsp_para_expediente(
     paginas: list[PaginaTexto], nombre_proyecto: Optional[str]
 ) -> tuple[CamposAnuncioPcsp, Optional[str]]:

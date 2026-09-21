@@ -207,7 +207,7 @@ CUADRO_0044 = [
 def test_la_aritmetica_de_las_filas_demuestra_el_cuadro():
     demostrado = _cuadro_demostrado_por_aritmetica(CUADRO_0044)
     assert demostrado is not None
-    inicio, datos, _columna_texto = demostrado
+    inicio, datos, _columna_texto, _recuperadas = demostrado
     # La cabecera es solo la fila 0; las filas de sección no son datos.
     assert inicio == 1
     assert len(datos) == 3
@@ -217,7 +217,7 @@ def test_la_aritmetica_de_las_filas_demuestra_el_cuadro():
 def test_las_filas_de_seccion_no_entran_como_lineas():
     """Condición del cliente: "las líneas que salgan solo entran si pasan la
     comprobación aritmética de su fila". "Obra civil" no la pasa."""
-    _inicio, datos, _columna = _cuadro_demostrado_por_aritmetica(CUADRO_0044)
+    _inicio, datos, _columna, _recuperadas = _cuadro_demostrado_por_aritmetica(CUADRO_0044)
     assert not any("Obra civil" in (c or "") for fila in datos for c in fila)
 
 
@@ -238,7 +238,7 @@ def test_una_tabla_cuya_unica_columna_de_texto_es_la_referencia_entra_marcada():
     assert _tripleta_que_cuadra(solo_codigos) is not None  # la aritmética sí cuadra
     demostrado = _cuadro_demostrado_por_aritmetica(solo_codigos)
     assert demostrado is not None
-    _inicio, datos, columna_texto = demostrado
+    _inicio, datos, columna_texto, _recuperadas = demostrado
     assert len(datos) == 3
     assert columna_texto.indice == 0 and columna_texto.es_designacion is False
 
@@ -271,7 +271,7 @@ def test_la_fila_sin_descripcion_hereda_el_rotulo_de_su_seccion():
     ]
     demostrado = _cuadro_demostrado_por_aritmetica(filas)
     assert demostrado is not None
-    _inicio, datos, _columna = demostrado
+    _inicio, datos, _columna, _recuperadas = demostrado
     assert [fila[0] for fila in datos] == ["09.01", "12.01"]
     assert datos[1][1] == "Seguridad y Salud"
 
@@ -287,7 +287,7 @@ def test_la_fila_sin_descripcion_no_hereda_de_una_seccion_con_otro_numero():
     ]
     demostrado = _cuadro_demostrado_por_aritmetica(filas)
     assert demostrado is not None
-    _inicio, datos, _columna = demostrado
+    _inicio, datos, _columna, _recuperadas = demostrado
     assert [fila[0] for fila in datos] == ["09.01"]
 
 

@@ -55,6 +55,7 @@ from app.catalogo import (
     MOTIVO_MAPEO_INCOHERENTE,
     MOTIVO_MATRICULA_8_FUERA_DEL_MAESTRO,
     MOTIVO_MATRICULA_FUERA_DEL_MAESTRO,
+    extraer_texto_otra_cantidad,
 )
 from app.presupuestos_adif import (
     COLUMNAS as COLUMNAS_PRESUPUESTOS,
@@ -142,6 +143,15 @@ def _texto_celdas_vacias(
         f"{_COLUMNA_DE_CAMPO[c.campo]}: {ETIQUETA_MOTIVO[c.motivo]}" + (f" ({c.detalle})" if c.detalle else "")
         for c in celdas_vacias(linea, identificador_lote, expediente, modelo_precio)
     ]
+    # Sesión 2026-09-21 (tercera parte), encargo del cliente: la Cantidad de un
+    # cuadro que solo trae «cantidad mínima por pedido» y «pedido inicial» no
+    # está vacía, pero la fila tiene que decir cuál de las dos es y qué trae la
+    # otra, para que nadie la tome por la cantidad total. Es la única columna
+    # de motivos de la fila, así que va aquí (`app.catalogo.
+    # texto_otra_cantidad`).
+    otra_cantidad = extraer_texto_otra_cantidad(linea.motivo_revision)
+    if otra_cantidad:
+        partes.append(otra_cantidad)
     return "; ".join(partes) or None
 
 

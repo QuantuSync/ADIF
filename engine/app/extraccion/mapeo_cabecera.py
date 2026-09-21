@@ -996,6 +996,44 @@ def corregir_cantidad_obligatoria_por_estimada(
     return {**mapeo, "cantidad": estimadas[0]}
 
 
+# Sesión 2026-09-21 (tercera parte), encargo del cliente. Hay cuadros que no
+# publican la cantidad a comprar: solo la «cantidad mínima a suministrar por
+# pedido» y el «pedido inicial» (la familia de las grifas, los aisladores, los
+# detectores...). La Cantidad del catálogo es la que haya dado el mapeo, y NO
+# se cambia -- ninguna de las dos es la cantidad total, así que no hay una
+# lectura mala que corregir --, pero la fila tiene que decir cuál de las dos
+# es y qué trae la otra, para que nadie la tome por la cantidad total. Esta es
+# la columna "otra". Solo con exactamente una columna de cada y la Cantidad en
+# una de las dos: un cuadro que además trae «cantidades estimadas» ya toma la
+# estimada (`corregir_cantidad_obligatoria_por_estimada`) y no entra aquí.
+def columna_de_la_otra_cantidad(
+    cabecera: list[Optional[str]], mapeo: dict[str, Optional[int]]
+) -> Optional[int]:
+    indice = mapeo.get("cantidad")
+    if indice is None or indice >= len(cabecera):
+        return None
+
+    def compacto(texto: Optional[str]) -> str:
+        return normalizar(texto).replace(" ", "") if texto else ""
+
+    minimas = [
+        i for i, texto in enumerate(cabecera)
+        if "minim" in compacto(texto) and ("pedido" in compacto(texto) or "periodo" in compacto(texto))
+    ]
+    iniciales = [
+        i for i, texto in enumerate(cabecera)
+        if "minim" not in compacto(texto)
+        and ("pedidoinicia" in compacto(texto) or "periodoinicia" in compacto(texto))
+    ]
+    if len(minimas) != 1 or len(iniciales) != 1:
+        return None
+    if indice == minimas[0]:
+        return iniciales[0]
+    if indice == iniciales[0]:
+        return minimas[0]
+    return None
+
+
 def corregir_columna_importe_tomada_por_precio(
     cabecera: list[Optional[str]], mapeo: dict[str, Optional[int]]
 ) -> tuple[dict[str, Optional[int]], bool]:

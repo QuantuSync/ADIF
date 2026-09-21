@@ -18,7 +18,7 @@ suyas."""
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from typing import Optional
 
@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 
 from app.catalogo import (
     MOTIVO_MAPEO_INCOHERENTE,
+    rotulo_de_columna,
     _acumular_motivo,
     construir_lineas_desde_tabla,
     corregir_descripcion_desplazada_entre_tablas,
@@ -38,6 +39,7 @@ from app.catalogo import (
 from app.extraccion.codigo_material import derivar_codigo_material_con_modelo
 from app.extraccion.firma_estructural import calcular_firma_estructural
 from app.extraccion.invalidado import INVALIDADO
+from app.extraccion.normalizacion import limpiar_texto_celda
 from app.extraccion.localizador import ResultadoLocalizacion, localizar_paginas_candidatas
 from app.extraccion.lote_tabla import MOTIVO_TABLA_DEL_CONJUNTO, asociar_lote_tabla
 from app.extraccion.mapeo_cabecera import (
@@ -48,6 +50,7 @@ from app.extraccion.mapeo_cabecera import (
     corregir_confusion_matricula_codigo_precio,
     corregir_confusion_precio_cantidad,
     completar_cantidad_por_contenido,
+    columna_de_la_otra_cantidad,
     corregir_cantidad_obligatoria_por_estimada,
     corregir_columna_importe_tomada_por_precio,
     liberar_unidad_que_son_solo_cifras,
@@ -57,6 +60,16 @@ from app.extraccion.mapeo_cabecera import (
     mapear_cabecera,
 )
 from app.extraccion.referencia_como_descripcion import marcar_descripcion_desde_referencia
+from app.extraccion.filas_repetidas import conservar_filas_repetidas_que_cierran_el_lote
+from app.extraccion.fila_sobre_la_tabla import (
+    MARCA_FRAGMENTO as MARCA_FILA_SOBRE_LA_TABLA,
+    fila_demostrada_por_su_aritmetica,
+    fila_encima_de_la_tabla,
+)
+from app.extraccion.partida_alzada_del_lote import (
+    descartar_recuperadas_que_no_cuadran,
+    recuperar_partidas_alzadas_que_cierran_el_lote,
+)
 from app.extraccion.tabla import extraer_tablas_pagina
 from app.extraccion.texto import PaginaTexto, normalizar
 from app.interfaces.model_provider import ModelProvider
@@ -232,6 +245,36 @@ def _quedarse_con_la_correccion(lineas: list[dict]) -> list[dict]:
     ]
 
 
+def _otra_cantidad_por_su_forma(filas: list, mapeo: dict, vigente) -> Optional[tuple[int, bool]]:
+    """La columna de la «otra cantidad» en una página de continuación cuya
+    geometría no casa con la de la tabla con cabecera (un escaneado se
+    reconstruye con su propia rejilla en cada página, a veces con una columna
+    vacía de más al principio). Las dos columnas se reconocen por su posición
+    contada desde el final de la fila, que es la que no cambia. Devuelve
+    (columna de la otra, `True` si la Cantidad de esta página es la que en la
+    cabecera era la otra) -- pasa en las grifas: en la página con cabecera la
+    Cantidad es la mínima por pedido y en las de continuación el pedido inicial.
+    Y la otra columna, solo con cifras."""
+    indice_otra, _columnas, _rotulos, num_columnas, indice_cantidad = vigente
+    cantidad = mapeo.get("cantidad")
+    if cantidad is None or not filas or len({len(fila) for fila in filas}) != 1:
+        return None
+    ancho = len(filas[0])
+    desde_el_final = cantidad - ancho
+    if desde_el_final == indice_cantidad - num_columnas:
+        otra, invertida = ancho + (indice_otra - num_columnas), False
+    elif desde_el_final == indice_otra - num_columnas:
+        otra, invertida = ancho + (indice_cantidad - num_columnas), True
+    else:
+        return None
+    if not 0 <= otra < ancho:
+        return None
+    valores = [(fila[otra] or "").strip() for fila in filas]
+    if not any(valores) or not all(not v or re.fullmatch(r"[\d.,\s]+", v) for v in valores):
+        return None
+    return otra, invertida
+
+
 def procesar_anejo(
     ruta_pdf,
     paginas_texto: list[PaginaTexto],
@@ -244,6 +287,7 @@ def procesar_anejo(
     documento_de_otro_lote: bool = False,
     presupuestos_declarados: tuple[Decimal, ...] = (),
     presupuestos_por_lote: Optional[dict[str, Optional[Decimal]]] = None,
+    presupuestos_publicados_por_lote: Optional[dict[str, Decimal]] = None,
 ) -> ResultadoProcesamientoAnejo:
     """`paginas_texto`: el texto plano de cada página, ya extraído por el
     llamador (etapa 1 de la cascada, `app.extraccion.texto.
@@ -366,6 +410,12 @@ def procesar_anejo(
     # ese mapeo, validado contra sus filas, antes de probar nada más. Como
     # `cache_estructural`, nunca sale de esta llamada.
     ultima_con_cabecera: Optional[tuple[dict[str, Optional[int]], tuple, bool]] = None
+    # Sesión 2026-09-21 (tercera parte): la columna «pedido inicial» o
+    # «cantidad mínima por pedido» que NO es la Cantidad, de la última tabla con
+    # cabecera, con su geometría y los dos rótulos -- para que sus páginas de
+    # continuación, que heredan el mapeo por geometría, digan lo mismo en su
+    # motivo (`columna_de_la_otra_cantidad`).
+    otra_cantidad_vigente: Optional[tuple[int, tuple, tuple[str, str], int, int]] = None
     # Bloque 1, sesión 2026-09-19 (tercera parte): ¿alguna tabla de ESTE
     # documento ha declarado ya, en su propia cabecera, una columna de
     # cantidad? Es la única certeza que autoriza a buscarla por contenido en
@@ -425,7 +475,7 @@ def procesar_anejo(
                     resultado_asociacion = asociar_lote_tabla(
                         pagina, banda_top, tabla.bbox, identificadores_validos=set(lotes),
                         texto_titulo_tabla=" ".join(c for c in tabla.cabecera if c),
-                        texto_lote_propio=tabla.titulo_propio,
+                        texto_lote_propio=tabla.titulo_propio or tabla.rotulo_de_lote,
                         texto_cola_pagina_anterior=cola_anterior,
                         separada_por_paginas=separada,
                         texto_paginas_previas=paginas_previas,
@@ -720,6 +770,50 @@ def procesar_anejo(
                 # nunca se cachea: la columna sale de la cabecera cada vez.
                 mapeo = completar_columna_importe(tabla.cabecera, mapeo)
                 mapeo = corregir_cantidad_obligatoria_por_estimada(tabla.cabecera, mapeo)
+                # Sesión 2026-09-21 (tercera parte), encargo del cliente: en un
+                # cuadro que solo trae «cantidad mínima por pedido» y «pedido
+                # inicial», cada fila dice en su motivo cuál de las dos es la
+                # Cantidad y qué trae la otra. La Cantidad no se cambia.
+                otra_cantidad: Optional[tuple[int, str, str]] = None
+                # Una cabecera de verdad (no una fila de datos tomada por
+                # cabecera, que trae una matrícula) abre un cuadro nuevo: con
+                # las dos columnas, su nota; sin ellas, ninguna.
+                cabecera_de_verdad = not sin_cabecera_propia and not any(
+                    re.fullmatch(r"\d{8,9}[A-Za-z]?", re.sub(r"\s+", "", c or "")) for c in tabla.cabecera
+                )
+                if cabecera_de_verdad and not any(
+                    "cantidad" in normalizar(c or "").replace(" ", "") for c in tabla.cabecera
+                ):
+                    otra_cantidad_vigente = None
+                elif cabecera_de_verdad:
+                    otra_cantidad_vigente = None
+                    indice_otra = columna_de_la_otra_cantidad(tabla.cabecera, mapeo)
+                    rotulo_cantidad = rotulo_de_columna(tabla.cabecera, mapeo.get("cantidad"))
+                    rotulo_otra = rotulo_de_columna(tabla.cabecera, indice_otra)
+                    if indice_otra is not None and rotulo_cantidad and rotulo_otra:
+                        otra_cantidad_vigente = (
+                            indice_otra, tabla.columnas_x, (rotulo_cantidad, rotulo_otra),
+                            len(tabla.cabecera), mapeo["cantidad"],
+                        )
+                        otra_cantidad = (indice_otra, rotulo_cantidad, rotulo_otra)
+                elif otra_cantidad_vigente is not None:
+                    # Una página de continuación: sin cabecera, o con su primera
+                    # fila de datos tomada por cabecera (no nombra ninguna
+                    # columna de cantidad, así que no abre un cuadro nuevo).
+                    heredada = (
+                        heredar_mapeo_por_geometria(
+                            {"otra_cantidad": otra_cantidad_vigente[0]}, otra_cantidad_vigente[1], tabla.columnas_x
+                        )
+                        if mapeo_por_geometria is not None else None
+                    )
+                    if heredada is not None:
+                        otra_cantidad = (heredada["otra_cantidad"], *otra_cantidad_vigente[2])
+                    elif (forma := _otra_cantidad_por_su_forma(tabla.filas, mapeo, otra_cantidad_vigente)) is not None:
+                        otra, invertida = forma
+                        rotulo_cantidad, rotulo_otra = otra_cantidad_vigente[2]
+                        otra_cantidad = (
+                            (otra, rotulo_otra, rotulo_cantidad) if invertida else (otra, rotulo_cantidad, rotulo_otra)
+                        )
                 # Bloque 1, decisión 1 del cliente (sesión 2026-09-19, sexta
                 # parte): el cuadro cuya única columna de dinero se llama
                 # "IMPORTE" en su propia cabecera no publica precio unitario
@@ -761,8 +855,25 @@ def procesar_anejo(
                 )
                 lineas_tabla = construir_lineas_desde_tabla(
                     tabla, mapeo, documento_origen_id, expediente_id, baja_lote,
-                    orden_inicial=len(lineas),
+                    orden_inicial=len(lineas), otra_cantidad=otra_cantidad,
                 )
+                # Sesión 2026-09-21 (tercera parte), bloque 3 del encargo: la
+                # primera fila de una página de continuación que queda por
+                # encima de la caja de la tabla (`app.extraccion.
+                # fila_sobre_la_tabla`). Recompuesta por las columnas de la
+                # tabla, demostrada por su aritmética, y marcada: solo se queda
+                # si con ella el lote cuadra.
+                if sin_cabecera_propia:
+                    fila_arriba = fila_encima_de_la_tabla(pagina, tabla)
+                    if fila_arriba is not None and fila_demostrada_por_su_aritmetica(fila_arriba, mapeo):
+                        de_arriba = construir_lineas_desde_tabla(
+                            replace(tabla, filas=[fila_arriba]), mapeo, documento_origen_id, expediente_id,
+                            baja_lote, orden_inicial=len(lineas) + len(lineas_tabla), otra_cantidad=otra_cantidad,
+                        )
+                        for linea in de_arriba:
+                            linea["recuperada_que_falta"] = True
+                            linea["fragmento"] = f"{MARCA_FILA_SOBRE_LA_TABLA} {linea.get('fragmento') or ''}".strip()
+                        lineas_tabla = de_arriba + lineas_tabla
                 if candidata.numero in de_la_oferta:
                     # Solo la fila con precio: ese precio es el ofertado. El
                     # modelo en blanco (precio e importe vacíos) sigue como
@@ -771,6 +882,15 @@ def procesar_anejo(
                 if importe_tomado_por_precio:
                     for linea in lineas_tabla:
                         linea["precio_solo_en_la_columna_de_importe"] = True
+                if tabla.codigos_recuperados:
+                    for linea in lineas_tabla:
+                        if linea.get("codigo_precio") in tabla.codigos_recuperados:
+                            linea["recuperada_que_falta"] = True
+                if tabla.referencias_recuperadas:
+                    recuperadas = {limpiar_texto_celda(r) for r in tabla.referencias_recuperadas if r}
+                    for linea in lineas_tabla:
+                        if linea.get("descripcion") in recuperadas:
+                            linea["recuperada_que_falta"] = True
                 if referencia_como_descripcion:
                     for linea in lineas_tabla:
                         marcar_descripcion_desde_referencia(linea)
@@ -976,6 +1096,22 @@ def procesar_anejo(
         lineas, totales_por_lote
     )
     precios_corregidos += precios_sin_columna_propia
+
+    # Sesión 2026-09-21 (tercera parte), bloque 3 del encargo: la partida
+    # alzada del lote que la tabla no llega a leer, solo si su importe es
+    # exactamente lo que le falta al lote para su presupuesto publicado (ver
+    # `app.extraccion.partida_alzada_del_lote`). Con los precios ya finales.
+    tablas_sin_lote.extend(
+        recuperar_partidas_alzadas_que_cierran_el_lote(
+            lineas, paginas_texto, presupuestos_publicados_por_lote or {}, documento_origen_id, expediente_id,
+            lotes,
+        )
+    )
+    tablas_sin_lote.extend(
+        conservar_filas_repetidas_que_cierran_el_lote(lineas, presupuestos_publicados_por_lote or {})
+    )
+    lineas, motivos_recuperadas = descartar_recuperadas_que_no_cuadran(lineas, presupuestos_publicados_por_lote or {})
+    tablas_sin_lote.extend(motivos_recuperadas)
 
     # `Código del material`, vía de modelo (CONTEXTO.md sección 6, bloque 5 de
     # la sesión de vocabulario): `construir_lineas_desde_tabla` (dentro de

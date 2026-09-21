@@ -283,7 +283,7 @@ _FILAS_0096 = [
 def test_la_cuarta_fila_desplazada_entra_porque_su_aritmetica_cuadra():
     demostrado = _cuadro_demostrado_por_aritmetica(_FILAS_0096)
     assert demostrado is not None
-    _inicio, datos, _columna = demostrado
+    _inicio, datos, _columna, _recuperadas = demostrado
     assert len(datos) == 4
     assert datos[3][0].startswith("Potenciómetro rotatorio")
     # Con ella, el cuadro suma el presupuesto publicado del lote 1:
@@ -328,7 +328,7 @@ _FILAS_0098 = [
 def test_el_cuadro_de_referencias_entra_y_senala_su_columna_de_texto():
     demostrado = _cuadro_demostrado_por_aritmetica(_FILAS_0098)
     assert demostrado is not None
-    inicio, datos, columna = demostrado
+    inicio, datos, columna, _recuperadas = demostrado
     assert inicio == 1
     assert len(datos) == 4
     assert columna.indice == 0 and columna.es_designacion is False
@@ -342,7 +342,7 @@ def test_un_cuadro_con_designacion_de_verdad_no_se_marca_como_referencia():
     ]
     demostrado = _cuadro_demostrado_por_aritmetica(filas)
     assert demostrado is not None
-    _inicio, _datos, columna = demostrado
+    _inicio, _datos, columna, _recuperadas = demostrado
     assert columna.es_designacion is True
 
 

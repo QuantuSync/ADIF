@@ -256,33 +256,24 @@ _BALASTO = (
     "Las cantidades del cuadro son «estimadas de referencia» y están bien leídas, fila a fila: el "
     "presupuesto del lote es su dotación máxima y el documento no dice que salga de esas cantidades"
 )
-_UN_SOLO_LOTE_ESCANEADO = (
-    "El anejo escaneado trae los cuadros de todos los lotes de la licitación y este expediente los tiene "
-    "todos como un único lote: el reparto por lotes de los documentos escaneados está pendiente"
-)
 _CAUSAS_COMPROBADAS: dict[tuple[str, str, Decimal, Decimal], _Causa] = {
     # --- Lectura del catálogo pendiente de corregir ---
-    **_causas(["3.22/28510.0048"], "1", "81300.00", "12900.00", NO_CUADRA_LECTURA,
-              "Los lotes 1 y 2 van en la misma tabla y sus filas se han leído todas como del lote 1: la suma "
-              "es exactamente 12.900,00 € del lote 1 más 68.400,00 € del lote 2"),
-    **_causas(["3.23/28510.0135"], "2", "192435.66", "8545.90", NO_CUADRA_LECTURA,
-              "La tabla del anejo mete los lotes 2 a 8 con su rótulo en una fila y se ha leído entera como lote "
-              "2; sus filas P-6 a P-8 suman exactamente los 8.545,90 € del lote 2"),
-    **_causas(["3.23/28510.0135"], "6", "64285.55", "68146.10", NO_CUADRA_LECTURA,
-              "Sus dos filas llevan el precio ofertado del contrato (27.335,30 y 36.950,25 €), no el de "
-              "licitación del anejo (28.549,40 y 39.596,70 €), que suman el presupuesto exacto"),
-    **_causas(["4.26/28510.0020"], "1", "2852766.32", "2853591.32", NO_CUADRA_LECTURA,
-              "P-12 lleva el precio ofertado en un contrato, 5.335,00 €; el presupuesto del lote (ANEJO_1.pdf "
-              "p.15) lo da a 5.500,00 € y con él cuadra al céntimo"),
-    **_causas(["2.23/28510.0138"], "1", "32815.00", "32740.00", NO_CUADRA_LECTURA,
-              "Faltan dos filas del cuadro (4 × 140,00 € y 2 × 40,00 €) y sobran dos de otra tabla (440,00 € y "
-              "275,00 €); las filas del cuadro suman su TOTAL, 32.740,00 €"),
-    **_causas(["6.19/28510.0135"], "1", "434723.09", "175000.00", NO_CUADRA_LECTURA, _UN_SOLO_LOTE_ESCANEADO),
-    **_causas(["6.19/28510.0175"], "1", "434723.09", "1100000.00", NO_CUADRA_LECTURA, _UN_SOLO_LOTE_ESCANEADO),
-    **_causas(["6.19/28510.0177"], "1", "434723.09", "350000.00", NO_CUADRA_LECTURA, _UN_SOLO_LOTE_ESCANEADO),
-    **_causas(["6.19/28510.0231"], "1", "55946.19", "10000.00", NO_CUADRA_LECTURA, _UN_SOLO_LOTE_ESCANEADO),
-    **_causas(["6.20/28510.0025"], "1", "55946.19", "20000.00", NO_CUADRA_LECTURA, _UN_SOLO_LOTE_ESCANEADO),
+    # Corregida el 2026-09-21 (tercera parte): el cuadro no suma su propio TOTAL.
+    **_causas(["2.23/28510.0138"], "1", "32815.00", "32740.00", NO_CUADRA_DOCUMENTO,
+              "Las filas del propio cuadro del presupuesto suman 33.015,00 €, 275,00 € más que el TOTAL que imprime "
+              "(32.740,00 €); al catálogo le faltan dos (4 × 140,00 € y 2 × 40,00 €, primeras filas de las pp.7 y 8) "
+              "y le sobra una de la otra tabla (440,00 €), pero ni corrigiéndolas cuadraría"),
     # --- Cantidades estimadas: el presupuesto es un máximo ---
+    # Sesión 2026-09-21 (tercera parte): los anejos escaneados repartidos por
+    # los rótulos «LOTE N» de su cuadro (cada expediente, su lote del anuncio).
+    # Sus cuadros son de «cantidad mínima a suministrar por pedido» y «pedido
+    # inicial» (cabeceras de ANEJO_1.pdf pp.15 y 19, y pp.14 y 20).
+    **_causas(["6.19/28510.0135"], "1", "26844.98", "175000.00", NO_CUADRA_ESTIMADAS, _POR_PEDIDO),
+    **_causas(["6.19/28510.0175"], "1", "404323.21", "1100000.00", NO_CUADRA_ESTIMADAS, _POR_PEDIDO),
+    **_causas(["6.19/28510.0177"], "1", "3554.90", "350000.00", NO_CUADRA_ESTIMADAS, _POR_PEDIDO),
+    **_causas(["6.19/28510.0231"], "1", "3930.55", "10000.00", NO_CUADRA_ESTIMADAS, _POR_PEDIDO),
+    **_causas(["6.20/28510.0025"], "1", "485.12", "20000.00", NO_CUADRA_ESTIMADAS, _POR_PEDIDO),
+    **_causas(["6.19/28510.0195"], "1", "8064.00", "70000.00", NO_CUADRA_ESTIMADAS, _POR_PEDIDO),
     **_causas(["6.23/28510.0034"], "1", "54.35", "400000.00", NO_CUADRA_ESTIMADAS, _REFERENCIA_1),
     **_causas(["6.23/28510.0137"], "1", "17.30", "200000.00", NO_CUADRA_ESTIMADAS, _REFERENCIA_1),
     **_causas(["6.24/28510.0125"], "2", "187.09", "175000.00", NO_CUADRA_ESTIMADAS, _REFERENCIA_1),
@@ -312,7 +303,6 @@ _CAUSAS_COMPROBADAS: dict[tuple[str, str, Decimal, Decimal], _Causa] = {
     **_causas(["6.19/28510.0136"], "1", "18544.06", "70000.00", NO_CUADRA_ESTIMADAS, _POR_PEDIDO),
     **_causas(["6.19/28510.0181"], "1", "1470.53", "300000.00", NO_CUADRA_ESTIMADAS, _POR_PEDIDO),
     **_causas(["6.19/28510.0184"], "2", "23962.64", "60000.00", NO_CUADRA_ESTIMADAS, _POR_PEDIDO),
-    **_causas(["6.19/28510.0195"], "1", "63771.00", "70000.00", NO_CUADRA_ESTIMADAS, _POR_PEDIDO),
     **_causas(["6.19/28510.0202"], "1", "3806.70", "26500.00", NO_CUADRA_ESTIMADAS, _POR_PEDIDO),
     **_causas(["6.19/28510.0202"], "2", "1967.67", "16500.00", NO_CUADRA_ESTIMADAS, _POR_PEDIDO),
     **_causas(["6.19/28510.0202"], "3", "566.00", "7000.00", NO_CUADRA_ESTIMADAS, _POR_PEDIDO),
@@ -344,9 +334,6 @@ _CAUSAS_COMPROBADAS: dict[tuple[str, str, Decimal, Decimal], _Causa] = {
     **_causas(["6.22/28510.0122"], "2", "11209999.78", "5900000.00", NO_CUADRA_ESTIMADAS,
               "El cuadro del lote lista los 407 aparatos (también los del otro lote, para urgencias) con cantidad "
               "de referencia 1: no es el pedido del lote"),
-    **_causas(["6.20/28510.0041"], "1", "21999998.38", "500000.00", NO_CUADRA_ESTIMADAS,
-              "El cuadro da una «cantidad de referencia» (3 casi siempre) para 345 aparatos: es una lista de "
-              "precios, no el pedido, y el presupuesto es el máximo de gasto"),
     **_causas(["6.21/28510.0041"], "1", "500014.38", "550000.00", NO_CUADRA_ESTIMADAS,
               "El cuadro da «medición estimada» y el documento no publica su total: el presupuesto es el máximo "
               "de gasto"),
@@ -369,43 +356,12 @@ _CAUSAS_COMPROBADAS: dict[tuple[str, str, Decimal, Decimal], _Causa] = {
               "El cuadro es el del acuerdo marco de carril (suma exactamente su presupuesto, 11.700.000,00 €) y se "
               "compara con el presupuesto de este pedido"),
     # --- Faltan líneas del lote en el catálogo ---
-    **_causas(["6.20/28510.0094", "6.20/28510.0141"], "2", "81012.74", "90000.00", NO_CUADRA_FALTAN_LINEAS,
-              "Falta la partida alzada para imprevistos del lote, 8.987,26 € (CONTRATO_2.pdf p.105): con ella "
-              "cuadra al céntimo"),
-    **_causas(["6.20/28510.0131"], "2", "27133.70", "30000.00", NO_CUADRA_FALTAN_LINEAS,
-              "Falta la partida alzada de repuestos del lote, 2.866,30 € (ANEJO_3.pdf p.6): con ella cuadra al "
-              "céntimo"),
-    **_causas(["6.20/28510.0131", "6.21/28510.0017"], "1", "85150.00", "90000.00", NO_CUADRA_FALTAN_LINEAS,
-              "Falta la partida alzada de repuestos del lote, 4.850,00 € (ANEJO_3.pdf p.4): con ella cuadra al "
-              "céntimo"),
+    # Corregida el 2026-09-21 (tercera parte): la partida alzada sí está.
     **_causas(["6.21/28510.0058", "6.21/28510.0130", "6.21/28510.0135", "6.21/28510.0137", "6.21/28510.0138"],
-              "1", "200000.00", "220000.00", NO_CUADRA_FALTAN_LINEAS,
-              "Falta la partida alzada para imprevistos del lote, 20.000,00 € (CONTRATO_1.pdf p.115): con ella "
-              "cuadra al céntimo"),
-    **_causas(["6.25/28510.0141", "6.25/28510.0186", "6.25/28510.0187"], "2", "882743.20", "1544593.20",
-              NO_CUADRA_FALTAN_LINEAS,
-              "Falta la fila P-1 del lote (61.000 t × 10,85 € = 661.850,00 €, ANEJO_1.pdf p.23): con ella cuadra "
-              "al céntimo"),
-    **_causas(["2.23/28510.0108"], "1", "25611.56", "25792.76", NO_CUADRA_FALTAN_LINEAS,
-              "El cuadro repite dos filas idénticas (100 × 1,50 € y 10 × 3,12 €) y el catálogo las tiene una "
-              "vez: faltan exactamente 181,20 €"),
-    **_causas(["2.24/28510.0068"], "1", "51218.77", "51581.17", NO_CUADRA_FALTAN_LINEAS,
-              "El cuadro repite dos filas idénticas (100 × 3,00 € y 10 × 6,24 €) y el catálogo las tiene una "
-              "vez: faltan exactamente 362,40 €"),
-    **_causas(["2.23/28510.0098"], "1", "29480.00", "35760.00", NO_CUADRA_FALTAN_LINEAS,
-              "Faltan cuatro filas del cuadro (1.800, 2.160, 1.520 y 800 €): con ellas se llega a su total, "
-              "35.760,00 €"),
-    **_causas(["2.24/28510.0118"], "1", "47695.00", "49045.00", NO_CUADRA_FALTAN_LINEAS,
-              "Falta la fila «Precintos verdes», 3 × 450,00 € = 1.350,00 €: con ella se llega al TOTAL del cuadro, "
-              "49.045,00 €"),
-    **_causas(["6.24/28510.0185"], "1", "2499470.00", "2500000.00", NO_CUADRA_FALTAN_LINEAS,
-              "Falta la fila P-030b del cuadro, 1 × 530,00 € (ANEJO_1.pdf p.22): con ella cuadra al céntimo"),
-    **_causas(["2.26/28510.0006"], "1", "2691203.26", "2740603.26", NO_CUADRA_FALTAN_LINEAS,
-              "Falta la fila de horas de técnico especializado, 608 h × 81,25 € = 49.400,00 € (ANEJO_1.pdf p.4): "
-              "con ella cuadra al céntimo"),
-    **_causas(["6.22/28510.0051", "6.22/28510.0159"], "1", "27150.00", "39695.00", NO_CUADRA_FALTAN_LINEAS,
-              "Faltan las filas cuyo precio el documento escribe con punto decimal a la inglesa («12.5»): sin su "
-              "total en la fila, el catálogo no las acepta"),
+              "1", "200000.00", "220000.00", NO_CUADRA_DOCUMENTO,
+              "El cuadro del lote (ANEJO_3.pdf p.3 y CONTRATO_1.pdf p.115) suma exactamente 200.000,00 € con su "
+              "partida alzada de 20.000,00 € incluida, y no trae más filas; el presupuesto que publica para el lote "
+              "es 220.000,00 € (PLIEGO_1.pdf p.4)"),
     **_causas(["6.20/28510.0042", "6.20/28510.0046", "6.20/28510.0047"], "2", "22050.00", "500000.00",
               NO_CUADRA_FALTAN_LINEAS,
               "El cuadro del lote 2 (ANEJO_3.pdf pp.47-48) solo ha llegado al catálogo en una fila, y además no "
@@ -425,9 +381,6 @@ _CAUSAS_COMPROBADAS: dict[tuple[str, str, Decimal, Decimal], _Causa] = {
               NO_CUADRA_DOCUMENTO,
               "Comprobado contra el documento: el cuadro del lote 3 del ANEJO_8.pdf se pasa 30.002,13 € de su "
               "propio presupuesto, y su partida alzada sigue siendo el 3 % exacto"),
-    **_causas(["3.22/28510.0009"], "2", "21500.00", "71000.00", NO_CUADRA_DOCUMENTO,
-              "El cuadro y la adjudicación numeran distinto los lotes: la suma, 21.500,00 €, es exactamente el "
-              "presupuesto del lote 3 (pregunta pendiente para ADIF)"),
 }
 
 
