@@ -275,6 +275,16 @@ def _otra_cantidad_por_su_forma(filas: list, mapeo: dict, vigente) -> Optional[t
     return otra, invertida
 
 
+def _es_celda_de_matriculas(celda: Optional[str]) -> bool:
+    """Una o varias matrículas separadas por espacios: una fila de datos, nunca
+    el rótulo de una cabecera."""
+    trozos = (celda or "").split()
+    return bool(trozos) and (
+        all(re.fullmatch(r"\d{8,9}[A-Za-z]?", t) for t in trozos)
+        or re.fullmatch(r"\d{8,9}[A-Za-z]?", "".join(trozos)) is not None
+    )
+
+
 def procesar_anejo(
     ruta_pdf,
     paginas_texto: list[PaginaTexto],
@@ -777,9 +787,11 @@ def procesar_anejo(
                 otra_cantidad: Optional[tuple[int, str, str]] = None
                 # Una cabecera de verdad (no una fila de datos tomada por
                 # cabecera, que trae una matrícula) abre un cuadro nuevo: con
-                # las dos columnas, su nota; sin ellas, ninguna.
+                # las dos columnas, su nota; sin ellas, ninguna. Sesión
+                # 2026-09-22: una celda puede traer varias matrículas
+                # ("64315045O 64810014Z", `6.19/28510.0177` p.22, escaneada).
                 cabecera_de_verdad = not sin_cabecera_propia and not any(
-                    re.fullmatch(r"\d{8,9}[A-Za-z]?", re.sub(r"\s+", "", c or "")) for c in tabla.cabecera
+                    _es_celda_de_matriculas(c) for c in tabla.cabecera
                 )
                 if cabecera_de_verdad and not any(
                     "cantidad" in normalizar(c or "").replace(" ", "") for c in tabla.cabecera
