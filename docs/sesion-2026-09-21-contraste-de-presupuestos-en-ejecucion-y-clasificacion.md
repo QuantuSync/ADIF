@@ -250,3 +250,113 @@ de SAP de 4 cifras (`1001` Carril, `1003` Traviesas de hormigón, `1006`
 Aparatos vía…). No son prefijos de matrícula, y el maestro no dice a qué grupo
 es cada matrícula. Si ADIF tiene esa correspondencia, es su propia
 clasificación.
+
+---
+
+## Bloque 4 — Cierre
+
+### Pruebas
+
+**1.360 pruebas en verde** (1.334 antes): 18 del contraste de presupuestos y
+del lector de presupuestos por lote, 8 del listado de expedientes en ejecución.
+
+### Reproceso completo: hacía falta, y uno solo
+
+El bloque 1 añade un paso a la extracción: `registrar_presupuestos_de_lote`,
+al final de cada expediente. Por eso hubo **un reproceso completo, con la
+imagen reconstruida con el código final** (`f2c8e57`) y la red apagada.
+Fueron 517 expedientes en **22 min 2 s** (trabajo 31297), con
+`descargas_lanzadas: 0`. Los bloques 2 y 3 no tocan la extracción.
+
+Después del reproceso se cambió una cosa más, sin tocar la extracción: la
+explicación del contraste dice ahora cuántas filas de un lote no salen en
+"Materiales" (más abajo). Se volvieron a construir la imagen, a pasar las
+pruebas, a descargar el entregable, a comparar y a verificar la web. **La
+auditoría, repetida con esa imagen final, da 0 errores y 6 avisos**, los
+mismos de la sesión anterior (precios atípicos 1.544, sin cambio).
+
+### El entregable: el Excel descargado desde la web
+
+`C:\dev\ADIF\catalogo_adif_2026-09-21-contraste-y-en-ejecucion.xlsx`. Se
+descargó con Chromium desde `/catalogo`, pulsando "Exportar Excel", como lo
+hace el cliente, sin errores de consola ni aviso de error en la pantalla.
+**Es idéntico a la exportación directa de la API salvo la fecha de creación**:
+la única entrada distinta del `.xlsx` es `docProps/core.xml`, y dentro de ella
+solo `created`/`modified`. **Desde hoy es regla** (CONTEXTO.md sección 13):
+el entregable es siempre el Excel descargado desde la web.
+
+Un detalle para la próxima vez: el clic en el enlace tiene que hacerse sin
+esperar a la navegación (`click(no_wait_after=True)`). La exportación tarda
+más de los 30 s que Playwright espera por defecto.
+
+### Comparación con `catalogo_adif_2026-09-20-motivos-completos.xlsx`
+
+| | 20/09 | 21/09 |
+|---|---:|---:|
+| Hojas | Materiales, Conciliación, Resumen | + **Contraste de presupuestos** |
+| Filas de "Materiales" | 20.062 | **20.062** |
+| Filas distintas en las 18 columnas | — | **0** |
+| Expedientes que pierden filas | — | **0** |
+| Materiales por expediente + matrícula / + descripción y precio / + lote y descripción | 11.918 / 17.957 / 19.664 | **iguales, 0 perdidos** |
+| Filas de "Conciliación" | 534 | 534 |
+| Columnas de "Conciliación" | 11 | **12** ("En ejecución según ADIF", 111 filas rellenas) |
+| Celdas cambiadas en las 11 columnas de antes | — | **0** |
+
+**Cada diferencia, explicada**:
+
+1. **La hoja "Contraste de presupuestos"**, nueva, con 485 lotes (bloque 1).
+2. **La columna 12 de "Conciliación"**, nueva (bloque 2).
+3. **Una línea nueva en el Resumen**: la procedencia de esa columna.
+
+No hay ninguna otra: "Materiales" es idéntica fila a fila y ninguna cifra del
+Resumen cambia. Es lo esperado, porque ningún bloque cambiaba datos del
+catálogo.
+
+### "Conciliación" cuadra con "Materiales"
+
+**20.062 = 20.062**, con 0 expedientes sin Situación. Recuento por Situación,
+sin cambios: Aporta líneas 390, Publicado sin cuadro de precios 54, Precios en
+acuerdo marco no publicado 47, Publicado dentro de la ficha de otro 17,
+Cobertura parcial de lotes 9, Escaneados ilegibles 6, Acuerdo marco que
+tampoco publica precios 3, Documentos de hermanos 3, Otro 3, Acuerdo marco sin
+precios unitarios 2, Pendiente de procesar 0.
+
+### La web da las mismas cifras que el Excel
+
+Leído con Chromium, como lo pinta el navegador:
+
+- **`/conciliacion`**: 534 filas, las mismas líneas, Situación y "En ejecución
+  según ADIF" que la hoja, fila a fila; suma de líneas 20.062; los once
+  botones con el mismo recuento que el Excel.
+- **`/contraste-presupuestos`**: 485 filas, la misma suma, cifra comparada,
+  resultado y explicación que la hoja, fila a fila; botones 233 / 13 / 139 /
+  100.
+- Ningún aviso de error, ningún error de consola.
+
+### Lo que encontró el propio cierre, y se arregló
+
+La verificación del 18/09 decía que los lotes 2 y 3 de `6.25/28510.0097` no se
+podían cerrar porque el documento no da cantidad a 12 y 20 filas. El contraste
+decía "No cuadra". Las dos cosas son ciertas: esas filas existen, pero **no
+salen en "Materiales"**, porque su tabla se descarta por mapeo incoherente, y
+el contraste solo suma lo que sale. Sin decirlo, "No cuadra" parecía un fallo
+de atribución. **La explicación dice ahora cuántas filas del lote se quedan
+fuera** (11 y 20 en esos dos lotes; 63, 44 y 44 en los lotes de
+`6.22/28510.0094` y `0126`, que cuadran igual). No cambia ningún recuento.
+
+## Pendiente de decisión del cliente (no se ha tocado nada)
+
+1. **Tres sumas absurdas que delatan una lectura mala del catálogo**, a la
+   vista gracias al contraste: `6.25/28510.0019` y `6.25/28510.0041` lote 3
+   (13.457.044.000 €, 11.600 veces su presupuesto), `6.24/28510.0188`
+   (507.926.862,96 €, 2.113 veces) y, sin presupuesto con el que compararlo,
+   `6.20/28510.0042`/`0046`/`0047` lote 1 (863.821.702.015,56 €). Corregirlas
+   cambiaría datos del catálogo.
+2. **`6.25/28510.5001/01` tiene una segunda ficha, `6.25/28510.5001_01`**, las
+   dos como `sin_publicar`.
+3. **La clasificación por tipo de material**: validar los nombres en el Excel
+   de la propuesta, y preguntar a ADIF si tiene la correspondencia de cada
+   matrícula con sus 13 grupos contables de SAP.
+4. **Los 40 lotes sin presupuesto publicado** y los 139 "No cuadra" están en la
+   hoja con su explicación; solo los cinco de las traviesas y los otros tres
+   comprobados a mano llevan la comprobación contra el documento.
