@@ -67,6 +67,7 @@ from app.contraste_presupuestos import (
     MOTIVOS_FUERA as MOTIVOS_FUERA_CONTRASTE,
     NOMBRE_HOJA as NOMBRE_HOJA_CONTRASTE,
     RESULTADOS as RESULTADOS_CONTRASTE,
+    SIGNIFICADO as SIGNIFICADO_CONTRASTE,
     Contraste,
     construir_contraste,
 )
@@ -711,10 +712,10 @@ def _escribir_contraste(libro: Workbook, contraste: Contraste) -> None:
     hoja.append([])
     hoja.append([_NOTA_CONTRASTE, None])
     hoja.append([])
-    hoja.append(["Resultado", "Lotes", None])
+    hoja.append(["Resultado", "Lotes", "Qué significa"])
     por_resultado = contraste.por_resultado()
     for resultado in RESULTADOS_CONTRASTE:
-        hoja.append([resultado, por_resultado[resultado], None])
+        hoja.append([resultado, por_resultado[resultado], SIGNIFICADO_CONTRASTE[resultado]])
     hoja.append(["Total de lotes contrastados", len(contraste.filas), None])
     hoja.append([])
     hoja.append(["Lotes con filas en \"Materiales\" que no entran en el contraste, y por qué", "Lotes", None])

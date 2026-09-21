@@ -963,6 +963,39 @@ def completar_columna_importe(
 # `completar_columna_importe` -- nunca "contiene", y "IMPORTE UNITARIO" sigue
 # deliberadamente fuera porque ese sí es un precio. Medido sobre las 497
 # cabeceras ya cacheadas del corpus: **3** la cumplen.
+# Sesión 2026-09-21 (segunda parte). Hay cuadros con DOS columnas de cantidad:
+# "CANTIDADES A INCLUIR OBLIGATORIAMENTE EN EL PEDIDO (INICIAL)" y "CANTIDADES
+# ESTIMADAS DE REFERENCIA". La cantidad del catálogo es la estimada: con ella
+# el lote cuadra al céntimo con su presupuesto (`6.24/28510.0171`: 2.340.000,00
+# €; `6.25/28510.0203`: 1.725.000,00 €), y con la obligatoria no. El reparto
+# voraz por longitud de alias se equivocaba cuando la extracción parte la
+# palabra ("CANTIDADE S ESTIMADAS"): la estimada solo casaba con "cantidad" y
+# la obligatoria, con "cantidades". De las 28 cabeceras cacheadas con las dos
+# columnas, 3 tenían la cantidad en la obligatoria, las 3 deterministas. Corre
+# sobre el mapeo final, venga de la caché, de las reglas o del modelo.
+def corregir_cantidad_obligatoria_por_estimada(
+    cabecera: list[Optional[str]], mapeo: dict[str, Optional[int]]
+) -> dict[str, Optional[int]]:
+    indice = mapeo.get("cantidad")
+    if indice is None or indice >= len(cabecera):
+        return mapeo
+
+    def compacto(texto: Optional[str]) -> str:
+        return normalizar(texto).replace(" ", "") if texto else ""
+
+    if "obligatori" not in compacto(cabecera[indice]):
+        return mapeo
+    usadas = {i for campo, i in mapeo.items() if i is not None and campo != "cantidad"}
+    estimadas = [
+        i
+        for i, texto in enumerate(cabecera)
+        if i != indice and i not in usadas and "cantidad" in compacto(texto) and "estimad" in compacto(texto)
+    ]
+    if len(estimadas) != 1:
+        return mapeo
+    return {**mapeo, "cantidad": estimadas[0]}
+
+
 def corregir_columna_importe_tomada_por_precio(
     cabecera: list[Optional[str]], mapeo: dict[str, Optional[int]]
 ) -> tuple[dict[str, Optional[int]], bool]:

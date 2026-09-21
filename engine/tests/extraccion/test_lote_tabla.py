@@ -24,6 +24,17 @@ def _tablas_ordenadas(pagina):
     return sorted(extraer_tablas_pagina(pagina), key=lambda t: t.bbox[1])
 
 
+def test_la_cabecera_con_la_l_doble_de_la_negrita_simulada_da_su_lote():
+    # Sesión 2026-09-21 (segunda parte): `6.21/28510.0058` CONTRATO_2.pdf
+    # p.119. Sin la "L" doble, la tabla heredaba el lote 7 de la página
+    # anterior y el lote 7 sumaba también el presupuesto del 8.
+    from app.extraccion.lote_tabla import _asociar_por_texto
+
+    resultado = _asociar_por_texto("LLOTE 8 – SUJECIONES", {"7", "8"})
+    assert resultado.identificador_lote == "8"
+    assert resultado.elegible_para_herencia is False
+
+
 def test_resolver_urgencia_mutua_lote_1():
     # Texto real de la p.15: el propio lote 1 cita al 2 como repuesto de
     # urgencia -- nunca al revés en esta frase.

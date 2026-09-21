@@ -20,7 +20,9 @@ from app.contraste_presupuestos import (
     EJECUCION_MATERIAL,
     FALTAN_CANTIDADES,
     INCIERTO,
-    NO_CUADRA,
+    NO_CUADRA_DOCUMENTO,
+    NO_CUADRA_FALTAN_LINEAS,
+    NO_CUADRA_SIN_CAUSA,
     NOMBRE_HOJA,
     RESULTADOS,
     SIN_PRESUPUESTO,
@@ -262,7 +264,7 @@ def test_menos_del_001_y_no_cuadra_con_el_porcentaje_exacto(db_session):
     _linea(db_session, b, lote_b, "1", "2160000")
     filas = {f.codigo_expediente: f for f in _contraste(db_session).filas}
     assert filas["6.24/28510.0001"].resultado == CUADRA_MENOS_001
-    assert filas["6.24/28510.0002"].resultado == NO_CUADRA
+    assert filas["6.24/28510.0002"].resultado == NO_CUADRA_SIN_CAUSA
     assert "exactamente el 90 %" in filas["6.24/28510.0002"].explicacion
 
 
@@ -277,12 +279,13 @@ def test_la_discrepancia_comprobada_a_mano_lleva_lo_que_se_comprobo(db_session):
     ))
     linea = _linea(db_session, expediente, lote, "1", "8230002.13")
     [fila] = _contraste(db_session).filas
-    assert fila.resultado == NO_CUADRA
-    assert "Comprobado a mano" in fila.explicacion and "ANEJO_8.pdf" in fila.explicacion
-    # Con otras cifras, el texto ya no se escribe: explicaría otra cosa.
+    assert fila.resultado == NO_CUADRA_DOCUMENTO
+    assert "ANEJO_8.pdf" in fila.explicacion
+    # Con otras cifras, la causa ya no se escribe: explicaría otra cosa.
     linea.precio_unitario = Decimal("8230002.14")
     [fila] = _contraste(db_session).filas
-    assert "Comprobado a mano" not in fila.explicacion
+    assert fila.resultado == NO_CUADRA_SIN_CAUSA
+    assert "ANEJO_8.pdf" not in fila.explicacion
 
 
 def test_el_lote_que_pone_el_sistema_no_toma_el_presupuesto_del_lote_1_de_un_documento(db_session):
@@ -392,8 +395,9 @@ def test_la_api_devuelve_las_filas_su_recuento_y_filtra(cliente, db_api):
     cuerpo = cliente.get("/contraste-presupuestos").json()
     assert cuerpo["total"] == 2
     assert [r["resultado"] for r in cuerpo["resultados"]] == list(RESULTADOS)
+    assert all(r["significado"] for r in cuerpo["resultados"])
     assert {r["resultado"]: r["lotes"] for r in cuerpo["resultados"]}[CUADRA_AL_CENTIMO] == 1
-    filtrado = cliente.get("/contraste-presupuestos", params={"resultado": NO_CUADRA}).json()
+    filtrado = cliente.get("/contraste-presupuestos", params={"resultado": NO_CUADRA_SIN_CAUSA}).json()
     assert [f["lote"] for f in filtrado["filas"]] == ["2"]
     assert filtrado["total"] == 2  # el recuento es el del total, no el del filtro
 
@@ -448,5 +452,5 @@ def test_las_filas_del_lote_que_no_salen_en_materiales_se_dicen(db_session):
     fuera = _linea(db_session, expediente, lote, None, "10")
     fuera.motivo_revision = MOTIVO_MAPEO_INCOHERENTE
     [fila] = _contraste(db_session).filas
-    assert (fila.lineas, fila.lineas_sin_cantidad, fila.resultado) == (1, 0, NO_CUADRA)
-    assert "1 fila(s) de este lote están en la base de datos pero no salen" in fila.explicacion
+    assert (fila.lineas, fila.lineas_sin_cantidad, fila.resultado) == (1, 0, NO_CUADRA_FALTAN_LINEAS)
+    assert "1 fila(s) de este lote están en revisión" in fila.explicacion

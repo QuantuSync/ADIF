@@ -538,16 +538,34 @@ impuestos" y "con impuestos". Si la etiqueta no lo dice, la fila empieza por
 | 11 | Líneas | Las filas de ese lote en "Materiales" |
 | 12 | Líneas sin cantidad | Las que el documento no da con cantidad (sin contar las partidas alzadas) |
 | 13 | Resultado | Ver la tabla de abajo |
-| 14 | Explicación | En una frase qué pasa; en los lotes comprobados a mano, lo que se comprobó contra el documento |
+| 14 | Explicación | En una frase qué pasa; en los lotes que no cuadran, su causa comprobada contra el documento y la cifra que la demuestra |
 
-### Los cuatro resultados
+### Los resultados
+
+Desde el 21/09/2026 (segunda parte) **un lote que no cuadra dice por qué**: su
+causa se ha comprobado contra el documento, y la columna "Explicación" la
+cuenta en una línea, con la cifra concreta ("Falta la partida alzada para
+imprevistos del lote, 8.987,26 € (CONTRATO_2.pdf p.105): con ella cuadra al
+céntimo"). La misma frase de "Qué significa" va en la hoja, debajo del
+recuento, y en la pantalla de la web.
 
 | Resultado | Qué significa |
 |---|---|
 | **Cuadra al céntimo** | La suma es exactamente la cifra comparada |
 | **Cuadra con diferencia menor del 0,01 %** | No es exacta, pero la diferencia es menor de una diezmilésima del presupuesto |
-| **No cuadra** | La diferencia es mayor. No dice quién está mal: el cuadro del propio documento puede pasarse de su presupuesto (hay cinco casos comprobados a mano), o el lote puede tener filas de más o de menos. La explicación da la pista cuando la aritmética la da (*"la suma es exactamente el 90 % del presupuesto"*, *"la suma es 22 veces el presupuesto"*) |
+| **No cuadra: lectura del catálogo pendiente de corregir** | El catálogo ha leído mal una cantidad, un precio o el lote de alguna fila. Está comprobado contra el documento, y la explicación dice qué fila y qué cifra; el arreglo está pendiente |
+| **No cuadra: el presupuesto publicado es otra cifra (IVA, gastos generales o beneficio)** | La cifra publicada no es la base sin IVA equivalente a los precios del cuadro. Hoy ningún lote |
+| **No cuadra: cantidades estimadas, el presupuesto es un máximo** | El documento da cantidades de referencia, por pedido o de un pedido abierto, no las que se van a comprar: el presupuesto es un techo de gasto y la suma no tiene por qué coincidir con él. Es el caso más frecuente, y **no es un error de nadie** |
+| **No cuadra: faltan líneas del lote en el catálogo** | El documento trae filas de este lote que no están en "Materiales": en revisión, o no leídas. La explicación dice cuáles y cuánto suman |
+| **No cuadra: el presupuesto incluye partidas que el cuadro no trae** | El presupuesto suma conceptos que no están en el cuadro de precios: reparaciones, obra, mantenimiento, servicios |
+| **No cuadra: discrepancia del propio documento** | Las filas están bien leídas y el propio documento no suma su presupuesto (comprobado contra el PDF) |
+| **No cuadra: causa sin determinar** | La causa no se ha comprobado todavía contra el documento. Hoy ningún lote |
 | **No se puede cerrar: faltan cantidades** | Alguna fila del lote no trae cantidad (o precio) en el documento, así que la suma está incompleta |
+
+**La causa solo se escribe si la suma y el presupuesto son los que se
+comprobaron.** Si cualquiera de las dos cifras cambia (un reproceso que lee
+mejor una fila, un presupuesto nuevo), la fila pasa a *"causa sin
+determinar"*: nunca explica una cifra que no es la que se miró.
 
 ### Los lotes que no entran
 

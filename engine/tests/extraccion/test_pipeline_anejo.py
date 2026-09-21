@@ -509,3 +509,30 @@ def test_reprocesar_el_mismo_documento_no_duplica_lineas_ni_repite_llamadas(db_s
     from app.models import LineaCatalogo
 
     assert db_session.query(LineaCatalogo).filter_by(lote_id=lote.id).count() == 14
+
+
+def test_las_paginas_de_la_oferta_van_del_titulo_a_su_total():
+    # Sesión 2026-09-21 (segunda parte): "ANEJO Nº 1 Bis. JUSTIFICACIÓN DE LA
+    # PROPOSICIÓN ECONÓMICA PRESENTADA..." de `4.26/28510.0020` CONTRATO_1.pdf
+    # pp.5-6: sus precios son los ofertados, no los de licitación.
+    from app.extraccion.pipeline_anejo import paginas_de_la_oferta
+    from app.extraccion.texto import PaginaTexto
+
+    paginas = [
+        PaginaTexto(numero=4, texto="PROPOSICIÓN ECONÓMICA Importe ofertado"),
+        PaginaTexto(numero=5, texto="ANEJO Nº 1 Bis JUSTIFICACIÓN DE LA PROPOSICIÓN ECONÓMICA PRESENTADA"),
+        PaginaTexto(numero=6, texto="P-17 Ud. 1 4.820,00 4.820,00 TOTAL OFERTADO (SIN IVA) 2.765.385,23"),
+        PaginaTexto(numero=7, texto="LOTE 1 PRESUPUESTO P-1 48 10.805,22"),
+    ]
+    assert paginas_de_la_oferta(paginas) == {5, 6}
+
+
+def test_el_titulo_del_pliego_sin_total_detras_no_marca_nada():
+    # El pliego administrativo repite el título en sus instrucciones, sin
+    # ningún cuadro detrás: no puede tapar un cuadro de precios de verdad.
+    from app.extraccion.pipeline_anejo import paginas_de_la_oferta
+    from app.extraccion.texto import PaginaTexto
+
+    paginas = [PaginaTexto(numero=n, texto="") for n in range(1, 12)]
+    paginas[1] = PaginaTexto(numero=2, texto="la justificación de la proposición económica presentada")
+    assert paginas_de_la_oferta(paginas) == set()

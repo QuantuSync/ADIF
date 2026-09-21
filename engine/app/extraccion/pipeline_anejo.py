@@ -17,6 +17,7 @@ comparte con sus hermanos traen las tablas de los demás lotes, y no son
 suyas."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Optional
@@ -47,6 +48,7 @@ from app.extraccion.mapeo_cabecera import (
     corregir_confusion_matricula_codigo_precio,
     corregir_confusion_precio_cantidad,
     completar_cantidad_por_contenido,
+    corregir_cantidad_obligatoria_por_estimada,
     corregir_columna_importe_tomada_por_precio,
     liberar_unidad_que_son_solo_cifras,
     derivar_mapeo_por_contenido,
@@ -177,6 +179,40 @@ def descartar_bloques_de_lote_que_no_cuadran(
     if not descartadas:
         return lineas, motivos
     return [l for l in lineas if id(l) not in descartadas], motivos
+
+
+# Sesión 2026-09-21 (segunda parte): el adjudicatario adjunta a su Contrato la
+# "ANEJO Nº 1 Bis. JUSTIFICACIÓN DE LA PROPOSICIÓN ECONÓMICA PRESENTADA DE
+# ACUERDO CON EL DESGLOSE DE UD. REFLEJADO EN EL PRESUPUESTO DEL PPTP", que
+# cierra con "TOTAL OFERTADO (SIN IVA)". Tiene la forma exacta de un cuadro de
+# precios (Ref. | Ud. | Medición | Denominación | Precio | Importe), pero sus
+# precios son los OFERTADOS, ya con la baja: no son precios de licitación. Se
+# leía como cuadro y su precio pisaba el del presupuesto del pliego
+# (`4.26/28510.0020` lote 1, P-12: 5.335,00 € de la oferta de CONTRATO_1.pdf
+# p.6 en vez de los 5.500,00 € del presupuesto, y el lote no cuadraba por
+# 825,00 €) o daba al lote sus únicas líneas (`3.23/28510.0135` lote 6,
+# CONTRATO_2.pdf p.74). Desde la página del título hasta la de su total, una
+# fila CON precio no es un precio de licitación. El título solo cuenta si su
+# "TOTAL OFERTADO (SIN IVA)" llega en ese mismo tramo de páginas: el pliego
+# administrativo repite el título en su texto sin que detrás haya ningún
+# cuadro. Medido: 17 documentos, 2 filas de "Materiales" con precio
+# (`3.23/28510.0135` lote 6) y el precio de P-12 de `4.26/28510.0020` lote 1.
+_TITULO_OFERTA_RE = re.compile(r"JUSTIFICACI[OÓ]N\s+DE\s+LA\s+PROPOSICI[OÓ]N\s+ECON[OÓ]MICA", re.IGNORECASE)
+_TOTAL_OFERTADO_RE = re.compile(r"TOTAL\s+OFERTADO\s*\(?\s*SIN\s+IVA", re.IGNORECASE)
+_PAGINAS_MAXIMAS_DE_LA_OFERTA = 5
+
+
+def paginas_de_la_oferta(paginas_texto: list[PaginaTexto]) -> set[int]:
+    ordenadas = sorted(paginas_texto, key=lambda p: p.numero)
+    paginas: set[int] = set()
+    for i, pagina in enumerate(ordenadas):
+        if not _TITULO_OFERTA_RE.search(pagina.texto or ""):
+            continue
+        for j in range(i, min(i + _PAGINAS_MAXIMAS_DE_LA_OFERTA + 1, len(ordenadas))):
+            if _TOTAL_OFERTADO_RE.search(ordenadas[j].texto or ""):
+                paginas.update(p.numero for p in ordenadas[i:j + 1])
+                break
+    return paginas
 
 
 def _es_nota_de_subsanacion(paginas_texto: list[PaginaTexto]) -> bool:
@@ -348,6 +384,7 @@ def procesar_anejo(
 
     with pdfplumber.open(ruta_pdf) as pdf:
         localizacion = localizar_paginas_candidatas(paginas_texto)
+        de_la_oferta = paginas_de_la_oferta(paginas_texto)
 
         for candidata in localizacion.candidatas:
             pagina = pdf.pages[candidata.numero - 1]
@@ -682,6 +719,7 @@ def procesar_anejo(
                 # calcula sobre el mapeo YA final (con sus correcciones), y
                 # nunca se cachea: la columna sale de la cabecera cada vez.
                 mapeo = completar_columna_importe(tabla.cabecera, mapeo)
+                mapeo = corregir_cantidad_obligatoria_por_estimada(tabla.cabecera, mapeo)
                 # Bloque 1, decisión 1 del cliente (sesión 2026-09-19, sexta
                 # parte): el cuadro cuya única columna de dinero se llama
                 # "IMPORTE" en su propia cabecera no publica precio unitario
@@ -725,6 +763,11 @@ def procesar_anejo(
                     tabla, mapeo, documento_origen_id, expediente_id, baja_lote,
                     orden_inicial=len(lineas),
                 )
+                if candidata.numero in de_la_oferta:
+                    # Solo la fila con precio: ese precio es el ofertado. El
+                    # modelo en blanco (precio e importe vacíos) sigue como
+                    # hasta ahora -- `3.24/28510.0063` no tiene otras líneas.
+                    lineas_tabla = [l for l in lineas_tabla if l.get("precio_unitario") in (None, INVALIDADO)]
                 if importe_tomado_por_precio:
                     for linea in lineas_tabla:
                         linea["precio_solo_en_la_columna_de_importe"] = True

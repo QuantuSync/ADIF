@@ -21,6 +21,7 @@ from app.auth import Usuario, get_current_user
 from app.contraste_presupuestos import (
     MOTIVOS_FUERA,
     RESULTADOS,
+    SIGNIFICADO,
     construir_contraste,
     lineas_de_materiales_por_lote,
 )
@@ -50,7 +51,9 @@ def obtener_contraste(
         total=len(contraste.filas),
         # El recuento es siempre el del total, no el del filtro: es la cifra
         # que se compara contra el Excel.
-        resultados=[RecuentoContrasteOut(resultado=r, lotes=por_resultado[r]) for r in RESULTADOS],
+        resultados=[
+            RecuentoContrasteOut(resultado=r, lotes=por_resultado[r], significado=SIGNIFICADO[r]) for r in RESULTADOS
+        ],
         filas=[FilaContrasteOut.model_validate(f, from_attributes=True) for f in filtradas],
         fuera_total=len(contraste.fuera),
         fuera=[RecuentoFueraOut(motivo=m, lotes=por_motivo[m]) for m in MOTIVOS_FUERA],

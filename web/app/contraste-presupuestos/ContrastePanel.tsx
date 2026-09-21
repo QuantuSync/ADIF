@@ -29,7 +29,7 @@ type FilaContraste = {
 
 type Respuesta = {
   total: number;
-  resultados: { resultado: string; lotes: number }[];
+  resultados: { resultado: string; lotes: number; significado: string }[];
   filas: FilaContraste[];
   fuera_total: number;
   fuera: { motivo: string; lotes: number }[];
@@ -137,7 +137,7 @@ export default function ContrastePanel({ apiUrl }: { apiUrl: string }) {
                       key={r.resultado}
                       className={`filtro-estado${resultado === r.resultado ? " active" : ""}`}
                       onClick={() => setResultado(r.resultado)}
-                      title={r.resultado}
+                      title={r.significado || r.resultado}
                       disabled={r.lotes === 0}
                     >
                       {r.resultado} <span className="mono">{r.lotes}</span>
@@ -147,6 +147,17 @@ export default function ContrastePanel({ apiUrl }: { apiUrl: string }) {
               </div>
             </div>
           </div>
+
+          <details className="muted">
+            <summary>Qué significa cada resultado</summary>
+            <ul>
+              {datos.resultados.map((r) => (
+                <li key={r.resultado}>
+                  <strong>{r.resultado}</strong>: {r.significado}
+                </li>
+              ))}
+            </ul>
+          </details>
 
           <p className="muted">
             {filas.length === datos.total
