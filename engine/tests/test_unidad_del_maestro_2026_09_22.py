@@ -133,3 +133,21 @@ def test_la_fila_con_unidad_del_documento_no_lleva_la_nota(db_session):
     linea = _guardar(db_session, lote, [["P-1", "603000210", "TORNILLO", "ud", "4", "1,00"]])
 
     assert TEXTO_UNIDAD_DEL_MAESTRO not in (_texto_celdas_vacias(linea, "1") or "")
+
+
+# --------------------------------------------------------------------------
+# Bloque 2 — la nota de la cantidad mínima por pedido en `6.19/28510.0177`
+# p.22: su tabla empieza en una fila con dos matrículas en la misma celda,
+# que se tomaba por cabecera y cerraba el cuadro de la nota.
+# --------------------------------------------------------------------------
+
+
+def test_una_celda_con_varias_matriculas_es_una_fila_de_datos():
+    from app.extraccion.pipeline_anejo import _es_celda_de_matriculas
+
+    assert _es_celda_de_matriculas("64315045O 64810014Z")
+    assert _es_celda_de_matriculas("643150450")
+    assert _es_celda_de_matriculas("643150 450")
+    assert not _es_celda_de_matriculas("Nº MATRICULA")
+    assert not _es_celda_de_matriculas("10 10")
+    assert not _es_celda_de_matriculas(None)
