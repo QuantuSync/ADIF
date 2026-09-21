@@ -206,3 +206,47 @@ leer en vez de inventarlas. La API monta `Ejemplo/Input` entera
 (`EN_EJECUCION_ADIF_DIR=/data/entrada`, en el `docker-compose.override.yml`
 local), así que no hay que tocar ningún montaje. Migración **0043**; 9 pruebas
 en `tests/test_en_ejecucion_adif.py`.
+
+---
+
+## Bloque 3 — Propuesta de clasificación por tipo de material
+
+**No se ha cambiado la columna "Código del material".** Entregado en
+`docs/propuesta-clasificacion-tipo-material.md` y en
+`C:\dev\ADIF\propuesta_clasificacion_tipo_material_2026-09-21.xlsx`, con una
+columna vacía para que el cliente valide cada nombre.
+
+| | 3 cifras | 4 cifras | 5 cifras |
+|---|---:|---:|---:|
+| Familias con filas en el catálogo | 59 | 175 | 301 |
+| Homogeneidad (filas cuya matrícula está en el maestro) | 41 % | 67 % | 71 % |
+| Familias 100 % homogéneas (por "Código del material") | 10 | 69 | 163 |
+
+**Propuesta: 4 cifras.** De 3 a 4 se ganan 26-27 puntos de homogeneidad; de 4
+a 5, 4-7 a cambio de 126 familias más, 54 de ellas de una sola matrícula. La
+homogeneidad se mide con el mismo vocabulario controlado de "Código del
+material" aplicado a las denominaciones del maestro. Con la primera palabra a
+secas salía mucho más baja (22 / 44 / 55 %), porque siglas como `SCI` o `CZI`
+y abreviaturas como "TRAV.HORM." no se reconocían.
+
+**Nombres, sin inventar ninguno**: 169 familias se nombran por sus
+denominaciones del maestro, 5 por el "Código del material" de sus filas y 1 por
+la primera palabra de sus descripciones. 53 son de un solo tipo (≥ 80 %) y
+cubren 4.015 filas; 122 son mixtas y llevan sus tres términos principales. **Un
+defecto de la primera versión, corregido antes de entregarla**: `6431` salía
+TORNILLO porque el vocabulario solo reconocía 2 de sus 64 denominaciones. Ahora
+el vocabulario solo nombra la familia si reconoce al menos la mitad; si no, se
+usa la primera palabra de sus denominaciones, y `6431` sale GRIFA. Nueve
+nombres se repiten en familias distintas (TRAVIESA en `6070` hormigón y en
+`6030` "TR-AK… NEGRA"…); el Excel lo avisa y no les pone apellido.
+
+**Filas sin matrícula (6.553): 334 se asignan con certeza** (descripción
+idéntica a filas con matrícula de una sola familia) **y 6.219 no**. De estas,
+214 son probables por su "Código del material", pero no se cuentan como
+ciertas.
+
+**Hallazgo para la pregunta al cliente**: el maestro trae 13 grupos contables
+de SAP de 4 cifras (`1001` Carril, `1003` Traviesas de hormigón, `1006`
+Aparatos vía…). No son prefijos de matrícula, y el maestro no dice a qué grupo
+es cada matrícula. Si ADIF tiene esa correspondencia, es su propia
+clasificación.
