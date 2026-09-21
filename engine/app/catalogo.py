@@ -1504,6 +1504,24 @@ def _construir_campos(
         # dejar la fila con pinta de resuelta antes de que la desalineación
         # completa llegara a intentarse.
         recuperada = _recuperar_cantidad_columna_fantasma(fila, mapeo)
+        if recuperada is not None and "€" in recuperada:
+            # Sesión 2026-09-21 (bloque 1): la misma regla que el caso de
+            # arriba, que solo miraba la columna mapeada. La fila "Partida
+            # alzada a justificar para imprevistos" de `6.25/28510.0019` p.118
+            # (y su copia en `0041`) trae UN solo importe, "116.000,00 €", y
+            # esta recuperación lo tomaba como cantidad a la vez que la de
+            # precio lo tomaba como precio: 116.000 × 116.000 = 13.456 millones
+            # en un lote de 1,16 millones. Una cantidad nunca lleva el símbolo
+            # de euro; si la fila no tiene precio, ese importe ES su precio.
+            if precio_unitario is None and _parece_precio_recuperable(recuperada):
+                precio_unitario = parsear_importe_es(recuperada)
+                precio_bruto = recuperada
+                motivo_revision = _acumular_motivo(
+                    motivo_revision,
+                    "precio unitario recuperado de una columna fantasma sin etiquetar junto a \"cantidad\" "
+                    "(la celda trae el símbolo €, una cantidad nunca lo lleva), confirmar antes de dar por buena",
+                )
+            recuperada = None
         if recuperada is not None:
             cantidad = parsear_numero_es(recuperada)
             motivo_revision = _acumular_motivo(
