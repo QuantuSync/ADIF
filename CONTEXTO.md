@@ -529,6 +529,22 @@ un valor del vocabulario de unidades conocidas**
 (`app.extraccion.unidad_medida`, sesión 2026-09-15): cualquier otro se
 descarta y la línea va a revisión.
 
+**La unidad del maestro de materiales está dentro del proceso automático**
+(sesión 2026-09-21, cuarta parte). Hasta entonces era un paso manual
+(`POST /mantenimiento/maestro-materiales/completar-unidades`) que no se había
+vuelto a lanzar desde la carga del maestro: 5.786 líneas con matrícula del
+maestro se quedaban sin su unidad (3.222 celdas del Excel). Ahora
+`app.extraccion.maestro_materiales.aplicar_unidades_del_maestro` corre al
+guardar las líneas de cada documento, sobre la fila ya escrita (como el motivo
+de la matrícula fuera del maestro), y `completar_unidades_desde_maestro` al
+final de cada ciclo, antes de la auditoría. Reglas: **la unidad del documento
+manda siempre** (si una pasada trae unidad, la marca
+`unidad_medida_completada_desde_maestro` se quita); la del maestro se
+**recalcula**, no se hereda (si la matrícula deja de figurar, se retira); la
+partida alzada no la recibe; sin maestro cargado no se toca nada. **La fila lo
+dice**: "Motivo de las celdas vacías" lleva *"Unidad de medida: del maestro de
+materiales de ADIF (el documento no la publica)"*.
+
 **"Ml" es metro lineal y se unifica con "m"** (sesión 2026-09-19, séptima
 parte, bloque 3). No se hacía por una duda —"ml puede ser metro lineal o
 mililitro"— que el corpus deshace: las **tres** líneas que la traen son obra
@@ -1120,8 +1136,9 @@ reconstruida:
    expediente y lo que la extracción anota en cada documento, y deja
    documentos, **las cuatro cachés** (texto, reconocimiento óptico, mapeo de
    cabecera, código de material), los listados de entrada y la sindicación.
-   `--reconstruir` es un ciclo forzado con las cuatro vías de red apagadas más
-   el paso de las unidades del maestro, que en producción se lanza a mano.
+   `--reconstruir` es un ciclo forzado con las cuatro vías de red apagadas (la
+   unidad del maestro la aplica el propio ciclo desde el 2026-09-21, cuarta
+   parte).
    **La segunda pasada es obligatoria**: varias reglas solo se activan sobre
    el estado que deja la primera (la del lote del título necesita que el
    expediente ya cargue con más de un lote), y la comparación que vale es la
@@ -1221,6 +1238,21 @@ materiales**: es el mejor argumento para tenerlo cargado.
 ---
 
 ## 16. Pendiente de resolver
+
+- **Para la próxima sesión (anotado el 2026-09-21, cuarta parte):**
+  1. **Las 723 celdas que el código actual ya no lee.** El valor guardado es el
+     bueno (está en el fragmento de su propia fila) y sobrevive porque un
+     `None` no pisa; si algún día se reconstruye desde cero, se perdería. Son
+     83 cantidades de `6.26/28510.0016` pp.11-12 ("CANTIDAD ESTIMADA" = 1 en las
+     páginas de continuación), 212 unidades de cinco expedientes (`4.26/28510.0020`,
+     `6.22/28510.0094`, `0122`, `0155`, `0156`: "Ud."/"UD." en la fila; 74 de
+     ellas en "Materiales") y 428 cantidades de filas sin lote de
+     `6.21/28510.0112`/`0113` ("… | 13 | 91.537,95 | €/UD"). Hay que arreglar
+     la lectura, no los datos (`docs/sesion-2026-09-21-valores-viejos-lecturas-malas-y-lineas-que-faltan.md`).
+  2. **La prueba de reconstrucción desde cero**, repetida con el código de esta
+     sesión (sección 13, "Reconstrucción en paralelo"), ya con la unidad del
+     maestro dentro del ciclo: tiene que dar las mismas filas que producción y,
+     como diferencia, solo esas 723 celdas mientras no se arregle su lectura.
 
 - **Excel de ejecución SAP (367 expedientes, departamento 28510): estado de
   contrato incorporado, cobertura del descubrimiento medida (sesión
@@ -3388,6 +3420,26 @@ materiales**: es el mejor argumento para tenerlo cargado.
   "faltan líneas"; "Conciliación" 19.333 = 19.333; las dos vistas, iguales al
   Excel.
 
+- **Sesión 2026-09-21 (cuarta parte): la unidad del maestro en el proceso
+  automático, la nota de `0177` y los lotes sin expediente**
+  (`docs/sesion-2026-09-21-unidad-del-maestro-nota-de-0177-y-lotes-sin-expediente.md`).
+  Excel: **las mismas 19.333 filas**. (1) **La unidad del maestro deja de ser un
+  paso manual**: la aplica el guardado de cada documento y el final de cada
+  ciclo (sección 7); la del documento manda siempre y la fila lo dice en
+  "Motivo de las celdas vacías". 3.029 celdas ganan unidad (las 3.222 del
+  encargo eran sobre el Excel de 19.857 filas) y 6.482 filas llevan la nota,
+  incluidas las 3 de la `P`, que antes no la llevaban. (2) **Las 7 filas de
+  `6.19/28510.0177` p.22 llevan la nota de la cantidad mínima**: una celda con
+  dos matrículas ya no se toma por cabecera. (3) **Pregunta 17**: a qué
+  expediente pertenece cada lote cuyas filas no están en el catálogo (5
+  licitaciones; `6.21/28510.0136` también perdió la tabla del lote 8). (4)
+  **Cierre**: 1.411 pruebas; un reproceso completo con la red apagada (22 min
+  16 s, `descargas_lanzadas: 0`); auditoría 0 errores y 7 avisos; entregable
+  descargado desde la web, idéntico al endpoint de la API salvo la fecha;
+  "Conciliación" 19.333 = 19.333; las dos vistas, iguales al Excel. Pendiente:
+  las 723 celdas que el código ya no lee y la reconstrucción desde cero
+  (sección 16).
+
 ---
 
 El registro histórico de hallazgos y decisiones de cada sesión vive en
@@ -3445,4 +3497,6 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `sesion-2026-09-21-sumas-absurdas-causas-del-contraste-y-ficha-duplicada.md`,
 `propuesta-clasificacion-tipo-material.md`,
 `sesion-2026-09-21-valores-viejos-lecturas-malas-y-lineas-que-faltan.md`,
+`sesion-2026-09-21-unidad-del-maestro-nota-de-0177-y-lotes-sin-expediente.md`,
+`preguntas-cliente-lotes-sin-expediente.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.
