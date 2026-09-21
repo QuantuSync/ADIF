@@ -73,6 +73,7 @@ from app.contraste_presupuestos import (
 from app.celdas_vacias import ETIQUETA_MOTIVO, PENDIENTE, celdas_vacias
 from app.conciliacion import (
     COLUMNAS_CONCILIACION,
+    EN_EJECUCION_SIN_FECHA,
     RegistroPublicado,
     SITUACIONES,
     comprobar_cuadre,
@@ -579,6 +580,35 @@ _NOTA_ESTADO_ADIF = (
 )
 
 
+# Bloque 2, sesión 2026-09-21: la columna "En ejecución según ADIF" de
+# "Conciliación" sale de una tercera fuente, y hay que decir cuál.
+_PROCEDENCIA_EN_EJECUCION = {
+    "expedientes_en_ejecucion_adif_20260921.csv": (
+        "compartido por ADIF en el grupo de trabajo el 18/09/2026 y reenviado ordenado el 21/09/2026"
+    ),
+}
+
+
+def _nota_en_ejecucion_adif(registro: RegistroPublicado) -> str:
+    if not registro.listado_en_ejecucion_adif:
+        return (
+            "La columna \"En ejecución según ADIF\" de esa hoja está vacía: todavía no se ha cargado "
+            "ningún listado de expedientes en ejecución de ADIF."
+        )
+    procedencia = _PROCEDENCIA_EN_EJECUCION.get(registro.listado_en_ejecucion_adif)
+    return (
+        "La columna \"En ejecución según ADIF\" de esa hoja NO sale de la Plataforma: es la fecha de firma "
+        "del acta de inicio que da el listado interno de ADIF de sus expedientes en ejecución ("
+        f"{registro.listado_en_ejecucion_adif}"
+        + (f", {procedencia}" if procedencia else "")
+        + f"). La llevan {registro.en_ejecucion_adif_en_la_hoja} expedientes de la hoja; \""
+        f"{EN_EJECUCION_SIN_FECHA}\" quiere decir que el listado lo incluye pero deja la fecha en blanco, "
+        "y la celda vacía, que el expediente no figura en él. Está separada de las dos columnas de estado "
+        "a propósito, y, como el listado de estados, no interviene en ningún momento en decidir si un "
+        "expediente consta publicado ni en su Situación: eso lo decide solo la Plataforma."
+    )
+
+
 def _escribir_conciliacion(libro: Workbook, filas: list) -> None:
     hoja = libro.create_sheet("Conciliación")
     hoja.append(COLUMNAS_CONCILIACION)
@@ -595,8 +625,9 @@ def _escribir_conciliacion(libro: Workbook, filas: list) -> None:
             _celda_texto_o_espacio(fila.baja),
             _celda_texto_o_espacio(fila.situacion),
             _celda_texto_o_espacio(fila.motivo),
+            _celda_texto_o_espacio(fila.en_ejecucion_adif),
         ])
-    for columna, ancho in zip("ABCDEFGHIJK", (22, 55, 32, 30, 24, 12, 14, 12, 55, 30, 80)):
+    for columna, ancho in zip("ABCDEFGHIJKL", (22, 55, 32, 30, 24, 12, 14, 12, 55, 30, 80, 22)):
         hoja.column_dimensions[columna].width = ancho
     for fila_hoja in hoja.iter_rows(min_row=2):
         for celda in fila_hoja:
@@ -703,6 +734,7 @@ def _escribir_bloque_conciliacion(hoja, filas: list, registro: RegistroPublicado
     hoja.append([_NOTA_CONCILIACION_HUECOS, None])
     hoja.append([_NOTA_ESTADO_ADIF, None])
     hoja.append([_NOTA_ESTADO_PUBLICADO, None])
+    hoja.append([_nota_en_ejecucion_adif(registro), None])
     hoja.append([])
     hoja.append(["De qué fecha es el registro de lo publicado y qué cubre", None])
     departamentos = ", ".join(registro.departamentos) or "(sin departamento configurado)"

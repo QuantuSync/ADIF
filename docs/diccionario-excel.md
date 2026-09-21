@@ -388,7 +388,7 @@ documento.
 
 ---
 
-## Hoja "Conciliación" — las 11 columnas
+## Hoja "Conciliación" — las 12 columnas
 
 **Para qué existe.** Contesta la pregunta *"¿cómo sabemos que la app ha leído
 todo lo que hay publicado?"*. Hasta que existió, un expediente que no aportaba
@@ -424,6 +424,7 @@ al menos un documento. Queda fuera lo que la Plataforma confirmó que no tiene.
 | 9 | Baja y de dónde sale | En una frase, con el fragmento literal del documento que la declara |
 | 10 | Situación | Ver la tabla de abajo |
 | 11 | Motivo | La explicación concreta de esa fila, en lenguaje llano |
+| 12 | En ejecución según ADIF | La fecha de firma del acta de inicio según el listado interno de ADIF de expedientes en ejecución. Ver abajo |
 
 ### Las dos columnas de estado, y por qué son dos
 
@@ -445,6 +446,22 @@ Un detalle: si el sistema ya tiene descargada de la Plataforma la Resolución de
 Adjudicación o el Contrato, la columna 4 usa eso en vez del último boletín —
 un boletín refleja el evento de su mes, no "sigue vigente". **Nunca al revés**:
 la columna solo sube de etapa, jamás baja.
+
+### "En ejecución según ADIF": una tercera fuente, en su propia columna
+
+Sale del **listado interno de ADIF de sus expedientes en ejecución**, con la
+fecha de firma del acta de inicio. No sale de la Plataforma. La primera versión
+la compartió ADIF en el grupo de trabajo el 18/09/2026 y la reenvió ordenada el
+21/09/2026. Tres valores posibles: la fecha (`24/08/2026`); *"En el listado,
+sin fecha de firma del acta de inicio"*, si el listado la deja en blanco; o
+vacía, si el expediente no figura en él.
+
+Va **al final y separada de las dos columnas de estado** a propósito, y, igual
+que "Estado según ADIF", **no interviene en decidir si un expediente consta
+publicado ni en su Situación**. Por eso un expediente puede estar en el listado
+de ADIF y no salir en esta hoja: pasa con `6.25/28510.5001/01`, que la
+Plataforma no devuelve. El Resumen dice de qué fichero sale la columna.
+Detalle en `docs/expedientes-en-ejecucion-adif.md`.
 
 ### Las once Situaciones
 

@@ -168,3 +168,41 @@ si cambian, explicaría otra cosa.
   filtro por resultado con su recuento (siempre el del total), búsqueda por
   expediente y los lotes que no entran, con su motivo.
 - 17 pruebas en `tests/test_contraste_presupuestos.py`.
+
+---
+
+## Bloque 2 — El listado de expedientes en ejecución de ADIF
+
+**Guardado** como `Ejemplo/Input/expedientes_en_ejecucion_adif_20260921.csv`,
+tal cual se recibió. **Procedencia**: listado interno de ADIF, compartido por
+Isa, de ADIF, en el grupo de trabajo el 18/09/2026 y reenviado ordenado el
+21/09/2026; no sale de la Plataforma. Queda escrita en
+`docs/expedientes-en-ejecucion-adif.md`, en CONTEXTO.md sección 7, en el
+docstring de `app.extraccion.en_ejecucion_adif` y en el Resumen del Excel.
+
+**121 expedientes: 112 del 28510 y 9 de otros departamentos**, que no se
+cargan. 4 del 28510 vienen sin fecha de acta. Ningún código repetido.
+
+**El cruce con el sistema coincide con el del cliente.** Los 112 existen en el
+sistema. **111 están en "Conciliación", 85 aportan líneas y 26 no; solo falta
+`6.25/28510.5001/01`.** No falta porque no se conozca: está como
+`sin_publicar`, buscado en la Plataforma sin resultado. Hay también una ficha
+`6.25/28510.5001_01` (con `_`), igualmente `sin_publicar`, que no se ha tocado.
+
+**Columna "En ejecución según ADIF"** en "Conciliación", la duodécima, al final
+y separada de las dos de estado. Lleva la fecha de firma del acta, *"En el
+listado, sin fecha de firma del acta de inicio"* o nada. La llevan 111 filas de
+la hoja. Su procedencia va en el Resumen, con el nombre del fichero cargado, y
+en la pantalla `/conciliacion`. **No interviene en qué expedientes salen ni en
+su Situación**: una prueba construye la hoja con y sin el listado y exige las
+mismas filas y las mismas Situaciones.
+
+**Ingesta para versiones nuevas**: dejar
+`expedientes_en_ejecucion_adif_AAAAMMDD.csv` en `Ejemplo/Input` y ejecutar
+`curl -X POST http://localhost:8000/mantenimiento/en-ejecucion-adif/cargar`.
+Carga la de fecha más reciente, sustituye entera a la anterior (cuenta los
+`retirados`), no da de alta expedientes y devuelve las fechas que no pueda
+leer en vez de inventarlas. La API monta `Ejemplo/Input` entera
+(`EN_EJECUCION_ADIF_DIR=/data/entrada`, en el `docker-compose.override.yml`
+local), así que no hay que tocar ningún montaje. Migración **0043**; 9 pruebas
+en `tests/test_en_ejecucion_adif.py`.

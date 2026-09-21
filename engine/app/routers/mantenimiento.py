@@ -11,6 +11,7 @@ from app.db import get_db
 from app.extraccion.candidatos_matricula import calcular_candidatos
 from app.extraccion.descubrimiento_matriz import TIPO_TRABAJO as TIPO_TRABAJO_DESCUBRIMIENTO_PEDIDOS
 from app.extraccion.estado_sap import cargar_estado_sap
+from app.extraccion.en_ejecucion_adif import cargar_en_ejecucion_adif
 from app.extraccion.estados_adif import cargar_estados_adif
 from app.extraccion.vigentes_remanente import cruzar_vigentes_con_remanente
 from app.catalogo_antiguo import comparar_con_catalogo_antiguo, generar_informe_catalogo_antiguo
@@ -35,6 +36,7 @@ from app.queue import encolar_trabajo
 from app.schemas import (
     CatalogoAntiguoResumenOut,
     EstadoMantenimientoOut,
+    EnEjecucionAdifCargaOut,
     EstadosAdifCargaOut,
     EstadoSapCargaOut,
     MaestroMaterialesCargaOut,
@@ -407,6 +409,20 @@ def cargar_estados_de_adif(
     una diferencia deliberada: **no da de alta ningún expediente**. Ver el
     docstring del módulo."""
     return cargar_estados_adif(db, settings.estados_adif_path)
+
+
+@router.post("/mantenimiento/en-ejecucion-adif/cargar", response_model=EnEjecucionAdifCargaOut)
+def cargar_expedientes_en_ejecucion_de_adif(
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    """Bloque 2, sesión 2026-09-21: carga la versión más reciente del listado
+    interno de ADIF de expedientes en ejecución que haya en
+    `EN_EJECUCION_ADIF_DIR` (`Ejemplo/Input`), con la fecha de firma del acta
+    de inicio. Sustituye entera a la anterior. **No da de alta ningún
+    expediente ni decide si alguno consta publicado** (docstring de
+    `app.extraccion.en_ejecucion_adif`)."""
+    return cargar_en_ejecucion_adif(db, settings.en_ejecucion_adif_dir)
 
 
 @router.post("/mantenimiento/vigentes-remanente/cruzar", response_model=VigentesRemanenteCruceOut)
