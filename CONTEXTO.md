@@ -328,6 +328,45 @@ Cada documento cae por la primera etapa que lo resuelva. **No saltes etapas.**
      solo importe, que salía 116.000 × 116.000).
    Y la cabecera de lote con la "L" doble de la negrita simulada ("LLOTE 8")
    vale igual encima de la tabla que en el texto entre tablas.
+   **Sesión 2026-09-21 (tercera parte)**, dos reglas de reparto y cinco de
+   recuperación. **Toda línea recuperada solo se queda si con ella el lote
+   cuadra al céntimo con su presupuesto publicado** (`partida_alzada_del_lote.
+   descartar_recuperadas_que_no_cuadran`; el presupuesto es el del lote, o el
+   que sus documentos publican con etiqueta sin IVA si es único, o para el lote
+   único del sistema el "sin impuestos" de la sindicación; la suma es la del
+   catálogo, cada material una vez por su firma):
+   - **El rótulo de lote en una fila de una tabla ya aceptada decide su lote**
+     (`tabla._partir_tabla_aceptada_por_rotulos`): encima de la cabecera o en
+     medio de los datos, la tabla se parte por esas filas sin ganar ni perder
+     ninguna y sin cambiar su cabecera. `3.22/28510.0048`, `3.23/28510.0135`.
+   - **El lote de la licitación que es el expediente, por el bloque «Nº Lote»
+     de su anuncio cuyo objeto es su título** (`orquestador.
+     _lote_de_la_licitacion_por_objeto`, el mismo emparejamiento que ya le daba
+     su presupuesto): con el lote único del sistema, un anejo que trae los
+     cuadros de todos los lotes bajo su rótulo se reparte por geometría y
+     rótulo, y solo si **todas** sus filas quedan atribuidas y cubre todos los
+     lotes del anuncio; se queda con las suyas y el resto se guarda sin lote.
+     Las grifas (`6.19/28510.0135`/`0175`/`0177`) y la regulación de tensión
+     (`6.19/28510.0231`, `6.20/28510.0025`), escaneadas.
+   - La **partida alzada del lote que la tabla no lee** (una tabla de una fila
+     en la página siguiente, o tras una subcabecera): se lee del texto de las
+     páginas del lote, y solo la única cuyo importe es exactamente lo que le
+     falta al lote (`partida_alzada_del_lote`).
+   - La **fila que se queda de cabecera**: su código pegado a la celda de
+     cabecera ("CODIFICACIÓN DEL PRECIO P-1") o con sufijo en minúscula
+     ("P-030b"), siempre el anterior al de la primera fila con código
+     (`tabla._fila_con_el_codigo_en_la_cabecera`).
+   - La **primera fila de una página de continuación** que `pdfplumber` deja
+     por encima de la caja de la tabla: recompuesta por las columnas de la
+     tabla y demostrada por su propia aritmética (`fila_sobre_la_tabla`).
+   - En un cuadro de **referencias**, la referencia sin ninguna secuencia de
+     tres letras ("RC-12-WK-H1X") y el **decimal con punto** ("12.5") que solo
+     la aritmética de la fila distingue de un separador de miles.
+   - La **fila que el propio cuadro repite** idéntica en la misma tabla y
+     página ya no se funde con su gemela (`filas_repetidas`).
+   Y en los cuadros que solo traen **«cantidad mínima por pedido» y «pedido
+   inicial»**, la Cantidad no cambia, pero la fila dice en su motivo cuál de
+   las dos es y qué trae la otra (`mapeo_cabecera.columna_de_la_otra_cantidad`).
 5. **Mapear cabecera → esquema.** Única etapa donde interviene el modelo. Ver sección 6.
 6. **Normalizar y derivar.** Ver secciones 7 y 8.
 
@@ -659,9 +698,9 @@ explicación es una línea con la cifra que lo demuestra. La causa vive en
 suma y el presupuesto son los que se comprobaron** contra el documento; si
 cambia cualquiera, la fila pasa a "causa sin determinar". El significado de
 cada resultado está escrito una sola vez (`SIGNIFICADO`) y lo usan la hoja, la
-API y la web. **El caso más frecuente, 80 de los 125, no es un error de
-nadie**: el cuadro da cantidades de referencia o por pedido y el presupuesto
-es un techo de gasto.
+API y la web. **El caso más frecuente, 84 de los 114 que no cuadran (sesión
+2026-09-21, tercera parte), no es un error de nadie**: el cuadro da cantidades
+de referencia o por pedido y el presupuesto es un techo de gasto.
 
 ### Cruce con el Excel de códigos
 
@@ -3318,6 +3357,37 @@ materiales**: es el mejor argumento para tenerlo cargado.
   salvo la fecha; "Conciliación" 19.857 = 19.857; las dos vistas de la web,
   iguales al Excel fila a fila.
 
+- **Sesión 2026-09-21 (tercera parte): los valores viejos, las lecturas malas
+  pendientes y las líneas que faltan**
+  (`docs/sesion-2026-09-21-valores-viejos-lecturas-malas-y-lineas-que-faltan.md`).
+  Excel 19.857 → **19.333 filas**, los mismos 390 expedientes.
+  (1) **Reconstrucción del catálogo desde cero en una base aparte**, con el
+  código actual, las mismas cachés y la red aislada (sección 13, "Reconstrucción
+  en paralelo"): mismas 19.857 filas. **132 celdas viejas corregidas** (91
+  matrículas, 28 códigos de precio, 7 cantidades, los 3 precios de la oferta y
+  sus adjudicados), cada una comprobada contra el fragmento de su propia fila.
+  **Lo que la reconstrucción deja vacío no siempre es viejo**: 723 celdas
+  (83 cantidades de `6.26/28510.0016`, 212 unidades, 428 cantidades sin lote)
+  están en su fila y es el código actual el que ya no las lee; no se tocan.
+  (2) **Lecturas malas**: el anejo con los cuadros de todos los lotes se
+  reparte por sus rótulos cuando el expediente sabe qué lote es por el bloque
+  «Nº Lote» de su anuncio; el rótulo de lote en una fila de una tabla aceptada
+  decide su lote. Cuadran `3.22/28510.0048`, `3.23/28510.0135` lotes 2 y 6, y de
+  paso `3.22/28510.0009` y `6.20/28510.0041` (**decisión del cliente**: aplicar la
+  regla también fuera del encargo, aunque 336 filas de `0041` salgan de
+  "Materiales"). Los 5 escaneados no cuadran: son cuadros de cantidad mínima por
+  pedido. (3) **16 de los 27 "faltan líneas" pasan a cuadrar**, cada
+  recuperación demostrada por el presupuesto del lote (sección 5, etapa 4);
+  `6.21/28510.0058` y hermanos no tenían líneas que faltar. (4) **La Cantidad de
+  los cuadros de «mínima por pedido» y «pedido inicial»** dice en su motivo cuál
+  es y qué trae la otra: 451 filas, 22 expedientes (pregunta 16). (5) **Cierre**:
+  1.402 pruebas; cuatro pasadas en la base aparte antes de un único reproceso de
+  producción (22 min 20 s, `descargas_lanzadas: 0`); auditoría 0 errores y 7
+  avisos; entregable descargado desde la web, idéntico a la API salvo la fecha;
+  contraste: 271 cuadran al céntimo (249 antes), 0 lecturas pendientes, 6
+  "faltan líneas"; "Conciliación" 19.333 = 19.333; las dos vistas, iguales al
+  Excel.
+
 ---
 
 El registro histórico de hallazgos y decisiones de cada sesión vive en
@@ -3374,4 +3444,5 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `expedientes-en-ejecucion-adif.md`,
 `sesion-2026-09-21-sumas-absurdas-causas-del-contraste-y-ficha-duplicada.md`,
 `propuesta-clasificacion-tipo-material.md`,
+`sesion-2026-09-21-valores-viejos-lecturas-malas-y-lineas-que-faltan.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.

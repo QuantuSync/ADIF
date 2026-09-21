@@ -217,6 +217,16 @@ compromete.
 **Un valor que sorprende y es correcto**: hay filas con cantidad **0**. Es lo
 que imprime el documento, y el cliente decidió mantenerlo.
 
+**Cuidado con los cuadros que solo dan "cantidad mínima por pedido" y "pedido
+inicial"** (desde el 21/09/2026). Ninguna de las dos es la cantidad total a
+comprar, y la columna Cantidad trae una de ellas —la que el mapeo de la tabla
+tomó por cantidad, casi siempre la mínima por pedido—. Esas filas lo dicen en
+la columna "Motivo de las celdas vacías", aunque la celda no esté vacía:
+*"Cantidad: es la columna «CANTIDAD MÍNIMA A SUMINISTRAR POR PEDIDO» del
+cuadro, no la cantidad total a comprar; su columna «PEDIDO INICIAL» trae 200
+en esta fila"*. Es una pregunta abierta para ADIF cuál de las dos quieren ver
+(`docs/preguntas-pendientes-cliente.md`, pregunta 16).
+
 ### 9. Precio unitario
 
 **Qué es.** El **precio licitado** del artículo: el que el pliego publica como
@@ -375,6 +385,10 @@ convierte un hueco en una explicación.
 
 Muchas entradas llevan además un detalle entre paréntesis que dice exactamente
 cuál de las causas posibles es la de esa fila.
+
+**Una entrada que no es de una celda vacía**: en los cuadros que solo publican
+"cantidad mínima por pedido" y "pedido inicial", la fila dice aquí cuál de las
+dos es su Cantidad y qué trae la otra (ver la columna 8, "Cantidad").
 
 **Por qué la celda se queda vacía en vez de traer un marcador de texto**:
 poner "N/D" en la columna de Precio unitario la convertiría en texto y rompería
