@@ -1120,6 +1120,42 @@ def test_construir_linea_catalogo_recupera_cantidad_de_columna_fantasma():
     assert "cantidad recuperada" in linea["motivo_revision"]
 
 
+def test_la_partida_alzada_con_un_solo_importe_no_lo_toma_como_cantidad():
+    # Sesión 2026-09-21, bloque 1: `6.25/28510.0019` CONTRATO_2 p.118, misma
+    # cabecera que el test de arriba. La fila P-323 trae UN solo importe,
+    # "116.000,00 €", en la columna fantasma de la cantidad (la 4), y la
+    # recuperación de precio también lo alcanzaba: 116.000 × 116.000.
+    mapeo = {
+        "codigo_precio": 0, "matricula": 1, "descripcion": 2, "unidad_medida": 3,
+        "cantidad": 5, "precio_unitario": 6,
+    }
+    fila = ["P-323", "Partida alzada a justificar para imprevistos", None, None, "116.000,00 €", None, None]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=118, documento_origen_id=None, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea["cantidad"] is None
+    assert linea["precio_unitario"] == Decimal("116000.00")
+
+
+def test_el_importe_con_euro_en_la_columna_fantasma_de_cantidad_es_el_precio_si_no_hay_otro():
+    # `6.21/28510.0003` PLIEGO p.5: la partida alzada de repuestos salía con
+    # 42.948,65 de cantidad y sin precio.
+    mapeo = {
+        "codigo_precio": None, "matricula": None, "descripcion": 0, "unidad_medida": None,
+        "cantidad": 5, "precio_unitario": 8,
+    }
+    fila = ["Partida alzada a justificar de repuestos", None, None, None, None, None, "42.948,65 €", None, None]
+
+    linea = construir_linea_catalogo(
+        fila, mapeo, pagina=5, documento_origen_id=None, expediente_id=1, baja_lote=None, orden_aparicion=0
+    )
+
+    assert linea["cantidad"] is None
+    assert linea["precio_unitario"] == Decimal("42948.65")
+
+
 def test_construir_linea_catalogo_no_recupera_cantidad_si_la_columna_anterior_no_es_numerica():
     # La columna anterior a "cantidad" puede ser una matrícula vacía de
     # verdad, no una columna fantasma con el número desplazado -- no se
