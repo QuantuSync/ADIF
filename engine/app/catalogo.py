@@ -959,6 +959,13 @@ def _parece_matricula_recuperable(texto: Optional[str]) -> bool:
     return bool(texto) and bool(_MATRICULA_VALIDA_RE.match(re.sub(r"\s+", "", texto)))
 
 
+def _parece_unidad_recuperable(texto: Optional[str]) -> bool:
+    if not texto or _es_celda_vacia(texto):
+        return False
+    limpia = limpiar_texto_celda(texto)
+    return bool(limpia) and es_unidad_conocida(limpia)
+
+
 def _parece_precio_recuperable(texto: Optional[str]) -> bool:
     if not texto or _es_celda_vacia(texto):
         return False
@@ -1261,6 +1268,15 @@ def _construir_campos(
     if descripcion and _es_concepto_de_presupuesto(descripcion):
         return "pie_de_tabla", None
     unidad_medida = limpiar_texto_celda(_unir_unidad_partida(_valor("unidad_medida")))
+    if not unidad_medida and mapeo.get("unidad_medida") is not None:
+        # Sesión 2026-09-22 (`4.26/28510.0020` pp.14-17): la cabecera parte la
+        # columna "Ud." en dos rangos y en unas filas la unidad cae en el de
+        # al lado. El mismo fenómeno de columna fantasma que ya se recupera
+        # para cantidad, precio y matrícula, con una prueba estricta: la celda
+        # de al lado es una unidad conocida ("Ud.", "PA"), nunca otro texto
+        # ("Precio mensual" de la misma columna se queda fuera). Sin motivo de
+        # revisión: el valor es literalmente una unidad de la fila.
+        unidad_medida = _recuperar_columna_fantasma(fila, mapeo, "unidad_medida", _parece_unidad_recuperable)
     if unidad_medida:
         unidad_medida = limpiar_unidad(unidad_medida)
 
