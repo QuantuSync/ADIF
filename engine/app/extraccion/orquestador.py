@@ -1320,6 +1320,7 @@ def _procesar_lotes_declarados(
 
         lote = _obtener_o_crear_lote(db, expediente.id, declarado.identificador)
         lote.baja_lote = baja_efectiva
+        lote.baja_heredada_de_matriz = None  # ver el camino de lote único, más abajo
         lote.importe_licitacion = declarado.importe_licitacion
         lote.importe_adjudicacion = declarado.importe_adjudicacion
         lote.adjudicatario = declarado.adjudicatario
@@ -1777,6 +1778,14 @@ def ejecutar_extraccion_expediente(
                     # `_lotes_candidatos_del_cuadro`).
                     reparto_por_objeto = _lote_de_la_licitacion_por_objeto(expediente, items)
                 lote.baja_lote = baja_efectiva
+                # Sesión 2026-09-22: la marca de "baja heredada de la matriz"
+                # se recalcula con la baja, como las marcas de origen de las
+                # líneas (sesión 2026-09-15). Solo se ponía a `True`, así que
+                # 33 lotes la conservaban de una pasada antigua aunque su baja
+                # ya saliera de sus documentos (o no tuvieran ninguna).
+                # `intentar_heredar_de_matriz`, más abajo, la vuelve a poner si
+                # esta pasada hereda de verdad.
+                lote.baja_heredada_de_matriz = None
                 lote.importe_licitacion = importe_licitacion
                 lote.importe_adjudicacion = importe_adjudicacion
                 if identidad_propia is not None:

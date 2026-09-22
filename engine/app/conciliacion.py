@@ -282,10 +282,42 @@ def describir_registro_publicado(db: Session, filas: list[FilaConciliacion]) -> 
     )
 
 
+def _mismo_valor(valor_extraido: Optional[str], baja: Optional[Decimal]) -> bool:
+    try:
+        return baja is not None and valor_extraido is not None and Decimal(valor_extraido) == baja
+    except ArithmeticError:
+        return False
+
+
+def _cita(traza: TrazaOrigen, nombre_documento: Optional[str]) -> str:
+    if traza.fragmento:
+        return f"declarada en {nombre_documento or 'un documento del expediente'}: “{traza.fragmento.strip()}”"
+    return f"declarada en {nombre_documento or 'un documento del expediente'}"
+
+
+def _cita_de_lote(lote: Lote, trazas_baja_lote: dict) -> Optional[str]:
+    """La traza más reciente del lote que declara SU baja de hoy. Las que
+    declaran otra cifra son historia (`app.extraccion.traza`) y no la
+    explican."""
+    for traza, nombre in trazas_baja_lote.get(lote.id, []):
+        if _mismo_valor(traza.valor_extraido, lote.baja_lote):
+            return _cita(traza, nombre)
+    return None
+
+
 def _texto_baja(expediente: Expediente, lotes: list[Lote], traza: Optional[TrazaOrigen],
-                nombre_documento: Optional[str]) -> str:
+                nombre_documento: Optional[str], trazas_baja_lote: Optional[dict] = None) -> str:
     """"Si tiene baja y de dónde sale", en una frase que se lea sin conocer el
-    sistema."""
+    sistema.
+
+    Sesión 2026-09-22 (decisión del cliente): cuando la baja es de los lotes,
+    la cita sale de la traza de cada lote, que es donde la guarda la
+    extracción. Antes solo se leía la del expediente, que el código de hoy no
+    escribe para un expediente con varios lotes: 13 filas llevaban la cita de
+    una traza del 03-04/09 (y, con varias bajas, solo nombraba una) y otras
+    36 con varias bajas salían sin ninguna. La del expediente queda para
+    cuando ningún lote tiene la suya."""
+    trazas_baja_lote = trazas_baja_lote or {}
     if any(l.modelo_precio == ModeloPrecio.indexado_por_pedido for l in lotes):
         return (
             "No: es un acuerdo marco cuyos precios se revisan pedido a pedido con un coeficiente que "
@@ -294,14 +326,36 @@ def _texto_baja(expediente: Expediente, lotes: list[Lote], traza: Optional[Traza
     bajas = {l.baja_lote for l in lotes if l.baja_lote is not None}
     if not bajas and expediente.baja_global is None:
         return "No: ningún documento de este expediente declara una baja"
+    citas_por_baja: dict[Decimal, list[tuple[str, Optional[str]]]] = {}
+    for lote in sorted(lotes, key=lambda l: _orden_lote(l.identificador_lote)):
+        if lote.baja_lote is not None:
+            citas_por_baja.setdefault(lote.baja_lote, []).append(
+                (lote.identificador_lote, _cita_de_lote(lote, trazas_baja_lote))
+            )
     origen = f" (declarada en {nombre_documento})" if nombre_documento else ""
     if traza is not None and traza.fragmento:
         origen = f" (declarada en {nombre_documento or 'un documento del expediente'}: “{traza.fragmento.strip()}”)"
     if len(bajas) > 1:
-        detalle = ", ".join(_porcentaje(b) for b in sorted(bajas))
-        return f"Sí, distinta por lote: {detalle}{origen}"
+        partes = []
+        for baja in sorted(bajas):
+            con_cita = [(ident, cita) for ident, cita in citas_por_baja.get(baja, []) if cita]
+            if con_cita:
+                idents = [ident for ident, _ in citas_por_baja[baja]]
+                rotulo = f"lote {idents[0]}" if len(idents) == 1 else f"lotes {', '.join(idents)}"
+                partes.append(f"{_porcentaje(baja)} ({rotulo}, {con_cita[0][1]})")
+            else:
+                partes.append(_porcentaje(baja))
+        return f"Sí, distinta por lote: {', '.join(partes)}"
     unica = next(iter(bajas)) if bajas else expediente.baja_global
+    cita_lote = next((cita for _, cita in citas_por_baja.get(unica, []) if cita), None) if bajas else None
+    if cita_lote is not None:
+        origen = f" ({cita_lote})"
     return f"Sí, {_porcentaje(unica)}{origen}"
+
+
+def _orden_lote(identificador: Optional[str]) -> tuple:
+    texto = identificador or ""
+    return (0, int(texto), "") if texto.isdigit() else (1, 0, texto)
 
 
 def _porcentaje(valor: Optional[Decimal]) -> str:
@@ -701,6 +755,29 @@ def construir_conciliacion(
         .order_by(TrazaOrigen.id)
     ).all():
         traza_baja[traza.entidad_id] = (traza, nombre)
+    # Sesión 2026-09-22: y la de cada lote (la extracción la guarda en el lote
+    # cuando la baja es de un lote). Por lote, de la más reciente a la más
+    # antigua: `_cita_de_lote` se queda con la que declara la baja actual.
+    trazas_baja_lote: dict[int, list[tuple[TrazaOrigen, Optional[str]]]] = {}
+    expediente_de_lote = {l.id: l.expediente_id for ls in lotes_por_expediente.values() for l in ls}
+    for traza in db.execute(
+        select(TrazaOrigen)
+        .where(TrazaOrigen.entidad_tipo == "lote", TrazaOrigen.campo == "baja_declarada")
+        .order_by(TrazaOrigen.id.desc())
+    ).scalars():
+        trazas_baja_lote.setdefault(traza.entidad_id, []).append((traza, None))
+    nombres_documento = {
+        (expediente_id, documento_id): nombre
+        for expediente_id, documento_id, nombre in db.execute(
+            select(DocumentoExpediente.expediente_id, DocumentoExpediente.documento_id,
+                   DocumentoExpediente.nombre_archivo)
+        ).all()
+    }
+    for lote_id, trazas in trazas_baja_lote.items():
+        expediente_id = expediente_de_lote.get(lote_id)
+        trazas_baja_lote[lote_id] = [
+            (traza, nombres_documento.get((expediente_id, traza.documento_id))) for traza, _ in trazas
+        ]
 
     por_codigo = {e.codigo_expediente: e for e in expedientes.values()}
 
@@ -789,7 +866,7 @@ def construir_conciliacion(
                 documentos_reconocimiento_optico=sum(1 for h in hashes if h in hashes_ocr),
                 lineas_en_catalogo=lineas,
                 baja=_texto_baja(expediente, lotes_por_expediente.get(expediente.id, []), traza,
-                                 nombre_documento),
+                                 nombre_documento, trazas_baja_lote),
                 situacion=situacion,
                 motivo=motivo,
                 en_ejecucion_adif=_texto_en_ejecucion(expediente),

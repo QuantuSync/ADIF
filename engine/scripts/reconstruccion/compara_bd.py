@@ -1,6 +1,7 @@
 """Compara producción (adif) con la base reconstruida (adif_reconstruccion)
 línea a línea por (expediente, lote, clave_linea), y lotes y expedientes por
-su clave. uso: python compara_bd.py /salida/cmp_bd.json"""
+su clave. uso: python compara_bd.py /salida/cmp_bd.json [base_a base_b]
+(por defecto adif y adif_reconstruccion)."""
 import json
 import sys
 from collections import Counter
@@ -67,20 +68,54 @@ def comparar(p, r, campos):
     return difs, sorted(set(p) - set(r), key=str), sorted(set(r) - set(p), key=str)
 
 
+CONTENIDO = ("codigo_precio", "matricula", "descripcion", "precio_unitario", "doc_hash", "pagina")
+
+
+def emparejar_por_contenido(p, r, solo_p, solo_r):
+    por_contenido = {}
+    for k in solo_r:
+        por_contenido.setdefault((k[0], k[1]) + tuple(r[k][c] for c in CONTENIDO), []).append(k)
+    quedan_p, pares = [], []
+    for k in solo_p:
+        c = (k[0], k[1]) + tuple(p[k][x] for x in CONTENIDO)
+        if por_contenido.get(c):
+            pares.append((k, por_contenido[c].pop(0)))
+        else:
+            quedan_p.append(k)
+    usadas = {kr for _, kr in pares}
+    difs = []
+    for kp, kr in pares:
+        for c in CAMPOS_LINEA:
+            if c != "orden_aparicion" and p[kp][c] != r[kr][c]:
+                difs.append({"clave": list(kp), "clave_reconstruida": list(kr), "campo": c,
+                             "produccion": p[kp][c], "reconstruida": r[kr][c], "id_prod": p[kp].get("id")})
+    return quedan_p, [k for k in solo_r if k not in usadas], [[list(a), list(b)] for a, b in pares], difs
+
+
 def main():
     out = {}
+    base_a, base_b = (sys.argv[2], sys.argv[3]) if len(sys.argv) > 3 else ("adif", "adif_reconstruccion")
     for nombre, sql, clave, campos in (
         ("lineas", SQL_LINEAS, ("exp", "lote", "clave"), CAMPOS_LINEA),
         ("lotes", SQL_LOTES, ("exp", "lote"), CAMPOS_LOTE),
         ("expedientes", SQL_EXP, ("exp",), CAMPOS_EXP),
     ):
-        p, r = leer("adif", sql, clave), leer("adif_reconstruccion", sql, clave)
+        p, r = leer(base_a, sql, clave), leer(base_b, sql, clave)
         difs, solo_p, solo_r = comparar(p, r, campos)
+        claves_distintas = []
+        if nombre == "lineas":
+            # Una fila sin código ni matrícula lleva por clave un hash de su
+            # descripción y su orden de aparición: si el orden cambia, cambia
+            # la clave sin cambiar la fila. Se emparejan por contenido.
+            solo_p, solo_r, claves_distintas, difs_contenido = emparejar_por_contenido(p, r, solo_p, solo_r)
+            difs += difs_contenido
         out[nombre] = {
             "produccion": len(p), "reconstruida": len(r), "diferencias": difs,
             "solo_produccion": [p[k] for k in solo_p], "solo_reconstruida": [r[k] for k in solo_r],
+            "claves_distintas": claves_distintas,
         }
-        print(nombre, len(p), len(r), "difs", len(difs), "solo_prod", len(solo_p), "solo_recon", len(solo_r))
+        print(nombre, len(p), len(r), "difs", len(difs), "solo_prod", len(solo_p), "solo_recon", len(solo_r),
+              "misma fila con otra clave", len(claves_distintas))
         print("  ", Counter(d["campo"] for d in difs).most_common())
     with open(sys.argv[1], "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, default=str, indent=1)

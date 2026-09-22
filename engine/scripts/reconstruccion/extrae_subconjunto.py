@@ -9,7 +9,9 @@ pasada lanza `extraer_expediente` para los expedientes nombrados, con el mismo
 despachador del worker y la unidad del maestro de fin de ciclo. Corre en un
 contenedor de la imagen del worker conectado solo a la red aislada.
 
-uso: python extrae_subconjunto.py [--vaciar] [--pasadas 2] --salida x.json EXP [EXP ...]
+uso: python extrae_subconjunto.py [--vaciar] [--pasadas 2] [--contra BASE] --salida x.json EXP [EXP ...]
+Sin `--vaciar`, sobre una copia del estado de producción: sirve para ver qué
+hace el código nuevo con los valores y las claves que producción ya tiene.
 """
 import argparse
 import json
@@ -39,6 +41,7 @@ def main():
     ap.add_argument("--vaciar", action="store_true")
     ap.add_argument("--pasadas", type=int, default=2)
     ap.add_argument("--salida", required=True)
+    ap.add_argument("--contra", default="adif", help="base con la que se compara (producción por defecto)")
     ap.add_argument("expedientes", nargs="+")
     args = ap.parse_args()
 
@@ -61,7 +64,7 @@ def main():
         completar_unidades_desde_maestro(db)
     db.close()
 
-    p, r = leer("adif", set(args.expedientes)), leer(base, set(args.expedientes))
+    p, r = leer(args.contra, set(args.expedientes)), leer(base, set(args.expedientes))
     difs, solo_p, solo_r = comparar(p, r, [c for c in CAMPOS_LINEA if c not in CAMPOS_IGNORADOS])
     print("lineas", len(p), len(r), "difs", len(difs), "solo_prod", len(solo_p), "solo_recon", len(solo_r))
     print(Counter((d["clave"][0], d["campo"]) for d in difs).most_common())

@@ -112,3 +112,103 @@ def test_la_partida_alzada_de_al_lado_sigue_sin_ser_unidad():
 
 def test_la_unidad_de_su_columna_manda():
     assert _linea(_fila_0020("PA", "Ud."))["unidad_medida"] == "ud"
+
+
+# La fila sin código ni matrícula cuya clave (hash de descripción y orden)
+# cambió porque cambió su orden de aparición.
+def _lote_sin_codigos(db_session):
+    from app.models import Expediente, Lote
+
+    expediente = Expediente(codigo_expediente="2.24/28510.9118")
+    db_session.add(expediente)
+    db_session.commit()
+    lote = Lote(expediente_id=expediente.id, identificador_lote="1")
+    db_session.add(lote)
+    db_session.commit()
+    return lote
+
+
+_MAPEO_SIN_CODIGOS = {"codigo_precio": None, "matricula": None, "descripcion": 0, "unidad_medida": None,
+                      "cantidad": 1, "precio_unitario": 2}
+
+
+def _guardar_filas(db_session, lote, filas, orden_inicial=0):
+    from app.catalogo import guardar_lineas_catalogo
+
+    lineas = [
+        construir_linea_catalogo(fila, _MAPEO_SIN_CODIGOS, 8, None, lote.expediente_id, None, orden_inicial + i)
+        for i, fila in enumerate(filas)
+    ]
+    guardar_lineas_catalogo(db_session, lote.id, lineas)
+    db_session.commit()
+
+
+def test_la_misma_fila_con_otro_orden_toma_la_clave_nueva_sin_motivo_de_fusion(db_session):
+    from app.models import LineaCatalogo
+
+    lote = _lote_sin_codigos(db_session)
+    _guardar_filas(db_session, lote, [["Pala cuadrada", "10", "50,00 €"]], orden_inicial=3)
+    antes = db_session.query(LineaCatalogo).filter_by(lote_id=lote.id).one()
+    id_antes, clave_antes = antes.id, antes.clave_linea
+
+    _guardar_filas(db_session, lote, [["Pala cuadrada", "10", "50,00 €"]], orden_inicial=5)
+
+    despues = db_session.query(LineaCatalogo).filter_by(lote_id=lote.id).one()
+    assert despues.id == id_antes
+    assert despues.clave_linea != clave_antes
+    assert "fila fundida" not in (despues.motivo_revision or "")
+
+
+def test_dos_filas_iguales_del_mismo_cuadro_siguen_marcadas_como_fundidas(db_session):
+    from app.models import LineaCatalogo
+
+    lote = _lote_sin_codigos(db_session)
+    _guardar_filas(db_session, lote, [["Pala cuadrada", "10", "50,00 €"], ["Pala cuadrada", "10", "50,00 €"]])
+
+    filas = db_session.query(LineaCatalogo).filter_by(lote_id=lote.id).all()
+    assert len(filas) == 1
+    assert "fila fundida" in (filas[0].motivo_revision or "")
+
+
+# La cita de la baja en "Conciliación", desde la traza de cada lote.
+def test_la_cita_de_la_baja_por_lote_sale_de_la_traza_de_cada_lote():
+    from decimal import Decimal
+
+    from app.conciliacion import _texto_baja
+    from app.models import Expediente, Lote, TrazaOrigen
+
+    expediente = Expediente(codigo_expediente="6.23/28510.9051")
+    lote1 = Lote(id=1, identificador_lote="1", baja_lote=Decimal("0.2531"))
+    lote2 = Lote(id=2, identificador_lote="2", baja_lote=Decimal("0.2510"))
+    trazas = {
+        1: [(TrazaOrigen(valor_extraido="0.2531", fragmento="25,31 % de baja", documento_id=7), "ADJUDICACION_1.pdf")],
+        2: [
+            # La más reciente declara otra cifra: es historia, no la explica.
+            (TrazaOrigen(valor_extraido="0.30", fragmento="30 % de baja", documento_id=8), "CONTRATO_9.pdf"),
+            (TrazaOrigen(valor_extraido="0.2510", fragmento="baja del 25,10%", documento_id=8), "CONTRATO_2.pdf"),
+        ],
+    }
+    # La traza vieja del expediente ya no manda cuando los lotes tienen la suya.
+    vieja = TrazaOrigen(valor_extraido="0.2531", fragmento="baja del 25,31%", documento_id=9)
+
+    texto = _texto_baja(expediente, [lote2, lote1], vieja, "CONTRATO_1.pdf", trazas)
+
+    assert texto == (
+        "Sí, distinta por lote: 25,10 % (lote 2, declarada en CONTRATO_2.pdf: “baja del 25,10%”), "
+        "25,31 % (lote 1, declarada en ADJUDICACION_1.pdf: “25,31 % de baja”)"
+    )
+
+
+def test_sin_traza_de_lote_sigue_la_del_expediente():
+    from decimal import Decimal
+
+    from app.conciliacion import _texto_baja
+    from app.models import Expediente, Lote, TrazaOrigen
+
+    expediente = Expediente(codigo_expediente="6.24/28510.9124")
+    lote = Lote(id=1, identificador_lote="1", baja_lote=Decimal("0.045"))
+    traza = TrazaOrigen(valor_extraido="0.045", fragmento="baja del 4,50%", documento_id=3)
+
+    assert _texto_baja(expediente, [lote], traza, "ADJUDICACION_1.pdf", {}) == (
+        "Sí, 4,50 % (declarada en ADJUDICACION_1.pdf: “baja del 4,50%”)"
+    )
