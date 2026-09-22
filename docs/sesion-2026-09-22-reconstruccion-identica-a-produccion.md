@@ -24,7 +24,7 @@ revisión. Cuando esto se migre a un servidor se montará una base nueva.
   Para las 723 celdas se usaron los 24 expedientes de sus documentos (los
   cinco y sus hermanos que comparten documento).
 - `compara_bd.py` empareja ahora por contenido las filas cuya clave interna
-  cambió (ver la causa 4 del bloque 2) y acepta los nombres de las dos bases.
+  cambió (ver la causa 1 del bloque 2) y acepta los nombres de las dos bases.
 
 **Aviso de entorno que costó una pasada**: el contenedor de la reconstrucción
 necesita `MODEL_API_KEY` en su entorno aunque la red esté aislada. Sin clave
@@ -43,7 +43,7 @@ Agrupadas por causa en el código:
 | Causa | Celdas | Resultado |
 |---|---:|---|
 | **No era una cantidad**: `6.21/28510.0112`/`0113`, cuadro de «impacto del fallo en la seguridad operacional» (pp.159-187 de sus dos documentos). En las 428 el valor guardado es exactamente la celda de «PESO en toneladas» (13 t un semicambio, 4,5 t una aguja) | 428 | El código actual acierta al no leerla. **Vaciadas en producción, decisión tuya** (`UPDATE` fila a fila, 428 de 428 coincidencias) |
-| Subcolumna de la cabecera: en `6.26/28510.0016` p.10 «PRECIO ADQUISICIÓN» y «CANTIDAD ESTIMADA» son subcolumnas (430,7-483,7) de la columna de las pp.11-12 (427,2-487,1), a 3,5 pt de cada borde; la herencia del mapeo por geometría exigía 3 | 83 | **Recuperadas**: `heredar_mapeo_por_geometria` acepta la única columna que contiene a la de origen, nunca una que ya tenga otro campo |
+| Subcolumna de la cabecera: en `6.26/28510.0016` p.10 «PRECIO ADQUISICIÓN» y «CANTIDAD ESTIMADA» son subcolumnas (430,7-483,7) de la columna de las pp.11-12 (427,2-487,1), a 3,5 pt de cada borde; la herencia del mapeo por geometría exigía 3 | 83 | **Recuperadas**: `heredar_mapeo_por_geometria` acepta la columna que coincide con la **madre** de la subcolumna en la cabecera, nunca una que ya tenga otro campo (la primera versión, «la que la contiene», causó la regresión de `6.19/28510.0122`, ver el bloque 2) |
 | Tabla sin cabecera propia con «UD.» en una columna que el mapeo no reclama (`derivar_mapeo_por_contenido` nunca asigna la unidad): `6.22/28510.0094` pp.5-6 y p.20, `0122`/`0155`/`0156` pp.11-12 | 203 | **Recuperadas**: `completar_unidad_por_contenido`, hermana de la de cantidad (el documento declara la unidad en otra tabla, y hay exactamente una columna libre con todos sus valores unidades conocidas) |
 | Columna fantasma de la unidad: `4.26/28510.0020` pp.14-17, la cabecera «Ud.» ocupa dos rangos y en unas filas la unidad cae en el de al lado | 9 | **Recuperadas**: recuperación de columna fantasma para la unidad, con la prueba estricta de que la celda es una unidad conocida («Precio mensual» se queda fuera) |
 
@@ -91,8 +91,8 @@ El primer arreglo de la subcolumna aceptaba «la columna que contiene a la de
 la cabecera». En la p.16, escaneada y con otra maquetación, eso llevó el precio
 a la columna de la referencia, y la recuperación de columna fantasma tomó
 «ESQUEMA VIA 311 623» por importe: **11 precios pasaron de 395 € a 311.623 €**
-con el reproceso de las 10:30. No lo detectó la reconstrucción, que tenía el
-mismo fallo, sino la comparación del entregable con el de ayer. Arreglo: solo
+con el reproceso de las 10:30. No lo detectó la reconstrucción, que llevaba el
+mismo fallo (se paró), sino la comparación del entregable con el de ayer. Arreglo: solo
 vale la columna que coincide con la **madre** de la subcolumna en la cabecera.
 Comparando la base de antes de la sesión con la de después, fue la única
 sobrescritura de un valor por otro, fuera de las lecturas que aceptaste.
