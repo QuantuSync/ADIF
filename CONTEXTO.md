@@ -1157,6 +1157,31 @@ reconstruida:
    revisión no se tocan nunca. Con más de 200 celdas viejas, se enseña la
    clasificación al cliente antes de corregir.
 
+**Condición de cierre (decisión del cliente, sesión 2026-09-22).** A partir
+de ahora, **ningún cambio de la extracción se da por cerrado hasta que una
+reconstrucción desde cero con el código final sale idéntica a producción**,
+celda a celda en todas las hojas del Excel y línea a línea en la base, con
+una sola diferencia admitida: las confirmaciones manuales de la cola de
+revisión (una reconstrucción no las tiene). Si la reconstrucción saca
+cualquier otra diferencia, **se para y se le cuenta al cliente antes de
+lanzar otro reproceso completo**. Tres cosas aprendidas el 2026-09-22 que
+forman parte del procedimiento:
+
+- El contenedor de la reconstrucción necesita `MODEL_API_KEY` (y
+  `MODEL_WORKSPACE_ID`) aunque la red esté aislada: sin clave no se lee
+  tampoco la caché en disco del modelo y las tablas cuyo mapeo está en ella
+  no se extraen. Con la red `--internal` la clave no puede llamar a nada.
+- Antes de reprocesar producción, comparar el Excel nuevo con el entregable
+  anterior y la base de antes con la de después, buscando **valores
+  sobrescritos por otro valor**: un `None` no pisa, así que una lectura mala
+  nueva solo aparece así (la de `6.19/28510.0122`, 11 precios, se vio de esta
+  forma y no en la reconstrucción, que la tenía igual).
+- Para probar un arreglo en unos pocos expedientes sin esperar a la
+  reconstrucción entera: `engine/scripts/reconstruccion/extrae_subconjunto.py`
+  (desde cero con `--vaciar`, o sobre una copia del estado de producción sin
+  él). `compara_bd.py` empareja por contenido las filas cuya clave interna
+  cambió.
+
 Lo que no se vacía, a propósito: el título, la matriz y el cruce con el
 listado de códigos, porque también los escriben los listados de entrada.
 
@@ -1239,20 +1264,10 @@ materiales**: es el mejor argumento para tenerlo cargado.
 
 ## 16. Pendiente de resolver
 
-- **Para la próxima sesión (anotado el 2026-09-21, cuarta parte):**
-  1. **Las 723 celdas que el código actual ya no lee.** El valor guardado es el
-     bueno (está en el fragmento de su propia fila) y sobrevive porque un
-     `None` no pisa; si algún día se reconstruye desde cero, se perdería. Son
-     83 cantidades de `6.26/28510.0016` pp.11-12 ("CANTIDAD ESTIMADA" = 1 en las
-     páginas de continuación), 212 unidades de cinco expedientes (`4.26/28510.0020`,
-     `6.22/28510.0094`, `0122`, `0155`, `0156`: "Ud."/"UD." en la fila; 74 de
-     ellas en "Materiales") y 428 cantidades de filas sin lote de
-     `6.21/28510.0112`/`0113` ("… | 13 | 91.537,95 | €/UD"). Hay que arreglar
-     la lectura, no los datos (`docs/sesion-2026-09-21-valores-viejos-lecturas-malas-y-lineas-que-faltan.md`).
-  2. **La prueba de reconstrucción desde cero**, repetida con el código de esta
-     sesión (sección 13, "Reconstrucción en paralelo"), ya con la unidad del
-     maestro dentro del ciclo: tiene que dar las mismas filas que producción y,
-     como diferencia, solo esas 723 celdas mientras no se arregle su lectura.
+- **Para la próxima sesión (anotado el 2026-09-22):** la reconstrucción
+  desde cero es condición de cierre de cualquier cambio de la extracción
+  (sección 13). Quedan las preguntas 16 y 17 a ADIF. Detalle y lo que quedó
+  pendiente de decidir en `docs/sesion-2026-09-22-reconstruccion-identica-a-produccion.md`.
 
 - **Excel de ejecución SAP (367 expedientes, departamento 28510): estado de
   contrato incorporado, cobertura del descubrimiento medida (sesión
