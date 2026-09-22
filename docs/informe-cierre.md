@@ -85,3 +85,81 @@ Modelos configurados (medido en `.env` y en la base):
   reconocimiento óptico.
 - `claude-opus-5`: solo en la relectura a mano de páginas concretas, en 5
   trabajos `ocr_relectura`.
+
+### 1.3 Módulos del motor
+
+`engine/app` tiene 95 ficheros en git, de los que 88 tienen código (medido).
+La responsabilidad de cada módulo en una línea sale de su propia cabecera
+de documentación.
+
+**Núcleo y API**
+
+| Módulo | Responsabilidad |
+|---|---|
+| `main.py` | Crea la app FastAPI, CORS, y convierte una caída de la base en un 503 con cabecera CORS. |
+| `config.py` | Toda la configuración por variables de entorno. |
+| `db.py`, `models.py`, `schemas.py` | Conexión, 17 tablas ORM y esquemas de la API. |
+| `auth.py` | Costura de autenticación: hoy devuelve un usuario ficticio (invariante 7). |
+| `queue.py` | Cola de trabajos en PostgreSQL con `SELECT … FOR UPDATE SKIP LOCKED`; reclama huérfanos a los 300 s. |
+| `worker.py` | Bucle del worker: toma trabajos, los despacha por tipo y lanza lo programado. |
+| `esperar_bd.py` | Espera a la base antes de migrar o arrancar (tolerancia a reinicios de `dockerd`). |
+| `routers/*` (9) | Endpoints: `health`, `expedientes`, `trabajos`, `catalogo`, `conciliacion`, `contraste_presupuestos`, `revision`, `documentos`, `mantenimiento`. |
+| `interfaces/document_storage.py` | Interfaz de almacenamiento de documentos (hoy disco local). |
+| `interfaces/model_provider.py` | Interfaz del modelo intercambiable, con implementación de API, nula y con caché en disco. |
+
+**Catálogo, exportación y hojas del Excel**
+
+| Módulo | Responsabilidad |
+|---|---|
+| `catalogo.py` | Construye, fusiona, guarda, poda y recalcula las líneas del catálogo; es el módulo más grande (3.687 líneas de fichero). |
+| `catalogo_consulta.py` | Lectura del catálogo con filtros, búsqueda por matrícula y trazabilidad; la única consulta que usan la web y el Excel. |
+| `celdas_vacias.py` | Motivo de cada celda vacía: no aplica, no consta o pendiente. |
+| `exportacion.py` | Genera el Excel entregable y comprueba que "Conciliación" cuadra con "Materiales". |
+| `conciliacion.py` | Hoja "Conciliación": una fila por expediente publicado, con su Situación. |
+| `contraste_presupuestos.py` | Hoja "Contraste de presupuestos": suma de cada lote contra su presupuesto publicado, con su causa. |
+| `presupuestos_adif.py` | Hoja "Presupuestos ADIF", solo si llega un listado con presupuesto. |
+| `exclusion.py` | Listas de exclusión por código, departamento, código interno o palabras del título. |
+| `criterio_expediente.py` | Criterio del cliente de qué código es "nuestro" (contiene 28510). |
+| `catalogo_antiguo.py` | Cruce con el catálogo antiguo de ADIF, preparado para cuando llegue. |
+| `ingesta_local.py` | Segunda vía de entrada: documentos desde una carpeta local. |
+
+**Extracción (`app/extraccion`, 45 módulos)**
+
+| Módulo | Responsabilidad |
+|---|---|
+| `orquestador.py` | Encadena la cascada sobre todos los documentos de un expediente (trabajo `extraer_expediente`). |
+| `texto.py` | Texto de cada página, con caché por hash de documento. |
+| `clasificador.py` | Etapa 1: plantilla del documento por marcadores de texto. |
+| `campos_pcsp.py`, `campos_lc27.py` | Etapa 2: campos de etiqueta fija del Anuncio PCSP y de la Propuesta LC.27. |
+| `baja.py`, `precios_unitarios.py`, `modelo_precio_indexado.py` | Baja declarada en texto; caso de precios unitarios; segunda familia de precio indexado por pedido. |
+| `lotes.py`, `lotes_pcsp.py`, `lote_declarado.py`, `lote_tabla.py` | Estructura multilote, bloques «Nº Lote» del anuncio, lote declarado en el título, y a qué lote pertenece cada tabla (etapa 3.5). |
+| `identidad_expediente.py`, `herencia_matriz.py`, `descubrimiento_matriz.py` | Identidad del expediente desde su documento, herencia del acuerdo marco y búsqueda inversa de pedidos. |
+| `localizador.py` | Etapa 3: páginas candidatas a cuadro de precios. |
+| `tabla.py`, `fila_sobre_la_tabla.py`, `filas_repetidas.py`, `partida_alzada_del_lote.py` | Etapa 4: extraer el cuadro con `pdfplumber` y recuperar las filas que la tabla pierde. |
+| `firma_cabecera.py`, `firma_estructural.py`, `mapeo_cabecera.py` | Etapa 5: firma de cabecera, caché y mapeo cabecera → esquema (reglas primero, modelo como último recurso). |
+| `pipeline_anejo.py` | Etapas 3 a 6 sobre un documento completo. |
+| `normalizacion.py`, `unidad_medida.py`, `codigo_material.py`, `referencia_como_descripcion.py`, `glifos_cid.py`, `invalidado.py`, `traza.py` | Etapa 6: números en formato español, unidades, código del material, cifras en glifos, estado `INVALIDADO` y trazas sin duplicar. |
+| `presupuesto_lote.py` | Presupuesto de licitación de cada lote leído de los documentos. |
+| `ocr.py`, `ocr_pdf.py`, `ocr_relectura.py` | Reconocimiento óptico de escaneados y relectura de páginas concretas. |
+| `cruce_codigos.py`, `estado_sap.py`, `estados_adif.py`, `en_ejecucion_adif.py`, `sap_desglose.py`, `maestro_materiales.py`, `vigentes_remanente.py`, `candidatos_matricula.py` | Cruce y carga de los ficheros de entrada de ADIF. |
+
+**Obtención de datos (`app/scraping`, `app/sindicacion`)**
+
+| Módulo | Responsabilidad |
+|---|---|
+| `scraping/pcsp.py` | Scraper de la Plataforma: búsqueda por MATRIZ con caída a Nº Expediente y descarga de documentos. |
+| `scraping/job.py` | Trabajo de cola que descarga y registra expediente y documentos. |
+| `scraping/limitador.py` | Espaciado mínimo entre peticiones a la Plataforma. |
+| `scraping/descubrimiento_busqueda.py` | Descubrimiento por el buscador de la Plataforma (fragmento `28510`). |
+| `sindicacion/cliente.py`, `atom_parser.py`, `descubrimiento.py`, `contraste.py` | Descarga y parseo de los boletines de sindicación, alta de expedientes y contraste de importes. |
+
+**Mantenimiento (`app/mantenimiento`)**
+
+| Módulo | Responsabilidad |
+|---|---|
+| `ciclo.py` | Ciclo de mantenimiento: descubrir, descargar, extraer y auditar. |
+| `frescura.py` | Decide qué hay que descargar o reextraer y cuándo se vuelve a buscar un `sin_publicar`. |
+| `programacion.py` | Lanza los trabajos programados desde el bucle del worker. |
+| `auditoria.py` | Auditoría automática del catálogo: solo detecta, nunca corrige. |
+| `copia_seguridad.py` | `pg_dump` con retención. |
+| `reconstruccion.py` | Reconstrucción del catálogo desde cero en una base aparte. |
