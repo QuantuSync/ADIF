@@ -42,6 +42,17 @@ def test_dos_campos_no_caen_en_la_misma_columna_por_contencion():
     assert heredar_mapeo_por_geometria(MAPEO_P10, COLUMNAS_P10, destino) is None
 
 
+def test_una_columna_sin_madre_en_la_cabecera_no_se_hereda_por_contener():
+    """`6.19/28510.0122` p.16, escaneada: su maquetación está desplazada y la
+    columna de la referencia (356-404) contiene a la del precio de la
+    cabecera. Contener no basta; sin columna madre en la cabecera, no se
+    hereda nada y el mapeo sale por el camino de siempre."""
+    origen = ((30.0, 72.5), (72.5, 194.6), (194.6, 262.5), (262.5, 310.8), (360.0, 400.0))
+    mapeo = {"matricula": 0, "descripcion": 1, "unidad_medida": None, "precio_unitario": 4}
+    destino = ((30.0, 72.5), (72.5, 273.6), (273.6, 356.2), (356.2, 404.6), (404.6, 440.3))
+    assert heredar_mapeo_por_geometria(mapeo, origen, destino) is None
+
+
 def test_la_contencion_no_le_quita_la_columna_a_un_campo_que_coincide_exacto():
     origen = ((0.0, 50.0), (10.0, 40.0))
     mapeo = {"descripcion": 0, "cantidad": 1}
