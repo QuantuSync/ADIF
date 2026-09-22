@@ -123,7 +123,7 @@ de documentación.
 | `catalogo_antiguo.py` | Cruce con el catálogo antiguo de ADIF, preparado para cuando llegue. |
 | `ingesta_local.py` | Segunda vía de entrada: documentos desde una carpeta local. |
 
-**Extracción (`app/extraccion`, 45 módulos)**
+**Extracción (`app/extraccion`, 43 módulos)**
 
 | Módulo | Responsabilidad |
 |---|---|
@@ -163,3 +163,31 @@ de documentación.
 | `auditoria.py` | Auditoría automática del catálogo: solo detecta, nunca corrige. |
 | `copia_seguridad.py` | `pg_dump` con retención. |
 | `reconstruccion.py` | Reconstrucción del catálogo desde cero en una base aparte. |
+
+### 1.4 La cascada de extracción
+
+Cada documento pasa por la primera etapa que lo resuelve (`CONTEXTO.md` §5 y
+§6). Es determinista salvo en tres puntos, que se marcan abajo.
+
+| Etapa | Qué hace | ¿Determinista? |
+|---|---|---|
+| 0. Texto | Texto de cada página con `pdfplumber`, en caché por hash (`cache_texto_documento`, 1.642 documentos, 54.883 páginas, medido). | Sí |
+| 0 bis. Reconocimiento óptico | Solo para los documentos sin capa de texto (`OCR_MODO=escaneados`): se rasteriza la página y se manda a un modelo con visión que devuelve la tabla. Caché por hash (`cache_ocr_documento`). Las líneas quedan marcadas (`texto_reconocido`, motivo y prefijo "[reconocimiento óptico]"). | **No. Modelo `claude-haiku-4-5`**; relectura de páginas sueltas con `claude-opus-5` |
+| 1. Clasificar la plantilla | Anuncio PCSP, Propuesta LC.27, `L9_CM.32-FE`, contrato, resolución, anejo o pliego, por marcadores de texto. Los pliegos administrativos se saltan las etapas 3 y 4. | Sí |
+| 2. Campos de etiqueta fija | Número de expediente, matriz, objeto, importes, adjudicatario, tipo de contrato, bloques «Nº Lote». Baja declarada en texto. | Sí |
+| 3. Localizar páginas | Por marcadores de cabecera, densidad numérica, identificadores de fila y aritmética de la propia línea. | Sí |
+| 3.5. Lote de cada tabla | Rótulo «LOTE N» por geometría, herencia entre páginas contiguas y cláusula de urgencia mutua. | Sí |
+| 4. Extraer la tabla | `pdfplumber`, con segundo intento, guardas de tabla espuria, prueba aritmética de las filas y recuperación de filas perdidas. | Sí |
+| 5. Mapear cabecera → esquema | Primero reglas por nombre y por contenido. Si la firma de la cabecera no está en `cache_mapeo_cabecera`, **una llamada al modelo** con la cabecera y 2-3 filas de ejemplo, y se guarda para siempre. | **No, solo con una cabecera nunca vista. Modelo `claude-haiku-4-5`** |
+| 6. Normalizar y derivar | Números en formato español con `Decimal`, unidades, precio adjudicado = precio × (1 − baja del lote), código del material, motivos de revisión. | Sí, salvo el código del material |
+| 6 bis. Código del material | Columna de tipo de pieza del cuadro ("REPUESTO") si existe; si no, vocabulario controlado y siglas de aparatos de vía. **Solo si nada casa, una llamada al modelo por término**, cacheada en `cache_codigo_material` (871 entradas, medido). | **No, solo sin coincidencia. Modelo `claude-haiku-4-5`** |
+
+Después de la cascada, al cerrar cada expediente: herencia del acuerdo
+marco, recálculo del precio adjudicado, presupuesto por lote, unidad desde
+el maestro de materiales, cruce con el Excel de códigos y poda de las líneas
+que la pasada ya no produce. Todo esto es determinista.
+
+**Formatos de cabecera aprendidos (medido, `cache_mapeo_cabecera`):** 497
+firmas. De ellas, 177 (35,6 %) se resolvieron por reglas deterministas y 320
+(64,4 %) por el modelo. Desde entonces, cada una de las 497 se aplica sin
+volver a llamar al modelo.
