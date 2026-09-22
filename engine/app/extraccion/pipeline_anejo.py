@@ -50,6 +50,7 @@ from app.extraccion.mapeo_cabecera import (
     corregir_confusion_matricula_codigo_precio,
     corregir_confusion_precio_cantidad,
     completar_cantidad_por_contenido,
+    completar_unidad_por_contenido,
     columna_de_la_otra_cantidad,
     corregir_cantidad_obligatoria_por_estimada,
     corregir_columna_importe_tomada_por_precio,
@@ -433,6 +434,8 @@ def procesar_anejo(
     # `completar_cantidad_por_contenido`). Se mira por documento, nunca entre
     # documentos: el mismo criterio que la caché de firma estructural.
     cantidad_declarada_en_el_documento = False
+    # Sesión 2026-09-22: lo mismo para la unidad (`completar_unidad_por_contenido`).
+    unidad_declarada_en_el_documento = False
     tablas_con_cabecera = 0
     ultima_cabecera_vista: Optional[str] = None
     # Bloque 2, sesión 2026-09-19: los totales que el propio documento declara
@@ -771,6 +774,10 @@ def procesar_anejo(
                     mapeo = completar_cantidad_por_contenido(
                         mapeo, tabla.filas, cantidad_declarada_en_el_documento
                     )
+                if not sin_cabecera_propia and mapeo.get("unidad_medida") is not None:
+                    unidad_declarada_en_el_documento = True
+                elif sin_cabecera_propia:
+                    mapeo = completar_unidad_por_contenido(mapeo, tabla.filas, unidad_declarada_en_el_documento)
                 # Bloque 2, sesión 2026-09-19: la columna de importes de esta
                 # tabla, si su cabecera la nombra sin ambigüedad, y los
                 # totales que el propio cuadro declara al pie. Los dos son

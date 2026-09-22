@@ -25,6 +25,7 @@ from app.extraccion.firma_cabecera import calcular_firma_cabecera
 from app.extraccion.firma_estructural import clasificar_columnas, tiene_forma_de_matricula
 from app.extraccion.normalizacion import limpiar_codigo_celda
 from app.extraccion.texto import normalizar
+from app.extraccion.unidad_medida import es_unidad_conocida
 from app.interfaces.model_provider import ModelProvider
 from app.models import MapeoCabeceraCache
 
@@ -661,6 +662,49 @@ def completar_cantidad_por_contenido(
     return completado
 
 
+def _columna_parece_unidad(indice: int, filas: list[list[Optional[str]]]) -> bool:
+    valores = [
+        fila[indice].strip()
+        for fila in filas
+        if indice < len(fila) and fila[indice] and fila[indice].strip()
+    ]
+    return bool(valores) and all(es_unidad_conocida(v) for v in valores)
+
+
+def completar_unidad_por_contenido(
+    mapeo: dict[str, Optional[int]],
+    filas: list[list[Optional[str]]],
+    unidad_declarada_en_el_documento: bool,
+) -> dict[str, Optional[int]]:
+    """Sesión 2026-09-22, hermana de `completar_cantidad_por_contenido` para
+    `unidad_medida`. Una tabla sin cabecera propia cuyo mapeo sale de su
+    contenido (`derivar_mapeo_por_contenido`, que nunca asigna la unidad)
+    perdía la columna de unidad aunque trajera "UD." en cada fila: 203 celdas
+    de `6.22/28510.0094` (anejo pp.5-6 y p.20) y de `0122`/`0155`/`0156`
+    (pp.11-12), más otras 151 que tapaba la unidad del maestro. Mismas
+    guardas que la de cantidad: el documento declara una columna de unidad
+    en la cabecera de otra de sus tablas, y hay **exactamente una** columna
+    que ningún campo reclama con **todos** sus valores no vacíos siendo una
+    unidad conocida (`es_unidad_conocida`: "ud", "m", "kg"..., nunca un
+    texto cualquiera)."""
+    if not unidad_declarada_en_el_documento:
+        return mapeo
+    if mapeo.get("unidad_medida") is not None or not filas:
+        return mapeo
+    reclamadas = {indice for indice in mapeo.values() if indice is not None}
+    num_columnas = max(len(fila) for fila in filas)
+    candidatas = [
+        indice
+        for indice in range(num_columnas)
+        if indice not in reclamadas and _columna_parece_unidad(indice, filas)
+    ]
+    if len(candidatas) != 1:
+        return mapeo
+    completado = dict(mapeo)
+    completado["unidad_medida"] = candidatas[0]
+    return completado
+
+
 _TOLERANCIA_GEOMETRIA = 3.0
 
 
@@ -687,6 +731,7 @@ def heredar_mapeo_por_geometria(
     if not columnas_origen or not columnas_destino:
         return None
     resultado: dict[str, Optional[int]] = {}
+    por_contencion: set[str] = set()
     for campo, indice in mapeo_origen.items():
         if indice is None:
             resultado[campo] = None
@@ -701,10 +746,36 @@ def heredar_mapeo_por_geometria(
             and abs(columna[0] - x0) <= _TOLERANCIA_GEOMETRIA
             and abs(columna[1] - x1) <= _TOLERANCIA_GEOMETRIA
         ]
+        if not coincidencias:
+            coincidencias = _columnas_que_contienen(x0, x1, columnas_destino)
+            por_contencion.add(campo)
         if len(coincidencias) != 1:
             return None
         resultado[campo] = coincidencias[0]
+    otras = {indice for campo, indice in resultado.items() if campo not in por_contencion and indice is not None}
+    contenidas = [resultado[campo] for campo in por_contencion]
+    if len(contenidas) != len(set(contenidas)) or otras & set(contenidas):
+        return None
     return resultado
+
+
+def _columnas_que_contienen(x0: float, x1: float, columnas_destino: tuple) -> list[int]:
+    """Sesión 2026-09-22: la columna de la cabecera puede ser una subcolumna
+    de la de sus páginas de continuación. En `6.26/28510.0016` (anejo de la
+    p.10) la cabecera de "PRECIO ADQUISICIÓN" y "CANTIDAD ESTIMADA" parte cada
+    columna en tres rangos, y el campo cae en el del medio (430,7-483,7);
+    en las pp.11-12, sin cabecera, esa misma columna es una sola
+    (427,2-487,1), a 3,5 puntos de cada borde. Si ninguna columna coincide
+    en los dos bordes, vale la única que contiene a la de origen entera, y
+    nunca una que ya tenga otro campo. El llamador valida además el
+    resultado contra las filas (`evaluar_coherencia_mapeo`)."""
+    return [
+        j
+        for j, columna in enumerate(columnas_destino)
+        if columna is not None
+        and columna[0] <= x0 + _TOLERANCIA_GEOMETRIA
+        and columna[1] >= x1 - _TOLERANCIA_GEOMETRIA
+    ]
 
 
 def _columna_parece_matricula(indice: int, filas: list[list[Optional[str]]]) -> bool:
