@@ -324,7 +324,14 @@ def detectar_crecimiento_sin_cambios(conteo_antes: int, conteo_despues: int) -> 
     `Expediente.error`, cuando el recuento creció -- nunca se corrige solo
     (CONTEXTO.md sección 12: "lo que no cuadra va a la cola de revisión"), la
     idea es que un humano lo vea y decida, no que el sistema intente
-    deducir cuáles de las líneas nuevas son el duplicado real."""
+    deducir cuáles de las líneas nuevas son el duplicado real.
+
+    Sesión 2026-09-22: desde cero líneas no hay nada que duplicar. Es el pedido
+    que la pasada anterior no pudo heredar de su matriz porque la matriz aún no
+    tenía lotes (`6.20/28510.0040` de `6.18/28510.0003` en la reconstrucción
+    desde cero), y el aviso se quedaba en su error hasta la pasada siguiente."""
+    if conteo_antes == 0:
+        return None
     if conteo_despues > conteo_antes:
         return (
             f"integridad del catálogo: {conteo_antes} -> {conteo_despues} líneas en este expediente sin que "

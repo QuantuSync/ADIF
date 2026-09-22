@@ -3322,8 +3322,26 @@ def guardar_lineas_catalogo(
         # vaciar `duplicados_por_firma` más abajo.
         fusion_sin_matricula = firma is not None and firma[0] is None and bool(duplicados_por_firma)
 
+        clave_vieja_de_la_misma_linea = False
         if existente is None and duplicados_por_firma:
             existente = duplicados_por_firma.pop(0)
+            # Sesión 2026-09-22 (reconstrucción desde cero): una fila sin
+            # código ni matrícula lleva por clave un hash de su descripción y
+            # su orden de aparición, y el orden cambia cuando una pasada gana
+            # o pierde filas por encima. La fila guardada con la clave de
+            # entonces, que esta pasada todavía no ha escrito, es esta misma
+            # línea: toma la clave de hoy y no es una fusión. Sin esto, cada
+            # reproceso la volvía a encontrar por firma y le ponía el motivo
+            # de "fila fundida" (441 filas de 10 expedientes), que una base
+            # reconstruida desde cero no tiene.
+            clave_vieja_de_la_misma_linea = (
+                not datos.get("codigo_precio")
+                and not duplicados_por_firma
+                and existente.id not in ids_vivas
+                and existente.clave_linea not in claves_de_esta_llamada
+            )
+            if clave_vieja_de_la_misma_linea:
+                fusion_sin_matricula = False
 
         if existente is None:
             # `INVALIDADO` (app.extraccion.invalidado) solo importa para
@@ -3506,6 +3524,8 @@ def guardar_lineas_catalogo(
                     clave_ideal = None
                 if clave_ideal:
                     existente.clave_linea = clave_ideal
+            if clave_vieja_de_la_misma_linea and not existente.codigo_precio:
+                existente.clave_linea = datos["clave_linea"]
             if fusion_sin_matricula:
                 existente.motivo_revision = _acumular_motivo_unico(
                     existente.motivo_revision, _MOTIVO_FUSION_SIN_MATRICULA

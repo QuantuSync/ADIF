@@ -324,6 +324,11 @@ def test_detectar_crecimiento_sin_cambios_crece():
     assert "10 -> 14" in aviso
 
 
+def test_detectar_crecimiento_desde_cero_no_es_duplicacion():
+    """Sesión 2026-09-22: el pedido que hereda por primera vez de su matriz."""
+    assert detectar_crecimiento_sin_cambios(0, 31) is None
+
+
 def test_contar_lineas_catalogo(db_session):
     exp = _expediente()
     db_session.add(exp)
