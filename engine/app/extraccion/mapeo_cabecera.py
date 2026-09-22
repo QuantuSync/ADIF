@@ -747,7 +747,7 @@ def heredar_mapeo_por_geometria(
             and abs(columna[1] - x1) <= _TOLERANCIA_GEOMETRIA
         ]
         if not coincidencias:
-            coincidencias = _columnas_que_contienen(x0, x1, columnas_destino)
+            coincidencias = _columna_de_la_madre(indice, columnas_origen, columnas_destino)
             por_contencion.add(campo)
         if len(coincidencias) != 1:
             return None
@@ -759,23 +759,32 @@ def heredar_mapeo_por_geometria(
     return resultado
 
 
-def _columnas_que_contienen(x0: float, x1: float, columnas_destino: tuple) -> list[int]:
+def _coincide(a: tuple, b: tuple) -> bool:
+    return abs(a[0] - b[0]) <= _TOLERANCIA_GEOMETRIA and abs(a[1] - b[1]) <= _TOLERANCIA_GEOMETRIA
+
+
+def _columna_de_la_madre(indice: int, columnas_origen: tuple, columnas_destino: tuple) -> list[int]:
     """Sesión 2026-09-22: la columna de la cabecera puede ser una subcolumna
-    de la de sus páginas de continuación. En `6.26/28510.0016` (anejo de la
-    p.10) la cabecera de "PRECIO ADQUISICIÓN" y "CANTIDAD ESTIMADA" parte cada
-    columna en tres rangos, y el campo cae en el del medio (430,7-483,7);
-    en las pp.11-12, sin cabecera, esa misma columna es una sola
-    (427,2-487,1), a 3,5 puntos de cada borde. Si ninguna columna coincide
-    en los dos bordes, vale la única que contiene a la de origen entera, y
-    nunca una que ya tenga otro campo. El llamador valida además el
-    resultado contra las filas (`evaluar_coherencia_mapeo`)."""
-    return [
-        j
-        for j, columna in enumerate(columnas_destino)
-        if columna is not None
-        and columna[0] <= x0 + _TOLERANCIA_GEOMETRIA
-        and columna[1] >= x1 - _TOLERANCIA_GEOMETRIA
+    de la de sus páginas de continuación. En `6.26/28510.0016` (anejo, p.10)
+    la cabecera parte "PRECIO ADQUISICIÓN" y "CANTIDAD ESTIMADA" en una
+    columna madre (427,2-487,1) y tres rangos dentro, y el campo cae en el del
+    medio (430,7-483,7); en las pp.11-12, sin cabecera, esa columna es una
+    sola, la madre. Si ninguna columna coincide con la del campo, vale la que
+    coincide con **su madre en la cabecera** -- no la que simplemente la
+    contiene: en una página escaneada con otra maquetación (`6.19/28510.0122`
+    p.16) "contener" llevaba el precio a la columna de al lado. El llamador
+    exige además que no caiga en una columna que ya tenga otro campo y valida
+    el resultado contra las filas (`evaluar_coherencia_mapeo`)."""
+    propia = columnas_origen[indice]
+    madres = [
+        c for j, c in enumerate(columnas_origen)
+        if j != indice and c is not None and not _coincide(c, propia)
+        and c[0] <= propia[0] + _TOLERANCIA_GEOMETRIA and c[1] >= propia[1] - _TOLERANCIA_GEOMETRIA
     ]
+    return sorted({
+        j for madre in madres for j, columna in enumerate(columnas_destino)
+        if columna is not None and _coincide(columna, madre)
+    })
 
 
 def _columna_parece_matricula(indice: int, filas: list[list[Optional[str]]]) -> bool:
