@@ -1284,12 +1284,15 @@ materiales**: es el mejor argumento para tenerlo cargado.
 
 ## 16. Pendiente de resolver
 
-- **Despliegue en Azure preparado, no hecho (sesión 2026-10-14).** La máquina
-  existe (`adif-catalogo-ineco.spaincentral.cloudapp.azure.com`). Falta abrir el
-  80 en Azure, subir los datos y ejecutar `deploy/instalar.sh`, y decidir la
-  clave del modelo de IA del cliente. Pasos exactos en `docs/guia-de-operacion.md`;
-  detalle y lo que quedó sin probar en
-  `docs/sesion-2026-10-14-acceso-modelo-configurable-y-despliegue.md`.
+- **Desplegado en Azure (sesión 2026-10-14).**
+  `https://adif-catalogo-ineco.spaincentral.cloudapp.azure.com`, con los datos
+  del portátil, certificado real, servicio de IA del cliente (`openai`,
+  despliegue `vision`) y seis usuarios provisionales (`usuario1`-`usuario6`)
+  por renombrar con los nombres reales. Desde entonces **la base de referencia
+  es la de la máquina**, no la del portátil: tiene además las 22 líneas de
+  `6.26/28510.0066`, reextraído allí. Procedimiento real y comprobaciones en
+  `docs/despliegue-azure-2026-10-14.md`; operación en
+  `docs/guia-de-operacion.md`.
 
 - **Para la próxima sesión (anotado el 2026-09-22):** la reconstrucción
   desde cero es condición de cierre de cualquier cambio de la extracción

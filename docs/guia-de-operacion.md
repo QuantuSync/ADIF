@@ -139,7 +139,19 @@ cd /opt/adif && sudo git pull && sudo deploy/instalar.sh
 ```
 
 Reconstruye y levanta; la API aplica sola las migraciones de la base al
-arrancar.
+arrancar. **Si el `git pull` cambia `deploy/Caddyfile`**, además
+`adif restart entrada`: el fichero está montado suelto en el contenedor, y
+`git` lo sustituye por otro, que Caddy no ve hasta reiniciarse (`instalar.sh`
+no lo reinicia si nada más ha cambiado).
+
+**Exportar el Excel** tarda unos 4 minutos (234 s medido el 14/10/2026, con
+19.351 filas) y el navegador no recibe nada hasta el final. Dos usuarios a la
+vez tardan unos 5 minutos y medio cada uno (327 s): la API es un solo proceso
+y se reparten el procesador, sin estorbarse más que eso. Caddy corta a los 10
+minutos (`deploy/Caddyfile`); con cuatro o más exportaciones a la vez se
+llegaría a ese límite. Firefox, por su cuenta, deja de esperar una respuesta a
+los 5 minutos (`network.http.response.timeout`): con dos exportaciones a la
+vez, mejor Chrome o Edge.
 
 **Reinicio de la máquina**: todo vuelve a arrancar solo (servicio
 `adif.service` de systemd, más `restart: unless-stopped` en cada
@@ -150,8 +162,11 @@ contenedor). Comprobar con `adif ps`.
 El worker hace una copia completa de la base cada 24 horas en
 `/srv/adif/copias/adif_AAAAMMDD_HHMMSS.dump` (unos 45 MB) y guarda las 14
 últimas; las más antiguas las borra él. Ajustable en `deploy/.env`
-(`BACKUP_INTERVALO_SEGUNDOS`, `BACKUP_RETENCION`). Hay un botón en la
-pantalla de Mantenimiento para forzar una.
+(`BACKUP_INTERVALO_SEGUNDOS`, `BACKUP_RETENCION`). La web no tiene botón
+para forzar una; se fuerza con la API, desde el navegador con una sesión
+abierta (consola de las herramientas de desarrollo):
+`fetch('/api/mantenimiento/copias/ejecutar', {method: 'POST', credentials: 'include'})`.
+La siguiente automática pasa a ser 24 horas después de esa.
 
 Las copias están en el mismo disco que la base: protegen de un error, no de
 perder la máquina. Conviene llevarse una de vez en cuando fuera

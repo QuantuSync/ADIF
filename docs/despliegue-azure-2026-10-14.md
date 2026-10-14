@@ -120,8 +120,9 @@ MODEL_API_VERSION=
 MODEL_API_KEY=<clave del recurso>
 ```
 
-La clave se escribió pasándola por la entrada estándar del `ssh` y de `sed`,
-para que no quedara en ninguna línea de comandos. Prueba mínima desde la
+La clave se pasó por la entrada estándar del `ssh`, para que no quedara en
+ninguna línea de comandos del portátil ni en el historial; en la máquina, el
+`sed` que la escribe en `.env` la lleva un instante en sus argumentos. Prueba mínima desde la
 máquina, leyendo la clave del propio `.env`:
 
 ```bash
@@ -252,3 +253,182 @@ llegaron, porque `restaurar-datos.sh` vacía `usuarios`, `sesiones_usuario` y
 
 Para renombrar no hay orden: se crea el usuario con el nombre real y se
 desactiva el provisional (`python -m app.usuarios desactivar usuario1`).
+
+## Bloque 5. Comprobación
+
+Todo con un navegador real (Chromium de Playwright, desde el portátil) contra
+`https://adif-catalogo-ineco.spaincentral.cloudapp.azure.com`, nunca contra
+`localhost`.
+
+### Acceso
+
+- Cualquier página sin sesión (`/`, `/catalogo`, `/revision`,
+  `/mantenimiento`, una inventada) responde 307 a `/entrar?siguiente=...`. Lo
+  primero que se ve es la pantalla de entrada (el único error de consola es
+  que falta `favicon.ico`).
+- `usuario1` con su contraseña temporal lleva a `/cambiar-contrasena`. Desde
+  ahí, ir a `/catalogo` devuelve al cambio, y la API contesta 403
+  `cambio_contrasena_obligatorio`. Cambiada la contraseña, entra.
+- Rutas de la API sin sesión: se sacó la lista completa del propio contenedor
+  (`app.main.app.routes`, 57 rutas) y se llamó a cada una por el dominio
+  público sin cookie. 54 dan 401; las otras tres son las que deben ir
+  abiertas y no dan datos: `GET /health` (`{"status":"ok"}`),
+  `POST /auth/entrar` (422 sin usuario) y `POST /auth/salir`.
+  `/api/openapi.json`, `/api/docs` y `/api/redoc` dan 404.
+
+### Catálogo y Excel
+
+El catálogo se ve: 40.164 líneas, 1.607 páginas. El Excel, pulsando
+«Exportar Excel»:
+
+| Prueba | Tiempo hasta tener el fichero | Resultado |
+|---|---:|---|
+| Un usuario solo, con los límites nuevos de Caddy | **234 s** | Completo |
+| Dos usuarios a la vez (`usuario1` y `usuario2`, sesiones distintas) | **327 s** cada uno | Los dos completos |
+
+Cada fichero se comprobó entero, no solo el 200: zip íntegro, y celda a celda
+**idéntico** al que genera `generar_excel_catalogo` sobre la base del
+portátil. Materiales 19.352 filas (19.351 de datos más la cabecera),
+Conciliación 539, Contraste de presupuestos 514, Resumen 73.
+
+Durante las dos exportaciones a la vez se vigiló la API cada 8 s: 100 % de un
+núcleo (es un solo proceso), memoria de 700 a 854 MB, `healthy`, 0
+reinicios, y `/api/health` siguió contestando por el dominio en menos de
+0,25 s.
+
+**Límites de tiempo.** La exportación tarda varios minutos y no manda nada
+hasta el final. Ni Caddy 2.8 (sin límite en `reverse_proxy` ni en `write`) ni
+uvicorn la cortan, así que no cortaban nada. Aun así se dejaron escritos a 10
+minutos en `deploy/Caddyfile` (`servers { timeouts { write 10m; idle 10m } }`
+y `transport http { response_header_timeout 10m; read_timeout 10m }`). Las
+versiones posteriores de Caddy añaden `write_idle`, de 1 minuto por defecto,
+que la 2.8.4 no reconoce: está anotado en el propio fichero. Se llevó a la
+máquina escribiendo **sobre el mismo fichero**, porque está montado suelto en
+el contenedor y uno nuevo no lo vería:
+
+```bash
+ssh adif-catalogo-ineco.spaincentral.cloudapp.azure.com 'sudo tee /opt/adif/deploy/Caddyfile > /dev/null' < deploy/Caddyfile
+sudo docker compose -f docker-compose.prod.yml exec -T entrada caddy validate --config /etc/caddy/Caddyfile
+sudo docker compose -f docker-compose.prod.yml restart entrada
+```
+
+No se tocó nada más de la arquitectura (ni varios procesos de API ni
+rendimiento). Lo que queda: con 4 o más exportaciones a la vez se llegaría a
+los 10 minutos, y Firefox deja de esperar a los 5 minutos por su cuenta.
+
+### Documentos
+
+Desde el panel de una línea del catálogo, «Origen documental» abre el PDF en
+una pestaña nueva (`/api/documentos/<id>/archivo`, `application/pdf`,
+`inline`). Se comprobaron tres (1623, 1515 y 1468, de 0,26 a 12,8 MB): mismo
+tamaño y misma SHA-256 que los ficheros de `/srv/adif/documentos`.
+
+### Mantenimiento y servicio de IA
+
+La pantalla dice «Modelo de IA para escaneados y cabeceras nuevas: openai ·
+vision», sin aviso. Ciclo cada 7 días, el siguiente el 21/10/2026 a las
+15:46 (hora peninsular). No se pulsó «Lanzar ciclo ahora».
+
+### Móvil y escritorio
+
+`/catalogo`, `/mantenimiento` y `/revision` cargan bien a 360×800, 390×844,
+412×915 y 1366×900. En móvil, Mantenimiento (815 px) y la cola de revisión
+(502 px) se salen de ancho, igual que en local con el mismo código. No es del
+despliegue y no se tocó.
+
+### Reinicio de la máquina
+
+```bash
+sudo systemctl reboot
+```
+
+Volvió en unos 20 segundos sin hacer nada. Docker y `adif.service` activos
+(`up -d` con código 0) y los cinco contenedores arriba, con la API `healthy`.
+http sigue redirigiendo a https. Caddy usó el certificado guardado (mismo
+número de serie, una sola emisión en todo su registro). El worker volvió con
+`modelo de IA: proveedor openai, modelo vision`. La sesión abierta del
+navegador siguió valiendo, porque las sesiones están en la base.
+
+Copias diarias tras el reinicio: el programador las tenía activas, cada
+86.400 s, la próxima a las 18:45 UTC. Para no esperar se forzó una por la API
+con la sesión de `usuario1`
+(`POST /api/mantenimiento/copias/ejecutar`): `adif_20261014_165628.dump`,
+45,6 MB, hecha por `pg_dump` 17.11 contra el servidor 16.15, y el
+`pg_restore` del motor la lee entera (22 tablas con datos). La siguiente
+automática queda 24 horas después de esa. La guía decía que había un botón
+para esto en Mantenimiento y no lo hay; corregido.
+
+### Reextracción de `6.26/28510.0066` (la única)
+
+Era la única extracción fallida desde el 22/09. El ciclo del 14/10 en el
+portátil (13:46 UTC, antes de esta sesión) la dejó con 0 líneas: `ANEJO_1.pdf`
+dio `401 invalid x-api-key` con la clave antigua. Se lanzó en la máquina solo
+la extracción (sin volver a descargar), con la sesión de `usuario1`, como el
+botón de la web:
+
+```js
+fetch('/api/expedientes/624/extraer', {method: 'POST', credentials: 'include'})   // trabajo 34777
+```
+
+Resultado en 4 s de trabajo: **22 líneas nuevas**, todas con lote y en
+`sin_revisar`. El expediente queda en `pendiente_revision` por «no se pudo
+determinar la baja de ningún lote» (aún sin adjudicación; es un aviso, no un
+fallo de lectura). **2 llamadas al servicio de Azure, las dos `200 OK`** (503
+y 423 tokens de entrada, 32 de salida, fin `stop`), para traducir dos
+cabeceras nunca vistas, que quedaron en caché.
+
+`ANEJO_1.pdf` **no es escaneado** (`aviso_documento_escaneado: null`), así
+que esta extracción no probó la lectura de imágenes. Para probarla sin
+reprocesar nada, un script de solo lectura (`prueba_vision.py`, copiado en el
+worker y borrado después) leyó con `_rasterizar` y `_leer_pagina` de
+`app.extraccion.ocr` la página 1, sin capa de texto, de un escaneado ya leído
+(`6.18_28510.0071/ADJUDICACION_f35b04b217a64bad.pdf`), sin escribir en la
+base. `vision` la leyó en 11 s (1.681 tokens de entrada, 785 de salida, sin
+error), con un 89,6 % de parecido con la lectura guardada de
+`claude-haiku-4-5`.
+
+### Al terminar
+
+- `usuario1` y `usuario2`, usados en las pruebas, se reiniciaron
+  (`python -m app.usuarios reiniciar`): contraseña temporal nueva, cambio
+  obligatorio y sesiones cerradas. El fichero del portátil está al día. Los
+  seis quedan sin estrenar.
+- Borrado `/srv/adif/traspaso/*` y los ficheros de prueba de `/tmp`.
+- Quedan en el portátil, fuera del repositorio, `C:\dev\adif-traspaso` (el
+  volcado, el paquete de documentos y los Excel de las pruebas) y una copia de
+  la clave en el `~/.ssh` de WSL, para `rsync`.
+- `az` (instalado con winget) no llegó a iniciar sesión: la cuenta entró en
+  su directorio por defecto, sin suscripciones, y el código de dispositivo
+  contra el directorio de la suscripción (`83cd3889-...`) caducó sin
+  usarse. No hizo falta para nada.
+
+## Diferencia con el Excel entregado el 22/09
+
+El 22/09: 19.333 filas en Materiales (sin contar la cabecera) y 40.133 líneas
+en la base. Antes de la reextracción de `0066`: 19.351 y 40.164, es decir,
+**18 filas** (no 19: el 19.352 cuenta la cabecera) y **31 líneas** más. Se
+compararon fila a fila los dos Excel
+(`catalogo_adif_2026-09-22-reconstruccion-identica-a-produccion.xlsx` y el de
+hoy) y la base. Todo viene de los ciclos semanales del 30/09, del 07/10 y del
+14/10:
+
+| Expediente | Excel 22/09 → hoy | Líneas en la base | Qué pasó |
+|---|---|---|---|
+| `6.26/28510.0105` | 0 → 13 | 0 → 13 | Expediente nuevo (ciclo del 30/09), extracción `completado` |
+| `6.25/28510.0221` | 13 → 18 | 13 → 31 | Reextraído el 30/09 (23 creadas, 8 actualizadas, 5 podadas): cantidades nuevas y filas que pasan del lote 2 al 1. 13 de las 31 quedan sin lote y van a «Resumen», no a Materiales, como todas las huérfanas |
+| `6.26/28510.0030` | 29 → 29 | 29 | Mismo número; llega la adjudicación (ciclo del 14/10): precio adjudicado y baja |
+| `6.24/28510.0188` | 2 → 2 | 2 | Igual; adjudicación en el ciclo del 07/10 |
+| **Total** | **+18** | **+31** | |
+
+Completitud: de las 17 extracciones lanzadas desde el 22/09, la única con un
+error de verdad es la de `6.26/28510.0066` (arriba). Las demás que salen
+buscando «no se pudo» son avisos normales por fila («valor que no se pudo
+interpretar, marcadas para revisión», «no se pudo determinar la baja»).
+Ninguna extracción quedó `fallido`; los 109 trabajos fallidos desde el 22/09
+son todos descargas «no encontrado en la Plataforma ni por matriz ni por
+expediente» (92 expedientes que se reintentan cada ciclo). `19/28510`, nuevo
+del 30/09, está sin líneas a propósito: el documento descargado como
+adjudicación no lo menciona.
+
+Con la reextracción de `0066`, la base de la máquina tiene 22 líneas más que
+la del portátil: 40.186.

@@ -2,6 +2,21 @@
 # certificado de DOMINIO (Let's Encrypt) y redirige solo todo lo que llega por
 # el puerto 80 al 443: no hace falta escribir ninguna de las dos cosas.
 
+# Límites de tiempo explícitos (sesión 2026-10-14, despliegue en Azure): la
+# exportación del Excel tarda 3-5 minutos en generarse antes de mandar el
+# primer byte. Los valores por defecto de Caddy 2.8 no cortan nada; con esto
+# queda escrito y acotado. Las versiones posteriores añaden `write_idle` (1
+# minuto por defecto, la 2.8.4 no lo reconoce): al actualizar la imagen,
+# añadir aquí `write_idle 10m`.
+{
+	servers {
+		timeouts {
+			write 10m
+			idle 10m
+		}
+	}
+}
+
 {$DOMINIO} {
 	encode zstd gzip
 
@@ -16,7 +31,12 @@
 
 	# La API, bajo /api, sin el prefijo: la API no sabe que está detrás.
 	handle_path /api/* {
-		reverse_proxy api:8000
+		reverse_proxy api:8000 {
+			transport http {
+				response_header_timeout 10m
+				read_timeout 10m
+			}
+		}
 	}
 
 	handle {
