@@ -30,7 +30,15 @@ def run_migrations_online():
         poolclass=pool.NullPool,
     )
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        # Una transacción por migración (sesión 2026-10-14): varias añaden un
+        # valor a un enum con ALTER TYPE ... ADD VALUE, y PostgreSQL no deja
+        # usar ese valor hasta que esa transacción se confirma. Con todas en
+        # una sola, migrar una base vacía desde cero fallaba en la 0031 (usa
+        # `sin_publicar`, añadido en la 0010); una base que se había ido
+        # migrando poco a poco nunca lo vio. Pasó al probar el despliegue.
+        context.configure(
+            connection=connection, target_metadata=target_metadata, transaction_per_migration=True
+        )
         with context.begin_transaction():
             context.run_migrations()
 

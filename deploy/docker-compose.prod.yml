@@ -1,0 +1,122 @@
+# Despliegue en producción (sesión 2026-10-14). Mismo código y mismas imágenes
+# que en local (CONTEXTO.md sección 9.4); cambia solo lo de alrededor:
+#
+# - Los cuatro procesos de siempre (postgres, api, worker, web) sin ningún
+#   puerto publicado: solo se ven entre ellos, por la red interna.
+# - Un quinto contenedor, "entrada" (Caddy), el único con puertos abiertos:
+#   443 con HTTPS y certificado automático para DOMINIO, y 80, que solo
+#   redirige a 443. Sirve la web en "/" y la API en "/api", así que el
+#   navegador ve un único origen.
+# - Documentos, copias de la base y ficheros de entrada en carpetas de la
+#   máquina (RUTA_DATOS, /srv/adif por defecto), fáciles de copiar y de ver.
+#
+# Uso, desde esta carpeta (deploy/), con el fichero .env al lado:
+#   docker compose -f docker-compose.prod.yml up -d --build
+# Lo hace solo `instalar.sh`; ver docs/guia-de-operacion.md.
+
+name: adif
+
+x-motor: &motor
+  build: ../engine
+  image: adif-engine:produccion
+  restart: unless-stopped
+  env_file: .env
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-adif}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?falta POSTGRES_PASSWORD en deploy/.env}
+      POSTGRES_DB: ${POSTGRES_DB:-adif}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Carpeta de traspaso, para restaurar una copia con el pg_restore del
+      # propio servidor (deploy/restaurar-datos.sh).
+      - ${RUTA_DATOS:-/srv/adif}/traspaso:/traspaso:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-adif} -d ${POSTGRES_DB:-adif}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    <<: *motor
+    # `--proxy-headers`: detrás de "entrada", la dirección real de quien entra
+    # llega en X-Forwarded-For; sin esto, el registro de accesos y el límite de
+    # intentos por dirección verían siempre la de Caddy. Solo "entrada" puede
+    # hablar con la API (ningún puerto publicado), así que se fía de cualquiera.
+    command: >-
+      sh -c "python -m app.esperar_bd && alembic upgrade head &&
+      uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips='*'"
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-adif}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-adif}
+      DOCUMENT_STORAGE_PATH: /data/documentos
+      CORS_ALLOWED_ORIGINS: https://${DOMINIO:?falta DOMINIO en deploy/.env}
+      SESION_COOKIE_SEGURA: "true"
+      BACKUP_DIR: /backups
+    volumes:
+      - ${RUTA_DATOS:-/srv/adif}/documentos:/data/documentos
+      - ${RUTA_DATOS:-/srv/adif}/entrada:/data/entrada:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  worker:
+    <<: *motor
+    command: sh -c "python -m app.esperar_bd && python -m app.worker"
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-adif}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-adif}
+      DOCUMENT_STORAGE_PATH: /data/documentos
+      WORKER_POLL_INTERVAL_SECONDS: 3
+      BACKUP_DIR: /backups
+      MODEL_CACHE_DIR: ""
+    volumes:
+      - ${RUTA_DATOS:-/srv/adif}/documentos:/data/documentos
+      - ${RUTA_DATOS:-/srv/adif}/entrada:/data/entrada:ro
+      - ${RUTA_DATOS:-/srv/adif}/copias:/backups
+    depends_on:
+      api:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ../web
+      args:
+        NEXT_PUBLIC_API_URL: https://${DOMINIO}/api
+        API_URL: http://api:8000
+    image: adif-web:produccion
+    restart: unless-stopped
+    environment:
+      API_URL: http://api:8000
+    depends_on:
+      - api
+
+  entrada:
+    image: caddy:2.8.4-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMINIO: ${DOMINIO}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificados y claves de Caddy: si se pierden, pide otros, pero
+      # Let's Encrypt limita cuántos se pueden pedir por semana.
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+      - api
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:

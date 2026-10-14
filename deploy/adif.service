@@ -1,0 +1,21 @@
+# Arranque automático al encender la máquina (sesión 2026-10-14). Lo instala
+# `instalar.sh` en /etc/systemd/system/, con @DEPLOY@ cambiado por la carpeta
+# deploy/ del repositorio. Los contenedores ya llevan `restart:
+# unless-stopped`; esto asegura además que, tras un reinicio, se levantan
+# todos aunque alguno se hubiera parado a mano.
+[Unit]
+Description=ADIF - Catálogo de materiales (docker compose)
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=@DEPLOY@
+ExecStart=/usr/bin/docker compose -f docker-compose.prod.yml up -d
+ExecStop=/usr/bin/docker compose -f docker-compose.prod.yml stop
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

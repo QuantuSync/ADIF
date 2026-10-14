@@ -1,0 +1,6 @@
+# Scripts y configuración que se ejecutan en Linux: siempre con LF.
+*.sh text eol=lf
+deploy/Caddyfile text eol=lf
+deploy/*.service text eol=lf
+deploy/env.produccion.ejemplo text eol=lf
+deploy/*.yml text eol=lf

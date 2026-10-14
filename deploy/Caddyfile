@@ -1,0 +1,25 @@
+# Servidor de entrada (sesión 2026-10-14). Caddy pide y renueva solo el
+# certificado de DOMINIO (Let's Encrypt) y redirige solo todo lo que llega por
+# el puerto 80 al 443: no hace falta escribir ninguna de las dos cosas.
+
+{$DOMINIO} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		# La cola de revisión enseña los PDF en un iframe de este mismo sitio.
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "same-origin"
+		-Server
+	}
+
+	# La API, bajo /api, sin el prefijo: la API no sabe que está detrás.
+	handle_path /api/* {
+		reverse_proxy api:8000
+	}
+
+	handle {
+		reverse_proxy web:3000
+	}
+}
