@@ -506,5 +506,7 @@ los de la auditoría automática del catálogo, los mismos de antes.
 En el registro de accesos consta que `NOMBRE1` entró a las 17:38:37 UTC y
 cambió su contraseña a las 17:40:03, desde 91.116.111.191. No fue durante
 estas pruebas (la mía con `NOMBRE1` fue a las 17:28:15, entrada y salida sin
-cambio). Su contraseña temporal de `privado/` está marcada como que ya no
-vale.
+cambio): fue el cliente, probando. Después se reinició
+(`python -m app.usuarios reiniciar NOMBRE1`): contraseña temporal nueva en
+`privado/`, cambio obligatorio y sesión cerrada. Los seis quedan sin
+estrenar.
