@@ -220,3 +220,35 @@ Idénticas en las 22 tablas (expedientes 614, lotes 692, líneas de catálogo
 `registro_accesos` (5 → 0), que `restaurar-datos.sh` vacía a propósito: los
 usuarios de desarrollo no viajan a producción. Que los documentos se abren
 desde la web se comprobó en el bloque 5, con el navegador.
+
+## Bloque 4. Usuarios
+
+Seis usuarios con nombre provisional (`usuario1` a `usuario6`), para
+renombrarlos después con los reales. Las contraseñas temporales se llevaron
+directamente a un fichero del portátil, fuera del repositorio
+(`%USERPROFILE%\Documents\adif-usuarios-provisionales-2026-10-14.txt`), sin
+sacarlas por pantalla:
+
+```bash
+F=/c/Users/LUCAS/Documents/adif-usuarios-provisionales-2026-10-14.txt
+ssh adif-catalogo-ineco.spaincentral.cloudapp.azure.com 'cd /opt/adif/deploy
+  for u in usuario1 usuario2 usuario3 usuario4 usuario5 usuario6; do
+    sudo docker compose -f docker-compose.prod.yml exec -T api python -m app.usuarios crear $u |
+      sed -n "s/^Usuario «\(.*\)»\. Contraseña temporal: \(.*\)$/\1\t\2/p"
+  done' > "$F"
+```
+
+Seis contraseñas distintas, de 16 caracteres, todas con cambio obligatorio en
+la primera entrada:
+
+```bash
+sudo docker compose -f docker-compose.prod.yml exec -T api python -m app.usuarios listar
+# usuario1 ... usuario6   activo   última entrada: -  (contraseña temporal pendiente de cambiar)
+```
+
+No hay ningún otro usuario: los de desarrollo (`lucas`, `verificacion`) no
+llegaron, porque `restaurar-datos.sh` vacía `usuarios`, `sesiones_usuario` y
+`registro_accesos`.
+
+Para renombrar no hay orden: se crea el usuario con el nombre real y se
+desactiva el provisional (`python -m app.usuarios desactivar usuario1`).
