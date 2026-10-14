@@ -259,6 +259,35 @@ function PanelAuditoria({ estado }: { estado: EstadoMantenimiento | null }) {
   );
 }
 
+// Sesión 2026-10-14: qué modelo de IA tiene configurado el sistema. Sin
+// ninguno, todo funciona para consultar y exportar, y aquí se dice con
+// claridad qué es lo único que no se puede hacer.
+type ModeloIA = { configurado: boolean; proveedor: string; modelo: string | null; aviso: string | null };
+
+function TarjetaModeloIA({ apiUrl }: { apiUrl: string }) {
+  const [modelo, setModelo] = useState<ModeloIA | null>(null);
+  useEffect(() => {
+    fetch(`${apiUrl}/mantenimiento/modelo-ia`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then(setModelo)
+      .catch(() => null);
+  }, [apiUrl]);
+  if (!modelo) return null;
+  if (!modelo.configurado) {
+    return (
+      <p className="error-banner" role="status">
+        <strong>Sin modelo de IA.</strong> {modelo.aviso}
+      </p>
+    );
+  }
+  return (
+    <p className="muted" style={{ margin: "0 0 1.5rem" }}>
+      Modelo de IA para escaneados y cabeceras nuevas: {modelo.proveedor}
+      {modelo.modelo ? ` · ${modelo.modelo}` : ""}
+    </p>
+  );
+}
+
 export default function MantenimientoPanel({ apiUrl }: { apiUrl: string }) {
   const [estado, setEstado] = useState<EstadoMantenimiento | null>(null);
   const [historial, setHistorial] = useState<Trabajo[]>([]);
@@ -346,6 +375,7 @@ export default function MantenimientoPanel({ apiUrl }: { apiUrl: string }) {
         </p>
       )}
       {errorAccion && <p className="error-banner">{errorAccion}</p>}
+      <TarjetaModeloIA apiUrl={apiUrl} />
 
       {confirmado && estado && (
         <>

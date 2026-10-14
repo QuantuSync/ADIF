@@ -95,6 +95,13 @@ services:
       # GET /mantenimiento/copias/estado muestre la frecuencia real.
       BACKUP_INTERVALO_SEGUNDOS: ${BACKUP_INTERVALO_SEGUNDOS:-86400}
       BACKUP_ACTIVO: ${BACKUP_ACTIVO:-true}
+      # Sesión 2026-10-14: la API no llama nunca al modelo, pero la pantalla
+      # de mantenimiento dice si hay uno configurado (GET
+      # /mantenimiento/modelo-ia), y para eso lee la misma configuración que
+      # el worker. Solo mira si la clave está; nunca la devuelve.
+      MODEL_API_KEY: ${MODEL_API_KEY:-}
+      MODEL_ID: ${MODEL_ID:-}
+      MODEL_PROVEEDOR: ${MODEL_PROVEEDOR:-anthropic}
     volumes:
       - documentos:/data/documentos
     ports:
@@ -124,6 +131,14 @@ services:
       # de modelo elegido en cada despliegue, se rellena siempre desde .env.
       MODEL_API_KEY: ${MODEL_API_KEY:-}
       MODEL_ID: ${MODEL_ID:-}
+      # Sesión 2026-10-14: "anthropic" (por defecto) u "openai" -- cualquier
+      # servicio con el protocolo de chat de OpenAI, como el servicio de IA del
+      # cliente en su suscripción --, que necesita además MODEL_ENDPOINT y,
+      # solo con el formato antiguo por despliegue, MODEL_API_VERSION. Ver
+      # app.interfaces.model_provider.crear_proveedor_modelo.
+      MODEL_PROVEEDOR: ${MODEL_PROVEEDOR:-anthropic}
+      MODEL_ENDPOINT: ${MODEL_ENDPOINT:-}
+      MODEL_API_VERSION: ${MODEL_API_VERSION:-}
       # Solo si MODEL_API_KEY es una clave ligada a identidad (ver
       # docstring de APIModelProvider).
       MODEL_WORKSPACE_ID: ${MODEL_WORKSPACE_ID:-}

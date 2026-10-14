@@ -204,9 +204,13 @@ def reconocer_documento_cacheado(
 
     modelo = settings.model_id or type(model_provider).__name__
     cacheado = db.get(CacheOcrDocumento, documento_hash)
-    vigente = (
-        cacheado is not None and cacheado.version_logica_ocr == VERSION_LOGICA_OCR and cacheado.modelo == modelo
-    )
+    # Sesión 2026-10-14: la lectura vale aunque la haya hecho otro modelo u
+    # otro proveedor. Cambiar de servicio de IA (el del cliente en su
+    # suscripción) no puede volver a leer -- y a pagar -- los escaneados ya
+    # leídos; para mejorar unas páginas concretas está la relectura
+    # (`app.extraccion.ocr_relectura`). `modelo` queda como constancia de
+    # quién leyó el documento.
+    vigente = cacheado is not None and cacheado.version_logica_ocr == VERSION_LOGICA_OCR
     if vigente and not _pendientes(cacheado.paginas):
         return DocumentoReconocido(list(cacheado.paginas), cacheado.completo, cacheado.num_paginas)
 
@@ -241,8 +245,9 @@ def reconocer_documento_cacheado(
     if cacheado is None:
         cacheado = CacheOcrDocumento(documento_hash=documento_hash)
         db.add(cacheado)
+    if not vigente:
+        cacheado.modelo = modelo
     cacheado.version_logica_ocr = VERSION_LOGICA_OCR
-    cacheado.modelo = modelo
     cacheado.num_paginas = total
     cacheado.completo = completo
     cacheado.paginas = paginas
@@ -254,6 +259,18 @@ def reconocer_documento_cacheado(
             f"se reintentarán): {next(p['error'] for p in paginas if p.get('error') and p.get('reintentar'))}"
         )
     return DocumentoReconocido(paginas, completo, total)
+
+
+def leer_documento_en_cache(db: Session, documento_hash: str) -> Optional[DocumentoReconocido]:
+    """Sin modelo configurado (sesión 2026-10-14): la lectura ya hecha de un
+    escaneado se sigue usando tal cual, sin leer nada nuevo. `None` si el
+    documento nunca se leyó."""
+    from app.models import CacheOcrDocumento
+
+    cacheado = db.get(CacheOcrDocumento, documento_hash)
+    if cacheado is None or cacheado.version_logica_ocr != VERSION_LOGICA_OCR:
+        return None
+    return DocumentoReconocido(list(cacheado.paginas), cacheado.completo, cacheado.num_paginas)
 
 
 def marcar_linea_reconocida(linea: dict) -> None:

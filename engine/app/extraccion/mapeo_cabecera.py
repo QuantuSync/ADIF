@@ -955,7 +955,7 @@ def mapear_cabecera(
     if model_provider is None:
         raise RuntimeError(
             f"la cabecera {cabecera!r} (firma {firma}) no tiene mapeo determinista "
-            "y no se proporcionó un ModelProvider para resolverla"
+            "y no hay modelo de IA configurado para resolverla (MODEL_API_KEY vacía)"
         )
     mapeo_modelo = _mapear_con_modelo(cabecera, filas_ejemplo, model_provider)
     if cabecera_fiable:

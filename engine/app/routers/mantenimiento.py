@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import Usuario, get_current_user
 from app.config import settings
+from app.interfaces.model_provider import describir_proveedor_modelo
 from app.db import get_db
 from app.extraccion.candidatos_matricula import calcular_candidatos
 from app.extraccion.descubrimiento_matriz import TIPO_TRABAJO as TIPO_TRABAJO_DESCUBRIMIENTO_PEDIDOS
@@ -107,6 +108,14 @@ def estado_mantenimiento(
     encontró (`ultima_ejecucion.resultado`), si hay una en curso ahora
     mismo, y cuándo tocaría la próxima programada."""
     return obtener_estado(db)
+
+
+@router.get("/mantenimiento/modelo-ia")
+def modelo_ia(usuario: Usuario = Depends(get_current_user)):
+    """Sesión 2026-10-14: qué modelo de IA hay configurado, sin la clave. Sin
+    ninguno, el sistema funciona para consultar y exportar, y la pantalla de
+    mantenimiento lo dice con este `aviso`."""
+    return describir_proveedor_modelo(settings)
 
 
 @router.get("/mantenimiento/historial", response_model=list[TrabajoOut])

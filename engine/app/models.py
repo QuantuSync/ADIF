@@ -670,8 +670,9 @@ class CacheOcrDocumento(Base):
     """Sesión 2026-09-17: texto reconocido de un documento escaneado
     (`app.extraccion.ocr`), por hash de documento como `CacheTextoDocumento`.
     Leer una página con el modelo cuesta segundos y dinero, y el documento no
-    cambia: nunca se repite, salvo que suba `VERSION_LOGICA_OCR` o cambie el
-    modelo. `completo` es falso cuando solo se leyeron las primeras páginas
+    cambia: nunca se repite, salvo que suba `VERSION_LOGICA_OCR` (desde la
+    sesión 2026-10-14, cambiar de modelo o de proveedor ya no la invalida;
+    `modelo` dice quién la hizo). `completo` es falso cuando solo se leyeron las primeras páginas
     (pliego administrativo, o documento demasiado largo)."""
 
     __tablename__ = "cache_ocr_documento"

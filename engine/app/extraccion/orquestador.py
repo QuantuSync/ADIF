@@ -94,7 +94,7 @@ from app.extraccion.normalizacion import parsear_importe_es
 from app.extraccion.pipeline_anejo import procesar_anejo
 from app.extraccion.precios_unitarios import calcular_baja_efectiva
 from app.extraccion.texto import es_documento_escaneado, extraer_texto_cacheado
-from app.extraccion.ocr import marcar_linea_reconocida, ocr_activo, reconocer_documento_cacheado
+from app.extraccion.ocr import leer_documento_en_cache, marcar_linea_reconocida, ocr_activo, reconocer_documento_cacheado
 from app.extraccion.ocr_pdf import generar_pdf_reconocido
 from app.extraccion.traza import registrar_traza
 from app.interfaces.document_storage import DocumentStorage
@@ -671,7 +671,13 @@ def _clasificar_documentos(
         num_paginas = len(paginas)
         escaneado = es_documento_escaneado(paginas)
         reconocido = None
-        if escaneado and ocr_activo() and model_provider is not None:
+        if escaneado and ocr_activo() and model_provider is None:
+            # Sin modelo configurado (sesión 2026-10-14): lo ya leído se sigue
+            # usando; solo un escaneado nunca leído se queda sin leer.
+            reconocido = leer_documento_en_cache(db, doc.hash)
+            if reconocido is not None:
+                paginas = reconocido.paginas_texto
+        elif escaneado and ocr_activo():
             # Sesión 2026-09-17: solo un documento sin capa de texto pasa por
             # el reconocimiento óptico, y su resultado se cachea por hash.
             try:
@@ -2195,7 +2201,13 @@ def ejecutar_extraccion_expediente(
                 # pendiente real, 2026-09-05, ver el bloque que usa esta
                 # variable).
                 motivo_escaneados = (
-                    "documento(s) escaneado(s), sin capa de texto (fuera de alcance sin OCR o modelo "
+                    # Sesión 2026-10-14: si la causa es que no hay modelo
+                    # configurado, se dice así, para que quien lo lea sepa
+                    # que se arregla con configuración y no es un límite.
+                    "documento(s) escaneado(s) sin leer: no hay modelo de IA configurado para leer "
+                    "escaneados nuevos (MODEL_API_KEY vacía): " + "; ".join(documentos_escaneados)
+                    if model_provider is None and ocr_activo()
+                    else "documento(s) escaneado(s), sin capa de texto (fuera de alcance sin OCR o modelo "
                     "multimodal, CONTEXTO.md sección 15): " + "; ".join(documentos_escaneados)
                 )
 

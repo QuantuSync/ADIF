@@ -115,6 +115,16 @@ class Settings(BaseSettings):
     # requerido para que APIModelProvider pueda arrancar.
     model_api_key: Optional[str] = None
     model_id: Optional[str] = None
+    # Sesión 2026-10-14: qué implementación de `ModelProvider` usa el worker
+    # (`app.interfaces.model_provider.crear_proveedor_modelo`). "anthropic",
+    # la de siempre, u "openai": cualquier servicio con el protocolo de chat
+    # de OpenAI -- el servicio de IA del cliente en su suscripción, o un
+    # modelo autoalojado --, que necesita además `model_endpoint` y, solo con
+    # el formato antiguo por despliegue, `model_api_version`. Cambiar de uno a
+    # otro es configuración, nunca código (CONTEXTO.md sección 9.2).
+    model_proveedor: str = "anthropic"
+    model_endpoint: Optional[str] = None
+    model_api_version: Optional[str] = None
     # Solo necesario si MODEL_API_KEY es una clave ligada a identidad
     # (creada en la consola bajo un usuario, no una API key clásica de
     # workspace): la API de este proveedor la exige en una cabecera propia

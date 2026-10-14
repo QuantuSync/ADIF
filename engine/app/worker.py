@@ -15,7 +15,7 @@ from app.extraccion.orquestador import ejecutar_extraccion_expediente
 from app.ingesta_local import TIPO_TRABAJO as TIPO_INGESTA_LOCAL
 from app.ingesta_local import ingerir_carpeta_local
 from app.interfaces.document_storage import LocalDiskStorage
-from app.interfaces.model_provider import APIModelProvider, CachedModelProvider
+from app.interfaces.model_provider import CachedModelProvider, crear_proveedor_modelo, describir_proveedor_modelo
 from app.mantenimiento.auditoria import TIPO_TRABAJO as TIPO_AUDITORIA_CATALOGO
 from app.mantenimiento.auditoria import ejecutar_auditoria
 from app.mantenimiento.ciclo import TIPO_TRABAJO as TIPO_MANTENIMIENTO_CICLO
@@ -48,18 +48,19 @@ logger = logging.getLogger("worker")
 
 storage = LocalDiskStorage(settings.document_storage_path)
 
-# Etapa 5 de la cascada (CONTEXTO.md sección 6): sin clave configurada, se
-# procesa igual pero el mapeo de cabecera nunca vista fallará con un error
-# real en vez de una llamada silenciosa a ningún sitio (NullModelProvider).
-model_provider = (
-    APIModelProvider(
-        api_key=settings.model_api_key,
-        modelo=settings.model_id,
-        workspace_id=settings.model_workspace_id,
+# Etapa 5 de la cascada (CONTEXTO.md sección 6) y lectura de escaneados:
+# el proveedor lo elige la configuración (`MODEL_PROVEEDOR`, sesión
+# 2026-10-14). Sin clave, `None`: se procesa igual, lo ya leído sale de la
+# caché, y un escaneado nuevo o una cabecera nunca vista quedan en revisión
+# con un motivo que lo dice, en vez de una llamada silenciosa a ningún sitio.
+model_provider = crear_proveedor_modelo(settings)
+_descripcion_modelo = describir_proveedor_modelo(settings)
+if _descripcion_modelo["configurado"]:
+    logger.info(
+        "modelo de IA: proveedor %s, modelo %s", _descripcion_modelo["proveedor"], _descripcion_modelo["modelo"]
     )
-    if settings.model_api_key
-    else None
-)
+else:
+    logger.warning(_descripcion_modelo["aviso"])
 # Decorador de desarrollo (interfaces/model_provider.py, docstring de
 # CachedModelProvider): solo se activa si MODEL_CACHE_DIR está en el
 # entorno, para no cachear en disco en producción por accidente.
@@ -214,9 +215,7 @@ def procesar_ocr_relectura(db, trabajo) -> dict:
     documento = db.get(Documento, documento_id)
     if documento is None:
         raise RuntimeError(f"documento_id {documento_id} no existe")
-    proveedor = APIModelProvider(
-        api_key=settings.model_api_key, modelo=modelo, workspace_id=settings.model_workspace_id,
-    )
+    proveedor = crear_proveedor_modelo(settings, modelo=modelo)
     return releer_paginas(
         db, documento.hash,
         lambda: storage.recuperar(documento.ruta_almacenamiento),
