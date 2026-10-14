@@ -1,10 +1,11 @@
 import logging
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import OperationalError
 
+from app.auth import get_current_user
 from app.config import settings
 from app.extraccion.cruce_codigos import validar_ruta_codigos_proyecto
 from app.extraccion.estado_sap import validar_ruta_estado_sap
@@ -13,7 +14,7 @@ from app.extraccion.maestro_materiales import validar_ruta_maestro_materiales
 from app.extraccion.sap_desglose import validar_ruta_sap_desglose
 from app.extraccion.vigentes_remanente import validar_ruta_vigentes_remanente
 from app.catalogo_antiguo import validar_ruta_catalogo_antiguo
-from app.routers import catalogo, conciliacion, contraste_presupuestos, documentos, expedientes, health, mantenimiento, revision, trabajos
+from app.routers import auth, catalogo, conciliacion, contraste_presupuestos, documentos, expedientes, health, mantenimiento, revision, trabajos
 
 logger = logging.getLogger("api")
 
@@ -45,7 +46,14 @@ validar_ruta_maestro_materiales(settings.maestro_materiales_path)
 validar_ruta_vigentes_remanente(settings.vigentes_remanente_path)
 validar_ruta_catalogo_antiguo(settings.catalogo_antiguo_path)
 
-app = FastAPI(title="ADIF - Catalogo de materiales")
+# Sesión 2026-10-14: la documentación interactiva describe todas las rutas;
+# fuera por defecto, igual que el resto de la API sin sesión.
+app = FastAPI(
+    title="ADIF - Catalogo de materiales",
+    docs_url="/docs" if settings.api_documentacion_activa else None,
+    redoc_url=None,
+    openapi_url="/openapi.json" if settings.api_documentacion_activa else None,
+)
 
 # Sin esto, cualquier fetch() del navegador (web en otro origen, sección
 # 9.1) falla con "Failed to fetch" aunque la API responda 200: el navegador
@@ -55,6 +63,9 @@ app.add_middleware(
     allow_origins=[o.strip() for o in settings.cors_allowed_origins.split(",") if o.strip()],
     allow_methods=["*"],
     allow_headers=["*"],
+    # La sesión viaja en una cookie (`app.auth`): sin esto el navegador no
+    # la manda en un fetch() a otro origen (en local, :3000 -> :8000).
+    allow_credentials=True,
 )
 
 
@@ -86,12 +97,16 @@ async def error_conexion_bd(request: Request, exc: OperationalError) -> JSONResp
     )
 
 
+# Sesión 2026-10-14: toda la API exige sesión válida salvo `/health` (sin
+# datos, lo usa la comprobación de salud de Docker) y `/auth` (entrar y
+# cambiar la contraseña obligatoria). Se pone aquí, en cada router, y no ruta
+# a ruta, para que una ruta nueva no pueda quedar abierta por olvido -- y
+# `tests/test_acceso.py` lo comprueba recorriendo todas.
 app.include_router(health.router)
-app.include_router(expedientes.router)
-app.include_router(trabajos.router)
-app.include_router(catalogo.router)
-app.include_router(conciliacion.router)
-app.include_router(contraste_presupuestos.router)
-app.include_router(revision.router)
-app.include_router(documentos.router)
-app.include_router(mantenimiento.router)
+app.include_router(auth.router)
+_CON_SESION = [Depends(get_current_user)]
+for _router in (
+    expedientes.router, trabajos.router, catalogo.router, conciliacion.router,
+    contraste_presupuestos.router, revision.router, documentos.router, mantenimiento.router,
+):
+    app.include_router(_router, dependencies=_CON_SESION)

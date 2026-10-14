@@ -42,6 +42,23 @@ def _sin_descubrimiento_por_busqueda(monkeypatch):
     monkeypatch.setattr(config.settings, "busqueda_descubrimiento_activo", False)
 
 
+@pytest.fixture(autouse=True)
+def _sesion_iniciada(request):
+    """Sesión 2026-10-14: toda la API exige sesión (`app.auth`). Las pruebas
+    de cada pantalla prueban sus datos, no el acceso, así que entran con un
+    usuario de prueba ya dentro. `tests/test_acceso.py` es la excepción: se
+    marca con `acceso_real` y prueba la puerta de verdad."""
+    if request.node.get_closest_marker("acceso_real"):
+        yield
+        return
+    from app.auth import Usuario, get_current_user
+    from app.main import app
+
+    app.dependency_overrides[get_current_user] = lambda: Usuario(id=1, nombre="prueba")
+    yield
+    app.dependency_overrides.pop(get_current_user, None)
+
+
 @pytest.fixture()
 def db_session():
     """Sesión sobre SQLite en memoria: sin Postgres levantado. Usa `JSON`

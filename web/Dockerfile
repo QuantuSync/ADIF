@@ -13,6 +13,11 @@ COPY . .
 # entorno", aquí en forma de build arg del propio contenedor.
 ARG NEXT_PUBLIC_API_URL=http://localhost:8000
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+# Dirección de la API dentro de la red de contenedores, para el middleware
+# que comprueba la sesión (middleware.ts). Se fija también al construir por
+# si el middleware la lee del paquete y no del entorno de ejecución.
+ARG API_URL=http://api:8000
+ENV API_URL=$API_URL
 
 RUN npm run build
 

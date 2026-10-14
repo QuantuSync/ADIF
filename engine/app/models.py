@@ -961,3 +961,62 @@ class PresupuestoLoteDocumento(Base):
     pagina = Column(Integer, nullable=True)
     fragmento = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class Usuario(Base):
+    """Acceso con usuario y contraseña (sesión 2026-10-14, despliegue). Un
+    solo perfil: consulta, revisa y exporta. No hay administración desde la
+    web -- las altas, bajas y reinicios de contraseña se hacen por consola
+    (`python -m app.usuarios`). La contraseña se guarda solo como hash
+    argon2id (`app.auth`), nunca en claro."""
+
+    __tablename__ = "usuarios"
+
+    id = Column(Integer, primary_key=True)
+    nombre = Column(String(64), nullable=False, unique=True)
+    hash_contrasena = Column(String(255), nullable=False)
+    activo = Column(Boolean, nullable=False, default=True, server_default="true")
+    # Verdadero al crear y al reiniciar: la contraseña la ha fijado quien
+    # administra la máquina, así que la primera entrada obliga a cambiarla
+    # antes de dejar llegar a ningún dato.
+    debe_cambiar_contrasena = Column(Boolean, nullable=False, default=True, server_default="true")
+    contrasena_cambiada_en = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class SesionUsuario(Base):
+    """Una sesión abierta. Se guarda el SHA-256 del token, no el token: quien
+    lea la base no puede hacerse pasar por nadie. Caduca por inactividad
+    (`ultima_actividad`) y, en todo caso, a las `caduca_en`."""
+
+    __tablename__ = "sesiones_usuario"
+
+    id = Column(Integer, primary_key=True)
+    hash_token = Column(String(64), nullable=False, unique=True)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id", ondelete="CASCADE"), nullable=False, index=True)
+    creada_en = Column(DateTime(timezone=True), nullable=False)
+    ultima_actividad = Column(DateTime(timezone=True), nullable=False)
+    caduca_en = Column(DateTime(timezone=True), nullable=False)
+    ip = Column(String(64), nullable=True)
+
+
+class RegistroAcceso(Base):
+    """Quién entra y cuándo, y los intentos fallidos. También es la fuente
+    del límite de intentos (`app.auth.comprobar_limite_intentos`): los fallos
+    recientes se cuentan aquí, sin estado en memoria que se pierda al
+    reiniciar la API. `usuario_nombre` es el texto tecleado, exista o no."""
+
+    __tablename__ = "registro_accesos"
+    __table_args__ = (
+        Index("ix_registro_accesos_nombre_momento", "usuario_nombre", "momento"),
+        Index("ix_registro_accesos_ip_momento", "ip", "momento"),
+    )
+
+    id = Column(BigInteger().with_variant(Integer(), "sqlite"), primary_key=True)
+    momento = Column(DateTime(timezone=True), nullable=False)
+    usuario_nombre = Column(String(128), nullable=False)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id", ondelete="SET NULL"), nullable=True)
+    # "entrada" | "fallo" | "bloqueado" | "salida" | "cambio_contrasena"
+    resultado = Column(String(32), nullable=False)
+    ip = Column(String(64), nullable=True)
+    agente = Column(String(255), nullable=True)

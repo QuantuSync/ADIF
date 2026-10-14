@@ -295,5 +295,26 @@ class Settings(BaseSettings):
     # nada.
     ingesta_local_path: Optional[str] = None
 
+    # Acceso con usuario y contraseña (sesión 2026-10-14, `app.auth`). La
+    # sesión caduca tras `sesion_inactividad_minutos` sin actividad del
+    # usuario (el sondeo automático de las pantallas no cuenta, ver
+    # `CABECERA_SONDEO`) y, en todo caso, a las `sesion_duracion_maxima_horas`.
+    sesion_inactividad_minutos: int = 30
+    sesion_duracion_maxima_horas: int = 12
+    sesion_cookie_nombre: str = "adif_sesion"
+    # Verdadero detrás de HTTPS (producción): el navegador solo devuelve la
+    # cookie por una conexión cifrada. Falso en local, que va por http.
+    sesion_cookie_segura: bool = False
+    # Límite de intentos: con este número de fallos en la ventana, el usuario
+    # tecleado (o la dirección de origen) queda bloqueado hasta que la ventana
+    # deja atrás los fallos.
+    acceso_max_fallos_usuario: int = 5
+    acceso_max_fallos_ip: int = 20
+    acceso_ventana_minutos: int = 15
+    contrasena_longitud_minima: int = 12
+    # Documentación interactiva de la API (/docs, /openapi.json). Apagada por
+    # defecto: describe todas las rutas y no hace falta para usar la web.
+    api_documentacion_activa: bool = False
+
 
 settings = Settings()

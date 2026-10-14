@@ -1,5 +1,5 @@
 import "./globals.css";
-import NavLinks from "./nav-links";
+import Marco from "./marco";
 
 export const metadata = {
   title: "ADIF - Catálogo de materiales",
@@ -17,14 +17,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body>
-        <nav className="app-nav">
-          <span className="app-brand">
-            ADIF
-            <small>Catálogo de materiales</small>
-          </span>
-          <NavLinks />
-        </nav>
-        <div className="app-body">{children}</div>
+        <Marco>{children}</Marco>
       </body>
     </html>
   );

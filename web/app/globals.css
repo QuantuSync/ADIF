@@ -1323,3 +1323,187 @@ input:focus-visible {
     grid-template-columns: 1fr;
   }
 }
+
+/* Acceso (sesión 2026-10-14): entrada y cambio de contraseña. Blanco, negro
+   y grises, sin adornos: la pantalla es un formulario y nada más. */
+
+.app-nav {
+  gap: 1.4rem;
+  padding: 0 1.5rem;
+  overflow-x: auto;
+}
+
+/* Con el bloque de usuario, la barra no cabe entera por debajo de este ancho
+   con el subtítulo de la marca: se quita él antes que partir los enlaces. */
+@media (max-width: 1560px) {
+  .app-brand small {
+    display: none;
+  }
+}
+
+.nav-link {
+  white-space: nowrap;
+}
+
+.nav-usuario {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  white-space: nowrap;
+}
+
+.nav-usuario-nombre {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.nav-salir {
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.acceso-fondo {
+  min-height: 100vh;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 14vh 16px 4rem;
+  background: var(--bg-subtle);
+}
+
+.acceso {
+  width: 100%;
+  max-width: 24rem;
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 2.25rem 2rem 2rem;
+}
+
+.acceso--en-pagina {
+  max-width: 28rem;
+  border: none;
+  padding: 0;
+}
+
+.acceso-marca {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 0.95rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--ink);
+  margin: 0 0 2rem;
+}
+
+.acceso-marca span {
+  font-family: var(--font-body);
+  font-weight: 500;
+  font-size: 0.8rem;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-muted);
+  padding-left: 0.6rem;
+  margin-left: 0.4rem;
+  border-left: 1px solid var(--border-strong);
+}
+
+.acceso-titulo {
+  font-family: var(--font-display);
+  font-size: 1.6rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  margin: 0 0 1.5rem;
+}
+
+.acceso-aviso {
+  color: var(--text-muted);
+  font-size: 0.92rem;
+  margin: -0.75rem 0 1.5rem;
+}
+
+.acceso-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+}
+
+.acceso-form .field {
+  gap: 0;
+}
+
+.acceso-form .input:focus {
+  box-shadow: 0 0 0 3px rgba(18, 21, 26, 0.12);
+}
+
+.acceso-ayuda {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-top: 0.35rem;
+}
+
+.acceso-error,
+.acceso-ok {
+  margin: 0;
+  padding: 0.65rem 0.9rem;
+  font-size: 0.88rem;
+  background: var(--gray-50);
+  border-left: 3px solid var(--ink);
+  color: var(--ink);
+}
+
+.acceso-ok {
+  border-left-color: var(--gray-400);
+}
+
+.acceso-boton {
+  justify-content: center;
+  width: 100%;
+  margin-top: 0.4rem;
+  padding: 0.75rem 1rem;
+  font-size: 0.95rem;
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--white);
+}
+
+.acceso-boton:hover:not(:disabled) {
+  background: var(--gray-700);
+  border-color: var(--gray-700);
+}
+
+.acceso-boton:focus-visible {
+  outline-color: var(--ink);
+}
+
+.acceso-nota {
+  margin: 1.5rem 0 0;
+  font-size: 0.8rem;
+  color: var(--text-faint);
+}
+
+@media (max-width: 980px) {
+  .app-nav {
+    overflow-x: auto;
+    gap: 1.5rem;
+    padding: 0 16px;
+  }
+  .app-body {
+    padding: 1.5rem 16px 4rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .acceso-fondo {
+    padding-top: 8vh;
+    background: var(--white);
+  }
+  .acceso {
+    border: none;
+    padding: 0;
+  }
+}

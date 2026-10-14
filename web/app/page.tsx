@@ -1,3 +1,4 @@
+import { cookies } from "next/headers";
 import ExpedientesPanel, { Expediente } from "./ExpedientesPanel";
 
 export default async function Home() {
@@ -25,7 +26,12 @@ export default async function Home() {
   let expedientes: Expediente[] = [];
   let expedientesConfirmado = false;
   try {
-    const res = await fetch(`${apiUrlServidor}/expedientes`, { cache: "no-store" });
+    // Sesión 2026-10-14: este fetch sale del servidor de Next, no del
+    // navegador, así que la cookie de sesión hay que pasarla a mano.
+    const res = await fetch(`${apiUrlServidor}/expedientes`, {
+      cache: "no-store",
+      headers: { cookie: cookies().toString() },
+    });
     if (!res.ok) throw new Error(`la API respondió ${res.status}`);
     expedientes = await res.json();
     expedientesConfirmado = true;
