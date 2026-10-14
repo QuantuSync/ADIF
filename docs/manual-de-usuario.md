@@ -8,13 +8,15 @@ puntos en los títulos y sin guiones largos. -->
 
 Catálogo de materiales de ADIF
 
-Para las personas de ADIF que consultan el catálogo y exportan el Excel
+Para el personal de ADIF que consulta el catálogo y exporta el Excel
+
+Elaborado por INECO para ADIF
 
 Octubre de 2026
 
 ## 1. Qué es la plataforma
 
-La plataforma es una página web que reúne en **un solo catálogo** los materiales que ADIF ha licitado: qué se ha comprado o se va a comprar, en qué expediente y en qué lote, en qué cantidad y a qué precio.
+La plataforma es una página web que reúne en **un solo catálogo** los materiales que ADIF ha licitado, con lo que se ha comprado o se va a comprar, en qué expediente y en qué lote, en qué cantidad y a qué precio.
 
 Cada fila del catálogo es **un artículo de un lote de un expediente**. Si el mismo material se ha comprado en tres expedientes, aparece tres veces, cada una con su precio. Así se puede ver cómo ha cambiado el precio de un material con el tiempo.
 
@@ -38,7 +40,7 @@ Todo lo que se ve sale de dos sitios.
 
 Algunos documentos están escaneados, es decir, son una imagen sin texto. Esos los lee un servicio de reconocimiento de imagen, y las líneas que salen de ellos llevan un aviso para comprobarlas contra el documento.
 
-Una regla importante: **la plataforma nunca se inventa un dato.** Si un documento no publica la cantidad, la matrícula o el precio, la celda se queda vacía y se explica por qué. Cada cifra se puede seguir hasta el documento, la página y el fragmento de texto de los que se leyó.
+Hay una regla importante, y es que **la plataforma nunca se inventa un dato.** Si un documento no publica la cantidad, la matrícula o el precio, la celda se queda vacía y se explica por qué. Cada cifra se puede seguir hasta el documento, la página y el fragmento de texto de los que se leyó.
 
 Los datos se ponen al día solos una vez por semana (capítulo 13).
 
@@ -80,7 +82,7 @@ Si olvida su contraseña, la plataforma no tiene un botón para recuperarla. Avi
 - La sesión se cierra sola tras **30 minutos sin actividad**.
 - En todo caso, se cierra a las **12 horas** de haber entrado, aunque la esté usando.
 
-Cuando se cierra, la plataforma le devuelve a la pantalla de entrada. No se pierde nada: vuelva a entrar y siga. Para salir antes, pulse **Salir**, arriba a la derecha. Si usa un ordenador compartido, salga siempre al terminar.
+Cuando se cierra, la plataforma le devuelve a la pantalla de entrada. No se pierde nada, basta con volver a entrar y seguir. Para salir antes, pulse **Salir**, arriba a la derecha. Si usa un ordenador compartido, salga siempre al terminar.
 
 ### Si se equivoca varias veces
 
@@ -227,7 +229,7 @@ Que un lote no cuadre **no siempre es un error**. El caso más frecuente es que 
 
 **Candidatos de matrícula** propone matrículas para materiales que el documento publica sin ella, a partir del maestro de materiales de ADIF.
 
-Puede entrar en las dos para consultar. Pero **lo que se guarda en ellas cambia el catálogo para todos**: una corrección, una confirmación o un descarte se ven al momento en la web y en el siguiente Excel. Si no forma parte de su trabajo, no cambie nada ahí. Si ve un dato que cree que está mal, avise a la persona de contacto con el expediente, el lote y el código de precio o la matrícula.
+Puede entrar en las dos para consultar. Pero **lo que se guarda en ellas cambia el catálogo para todos**, porque cualquier corrección, confirmación o descarte se ve al momento en la web y en el siguiente Excel. Si no forma parte de su trabajo, no cambie nada ahí. Si ve un dato que cree que está mal, avise a la persona de contacto con el expediente, el lote y el código de precio o la matrícula.
 
 ## 10. Exportar el Excel
 
@@ -272,14 +274,14 @@ Tiene 18 columnas, siempre en este orden. Las once primeras son el formato origi
 |---|---|---|
 | **1. Código interno** | El número interno con el que ADIF agrupa el expediente en su listado de códigos de proyecto. Es el número por el que se busca en almacenes. Se repite entre expedientes de la misma familia, así que no identifica un expediente por sí solo | Cuando el expediente no está en el listado de códigos de ADIF, o el listado no le da número, o solo aparece otro expediente de su familia |
 | **2. Código de expediente** | El número del expediente, en el formato de ADIF (6.24/28510.0088) | Nunca |
-| **3. Código matriz** | El acuerdo marco del que cuelga este pedido | Lo normal: la mayoría de los expedientes no cuelgan de ninguno |
+| **3. Código matriz** | El acuerdo marco del que cuelga este pedido | Es lo normal, porque la mayoría de los expedientes no cuelgan de ninguno |
 | **4. Título expediente** | El objeto del contrato, tal como lo publica el anuncio | Si no se encuentra en los documentos |
 | **5. Matrícula del material** | El código de 9 cifras con el que ADIF identifica el artículo (8 en pliegos antiguos) | Cuando el cuadro de precios no publica matrículas, que pasa en muchos pliegos, o cuando es una partida alzada |
 | **6. Descripción del material** | La descripción del artículo, copiada tal cual del documento | Nunca |
 | **7. Código del material** | La familia de la pieza (AGUJA, BRIDA, TRAVIESA, CABLE...). Sirve para agrupar el mismo tipo de material entre expedientes | Cuando la descripción no encaja en ninguna familia conocida, como marcas o servicios |
 | **8. Cantidad** | Las unidades que el cuadro de precios prevé comprar | Cuando el documento no la publica, es una partida alzada, o da una cantidad distinta para cada lote |
 | **9. Precio unitario** | El precio de licitación del artículo, es decir, el precio máximo publicado, antes de la rebaja | Cuando el documento no lo publica o da un precio distinto para cada lote |
-| **10. Lote** | El lote al que pertenece el artículo | En la hoja Materiales nunca: las líneas sin lote no salen en ella (capítulo 12) |
+| **10. Lote** | El lote al que pertenece el artículo | Nunca en la hoja Materiales, porque las líneas sin lote no salen en ella (capítulo 12) |
 | **11. Precio adjudicado** | Lo que se paga de verdad por unidad. Es el precio unitario con la baja del lote aplicada. Se calcula, no se lee de ningún documento | Mientras falte la baja del lote o el precio unitario, o en contratos cuyo precio se revisa en cada pedido |
 | **12. Baja del lote** | El porcentaje de rebaja que ofreció el adjudicatario de ese lote, tal como lo dice la adjudicación o el contrato. Una baja de 0 % puede ser real | Mientras no se haya publicado la adjudicación, o si el contrato no tiene una baja única |
 | **13. Unidad de medida** | En qué se mide la cantidad y el precio (ud, m, kg, t, h...). Si el documento no la trae, se toma del maestro de materiales de ADIF, y la fila lo dice en la columna 17 | Cuando el documento no la publica y tampoco está en el maestro, o es una partida alzada |
@@ -314,7 +316,7 @@ Una fila por cada expediente del departamento publicado en la Plataforma de Cont
 |---|---|
 | **Código de expediente** y **Título** | El expediente |
 | **Órgano de contratación** | Quién licita, según el anuncio |
-| **Estado que consta publicado en la Plataforma** | Hasta dónde llega lo publicado: anuncio previo, en plazo, pendiente de adjudicación, adjudicada, resuelta o anulada. La Plataforma no publica lo que pasa después |
+| **Estado que consta publicado en la Plataforma** | Hasta dónde llega lo publicado, que puede ser anuncio previo, en plazo, pendiente de adjudicación, adjudicada, resuelta o anulada. La Plataforma no publica lo que pasa después |
 | **Estado según ADIF** | Lo que dice el listado de SAP que envía ADIF (en ejecución, recepcionado, cerrado...). Se mantiene separado del anterior para saber siempre de dónde sale cada uno |
 | **Documentos descargados** | Cuántos documentos se han bajado de su ficha |
 | **Documentos leídos con reconocimiento óptico** | Cuántos de ellos eran escaneados y se leyeron como imagen |
@@ -355,21 +357,24 @@ Una fila por lote. Compara la suma de cantidad por precio de sus líneas en Mate
 | **Resultado** | Si cuadra o por qué no (ver abajo) |
 | **Explicación** | En una frase, qué pasa con ese lote |
 
-| Resultado | Qué quiere decir |
+Cuando el lote cuadra, el resultado es **Cuadra al céntimo**, si la suma es exactamente el presupuesto, o **Cuadra con diferencia menor del 0,01 %**, si es casi exacta.
+
+Cuando no cuadra, el resultado empieza por **No cuadra** y sigue con la causa. Las más frecuentes son estas.
+
+| Causa que acompaña a No cuadra | Qué quiere decir |
 |---|---|
-| **Cuadra al céntimo** | La suma es exactamente el presupuesto |
-| **Cuadra con diferencia menor del 0,01 %** | Casi exacto |
-| **No cuadra: cantidades estimadas, el presupuesto es un máximo** | El documento da cantidades de referencia y el presupuesto es un máximo de gasto. Es lo más habitual y no es un error |
-| **No cuadra: faltan líneas del lote en el catálogo** | Hay líneas del lote que no están en Materiales. La explicación dice cuáles |
-| **No cuadra: el presupuesto incluye partidas que el cuadro no trae** | El presupuesto incluye obra, servicios u otros conceptos que no están en el cuadro de precios |
-| **No cuadra: discrepancia del propio documento** | Las líneas están bien leídas y es el propio documento el que no suma su presupuesto |
-| **No se puede cerrar: faltan cantidades** | Alguna línea no trae cantidad, así que la suma está incompleta |
+| **cantidades estimadas, el presupuesto es un máximo** | El documento da cantidades de referencia y el presupuesto es un máximo de gasto. Es lo más habitual y no es un error |
+| **faltan líneas del lote en el catálogo** | Hay líneas del lote que no están en Materiales. La explicación dice cuáles |
+| **el presupuesto incluye partidas que el cuadro no trae** | El presupuesto incluye obra, servicios u otros conceptos que no están en el cuadro de precios |
+| **discrepancia del propio documento** | Las líneas están bien leídas y es el propio documento el que no suma su presupuesto |
+
+Si alguna línea del lote no trae cantidad, la suma está incompleta y el resultado es **No se puede cerrar**, seguido de **faltan cantidades**.
 
 Debajo de la tabla, la hoja cuenta los lotes que no entran en el contraste y por qué, por ejemplo porque no se publica un presupuesto para ese lote.
 
 ### Hoja Resumen
 
-Recoge las cifras del Excel (cuántas líneas hay en Materiales, cuántas están en revisión y no salen, cuántas tienen avisos) y, sobre todo, una tabla con **por qué hay líneas que no están en Materiales**, con tres columnas: qué ha pasado, cuántas líneas son y qué haría falta para resolverlo.
+Recoge las cifras del Excel (cuántas líneas hay en Materiales, cuántas están en revisión y no salen, cuántas tienen avisos) y, sobre todo, una tabla con **por qué hay líneas que no están en Materiales**, que para cada causa dice qué ha pasado, cuántas líneas son y qué haría falta para resolverlo.
 
 ## 12. Líneas en revisión, y por qué no salen en Materiales
 
@@ -382,7 +387,7 @@ Una línea queda en revisión, y fuera de la hoja Materiales, cuando la platafor
 - **Alguien la ha descartado** después de comprobarla contra el documento.
 - **Es un material ya incluido**, repetido en otro documento del mismo expediente.
 
-Estas líneas **no se pierden**: siguen guardadas, se ven en el catálogo de la web y están contadas, por causa, en la hoja Resumen. Cuando alguien las resuelve, pasan a la hoja Materiales en el siguiente Excel.
+Estas líneas **no se pierden**, porque siguen guardadas, se ven en el catálogo de la web y están contadas, por causa, en la hoja Resumen. Cuando alguien las resuelve, pasan a la hoja Materiales en el siguiente Excel.
 
 No hay que confundirlas con las líneas que llevan la marca **Revisar** en la web. Esas tienen un aviso, por ejemplo que se leyeron de un documento escaneado, pero **sí salen** en Materiales. El aviso es para que las compruebe contra el documento antes de dar la cifra por buena.
 
@@ -394,7 +399,7 @@ La plataforma se pone al día sola **una vez por semana**, sin que nadie tenga q
 
 - Busca en la Plataforma de Contratación expedientes nuevos del departamento.
 - Descarga los documentos nuevos que se hayan publicado, por ejemplo una adjudicación que antes no estaba.
-- Lee lo que es nuevo o ha cambiado y pone al día el catálogo: materiales nuevos, bajas y precios adjudicados que llegan con la adjudicación, estados.
+- Lee lo que es nuevo o ha cambiado y pone al día el catálogo con los materiales nuevos, las bajas y los precios adjudicados que llegan con la adjudicación, y los cambios de estado.
 - Vuelve a buscar los expedientes que la otra vez no estaban publicados.
 - Pasa una auditoría automática del catálogo, que solo avisa de cosas raras y nunca corrige nada por su cuenta.
 
@@ -405,7 +410,7 @@ Después de cada ciclo, un Excel nuevo puede traer más filas o filas con datos 
 En **Mantenimiento**, recuadro **Ejecución programada**.
 
 - **Última ejecución** y **Próxima ejecución** dicen cuándo fue la última vez y cuándo será la siguiente.
-- **Qué encontró la última ejecución** resume lo que hizo: expedientes nuevos, descargas y extracciones.
+- **Qué encontró la última ejecución** resume lo que hizo, es decir, cuántos expedientes nuevos encontró y cuántas descargas y extracciones hizo.
 
 ![Pantalla de mantenimiento, con la ejecución programada](../privado/manual/capturas/14-mantenimiento.png)
 
@@ -435,13 +440,13 @@ Para que nadie espere algo que no es.
 |---|---|
 | La plataforma me devuelve a la pantalla de entrada | La sesión ha caducado (30 minutos sin actividad o 12 horas). Vuelva a entrar |
 | No puedo entrar con mi contraseña | Compruebe las mayúsculas. Tras 5 intentos fallidos, espere 15 minutos. Si la ha olvidado, avise a la persona de contacto |
-| El Excel no termina de descargarse | Use Chrome o Edge, no Firefox. Pulse el botón una sola vez y espere hasta 6 minutos. Si falla con Chrome o Edge, vuelva a intentarlo pasados unos minutos |
+| El Excel no termina de descargarse | Use Chrome o Edge, no Firefox. Pulse el botón una sola vez y espere unos 4 minutos, o unos 5 minutos y medio si otra persona exporta a la vez. Si falla con Chrome o Edge, vuelva a intentarlo pasados unos minutos |
 | Una pantalla se queda en Cargando o da un error de conexión | Recargue la página. Si sigue, compruebe su conexión a internet y vuelva a intentarlo en unos minutos |
 | Un dato del catálogo me parece incorrecto | Abra el documento original desde la trazabilidad y compruébelo. Si el documento dice otra cosa, avise con el expediente, el lote y el código de precio o la matrícula |
 | Falta un expediente que debería estar | Búsquelo en Conciliación y en Expedientes. Si no está, avise con su código |
 | El último ciclo semanal falló o lleva más de una semana sin ejecutarse | Avise a la persona de contacto |
 
-Al avisar, diga siempre qué estaba haciendo, en qué pantalla, a qué hora y, si puede, adjunte una captura de pantalla. **Nunca envíe su contraseña**, ni a la persona de contacto: nadie se la va a pedir.
+Al avisar, diga siempre qué estaba haciendo, en qué pantalla, a qué hora y, si puede, adjunte una captura de pantalla. **Nunca envíe su contraseña**, ni siquiera a la persona de contacto, porque nadie se la va a pedir.
 
 ### Persona de contacto
 
