@@ -56,3 +56,85 @@ grep -F "AAAAC3NzaC1lZDI1NTE5AAAAIP+2E4/m6sGEZOhotvgve6t4/fT8sOUvmrCdYjkTTGZh ad
 
 Después se volvió a entrar con la clave nueva (bien) y se probó la del otro
 proyecto (`Permission denied (publickey)`).
+
+## Bloque 2. Instalación
+
+Estado de partida: Ubuntu 24.04.4, kernel 6.17 de Azure, sin Docker, `/opt` y
+`/srv` vacíos, 246 GB libres, salida a GitHub correcta.
+
+El repositorio es público, así que se clonó directamente de GitHub (así
+`git pull` sirve para actualizar):
+
+```bash
+ssh adif-catalogo-ineco.spaincentral.cloudapp.azure.com
+sudo git clone -q https://github.com/QuantuSync/ADIF.git /opt/adif
+sudo git -C /opt/adif check-ignore -v deploy/.env     # .gitignore:17:.env
+```
+
+`instalar.sh` se lanzó desacoplado de la sesión SSH, con registro, para que un
+corte no lo matara a medias:
+
+```bash
+sudo nohup /opt/adif/deploy/instalar.sh > ~/instalar-1.log 2>&1 < /dev/null &
+grep -n "^== \|^   " ~/instalar-1.log     # para seguirlo
+```
+
+Tardó unos 6 minutos (casi todo, construir las dos imágenes). Los seis pasos
+salieron como estaba previsto, sin tocar nada: Docker 29.9.0, `deploy/.env`
+creado con contraseña de base al azar y permisos 600, `/srv/adif/{documentos,
+copias,entrada,traspaso}`, imágenes construidas, y como la base estaba vacía
+levantó todo **salvo el worker**. `adif.service` quedó habilitado (no
+arrancado: arrancarlo con la base vacía levantaría el worker).
+
+Comprobaciones:
+
+```bash
+cd /opt/adif/deploy
+sudo docker compose -f docker-compose.prod.yml ps -a --format "table {{.Service}}\t{{.State}}\t{{.Status}}\t{{.Ports}}"
+sudo ss -tulnp | grep -v 127.0.0
+sudo docker compose -f docker-compose.prod.yml logs entrada | grep tls.obtain
+```
+
+- `api` (8000/tcp), `web` (3000/tcp) y `postgres` (5432/tcp) solo con el
+  puerto interno, sin publicar; el worker igual cuando arranca. En la máquina
+  escuchan solo `sshd` en el 22 y `docker-proxy` (Caddy) en el 80 y el 443.
+- Caddy obtuvo el certificado de Let's Encrypt en 6 segundos (emisor `YE1`,
+  válido del 14/10/2026 al 12/01/2027). El aviso `no OCSP stapling` es normal:
+  los certificados de Let's Encrypt ya no traen OCSP.
+- Desde fuera:
+
+  ```bash
+  curl -sI http://adif-catalogo-ineco.spaincentral.cloudapp.azure.com/catalogo   # 308 -> https://...
+  curl -s -o /dev/null -w "%{http_code} %{redirect_url}\n" https://adif-catalogo-ineco.spaincentral.cloudapp.azure.com/   # 307 -> /entrar
+  ```
+
+### Servicio de IA
+
+En `deploy/.env` (ignorado por git; se comprobó antes con `git check-ignore`):
+
+```
+MODEL_PROVEEDOR=openai
+MODEL_ENDPOINT=https://ai-adif-ineco.openai.azure.com/openai/v1
+MODEL_ID=vision
+MODEL_API_VERSION=
+MODEL_API_KEY=<clave del recurso>
+```
+
+La clave se escribió pasándola por la entrada estándar del `ssh` y de `sed`,
+para que no quedara en ninguna línea de comandos. Prueba mínima desde la
+máquina, leyendo la clave del propio `.env`:
+
+```bash
+sudo sed -n "s/^MODEL_API_KEY=/api-key: /p" .env | curl -sS -H @- -H "Content-Type: application/json" \
+  https://ai-adif-ineco.openai.azure.com/openai/v1/chat/completions \
+  -d '{"model":"vision","max_tokens":5,"messages":[{"role":"user","content":"Responde solo: OK"}]}'
+```
+
+Respondió 200 con `gpt-4.1-mini-2025-04-14`. Se aplicó con
+`sudo docker compose -f docker-compose.prod.yml up -d api`, y la API lo ve:
+
+```bash
+sudo docker compose -f docker-compose.prod.yml exec -T api python -c \
+  "from app.config import settings; from app.interfaces.model_provider import describir_proveedor_modelo as d; print(d(settings))"
+# {'configurado': True, 'proveedor': 'openai', 'modelo': 'vision', 'lee_escaneados_nuevos': True, 'aviso': None}
+```
