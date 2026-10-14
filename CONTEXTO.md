@@ -939,12 +939,25 @@ Estas reglas no se rompen ni siquiera "solo para la demo".
 5. **Nada específico de un proveedor cloud.** Ni servicios gestionados propietarios,
    ni SDK de un fabricante concreto, ni colas de proveedor. PostgreSQL estándar y
    contenedores. El destino final es OVHcloud; puede haber un tránsito por Azure;
-   **ninguno de los dos debe aparecer en el código.**
+   **ninguno de los dos debe aparecer en el código.** (Sesión 2026-10-14: el
+   servicio de IA del cliente en Azure se usa con `MODEL_PROVEEDOR=openai`, una
+   implementación del protocolo de chat de OpenAI por HTTP directo, sin SDK, que
+   vale igual para un modelo autoalojado. Azure solo aparece en la
+   configuración de ejemplo y en la guía, nunca en el código.)
 6. **La cola de trabajos va en PostgreSQL**, con bloqueo por fila. Sin Redis, sin
    Celery, sin broker. Menos servicios, menos modos de fallo, y la cola queda
    consultable con SQL para la pantalla de seguimiento.
-7. **Autenticación: ninguna, pero con costura.** Todas las rutas pasan por una función
-   que hoy devuelve un usuario ficticio. Añadirla luego se toca en un sitio.
+7. **Autenticación por la costura.** Todas las rutas pasan por
+   `app.auth.get_current_user`, que desde la sesión 2026-10-14 exige una sesión
+   válida (usuario y contraseña, argon2id, cookie `HttpOnly`, caducidad por
+   inactividad). Se aplica en `app.main` a cada router, no ruta a ruta, y
+   `tests/test_acceso.py` recorre todas las rutas exigiendo 401 sin sesión: una
+   ruta nueva no puede quedar abierta por olvido. Solo `/health` y `/auth/entrar`
+   y `/auth/salir` van sin sesión. Usuarios por consola (`python -m
+   app.usuarios`), nunca desde la web. La web lleva un `middleware.ts` que manda
+   a `/entrar` sin sesión, y `app/sesion-cliente.ts` añade la cookie a cada
+   llamada y marca el sondeo automático (`X-Sondeo`) para que no cuente como
+   actividad.
 8. **El Excel es una vista generada, no la fuente.** Los datos viven en la base de
    datos con su traza. El Excel se regenera a demanda.
 9. **Idempotencia.** Reprocesar un expediente actualiza sus filas, nunca las duplica.
@@ -994,6 +1007,11 @@ Cuatro, ni uno más:
   desde su propio bucle — no hay un quinto proceso "scheduler".
 - **PostgreSQL** — estado, catálogo, trazas, cola.
 - **Web** — Next.js. Cliente ligero.
+
+En producción (sesión 2026-10-14, `deploy/`) hay un quinto contenedor que no
+es un proceso del sistema sino la puerta: **`entrada`** (Caddy), el único con
+puertos abiertos, HTTPS con certificado automático, web en `/` y API en
+`/api`. Los cuatro de arriba no publican ningún puerto.
 
 El scraping **es un tipo de trabajo de la cola**, con su estado, reintentos y
 registro. No un script suelto. Corre en contenedor Linux con **Chromium headless**,
@@ -1071,6 +1089,8 @@ volcados distintos, juntarlos dejaría cada valor sin procedencia).
 /web        Next.js. Cliente ligero. Desplegable por separado.
 /engine     API, worker, extracción, scraping. Con su Dockerfile.
 /docs       Este fichero, y el registro histórico de hallazgos y decisiones.
+/deploy     Producción: compose, Caddy, instalar.sh, restaurar-datos.sh,
+            configuración de ejemplo. Guía en docs/guia-de-operacion.md.
 docker-compose.yml
 ```
 
@@ -1211,10 +1231,10 @@ Cierra cada sesión con algo que funcione y comprobado sobre un documento real.
 
 ## 15. Fuera de alcance
 
-Autenticación real, gestión de usuarios, SharePoint, despliegue en producción,
-ejecución programada manual fuera del ciclo de mantenimiento automático,
+SharePoint, ejecución programada manual fuera del ciclo de mantenimiento automático,
 paralelismo masivo, y todo lo estético que no sea legible en
-una pantalla compartida.
+una pantalla compartida. (Autenticación, gestión de usuarios por consola y
+despliegue en producción entraron en alcance en la sesión 2026-10-14.)
 
 **OCR o modelo multimodal para documentos escaneados.** Con el corpus real
 actual, 186 de 187 documentos tienen capa de texto (sección 3);
@@ -1263,6 +1283,13 @@ materiales**: es el mejor argumento para tenerlo cargado.
 ---
 
 ## 16. Pendiente de resolver
+
+- **Despliegue en Azure preparado, no hecho (sesión 2026-10-14).** La máquina
+  existe (`adif-catalogo-ineco.spaincentral.cloudapp.azure.com`). Falta abrir el
+  80 en Azure, subir los datos y ejecutar `deploy/instalar.sh`, y decidir la
+  clave del modelo de IA del cliente. Pasos exactos en `docs/guia-de-operacion.md`;
+  detalle y lo que quedó sin probar en
+  `docs/sesion-2026-10-14-acceso-modelo-configurable-y-despliegue.md`.
 
 - **Para la próxima sesión (anotado el 2026-09-22):** la reconstrucción
   desde cero es condición de cierre de cualquier cambio de la extracción
@@ -3514,4 +3541,6 @@ El registro histórico de hallazgos y decisiones de cada sesión vive en
 `sesion-2026-09-21-valores-viejos-lecturas-malas-y-lineas-que-faltan.md`,
 `sesion-2026-09-21-unidad-del-maestro-nota-de-0177-y-lotes-sin-expediente.md`,
 `preguntas-cliente-lotes-sin-expediente.md`,
+`sesion-2026-10-14-acceso-modelo-configurable-y-despliegue.md`,
+`guia-de-operacion.md`,
 además de `analisis-corpus.md` y `auditoria-previa.md` ya existentes.
