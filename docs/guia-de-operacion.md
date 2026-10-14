@@ -124,6 +124,22 @@ vuelve a leer nada de lo ya leído. La pantalla de Mantenimiento enseña el
 proveedor y el modelo en uso; el registro del worker
 (`adif logs worker | grep "modelo de IA"`) también.
 
+**Lo que hay puesto** (desde el 14/10/2026): recurso
+`https://ai-adif-ineco.openai.azure.com/`, despliegue `vision`, que corre
+**`gpt-4.1` (versión 2025-04-14)**. Empezó con `gpt-4.1-mini`; el cambio se
+hizo en Azure, dentro del mismo despliegue, sin tocar `deploy/.env`. La web
+y el registro enseñan el nombre del despliegue (`vision`), no el modelo de
+detrás. Para saber cuál es, desde `deploy/`:
+
+```bash
+sudo sed -n "s/^MODEL_API_KEY=/api-key: /p" .env | curl -sS -H @- -H "Content-Type: application/json"   https://ai-adif-ineco.openai.azure.com/openai/v1/chat/completions   -d '{"model":"vision","max_tokens":5,"messages":[{"role":"user","content":"Responde solo: OK"}]}'   | python3 -c "import sys,json; print(json.load(sys.stdin).get('model'))"
+# gpt-4.1-2025-04-14
+```
+
+Justo después de cambiar el modelo en Azure, la primera llamada con imagen
+dio `400 Bad Request`; unos minutos después las mismas llamadas iban bien.
+Si se cambia otra vez, esperar un poco antes de lanzar extracciones.
+
 ## Día a día
 
 ```bash

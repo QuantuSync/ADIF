@@ -1287,8 +1287,8 @@ materiales**: es el mejor argumento para tenerlo cargado.
 - **Desplegado en Azure (sesión 2026-10-14).**
   `https://adif-catalogo-ineco.spaincentral.cloudapp.azure.com`, con los datos
   del portátil, certificado real, servicio de IA del cliente (`openai`,
-  despliegue `vision`) y seis usuarios (`NOMBRE1`-`NOMBRE6`, contraseñas
-  temporales en `privado/`, fuera de git). Desde entonces **la base de referencia
+  despliegue `vision`, que corre `gpt-4.1` 2025-04-14) y seis usuarios
+  (`NOMBRE1`-`NOMBRE6`, contraseñas temporales en `privado/`, fuera de git). Desde entonces **la base de referencia
   es la de la máquina**, no la del portátil: tiene además las 22 líneas de
   `6.26/28510.0066`, reextraído allí. Procedimiento real y comprobaciones en
   `docs/despliegue-azure-2026-10-14.md`; operación en

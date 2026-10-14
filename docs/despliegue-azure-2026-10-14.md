@@ -466,3 +466,45 @@ contra el dominio: `usuario1` ya no entra (401) y `NOMBRE1` entra y la web lo
 lleva a «Cambiar contraseña». Desde ahí no deja ir al catálogo y la API
 responde 403 `cambio_contrasena_obligatorio`. No se le cambió la contraseña
 (sigue sin estrenar) y se cerró la sesión. La lista provisional se borró.
+
+## Cambio de modelo: gpt-4.1
+
+El cliente cambió en Azure el modelo del despliegue `vision`, de
+`gpt-4.1-mini` a `gpt-4.1`. El nombre del despliegue y la dirección son los
+mismos, así que `deploy/.env` no cambió (`MODEL_ID=vision`, `MODEL_ENDPOINT`
+igual) y no hubo que reiniciar nada. La llamada mínima del bloque 2 responde
+200 con `"model": "gpt-4.1-2025-04-14"`. El worker sigue viendo
+`configurado: True, proveedor openai, modelo vision, lee_escaneados_nuevos:
+True`.
+
+La prueba de lectura de escaneado se repitió con el mismo script de solo
+lectura y la misma página (página 1, sin capa de texto, de
+`6.18_28510.0071/ADJUDICACION_f35b04b217a64bad.pdf`). La base, igual antes que
+después: 140 lecturas en caché (la última del 19/09), 40.186 líneas y 34.563
+trabajos.
+
+| Modelo | Tiempo | Tokens (entrada / salida) | Caracteres | Coincidencia con la lectura guardada (`claude-haiku-4-5`) |
+|---|---:|---:|---:|---:|
+| `gpt-4.1-mini` (antes) | 11 s | 1.681 / 785 | 1.922 | 0,896 |
+| `gpt-4.1`, intento 1 | 12,5 s | 1.425 / 776 | 1.915 | 0,880 |
+| `gpt-4.1`, intento 2 | 15,0 s | 1.425 / 855 | 1.943 | 0,889 |
+
+La coincidencia es `difflib.SequenceMatcher` sobre el texto entero, así que
+mide sobre todo el orden y la maquetación de los bloques, no aciertos de
+lectura: los tres están en el mismo orden de magnitud. **Primer intento
+fallido:** justo después del cambio, la primera llamada con imagen dio
+`400 Bad Request` (las de solo texto ya iban). Repetida la misma llamada del
+motor minutos después para ver el cuerpo del error, ya no dio error, y las
+dos pruebas siguientes fueron bien. No se tocó código.
+
+Pantalla de Mantenimiento, con un usuario temporal (`verificacion-temporal`,
+creado para esto y borrado después con SQL, en una transacción que exigía
+borrar exactamente uno): «Modelo de IA para escaneados y cabeceras nuevas:
+openai · vision», sin aviso del modelo. Los «7 aviso(s)» de la pantalla son
+los de la auditoría automática del catálogo, los mismos de antes.
+
+En el registro de accesos consta que `NOMBRE1` entró a las 17:38:37 UTC y
+cambió su contraseña a las 17:40:03, desde 91.116.111.191. No fue durante
+estas pruebas (la mía con `NOMBRE1` fue a las 17:28:15, entrada y salida sin
+cambio). Su contraseña temporal de `privado/` está marcada como que ya no
+vale.
