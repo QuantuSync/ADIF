@@ -438,3 +438,31 @@ adjudicación no lo menciona.
 
 Con la reextracción de `0066`, la base de la máquina tiene 22 líneas más que
 la del portátil: 40.186.
+
+## Usuarios definitivos
+
+Por indicación del cliente se llaman `NOMBRE1` a `NOMBRE6`. Se crearon antes
+de borrar los provisionales, para que la plataforma no se quedara sin
+usuarios en ningún momento. Las contraseñas temporales van directamente a
+`privado/usuarios-2026-10-14.txt` (se comprobó antes con `git check-ignore`
+que la carpeta está ignorada); son seis distintas y todas con cambio
+obligatorio. `app.usuarios` no tiene orden para borrar, así que `usuario1` a
+`usuario6` se borraron con SQL, en una transacción que se deshacía si no eran
+exactamente seis. Sus sesiones se borran en cascada y el registro de accesos
+se conserva con `usuario_id` a nulo:
+
+```sql
+BEGIN;
+DO $$ DECLARE n int; BEGIN
+  DELETE FROM usuarios WHERE nombre IN ('usuario1','usuario2','usuario3','usuario4','usuario5','usuario6');
+  GET DIAGNOSTICS n = ROW_COUNT;
+  IF n <> 6 THEN RAISE EXCEPTION 'se iban a borrar % usuarios, no 6', n; END IF;
+END $$;
+COMMIT;
+```
+
+Quedan seis usuarios, los seis `NOMBRE`, y ninguna sesión. Con el navegador,
+contra el dominio: `usuario1` ya no entra (401) y `NOMBRE1` entra y la web lo
+lleva a «Cambiar contraseña». Desde ahí no deja ir al catálogo y la API
+responde 403 `cambio_contrasena_obligatorio`. No se le cambió la contraseña
+(sigue sin estrenar) y se cerró la sesión. La lista provisional se borró.
