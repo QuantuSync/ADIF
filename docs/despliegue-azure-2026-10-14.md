@@ -138,3 +138,85 @@ sudo docker compose -f docker-compose.prod.yml exec -T api python -c \
   "from app.config import settings; from app.interfaces.model_provider import describir_proveedor_modelo as d; print(d(settings))"
 # {'configurado': True, 'proveedor': 'openai', 'modelo': 'vision', 'lee_escaneados_nuevos': True, 'aviso': None}
 ```
+
+## Bloque 3. Datos
+
+### Copia de la base y de los documentos (en el portátil)
+
+En una carpeta fuera del repositorio, `C:\dev\adif-traspaso`. La base, con el
+`pg_dump` **16** del propio contenedor de PostgreSQL y no con el 17 del motor:
+el `pg_restore` 16 que usa `restaurar-datos.sh` no sabe leer un volcado de
+`pg_dump` 17 (es el desajuste ya visto con las copias automáticas).
+
+```bash
+export MSYS_NO_PATHCONV=1        # Git Bash: que no reescriba las rutas del contenedor
+mkdir -p /c/dev/adif-traspaso
+wsl -e docker exec adif-postgres-1 pg_dump -U adif -d adif -Fc -f /tmp/adif.dump
+wsl -e docker cp adif-postgres-1:/tmp/adif.dump /mnt/c/dev/adif-traspaso/adif.dump
+wsl -e docker exec adif-postgres-1 sh -c 'pg_restore -l /tmp/adif.dump | head; rm /tmp/adif.dump'
+#   Dumped from database version: 16.15 / Dumped by pg_dump version: 16.15
+wsl -e sh -c 'docker exec adif-api-1 tar -cf - -C /data/documentos . > /mnt/c/dev/adif-traspaso/documentos.tar
+  cd /mnt/c/dev/adif-traspaso && tar -tf documentos.tar | grep -vc "/$" && sha256sum adif.dump documentos.tar > SHA256SUMS'
+```
+
+`adif.dump` 45,5 MB, `documentos.tar` 1,99 GB con 1.651 ficheros. Antes se
+comprobó que la cola local no tenía trabajos pendientes ni en curso.
+
+### Subida reanudable
+
+Con `rsync` desde WSL (Git Bash no lo trae). WSL no puede usar la clave desde
+`/mnt/c` (permisos), así que se copió a su `~/.ssh` con permisos 600 y el
+mismo bloque `Host` que en Windows. El script `subir.sh` (en
+`C:\dev\adif-traspaso`) repite hasta 50 veces y al final comprueba las sumas
+en la máquina:
+
+```sh
+cd /mnt/c/dev/adif-traspaso
+DEST=adif-catalogo-ineco.spaincentral.cloudapp.azure.com:/srv/adif/traspaso/
+i=0
+while [ $i -lt 50 ]; do
+  i=$((i+1))
+  if rsync -t --partial --append-verify --timeout=120 --info=progress2,stats1 adif.dump SHA256SUMS documentos.tar "$DEST"; then
+    ssh adif-catalogo-ineco.spaincentral.cloudapp.azure.com 'cd /srv/adif/traspaso && sha256sum -c SHA256SUMS'
+    exit $?
+  fi
+  sleep 15
+done
+```
+
+```bash
+wsl -e sh /mnt/c/dev/adif-traspaso/subir.sh
+```
+
+Subió los 2 GB en unos 40 segundos (≈ 55 MB/s), sin cortes; sumas `OK`. Para
+comprobar que reanuda de verdad se recortó la copia remota a 900 MB
+(`truncate -s 900000000 /srv/adif/traspaso/documentos.tar`) y se volvió a
+lanzar: envió solo lo que faltaba (1,09 GB) y las sumas volvieron a dar `OK`.
+
+### Restauración
+
+```bash
+cd /opt/adif/deploy && sudo ./restaurar-datos.sh
+```
+
+42 segundos, sin errores: 614 expedientes, 40.164 líneas, 1.649 documentos,
+esquema 0044, 1.651 ficheros en `/srv/adif/documentos`. Arranca también el
+worker; su registro dice `modelo de IA: proveedor openai, modelo vision` y no
+encoló nada: el último ciclo semanal del origen es del 14/10 a las 13:46 UTC,
+así que el siguiente toca el 21/10, el descubrimiento de pedidos el 19/10, y
+la copia diaria el 14/10 hacia las 18:45 UTC.
+
+### Comparación con el origen
+
+Filas de todas las tablas, en las dos máquinas, con la misma consulta:
+
+```sql
+SELECT table_name, (xpath('/row/c/text()', query_to_xml('select count(*) as c from public.' || quote_ident(table_name), false, true, '')))[1]::text
+FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE' ORDER BY 1;
+```
+
+Idénticas en las 22 tablas (expedientes 614, lotes 692, líneas de catálogo
+40.164, documentos 1.649, trabajos 34.561...) salvo `usuarios` (2 → 0) y
+`registro_accesos` (5 → 0), que `restaurar-datos.sh` vacía a propósito: los
+usuarios de desarrollo no viajan a producción. Que los documentos se abren
+desde la web se comprobó en el bloque 5, con el navegador.
