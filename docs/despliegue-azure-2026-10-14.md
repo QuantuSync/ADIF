@@ -394,9 +394,15 @@ error), con un 89,6 % de parecido con la lectura guardada de
   obligatorio y sesiones cerradas. El fichero del portátil está al día. Los
   seis quedan sin estrenar.
 - Borrado `/srv/adif/traspaso/*` y los ficheros de prueba de `/tmp`.
-- Quedan en el portátil, fuera del repositorio, `C:\dev\adif-traspaso` (el
-  volcado, el paquete de documentos y los Excel de las pruebas) y una copia de
-  la clave en el `~/.ssh` de WSL, para `rsync`.
+- Después se recogió todo lo que había quedado fuera del repositorio. Lo que
+  sigue sirviendo está en `privado/`, que `.gitignore` excluye: el script de
+  subida (`privado/traspaso/subir.sh`, ya con la ruta nueva) y la lista de
+  usuarios. Se borraron `C:\dev\adif-traspaso` entero (el volcado y el
+  paquete de documentos ya no son la referencia, y los Excel de prueba eran
+  copias idénticas), la copia de la clave en el `~/.ssh` de WSL y los
+  temporales de las pruebas en los contenedores locales. Para repetir una
+  subida: `wsl -e sh -c 'mkdir -p ~/.ssh && cp /mnt/c/Users/LUCAS/.ssh/id_ed25519_adif ~/.ssh/ && chmod 600 ~/.ssh/id_ed25519_adif'`,
+  más el bloque `Host` del bloque 1 en `~/.ssh/config` de WSL.
 - `az` (instalado con winget) no llegó a iniciar sesión: la cuenta entró en
   su directorio por defecto, sin suscripciones, y el código de dispositivo
   contra el directorio de la suscripción (`83cd3889-...`) caducó sin

@@ -25,3 +25,7 @@ engine/.cache_modelo_dev/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Ficheros privados del operador: contraseñas de usuarios, copias y scripts
+# de traspaso a producción (sesión 2026-10-14). Nunca se suben.
+privado/
