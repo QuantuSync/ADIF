@@ -1,0 +1,8 @@
+#!/bin/sh
+# Quita del mensaje de commit cualquier coautoría o rastro de sesión de
+# Claude/Anthropic (prohibido en este repositorio, ver CONTEXTO.md sección 13).
+sed -i -E \
+  -e '/^[Cc]o-[Aa]uthored-[Bb]y:.*([Cc]laude|[Aa]nthropic)/d' \
+  -e '/^Claude-Session:/d' \
+  -e '/Generated with \[?Claude Code/d' \
+  "$1"

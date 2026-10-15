@@ -1128,6 +1128,12 @@ prueba que lo que el cliente descarga es lo que se ha comprobado. La
 exportación de la API sirve de contraste: las dos tienen que ser idénticas
 salvo la fecha de creación del fichero (`docProps/core.xml`).
 
+**Regla: ningún commit lleva coautoría de Claude/Anthropic** (ni
+`Co-Authored-By`, ni `Claude-Session`, ni "Generated with Claude Code").
+Lo impiden `.claude/settings.json` (`attribution` vacío, vale también para
+las sesiones en la nube) y el hook `.githooks/commit-msg`, que se activa en
+cada clon con `git config core.hooksPath .githooks`.
+
 ### Reconstrucción en paralelo: los valores viejos que ningún reproceso ve
 
 **Un `None` no pisa un valor guardado** (sección 9), así que una celda que
