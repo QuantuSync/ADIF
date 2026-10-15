@@ -4,3 +4,6 @@ deploy/Caddyfile text eol=lf
 deploy/*.service text eol=lf
 deploy/env.produccion.ejemplo text eol=lf
 deploy/*.yml text eol=lf
+
+# Hooks de git: shell, siempre con LF
+.githooks/* text eol=lf
