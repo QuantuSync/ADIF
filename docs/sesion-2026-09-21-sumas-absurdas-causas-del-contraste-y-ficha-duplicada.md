@@ -259,7 +259,7 @@ función nueva los mueve con un UPDATE.
 
 - **1.369 pruebas en verde** (1.362 antes de la sesión).
 - Imágenes `api`, `worker` y `web` **reconstruidas con el código final**
-  (`4eb6954`), desde `/mnt/c/dev/ADIF`.
+  (`4489e6c`), desde `/mnt/c/dev/ADIF`.
 - **Un único reproceso completo con la red apagada** (trabajo 32004,
   `forzar`, sindicación y búsqueda desactivadas): 517 expedientes, **21 min
   33 s** de ciclo, **`descargas_lanzadas: 0`**, 0 fallos. Los reprocesos

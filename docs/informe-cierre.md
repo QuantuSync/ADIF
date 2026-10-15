@@ -1,6 +1,6 @@
 # Informe de cierre del proyecto ADIF: cifras clave
 
-Datos a 22/09/2026, código en el commit `a144bbb`, rama `main`. Todas las cifras están medidas en el repositorio, en la base de producción (consultada en solo lectura) o en el Excel entregado, salvo las marcadas como "estimado".
+Datos a 22/09/2026, código en el commit `fb3576d`, rama `main`. Todas las cifras están medidas en el repositorio, en la base de producción (consultada en solo lectura) o en el Excel entregado, salvo las marcadas como "estimado".
 
 | Concepto | Cifra | De dónde sale |
 |---|---|---|

@@ -116,7 +116,7 @@ matrículas antes descartadas): `codigo_precio=matrícula` 41→23,
 límite de determinismo del bloque 4 debajo, el mismo mecanismo que lo
 explica.
 
-9 tests nuevos (671→680 pasan). Commit `d71396b`.
+9 tests nuevos (671→680 pasan). Commit `f26e2fa`.
 
 ---
 
@@ -155,7 +155,7 @@ sentinela, es el mismo lote reconfirmándose.
 
 **Verificado en vivo, dos pasadas más tras el arreglo: resultado idéntico
 byte a byte, 0 diferencias en 22.445 líneas.** 2 tests nuevos (680→681
-pasan). Commit `e8e2976`.
+pasan). Commit `746cf34`.
 
 **Límite conocido, sin cerrar del todo:** sobre tablas sin cabecera propia
 el modelo se llama sin caché persistente (`cabecera_sin_senal`), así que
@@ -204,7 +204,7 @@ propósito ahí.
 erróneo creado, confirmado y limpiado a mano), arreglo desplegado, dos
 pasadas seguidas sobre la misma carpeta dan el mismo resultado correcto
 (`enlaces_nuevos=0`, `documentos_codigo_declarado_distinto=5`, sin
-recrear el enlace erróneo). 1 test nuevo (681→682 pasan). Commit `14b8c75`.
+recrear el enlace erróneo). 1 test nuevo (681→682 pasan). Commit `0f590eb`.
 
 ---
 
@@ -258,6 +258,6 @@ prefiere excluir a inventar.
   (¿precio de referencia vs. de pedido?), no se fuerza un lote sin
   confirmar con el cliente qué representa esa tercera copia.
 
-Commits de esta sesión: `d71396b` (bloque 2/3), `e8e2976` (bloque 4),
-`14b8c75` (bloque 5). 671→682 tests, todos verdes. Dos reprocesos
+Commits de esta sesión: `f26e2fa` (bloque 2/3), `746cf34` (bloque 4),
+`0f590eb` (bloque 5). 671→682 tests, todos verdes. Dos reprocesos
 completos consecutivos verificados byte a byte idénticos tras el bloque 4.

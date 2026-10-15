@@ -12,7 +12,7 @@ revisión. Cuando esto se migre a un servidor se montará una base nueva.
 ## Cómo se ha medido
 
 - **La referencia ("antes")**: una reconstrucción completa desde cero con el
-  código del cierre de ayer (`d35ee0c`), en `adif_reconstruccion`, con la red
+  código del cierre de ayer (`1b0fbf9`), en `adif_reconstruccion`, con la red
   aislada y dos pasadas (517 extracciones cada una, 0 descargas, 0 fallos),
   comparada con el Excel entregado ayer y con una copia de producción de antes
   de la sesión (`adif_prod_antes`).

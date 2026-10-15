@@ -52,7 +52,7 @@ o a adivinar entre candidatas — el guard los mantiene intactos.
   compartido entre expedientes de la misma sindicación).
 - 661 tests (660 previos + 1 nuevo con la fila real de P-101), todos verdes.
 
-Commit `8a32400`.
+Commit `66fac0b`.
 
 ---
 
@@ -195,7 +195,7 @@ tocar el aspecto visual):
    contenedor real: los avisos de sindicación reales de expedientes como
    `6.25/28510.0150` ya aparecen.
 
-Commit `980f124`.
+Commit `ee3d8f9`.
 
 ---
 
@@ -363,7 +363,7 @@ dominante (71,7%, 21,2s) -- ya no hay ningún "otros" sin explicar.
   este cambio: la caché de texto no altera ningún resultado, solo evita
   recalcularlo.
 
-Commit `afb11af`.
+Commit `fbf7b96`.
 
 ---
 

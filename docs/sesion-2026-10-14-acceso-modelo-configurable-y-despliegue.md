@@ -5,7 +5,7 @@ El proyecto se entrega desplegado en una máquina de Azure ya creada (Ubuntu
 443 abierto). Esta sesión deja el sistema listo para ese despliegue, sin
 desplegar. No se ha reprocesado nada ni se han tocado datos del catálogo.
 
-Commits: `bfbd621` (acceso), `b2cf9d0` (modelo de IA), `8fa49be` (despliegue).
+Commits: `89ce22f` (acceso), `ed6060a` (modelo de IA), `94e635f` (despliegue).
 
 ## Bloque 1 — Acceso con usuario y contraseña
 

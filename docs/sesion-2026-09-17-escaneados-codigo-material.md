@@ -419,7 +419,7 @@ para 1.367 páginas en caché: 12,4 s por página, ~5 s de reloj leyendo 4 a la 
 - **Saldo de la API agotado al final**: 5 expedientes fallidos
   (`3.16/28510.0044`, `6.15/28510.0094`, `6.17/28510.0012`, `6.15/28510.0080`,
   `2.19/23108.0127`). Hace falta recargar crédito y relanzarlos.
-- **Una página que falla ya no tira el documento** (commit `f6ab430`): se
+- **Una página que falla ya no tira el documento** (commit `419aa7c`): se
   guarda con su error; si es transitorio (saldo, red) lo leído queda en caché,
   el trabajo falla visible y el reintento solo relee esa página; si no cabe en
   la respuesta, queda anotada como ilegible y no se reintenta. `0071` es el

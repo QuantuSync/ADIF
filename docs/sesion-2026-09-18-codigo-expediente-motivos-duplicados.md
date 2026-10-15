@@ -25,7 +25,7 @@ sino por versión del fichero.** Se probaron todas las definiciones posibles de
 número de documento) y todas dan 2.381 sobre el fichero en disco; además, los
 92 expedientes son "todo o nada" (ninguno mezcla filas con código y sin él).
 
-La causa: el cliente midió una exportación **anterior** al commit `c7e8616`
+La causa: el cliente midió una exportación **anterior** al commit `09e2a5d`
 del día antes, que sacó del catálogo las 22 filas de resumen de presupuesto y
 bajó el Excel de 18.260 a 18.239 filas. Esas 22 filas eran de 6 expedientes, y
 5 de los 6 no cruzan:

@@ -26,7 +26,7 @@ por número de expediente, sin ningún filtro de estado.
 
 | Expedientes | Estado antes | Causa |
 |---|---|---|
-| `0009` (RES), `0004`, `0064`, `0074` (PUB), `0030`, `0040` (EV) | `sin_publicar` | Búsqueda del 2026-09-07 17:17 UTC, antes del arreglo de límite de tasa (`eeab48b`, 19:50 UTC). Ese defecto convertía un timeout o un bloqueo en "no publicado". El ciclo de mantenimiento no vuelve a intentar nunca un `sin_publicar` (`app/mantenimiento/ciclo.py`, consulta de expedientes a evaluar). |
+| `0009` (RES), `0004`, `0064`, `0074` (PUB), `0030`, `0040` (EV) | `sin_publicar` | Búsqueda del 2026-09-07 17:17 UTC, antes del arreglo de límite de tasa (`5eaaf80`, 19:50 UTC). Ese defecto convertía un timeout o un bloqueo en "no publicado". El ciclo de mantenimiento no vuelve a intentar nunca un `sin_publicar` (`app/mantenimiento/ciclo.py`, consulta de expedientes a evaluar). |
 | `0047`, `0048`, `0049` (Presidencia) | `pendiente_revision`, 0 líneas | Pedidos del acuerdo marco de EPIs `2.24/04110.0036`/`0035`/`0037` (departamento 04110). Sus documentos propios son dos formularios PCSP sin cuadro de precios: los precios están en la matriz, y la matriz no aparece en la Plataforma. |
 | `0068`, `0073` (Presidencia) | `pendiente_revision`, 0 líneas | Lo mismo, matrices `4.24/04110.0189`/`0187`. |
 

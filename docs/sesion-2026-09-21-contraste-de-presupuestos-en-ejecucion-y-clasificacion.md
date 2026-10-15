@@ -264,7 +264,7 @@ del lector de presupuestos por lote, 8 del listado de expedientes en ejecución.
 
 El bloque 1 añade un paso a la extracción: `registrar_presupuestos_de_lote`,
 al final de cada expediente. Por eso hubo **un reproceso completo, con la
-imagen reconstruida con el código final** (`f2c8e57`) y la red apagada.
+imagen reconstruida con el código final** (`999106e`) y la red apagada.
 Fueron 517 expedientes en **22 min 2 s** (trabajo 31297), con
 `descargas_lanzadas: 0`. Los bloques 2 y 3 no tocan la extracción.
 

@@ -60,7 +60,7 @@ ya existente para `matricula`.
 Esta misma sesión de análisis descubrió y arregló el bug de forma
 independiente (mismo diagnóstico, mismo fichero) mientras otra sesión en
 paralelo lo arreglaba también, verificado sobre el mismo caso real —
-**el arreglo que quedó committeado (`6cd0692`, sesión de verificación del
+**el arreglo que quedó committeado (`d2db63e`, sesión de verificación del
 Excel de 6.599 líneas) es idéntico al de esta sesión**, así que no hay nada
 que commitear aparte aquí.
 
@@ -191,7 +191,7 @@ allá del arreglo puntual de la sección 2.
 
 Confirmado en curso: otra sesión reprocesó el catálogo completo por un
 defecto distinto (colisión de firma de cabecera vacía,
-`docs/sesion-2026-09-08-verificacion-excel-6599.md`, commit `6cd0692`) y
+`docs/sesion-2026-09-08-verificacion-excel-6599.md`, commit `d2db63e`) y
 tocó `CONTEXTO.md`, `engine/app/catalogo.py` y `engine/app/extraccion/
 mapeo_cabecera.py` mientras esta sesión trabajaba. `git status` se confirmó
 limpio tras cada operación de esta sesión; ningún commit propio hizo falta
