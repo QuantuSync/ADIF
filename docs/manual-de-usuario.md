@@ -8,7 +8,7 @@ puntos en los títulos y sin guiones largos. -->
 
 Catálogo de materiales de ADIF
 
-Para el personal de ADIF que consulta el catálogo y exporta el Excel
+Para el personal de ADIF que consulta el catálogo, exporta el Excel y, en su caso, revisa los datos
 
 Elaborado por INECO para ADIF
 
@@ -50,6 +50,19 @@ Los datos se ponen al día solos una vez por semana (capítulo 13).
 
 Cada persona tiene su propio usuario. La primera vez recibirá, por un canal aparte, su nombre de usuario y una **contraseña temporal**. No comparta su usuario con nadie.
 
+### Dos tipos de usuario
+
+Hay dos perfiles, y cada usuario tiene uno.
+
+| Perfil | Qué puede hacer |
+|---|---|
+| **Consulta** | Ver todas las pantallas, abrir los documentos originales y exportar el Excel. Nada más |
+| **Consulta y escritura** | Lo mismo, y además corregir, confirmar y descartar líneas, aceptar matrículas, añadir expedientes, volver a descargarlos o leerlos y lanzar los trabajos de mantenimiento |
+
+Casi todo el mundo tiene el perfil de consulta. Quien solo consulta ve las mismas pantallas y los mismos datos que los demás, pero **no le aparecen los botones ni los formularios que cambian algo**. Junto a su nombre, arriba a la derecha, pone **solo consulta**.
+
+Si necesita cambiar de perfil, pídalo a la persona de contacto (capítulo 15).
+
 ### Entrar
 
 Abra la dirección de la plataforma. Lo primero que aparece siempre es la pantalla de entrada. Escriba su usuario y su contraseña y pulse **Entrar**.
@@ -90,7 +103,7 @@ Después de **5 intentos fallidos** seguidos, el usuario queda bloqueado durante
 
 ## 4. Cómo moverse por la plataforma
 
-Arriba de todas las pantallas hay una barra con los apartados. El apartado en el que está aparece subrayado. A la derecha están su nombre de usuario, el enlace **Contraseña** y **Salir**.
+Arriba de todas las pantallas hay una barra con los apartados. El apartado en el que está aparece subrayado. A la derecha están su nombre de usuario (con la marca **solo consulta** si es su perfil), el enlace **Contraseña** y **Salir**.
 
 ![La barra de arriba, con todos los apartados](../privado/manual/capturas/05-barra.png)
 
@@ -143,9 +156,14 @@ Un expediente se puede dividir en **lotes**. Cada lote es un contrato independie
 
 En los pedidos que cuelgan de un acuerdo marco, la palabra lote a veces no es una división en contratos sino una familia de productos del acuerdo marco. Son dos cosas distintas con el mismo nombre.
 
-### Botones que no debe usar
+### Botones que cambian el catálogo
 
-En esta pantalla hay un recuadro **Añadir expediente** y, en cada fila, los botones **Descargar** y **Extraer**. Sirven para que el equipo que mantiene la plataforma dé de alta un expediente o vuelva a procesarlo, y cambian el catálogo para todos. **Si no se lo han pedido, no los use.** Para pedir que se añada un expediente, avise a la persona de contacto.
+Lo que ve en esta pantalla depende de su perfil (capítulo 3).
+
+- **Si solo consulta**, la pantalla se ve entera, con todos los expedientes, sus lotes y sus pedidos, pero sin botones de acción. No le aparecen el recuadro **Añadir expediente**, la columna **Acciones** ni los botones **Descargar**, **Extraer**, **Reintentar** y **Buscar más pedidos**. Para pedir que se añada un expediente, avise a la persona de contacto.
+- **Si tiene el perfil de consulta y escritura**, verá esos botones. Sirven para dar de alta un expediente o volver a procesarlo, y **cambian el catálogo para todos**. Úselos solo cuando sea parte de su trabajo.
+
+![Expedientes vista por un usuario de solo consulta, sin el recuadro para añadir ni la columna de acciones](../privado/manual/capturas/18-expedientes-consulta.png)
 
 ## 6. Catálogo
 
@@ -223,13 +241,26 @@ Que un lote no cuadre **no siempre es un error**. El caso más frecuente es que 
 
 ## 9. Cola de revisión y candidatos de matrícula
 
-**Cola de revisión** reúne los expedientes que necesitan que alguien los mire con el documento delante. A la izquierda está la lista, con el motivo de cada uno. A la derecha, el motivo completo, un formulario para corregir datos del expediente y el documento abierto al lado.
+**Cola de revisión** reúne los expedientes que necesitan que alguien los mire con el documento delante. A la izquierda está la lista, con el motivo de cada uno. Al pulsar uno, a la derecha aparecen el motivo completo, sus líneas de catálogo con el aviso de cada una y el documento abierto al lado.
 
-![Cola de revisión](../privado/manual/capturas/13-revision.png)
+**Candidatos de matrícula** propone matrículas para materiales que el documento publica sin ella, a partir del maestro de materiales de ADIF. Para cada material enseña el texto del pliego y los candidatos del maestro, de más a menos parecido.
 
-**Candidatos de matrícula** propone matrículas para materiales que el documento publica sin ella, a partir del maestro de materiales de ADIF.
+Las dos pantallas las puede ver cualquier usuario. Lo que cambia según el perfil (capítulo 3) es lo que se puede hacer en ellas.
 
-Puede entrar en las dos para consultar. Pero **lo que se guarda en ellas cambia el catálogo para todos**, porque cualquier corrección, confirmación o descarte se ve al momento en la web y en el siguiente Excel. Si no forma parte de su trabajo, no cambie nada ahí. Si ve un dato que cree que está mal, avise a la persona de contacto con el expediente, el lote y el código de precio o la matrícula.
+**Si solo consulta**, ve la cola entera, los motivos, las líneas y los documentos, y nada más. No le aparecen el recuadro **Corregir datos del expediente**, los botones de cada línea (**Confirmar**, **Corregir**, **Pendiente** y **Descartar**) ni los de los posibles duplicados. En Candidatos de matrícula tampoco le aparecen **Recalcular candidatos**, **Aceptar**, **Ninguno es correcto** y **Dejar nota**. Si ve un dato que cree que está mal, avise a la persona de contacto con el expediente, el lote y el código de precio o la matrícula.
+
+![Cola de revisión vista por un usuario de solo consulta](../privado/manual/capturas/19-revision-consulta.png)
+
+**Si tiene el perfil de consulta y escritura**, además de ver todo eso puede resolver cada línea de cuatro maneras.
+
+- **Confirmar**, si el dato leído coincide con el documento.
+- **Corregir**, para escribir a mano la matrícula, la cantidad o el precio unitario que dice el documento.
+- **Pendiente**, con una nota obligatoria, si hace falta consultar algo antes de decidir.
+- **Descartar**, con el motivo obligatorio, si la línea no es un material real o no se puede saber.
+
+También puede corregir los datos del expediente (importes, baja y código matriz) y confirmarlo, y en Candidatos de matrícula aceptar una matrícula propuesta o indicar que ninguna vale. **Todo lo que se guarda en estas pantallas cambia el catálogo para todos**, porque se ve al momento en la web y en el siguiente Excel. Hágalo siempre con el documento delante.
+
+![Cola de revisión vista por un usuario de consulta y escritura, con el formulario de corrección y los botones de cada línea](../privado/manual/capturas/13-revision.png)
 
 ## 10. Exportar el Excel
 
@@ -418,7 +449,7 @@ Más abajo, el **Histórico** lista los ciclos anteriores. En la columna **Estad
 
 ![Histórico de ciclos](../privado/manual/capturas/15-mantenimiento-historico.png)
 
-En esta pantalla hay dos botones, **Lanzar ciclo ahora** y **Ejecutar ahora** (ingesta manual de documentos). **No los pulse.** Lanzan trabajos largos que cambian el catálogo para todos y son cosa del equipo que mantiene la plataforma.
+Quien solo consulta ve esta pantalla entera, pero sin botones. Quien tiene el perfil de consulta y escritura ve además **Lanzar ciclo ahora** y **Ejecutar ahora** (ingesta manual de documentos). Lanzan trabajos largos que cambian el catálogo para todos. No hace falta pulsarlos, porque el ciclo se lanza solo cada semana, y solo deben usarse si lo pide el equipo que mantiene la plataforma.
 
 ## 14. Lo que la plataforma no hace
 
@@ -444,6 +475,7 @@ Para que nadie espere algo que no es.
 | Una pantalla se queda en Cargando o da un error de conexión | Recargue la página. Si sigue, compruebe su conexión a internet y vuelva a intentarlo en unos minutos |
 | Un dato del catálogo me parece incorrecto | Abra el documento original desde la trazabilidad y compruébelo. Si el documento dice otra cosa, avise con el expediente, el lote y el código de precio o la matrícula |
 | Falta un expediente que debería estar | Búsquelo en Conciliación y en Expedientes. Si no está, avise con su código |
+| No veo botones que un compañero sí ve | Su usuario es de solo consulta (capítulo 3). Si necesita modificar datos, pida el cambio de perfil a la persona de contacto |
 | El último ciclo semanal falló o lleva más de una semana sin ejecutarse | Avise a la persona de contacto |
 
 Al avisar, diga siempre qué estaba haciendo, en qué pantalla, a qué hora y, si puede, adjunte una captura de pantalla. **Nunca envíe su contraseña**, ni siquiera a la persona de contacto, porque nadie se la va a pedir.
