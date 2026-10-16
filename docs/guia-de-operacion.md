@@ -82,14 +82,25 @@ pondría a descargar la Plataforma entera. Para restaurar después:
 
 ## Usuarios
 
-Un solo perfil: consulta, revisa y exporta. No hay administración desde la web.
+Dos perfiles (desde el 16/10/2026). No hay administración desde la web.
+
+| Perfil | Qué puede hacer |
+|---|---|
+| `escritura` | Todo: consultar, exportar, revisar y corregir líneas, añadir expedientes, descargar y extraer, lanzar el ciclo y los demás trabajos |
+| `consulta` | Ver todas las pantallas (Mantenimiento incluida) y exportar el Excel. Nada más |
+
+El bloqueo lo hace la API: a un usuario de consulta, cualquier petición que no
+sea de lectura le responde 403 `solo_consulta`, venga de la web o no. La web,
+además, no le enseña los botones ni los formularios que escriben, y pone
+«solo consulta» junto a su nombre.
 
 ```bash
-adif exec api python -m app.usuarios crear ana.garcia      # imprime una contraseña temporal
+adif exec api python -m app.usuarios crear ana.garcia --perfil consulta    # o escritura; imprime una contraseña temporal
+adif exec api python -m app.usuarios perfil ana.garcia escritura           # cambia el perfil; vale desde su siguiente clic
 adif exec api python -m app.usuarios reiniciar ana.garcia  # contraseña temporal nueva
 adif exec api python -m app.usuarios desactivar ana.garcia # no puede entrar; cierra sus sesiones
 adif exec api python -m app.usuarios activar ana.garcia
-adif exec api python -m app.usuarios listar                # usuarios y su última entrada
+adif exec api python -m app.usuarios listar                # usuarios, perfil y última entrada
 adif exec api python -m app.usuarios accesos               # entradas, salidas y fallos
 adif exec api python -m app.usuarios accesos --usuario ana.garcia --limite 100
 ```

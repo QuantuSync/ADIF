@@ -954,7 +954,15 @@ Estas reglas no se rompen ni siquiera "solo para la demo".
    `tests/test_acceso.py` recorre todas las rutas exigiendo 401 sin sesión: una
    ruta nueva no puede quedar abierta por olvido. Solo `/health` y `/auth/entrar`
    y `/auth/salir` van sin sesión. Usuarios por consola (`python -m
-   app.usuarios`), nunca desde la web. La web lleva un `middleware.ts` que manda
+   app.usuarios`), nunca desde la web. **Dos perfiles desde la sesión
+   2026-10-16** (`usuarios.perfil`): `escritura` puede todo y `consulta` solo
+   lee y exporta. El bloqueo es de la API y va por método, no ruta a ruta:
+   `app.auth.get_usuario_con_permiso`, la misma dependencia que pone la
+   sesión en cada router, responde 403 `solo_consulta` a un usuario de
+   consulta en todo lo que no sea GET/HEAD/OPTIONS, y `tests/test_acceso.py`
+   recorre todas las rutas exigiéndolo. Por eso **ninguna ruta de lectura
+   puede escribir** (y ninguna que escriba puede ser GET). La web esconde
+   los botones (`app/perfil.tsx`), pero eso es solo presentación. La web lleva un `middleware.ts` que manda
    a `/entrar` sin sesión, y `app/sesion-cliente.ts` añade la cookie a cada
    llamada y marca el sondeo automático (`X-Sondeo`) para que no cuente como
    actividad.
