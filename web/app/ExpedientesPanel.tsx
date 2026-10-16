@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { usePuedeEscribir } from "./perfil";
 import { DatoVacio, EstadoTexto, accentClaseEstado, formatearImporte, formatearPorcentaje } from "./ui";
 import { interpretarMotivos } from "./motivos";
 import { useReintentoConexion } from "./useReintentoConexion";
@@ -314,7 +315,8 @@ function CeldaPedidos({
 }: {
   expediente: Expediente;
   buscando: boolean;
-  onBuscar: () => void;
+  // Sin él (usuario de consulta) no se enseña el botón de buscar más.
+  onBuscar?: () => void;
 }) {
   if (expediente.pedidos.length === 0 && !expediente.aviso_descubrimiento_pedidos) return null;
   return (
@@ -346,9 +348,11 @@ function CeldaPedidos({
               ))}
             </tbody>
           </table>
-          <button type="button" onClick={onBuscar} disabled={buscando} className="btn btn-ghost btn-sm" style={{ marginTop: "0.4rem" }}>
-            {buscando ? "Buscando…" : "Buscar más pedidos"}
-          </button>
+          {onBuscar && (
+            <button type="button" onClick={onBuscar} disabled={buscando} className="btn btn-ghost btn-sm" style={{ marginTop: "0.4rem" }}>
+              {buscando ? "Buscando…" : "Buscar más pedidos"}
+            </button>
+          )}
         </details>
       ) : (
         <span className="status-note status-note-tight" title={expediente.aviso_descubrimiento_pedidos ?? undefined}>
@@ -407,6 +411,7 @@ export default function ExpedientesPanel({
   const { error: errorConexion, confirmado, cargando, registrarExito, registrarFallo } =
     useReintentoConexion(inicialConfirmado);
   const [errorAccion, setErrorAccion] = useState<string | null>(null);
+  const puedeEscribir = usePuedeEscribir();
   const [codigoNuevo, setCodigoNuevo] = useState("");
   const [matrizNuevo, setMatrizNuevo] = useState("");
   const [creando, setCreando] = useState(false);
@@ -529,6 +534,7 @@ export default function ExpedientesPanel({
 
   return (
     <div>
+      {puedeEscribir && (
       <div className="card" style={{ marginBottom: "1.5rem" }}>
         <p className="section-label">Añadir expediente</p>
         <form onSubmit={crearExpediente} style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", alignItems: "end" }}>
@@ -561,6 +567,7 @@ export default function ExpedientesPanel({
           </button>
         </form>
       </div>
+      )}
 
       {/* Estados de carga y error (CONTEXTO.md, bloque de estados de carga y
           error, sesión 2026-09-06): mientras no hay respuesta confirmada de
@@ -629,7 +636,7 @@ export default function ExpedientesPanel({
                   <th className="num">Licitación</th>
                   <th className="num">Adjudicación</th>
                   <th className="num">Baja</th>
-                  <th>Acciones</th>
+                  {puedeEscribir && <th>Acciones</th>}
                 </tr>
               </thead>
               <tbody>
@@ -646,7 +653,7 @@ export default function ExpedientesPanel({
                     <CeldaPedidos
                       expediente={exp}
                       buscando={buscandoPedidos === exp.id}
-                      onBuscar={() => lanzarDescubrimientoPedidos(exp.id)}
+                      onBuscar={puedeEscribir ? () => lanzarDescubrimientoPedidos(exp.id) : undefined}
                     />
                   </td>
                   <td>{celdaMatriz(exp)}</td>
@@ -686,6 +693,7 @@ export default function ExpedientesPanel({
                   <td className="num">
                     <CeldaBaja expediente={exp} />
                   </td>
+                  {puedeEscribir && (
                   <td>
                     {/* En línea (encargo de esta sesión): con los `sin_publicar`
                         ya fuera de esta tabla, dos btn-sm uno junto al otro caben
@@ -710,6 +718,7 @@ export default function ExpedientesPanel({
                       </button>
                     </div>
                   </td>
+                  )}
                 </tr>
               );
             })}
@@ -741,6 +750,7 @@ export default function ExpedientesPanel({
                     <span className="mono">{exp.codigo_expediente}</span>
                     <EstadoTexto estado={exp.estado} />
                     <span className="muted">{textoSinPublicar(exp)}</span>
+                    {puedeEscribir && (
                     <button
                       onClick={() => lanzarDescarga(exp.id)}
                       disabled={lanzando === exp.id}
@@ -749,6 +759,7 @@ export default function ExpedientesPanel({
                     >
                       Reintentar
                     </button>
+                    )}
                   </li>
                 ))}
               </ul>

@@ -4,13 +4,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import NavLinks from "./nav-links";
+import { type Perfil, ProveedorPerfil } from "./perfil";
 import { API_URL_NAVEGADOR } from "./sesion-cliente";
 
 // Pantallas sin barra de navegación: la de entrada, y la de cambio de
 // contraseña mientras es obligatoria (todavía no se puede ir a ningún sitio).
 const SIN_MARCO = new Set(["/entrar"]);
 
-type Sesion = { usuario: string; debe_cambiar_contrasena: boolean };
+type Sesion = { usuario: string; debe_cambiar_contrasena: boolean; perfil: Perfil };
 
 export default function Marco({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() ?? "";
@@ -45,7 +46,12 @@ export default function Marco({ children }: { children: React.ReactNode }) {
         </span>
         <NavLinks />
         <span className="nav-usuario">
-          {sesion && <span className="nav-usuario-nombre">{sesion.usuario}</span>}
+          {sesion && (
+            <span className="nav-usuario-nombre">
+              {sesion.usuario}
+              {sesion.perfil === "consulta" && <span className="nav-usuario-perfil"> · solo consulta</span>}
+            </span>
+          )}
           <Link href="/cambiar-contrasena" className={`nav-link${pathname === "/cambiar-contrasena" ? " active" : ""}`}>
             Contraseña
           </Link>
@@ -54,7 +60,9 @@ export default function Marco({ children }: { children: React.ReactNode }) {
           </button>
         </span>
       </nav>
-      <div className="app-body">{children}</div>
+      <div className="app-body">
+        <ProveedorPerfil value={sesion?.perfil ?? null}>{children}</ProveedorPerfil>
+      </div>
     </>
   );
 }

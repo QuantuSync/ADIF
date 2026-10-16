@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useReintentoConexion } from "../../useReintentoConexion";
+import { usePuedeEscribir } from "../../perfil";
 
 type CandidatoMatricula = {
   matricula_candidata: string;
@@ -45,6 +46,8 @@ function formatearSimilitud(valor: string): string {
 }
 
 export default function CandidatosMatriculaPanel({ apiUrl }: { apiUrl: string }) {
+  // Consulta ve la cola y los candidatos, sin recalcular ni decidir.
+  const puedeEscribir = usePuedeEscribir();
   const [lineas, setLineas] = useState<LineaCandidatosMatricula[]>([]);
   const [total, setTotal] = useState(0);
   const [pagina, setPagina] = useState(1);
@@ -194,6 +197,7 @@ export default function CandidatosMatriculaPanel({ apiUrl }: { apiUrl: string })
 
   return (
     <div>
+      {puedeEscribir && (
       <div className="card" style={{ marginBottom: "1.5rem" }}>
         <p className="section-label">Recalcular la cola</p>
         <p className="muted" style={{ marginTop: 0 }}>
@@ -213,6 +217,7 @@ export default function CandidatosMatriculaPanel({ apiUrl }: { apiUrl: string })
           </p>
         )}
       </div>
+      )}
 
       <div className="candidato-toolbar">
         <label className="field">
@@ -268,6 +273,7 @@ export default function CandidatosMatriculaPanel({ apiUrl }: { apiUrl: string })
                     <span className="candidato-matricula">{c.matricula_candidata}</span>
                   </div>
                   <span className="candidato-similitud">{formatearSimilitud(c.similitud)}</span>
+                  {puedeEscribir && (
                   <button
                     onClick={() => aceptar(linea, c)}
                     disabled={enCurso.has(linea.linea_id)}
@@ -275,10 +281,12 @@ export default function CandidatosMatriculaPanel({ apiUrl }: { apiUrl: string })
                   >
                     Aceptar
                   </button>
+                  )}
                 </div>
               ))}
             </div>
 
+            {puedeEscribir && (
             <div className="candidato-acciones-linea">
               <button
                 onClick={() => rechazar(linea)}
@@ -295,8 +303,9 @@ export default function CandidatosMatriculaPanel({ apiUrl }: { apiUrl: string })
                 Dejar nota
               </button>
             </div>
+            )}
 
-            {notaAbiertaEn === linea.linea_id && (
+            {puedeEscribir && notaAbiertaEn === linea.linea_id && (
               <div className="candidato-nota-panel">
                 <label>
                   <span className="field-label">Nota</span>

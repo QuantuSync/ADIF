@@ -1359,6 +1359,11 @@ input:focus-visible {
   color: var(--text-muted);
 }
 
+.nav-usuario-perfil {
+  font-weight: 400;
+  opacity: 0.75;
+}
+
 .nav-salir {
   background: none;
   border: none;

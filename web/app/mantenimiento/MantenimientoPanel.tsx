@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { DatoVacio } from "../ui";
 import { useReintentoConexion } from "../useReintentoConexion";
+import { usePuedeEscribir } from "../perfil";
 
 type Trabajo = {
   id: number;
@@ -140,7 +141,8 @@ function PanelIngestaLocal({
   ultimaEjecucion, onLanzar, lanzando,
 }: {
   ultimaEjecucion: Trabajo | null;
-  onLanzar: () => void;
+  // Sin él (usuario de consulta) no se enseña el botón de ejecutar.
+  onLanzar?: () => void;
   lanzando: boolean;
 }) {
   const resultado = (ultimaEjecucion?.resultado ?? null) as ResumenIngestaLocal | null;
@@ -154,13 +156,15 @@ function PanelIngestaLocal({
             carpeta local.
           </p>
         </div>
-        <button
-          onClick={onLanzar}
-          disabled={lanzando || ultimaEjecucion?.estado === "en_proceso" || ultimaEjecucion?.estado === "pendiente"}
-          className="btn btn-secondary"
-        >
-          {lanzando ? "Lanzando…" : "Ejecutar ahora"}
-        </button>
+        {onLanzar && (
+          <button
+            onClick={onLanzar}
+            disabled={lanzando || ultimaEjecucion?.estado === "en_proceso" || ultimaEjecucion?.estado === "pendiente"}
+            className="btn btn-secondary"
+          >
+            {lanzando ? "Lanzando…" : "Ejecutar ahora"}
+          </button>
+        )}
       </div>
       {!ultimaEjecucion ? (
         <p className="muted" style={{ marginTop: "0.8rem" }}>Todavía no se ha ejecutado nunca.</p>
@@ -289,6 +293,8 @@ function TarjetaModeloIA({ apiUrl }: { apiUrl: string }) {
 }
 
 export default function MantenimientoPanel({ apiUrl }: { apiUrl: string }) {
+  // Consulta ve el estado y el histórico, sin los botones de lanzar.
+  const puedeEscribir = usePuedeEscribir();
   const [estado, setEstado] = useState<EstadoMantenimiento | null>(null);
   const [historial, setHistorial] = useState<Trabajo[]>([]);
   const [estadoAuditoria, setEstadoAuditoria] = useState<EstadoMantenimiento | null>(null);
@@ -409,14 +415,16 @@ export default function MantenimientoPanel({ apiUrl }: { apiUrl: string }) {
                   </strong>
                 </div>
               </div>
-              <button
-                onClick={lanzarAhora}
-                disabled={lanzando || estado.en_curso}
-                className="btn btn-primary"
-                style={{ marginLeft: "2rem" }}
-              >
-                {lanzando ? "Lanzando…" : "Lanzar ciclo ahora"}
-              </button>
+              {puedeEscribir && (
+                <button
+                  onClick={lanzarAhora}
+                  disabled={lanzando || estado.en_curso}
+                  className="btn btn-primary"
+                  style={{ marginLeft: "2rem" }}
+                >
+                  {lanzando ? "Lanzando…" : "Lanzar ciclo ahora"}
+                </button>
+              )}
             </div>
             {estado.ultima_ejecucion && (
               <>
@@ -454,7 +462,7 @@ export default function MantenimientoPanel({ apiUrl }: { apiUrl: string }) {
 
           <PanelAuditoria estado={estadoAuditoria} />
 
-          <PanelIngestaLocal ultimaEjecucion={ultimaIngesta} onLanzar={lanzarIngestaLocal} lanzando={lanzandoIngesta} />
+          <PanelIngestaLocal ultimaEjecucion={ultimaIngesta} onLanzar={puedeEscribir ? lanzarIngestaLocal : undefined} lanzando={lanzandoIngesta} />
 
           <p className="section-label">Histórico</p>
           <div className="table-scroll">

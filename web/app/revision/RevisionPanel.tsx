@@ -4,6 +4,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { DatoVacio, DescripcionCelda, esPartidaAlzada, formatearNumero, type MotivoVacio } from "../ui";
 import { interpretarMotivoLinea, interpretarMotivos } from "../motivos";
 import { useReintentoConexion } from "../useReintentoConexion";
+import { usePuedeEscribir } from "../perfil";
 
 type ExpedienteResumen = {
   id: number;
@@ -201,6 +202,9 @@ type RespuestaColaRevision = {
 };
 
 export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
+  // Un usuario de consulta ve la cola entera, con sus motivos y documentos,
+  // pero sin el formulario de corregir ni los botones de cada línea.
+  const puedeEscribir = usePuedeEscribir();
   const [lista, setLista] = useState<ExpedienteResumen[]>([]);
   const [totalLista, setTotalLista] = useState(0);
   const [paginaLista, setPaginaLista] = useState(1);
@@ -538,6 +542,7 @@ export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
                 pista de 1fr y desbordaba la página (encargo de la sesión de
                 pulido de 1280px). */}
             <div style={{ minWidth: 0 }}>
+              {puedeEscribir && (
               <div className="card" style={{ marginBottom: "1.25rem" }}>
                 <p className="section-label">Corregir datos del expediente</p>
                 <div className="field-grid">
@@ -583,6 +588,7 @@ export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
                   </button>
                 </div>
               </div>
+              )}
 
               <p className="section-label">Líneas de catálogo ({detalle.lineas.length})</p>
               {detalle.lineas.length === 0 ? (
@@ -613,7 +619,7 @@ export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
                         <th>Unidad</th>
                         <th>Estado</th>
                         <th>Aviso</th>
-                        <th />
+                        {puedeEscribir && <th />}
                       </tr>
                     </thead>
                     <tbody>
@@ -654,6 +660,7 @@ export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
                                   </span>
                                 )}
                               </td>
+                              {puedeEscribir && (
                               <td>
                                 <div className="button-row">
                                   {linea.estado_revision !== "confirmado" && (
@@ -685,10 +692,11 @@ export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
                                   )}
                                 </div>
                               </td>
+                              )}
                             </tr>
                             {linea.posible_duplicado_de && !esFinal && (
                               <tr>
-                                <td colSpan={8} className="linea-accion-panel duplicado-panel">
+                                <td colSpan={puedeEscribir ? 8 : 7} className="linea-accion-panel duplicado-panel">
                                   <p className="duplicado-titulo">
                                     Posible duplicado: coincide en matrícula/descripción/precio con una línea ya
                                     resuelta de este mismo expediente. No es una decisión del sistema — puede ser el
@@ -718,6 +726,7 @@ export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
                                       </div>
                                     </div>
                                   </div>
+                                  {puedeEscribir && (
                                   <div className="button-row" style={{ marginTop: "0.75rem" }}>
                                     <button onClick={() => confirmarLinea(linea.id)} className="btn btn-secondary btn-sm">
                                       Confirmar como línea distinta
@@ -729,10 +738,11 @@ export default function RevisionPanel({ apiUrl }: { apiUrl: string }) {
                                       Descartar como duplicado
                                     </button>
                                   </div>
+                                  )}
                                 </td>
                               </tr>
                             )}
-                            {panelAbierto && (
+                            {panelAbierto && puedeEscribir && (
                               <tr>
                                 <td colSpan={8} className="linea-accion-panel">
                                   {panelAbierto === "corregir" && (
