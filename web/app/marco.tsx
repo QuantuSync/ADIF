@@ -44,7 +44,9 @@ export default function Marco({ children }: { children: React.ReactNode }) {
           ADIF
           <small>Catálogo de materiales</small>
         </span>
-        <NavLinks />
+        <div className="nav-enlaces">
+          <NavLinks />
+        </div>
         <span className="nav-usuario">
           {sesion && (
             <span className="nav-usuario-nombre">
