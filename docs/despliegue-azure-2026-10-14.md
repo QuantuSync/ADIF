@@ -581,8 +581,30 @@ No se pulsó ningún botón que escriba con el usuario de escritura.
 
 La primera versión ponía «· solo consulta» a la derecha del nombre y la
 barra de arriba se desbordaba a 1366 px (Contraseña y Salir cortados). Ahora
-va debajo del nombre y no ensancha nada. La barra sigue desbordándose a
-1280 px con cualquier perfil, y a 1366 px con nombres de usuario largos
-(`margarita.vaquero`, unos 20 px): ya pasaba antes y no se tocó. En móvil,
-Mantenimiento (815 px) y la cola de revisión (502 px) se siguen saliendo de
-ancho igual que el 14/10.
+va debajo del nombre y no ensancha nada. Quedaba el desbordamiento de antes,
+a 1280 px con cualquier perfil y a 1366 px con nombres largos; arreglado el
+mismo día (apartado siguiente).
+
+### Barra de arriba en dos filas (commit `246c15a`)
+
+Por debajo de 1700 px la barra pasa a dos filas: arriba la marca (con su
+subtítulo) y el bloque de usuario (nombre, Contraseña y Salir), debajo los
+siete apartados. No se ha quitado ni escondido ninguna opción. La barra mide
+92 px en vez de 64; `--nav-h` cambia con ella, así que las cabeceras fijas
+de las tablas se siguen pegando justo debajo (medido, 0 px de hueco). Desde
+1700 px sigue en una fila. En móvil, la fila de apartados se desliza de lado
+sola, sin arrastrar la página.
+
+Comprobado en local y en la máquina, contra el dominio, con usuarios de 17
+caracteres (el largo de `margarita.vaquero` y `mercedes.molinero`, los más
+largos; el nombre va en letra de ancho fijo) de los dos perfiles, creados y
+borrados para esto: a 1280, 1366 y 1920 px la barra no desborda, marca,
+nombre, Contraseña y Salir quedan dentro de la ventana y los siete apartados
+caben; a 360, 390 y 412 px, el bloque de usuario cabe y «Salir» queda a 16 px
+del borde.
+
+Sin cambios, porque no tienen que ver con la barra: la tabla de Expedientes
+con la columna Acciones (perfil de escritura) se pasa 14 px a 1280 px; el
+catálogo se desplaza de lado en escritorio por el ancho de su tabla, como
+siempre; y en móvil Mantenimiento (815 px) y la cola de revisión (502 px)
+se siguen saliendo de ancho igual que el 14/10.
