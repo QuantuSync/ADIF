@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import OperationalError
 
-from app.auth import get_current_user
+from app.auth import get_usuario_con_permiso
 from app.config import settings
 from app.extraccion.cruce_codigos import validar_ruta_codigos_proyecto
 from app.extraccion.estado_sap import validar_ruta_estado_sap
@@ -101,10 +101,12 @@ async def error_conexion_bd(request: Request, exc: OperationalError) -> JSONResp
 # datos, lo usa la comprobación de salud de Docker) y `/auth` (entrar y
 # cambiar la contraseña obligatoria). Se pone aquí, en cada router, y no ruta
 # a ruta, para que una ruta nueva no pueda quedar abierta por olvido -- y
-# `tests/test_acceso.py` lo comprueba recorriendo todas.
+# `tests/test_acceso.py` lo comprueba recorriendo todas. Sesión 2026-10-16:
+# la misma dependencia cierra a los usuarios de consulta todo lo que no sea
+# leer (`app.auth.get_usuario_con_permiso`).
 app.include_router(health.router)
 app.include_router(auth.router)
-_CON_SESION = [Depends(get_current_user)]
+_CON_SESION = [Depends(get_usuario_con_permiso)]
 for _router in (
     expedientes.router, trabajos.router, catalogo.router, conciliacion.router,
     contraste_presupuestos.router, revision.router, documentos.router, mantenimiento.router,

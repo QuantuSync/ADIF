@@ -3,7 +3,12 @@
 La prueba central es la primera: recorre TODAS las rutas de la API y exige
 401 sin sesión, para que una ruta nueva no pueda quedar abierta por olvido.
 El resto prueba el ciclo completo: alta por consola, primera entrada con
-cambio obligatorio, caducidad por inactividad, límite de intentos y registro."""
+cambio obligatorio, caducidad por inactividad, límite de intentos y registro.
+
+Sesión 2026-10-16: dos perfiles. La otra prueba central recorre también
+TODAS las rutas y exige que un usuario de consulta no pueda escribir en
+ninguna, con la lista sacada de la propia aplicación: una ruta nueva que
+escriba queda cubierta sin tocar esta prueba."""
 from datetime import timedelta
 
 import pytest
@@ -14,7 +19,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app import models, usuarios
-from app.auth import ahora
+from app.auth import DETALLE_SOLO_CONSULTA, METODOS_DE_LECTURA, ahora
 from app.config import settings
 from app.db import Base, get_db
 from app.main import app
@@ -113,7 +118,7 @@ def test_primera_entrada_obliga_a_cambiar_la_contrasena_antes_de_ver_datos(clien
     bloqueada = cliente.get("/catalogo")
     assert bloqueada.status_code == 403
     assert bloqueada.json()["detail"] == "cambio_contrasena_obligatorio"
-    assert cliente.get("/auth/sesion").json() == {"usuario": "ana", "debe_cambiar_contrasena": True}
+    assert cliente.get("/auth/sesion").json() == {"usuario": "ana", "debe_cambiar_contrasena": True, "perfil": "escritura"}
 
     corta = cliente.post("/auth/cambiar-contrasena", json={"actual": temporal, "nueva": "corta"})
     assert corta.status_code == 400
@@ -127,8 +132,8 @@ def test_primera_entrada_obliga_a_cambiar_la_contrasena_antes_de_ver_datos(clien
     assert _entrar(TestClient(app), "ana", "una contraseña larga").json()["debe_cambiar_contrasena"] is False
 
 
-def _usuario_listo(db_session, nombre="ana", contrasena="una contraseña larga"):
-    temporal = usuarios.crear(db_session, nombre)
+def _usuario_listo(db_session, nombre="ana", contrasena="una contraseña larga", perfil="escritura"):
+    temporal = usuarios.crear(db_session, nombre, perfil)
     usuario = db_session.scalar(select(models.Usuario).where(models.Usuario.nombre == nombre))
     from app.auth import cifrar_contrasena
 
@@ -239,3 +244,145 @@ def test_la_consola_no_crea_duplicados_ni_nombres_con_espacios(db_session):
         usuarios.crear(db_session, "ana maría")
     with pytest.raises(usuarios.ErrorUsuarios):
         usuarios.reiniciar(db_session, "nadie")
+
+
+# --- Perfiles (sesión 2026-10-16) -------------------------------------------
+
+def _rutas_con_datos():
+    """Todas las rutas detrás de la sesión: las de `app.routes` menos las de
+    `/auth` y `/health`, que no llevan `get_usuario_con_permiso`."""
+    for metodo, plantilla, concreta in _rutas():
+        if plantilla.startswith("/auth/") or plantilla == "/health":
+            continue
+        yield metodo, plantilla, concreta
+
+
+def _rutas_que_escriben():
+    return [r for r in _rutas_con_datos() if r[0] not in METODOS_DE_LECTURA]
+
+
+def _entrar_como(db_session, nombre, perfil):
+    _usuario_listo(db_session, nombre=nombre, perfil=perfil)
+    cliente = TestClient(app, raise_server_exceptions=False)
+    assert _entrar(cliente, nombre, "una contraseña larga").status_code == 200
+    return cliente
+
+
+def _filas(db_session):
+    """Recuento de filas de cada tabla con datos (las de acceso no: la sesión
+    renueva su actividad y eso no es escribir datos)."""
+    from sqlalchemy import func
+
+    return {tabla.name: db_session.scalar(select(func.count()).select_from(tabla)) for tabla in _TABLAS}
+
+
+# Un cuerpo que valdría para casi cualquier ruta, para que el 403 no sea un
+# 422 disfrazado: la negativa tiene que venir del perfil, no del formulario.
+_CUERPO = {"codigo_expediente": "6.26/28510.9999", "motivo": "m", "nota": "n", "valor": "1"}
+
+
+def test_un_usuario_de_consulta_no_puede_escribir_en_ninguna_ruta(cliente, db_session):
+    escriben = _rutas_que_escriben()
+    # Las que nombró el cliente, para que la lista no salga corta por error.
+    plantillas = {(m, p) for m, p, _c in escriben}
+    for esperada in (
+        ("PATCH", "/catalogo/lineas/{linea_id}"),
+        ("POST", "/catalogo/lineas/{linea_id}/confirmar"),
+        ("POST", "/catalogo/lineas/{linea_id}/descartar"),
+        ("POST", "/catalogo/lineas/{linea_id}/pendiente"),
+        ("POST", "/revision/candidatos-matricula/{linea_id}/aceptar"),
+        ("POST", "/expedientes"),
+        ("POST", "/expedientes/{expediente_id}/descargar"),
+        ("POST", "/expedientes/{expediente_id}/extraer"),
+        ("POST", "/mantenimiento/ejecutar"),
+    ):
+        assert esperada in plantillas
+    assert len(escriben) > 25
+
+    consulta = _entrar_como(db_session, "eva", "consulta")
+    antes = _filas(db_session)
+    abiertas = []
+    for metodo, plantilla, concreta in escriben:
+        respuesta = consulta.request(metodo, concreta, json=_CUERPO)
+        if (respuesta.status_code, respuesta.json().get("detail")) != (403, DETALLE_SOLO_CONSULTA):
+            abiertas.append((metodo, plantilla, respuesta.status_code))
+    assert abiertas == []
+    assert _filas(db_session) == antes
+
+
+def test_un_usuario_de_consulta_ve_todas_las_pantallas_y_exporta(cliente, db_session):
+    consulta = _entrar_como(db_session, "eva", "consulta")
+    lecturas = [r for r in _rutas_con_datos() if r[0] in METODOS_DE_LECTURA]
+    assert ("GET", "/catalogo/exportar.xlsx") in {(m, p) for m, p, _c in lecturas}
+    cerradas = []
+    for metodo, plantilla, concreta in lecturas:
+        respuesta = consulta.request(metodo, concreta)
+        if respuesta.status_code in (401, 403):
+            cerradas.append((metodo, plantilla, respuesta.status_code))
+    assert cerradas == []
+    assert consulta.get("/catalogo").status_code == 200
+    exportado = consulta.get("/catalogo/exportar.xlsx")
+    assert exportado.status_code == 200 and exportado.content[:2] == b"PK"
+
+
+def test_el_perfil_no_frena_a_un_usuario_de_escritura(cliente, db_session):
+    escritura = _entrar_como(db_session, "ana", "escritura")
+    frenadas = []
+    for metodo, plantilla, concreta in _rutas_que_escriben():
+        respuesta = escritura.request(metodo, concreta, json=_CUERPO)
+        if respuesta.status_code in (401, 403):
+            frenadas.append((metodo, plantilla, respuesta.status_code))
+    assert frenadas == []
+    assert escritura.post("/expedientes", json={"codigo_expediente": "6.26/28510.9998"}).status_code == 200
+
+
+def test_consulta_puede_cambiar_su_contrasena_y_salir(cliente, db_session):
+    temporal = usuarios.crear(db_session, "eva", "consulta")
+    entrada = _entrar(cliente, "eva", temporal)
+    assert entrada.json() == {"usuario": "eva", "debe_cambiar_contrasena": True, "perfil": "consulta"}
+    assert cliente.post("/auth/cambiar-contrasena", json={"actual": temporal, "nueva": "una contraseña larga"}).status_code == 200
+    assert cliente.get("/auth/sesion").json()["perfil"] == "consulta"
+    assert cliente.post("/auth/salir").status_code == 200
+    assert cliente.get("/catalogo").status_code == 401
+
+
+def test_cambiar_el_perfil_vale_desde_la_peticion_siguiente(cliente, db_session):
+    cliente = _entrar_como(db_session, "eva", "consulta")  # sustituye al de la fixture, sin sesión
+    assert cliente.post("/expedientes", json={"codigo_expediente": "6.26/28510.9999"}).status_code == 403
+    usuarios.cambiar_perfil(db_session, "eva", "escritura")
+    assert cliente.post("/expedientes", json={"codigo_expediente": "6.26/28510.9999"}).status_code == 200
+    usuarios.cambiar_perfil(db_session, "eva", "consulta")
+    assert cliente.post("/expedientes", json={"codigo_expediente": "6.26/28510.9998"}).status_code == 403
+    assert cliente.get("/auth/sesion").json()["perfil"] == "consulta"
+
+
+def test_la_consola_exige_el_perfil_al_crear_y_solo_admite_los_dos(db_session, monkeypatch, capsys):
+    with pytest.raises(usuarios.ErrorUsuarios):
+        usuarios.crear(db_session, "eva", "administrador")
+    usuarios.crear(db_session, "eva", "consulta")
+    with pytest.raises(usuarios.ErrorUsuarios):
+        usuarios.cambiar_perfil(db_session, "eva", "todo")
+    assert [(f["usuario"], f["perfil"]) for f in usuarios.listar(db_session)] == [("eva", "consulta")]
+
+    import app.db
+
+    monkeypatch.setattr(app.db, "SessionLocal", lambda: db_session)
+    monkeypatch.setattr(db_session, "close", lambda: None)
+    with pytest.raises(SystemExit):
+        usuarios.main(["crear", "luis"])  # sin --perfil no crea nada
+    assert usuarios.main(["crear", "luis", "--perfil", "escritura"]) == 0
+    assert usuarios.main(["perfil", "luis", "consulta"]) == 0
+    assert {f["usuario"]: f["perfil"] for f in usuarios.listar(db_session)} == {"eva": "consulta", "luis": "consulta"}
+    capsys.readouterr()
+
+
+def test_los_usuarios_que_ya_existian_quedan_con_escritura(db_session):
+    from sqlalchemy import text
+
+    # Como una fila de antes de la migración 0045: sin perfil.
+    db_session.execute(text(
+        "INSERT INTO usuarios (nombre, hash_contrasena, activo, debe_cambiar_contrasena, created_at) "
+        "VALUES ('vieja', 'x', 1, 0, CURRENT_TIMESTAMP)"
+    ))
+    db_session.commit()
+    assert db_session.scalar(select(models.Usuario.perfil).where(models.Usuario.nombre == "vieja")) == "escritura"

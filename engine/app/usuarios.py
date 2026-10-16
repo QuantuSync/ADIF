@@ -1,7 +1,8 @@
 """Gestión de usuarios por consola (sesión 2026-10-14). No hay administración
 desde la web: quien administra la máquina crea, desactiva y reinicia aquí.
 
-    docker compose exec api python -m app.usuarios crear <usuario>
+    docker compose exec api python -m app.usuarios crear <usuario> --perfil consulta|escritura
+    docker compose exec api python -m app.usuarios perfil <usuario> consulta|escritura
     docker compose exec api python -m app.usuarios reiniciar <usuario>
     docker compose exec api python -m app.usuarios desactivar <usuario>
     docker compose exec api python -m app.usuarios activar <usuario>
@@ -10,7 +11,9 @@ desde la web: quien administra la máquina crea, desactiva y reinicia aquí.
 
 `crear` y `reiniciar` imprimen una contraseña temporal generada al azar, que
 se entrega a la persona por un canal aparte; la primera vez que entre, la web
-le obliga a cambiarla. Ninguna contraseña se pasa por la línea de órdenes (se
+le obliga a cambiarla. El perfil (sesión 2026-10-16) se elige al crear y se
+cambia con `perfil`: «escritura» puede todo; «consulta» ve todas las
+pantallas y exporta, y nada más. Ninguna contraseña se pasa por la línea de órdenes (se
 quedaría en el historial de la consola)."""
 import argparse
 import sys
@@ -18,7 +21,7 @@ import sys
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.auth import ahora, cerrar_sesiones_de_usuario, cifrar_contrasena, generar_contrasena_temporal
+from app.auth import PERFIL_ESCRITURA, PERFILES, ahora, cerrar_sesiones_de_usuario, cifrar_contrasena, generar_contrasena_temporal
 
 
 class ErrorUsuarios(Exception):
@@ -34,16 +37,26 @@ def _buscar(db: Session, nombre: str):
     return usuario
 
 
-def crear(db: Session, nombre: str) -> str:
+def _validar_perfil(perfil: str) -> str:
+    if perfil not in PERFILES:
+        raise ErrorUsuarios(f"Perfil «{perfil}» desconocido. Tiene que ser uno de: {', '.join(PERFILES)}.")
+    return perfil
+
+
+def crear(db: Session, nombre: str, perfil: str = PERFIL_ESCRITURA) -> str:
     from app.models import Usuario
 
+    _validar_perfil(perfil)
     nombre = nombre.strip()
     if not nombre or len(nombre) > 64 or any(c.isspace() for c in nombre):
         raise ErrorUsuarios("El nombre de usuario no puede estar vacío, tener espacios ni pasar de 64 caracteres.")
     if db.scalar(select(Usuario).where(Usuario.nombre == nombre)) is not None:
         raise ErrorUsuarios(f"Ya existe el usuario «{nombre}». Para darle otra contraseña, usa «reiniciar».")
     temporal = generar_contrasena_temporal()
-    db.add(Usuario(nombre=nombre, hash_contrasena=cifrar_contrasena(temporal), activo=True, debe_cambiar_contrasena=True))
+    db.add(Usuario(
+        nombre=nombre, hash_contrasena=cifrar_contrasena(temporal), activo=True, debe_cambiar_contrasena=True,
+        perfil=perfil,
+    ))
     db.commit()
     return temporal
 
@@ -58,6 +71,14 @@ def reiniciar(db: Session, nombre: str) -> str:
     cerrar_sesiones_de_usuario(db, usuario.id)
     db.commit()
     return temporal
+
+
+def cambiar_perfil(db: Session, nombre: str, perfil: str) -> None:
+    """Vale desde la petición siguiente: la API lee el perfil de la base en
+    cada una, así que no hace falta cerrar sus sesiones."""
+    usuario = _buscar(db, nombre)
+    usuario.perfil = _validar_perfil(perfil)
+    db.commit()
 
 
 def cambiar_activo(db: Session, nombre: str, activo: bool) -> None:
@@ -81,6 +102,7 @@ def listar(db: Session) -> list[dict]:
         filas.append({
             "usuario": usuario.nombre,
             "activo": usuario.activo,
+            "perfil": usuario.perfil,
             "debe_cambiar_contrasena": usuario.debe_cambiar_contrasena,
             "ultima_entrada": ultima,
         })
@@ -103,8 +125,14 @@ def _fecha(momento) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m app.usuarios", description="Usuarios de la plataforma.")
     ordenes = parser.add_subparsers(dest="orden", required=True)
+    sub = ordenes.add_parser("crear", help="alta con contraseña temporal")
+    sub.add_argument("usuario")
+    sub.add_argument("--perfil", required=True, choices=PERFILES,
+                     help="escritura: puede todo; consulta: ve todas las pantallas y exporta, nada más")
+    sub = ordenes.add_parser("perfil", help="cambia el perfil de un usuario (escritura o consulta)")
+    sub.add_argument("usuario")
+    sub.add_argument("perfil", choices=PERFILES)
     for orden, ayuda in (
-        ("crear", "alta con contraseña temporal"),
         ("reiniciar", "contraseña temporal nueva; obliga a cambiarla y cierra sus sesiones"),
         ("desactivar", "impide la entrada y cierra sus sesiones"),
         ("activar", "vuelve a permitir la entrada"),
@@ -122,20 +150,26 @@ def main(argv: list[str] | None = None) -> int:
     db = SessionLocal()
     try:
         if args.orden in ("crear", "reiniciar"):
-            temporal = (crear if args.orden == "crear" else reiniciar)(db, args.usuario)
+            if args.orden == "crear":
+                temporal = crear(db, args.usuario, args.perfil)
+            else:
+                temporal = reiniciar(db, args.usuario)
             print(f"Usuario «{args.usuario.strip()}». Contraseña temporal: {temporal}")
             print("Entrégala por un canal aparte. Se pedirá cambiarla en la primera entrada.")
+        elif args.orden == "perfil":
+            cambiar_perfil(db, args.usuario, args.perfil)
+            print(f"Usuario «{args.usuario}»: perfil {args.perfil}.")
         elif args.orden in ("desactivar", "activar"):
             cambiar_activo(db, args.usuario, args.orden == "activar")
             print(f"Usuario «{args.usuario}» {'activado' if args.orden == 'activar' else 'desactivado'}.")
         elif args.orden == "listar":
             filas = listar(db)
             if not filas:
-                print("No hay usuarios. Crea el primero con: python -m app.usuarios crear <usuario>")
+                print("No hay usuarios. Crea el primero con: python -m app.usuarios crear <usuario> --perfil escritura")
             for fila in filas:
                 estado = "activo" if fila["activo"] else "DESACTIVADO"
                 cambio = "  (contraseña temporal pendiente de cambiar)" if fila["debe_cambiar_contrasena"] else ""
-                print(f"{fila['usuario']:<24} {estado:<12} última entrada: {_fecha(fila['ultima_entrada'])}{cambio}")
+                print(f"{fila['usuario']:<24} {fila['perfil']:<10} {estado:<12} última entrada: {_fecha(fila['ultima_entrada'])}{cambio}")
         else:
             for acceso in accesos(db, args.usuario, args.limite):
                 print(f"{_fecha(acceso.momento)}  {acceso.resultado:<18} {acceso.usuario_nombre:<24} {acceso.ip or '-'}")

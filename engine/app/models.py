@@ -965,8 +965,10 @@ class PresupuestoLoteDocumento(Base):
 
 
 class Usuario(Base):
-    """Acceso con usuario y contraseña (sesión 2026-10-14, despliegue). Un
-    solo perfil: consulta, revisa y exporta. No hay administración desde la
+    """Acceso con usuario y contraseña (sesión 2026-10-14, despliegue). Dos
+    perfiles desde la sesión 2026-10-16 (`perfil`): «escritura» consulta,
+    revisa, exporta y lanza trabajos; «consulta» solo ve y exporta
+    (`app.auth.get_usuario_con_permiso`). No hay administración desde la
     web -- las altas, bajas y reinicios de contraseña se hacen por consola
     (`python -m app.usuarios`). La contraseña se guarda solo como hash
     argon2id (`app.auth`), nunca en claro."""
@@ -982,6 +984,9 @@ class Usuario(Base):
     # antes de dejar llegar a ningún dato.
     debe_cambiar_contrasena = Column(Boolean, nullable=False, default=True, server_default="true")
     contrasena_cambiada_en = Column(DateTime(timezone=True), nullable=True)
+    # "escritura" o "consulta" (`app.auth.PERFILES`). Los usuarios que ya
+    # existían al añadirlo quedan con "escritura", que es lo que tenían.
+    perfil = Column(String(16), nullable=False, default="escritura", server_default="escritura")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 

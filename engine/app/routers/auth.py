@@ -41,7 +41,9 @@ class CambioContrasena(BaseModel):
 
 
 def _sesion_respuesta(usuario: Usuario) -> dict:
-    return {"usuario": usuario.nombre, "debe_cambiar_contrasena": usuario.debe_cambiar_contrasena}
+    # `perfil` lo usa la web para no enseñar a un usuario de consulta los
+    # botones que escriben; quien manda es la API (`get_usuario_con_permiso`).
+    return {"usuario": usuario.nombre, "debe_cambiar_contrasena": usuario.debe_cambiar_contrasena, "perfil": usuario.perfil}
 
 
 def _poner_cookie(respuesta: Response, token: str) -> None:
@@ -74,7 +76,7 @@ def entrar(datos: Credenciales, request: Request, response: Response, db: Sessio
         raise HTTPException(status_code=401, detail="Usuario o contraseña incorrectos.")
     token = abrir_sesion(db, usuario.id, ip)
     _poner_cookie(response, token)
-    return {"usuario": usuario.nombre, "debe_cambiar_contrasena": usuario.debe_cambiar_contrasena}
+    return {"usuario": usuario.nombre, "debe_cambiar_contrasena": usuario.debe_cambiar_contrasena, "perfil": usuario.perfil}
 
 
 @router.get("/sesion")
@@ -128,4 +130,4 @@ def cambiar_contrasena(
     cerrar_sesiones_de_usuario(db, fila.id, salvo_token=request.cookies.get(settings.sesion_cookie_nombre))
     registrar_acceso(db, fila.nombre, "cambio_contrasena", ip_de(request), request.headers.get("user-agent"), fila.id)
     db.commit()
-    return {"usuario": fila.nombre, "debe_cambiar_contrasena": False}
+    return {"usuario": fila.nombre, "debe_cambiar_contrasena": False, "perfil": fila.perfil}

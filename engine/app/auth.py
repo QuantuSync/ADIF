@@ -34,6 +34,18 @@ from app.db import get_db
 CABECERA_SONDEO = "x-sondeo"
 # El detalle del 403 que la web reconoce para llevar a la pantalla de cambio.
 DETALLE_CAMBIO_OBLIGATORIO = "cambio_contrasena_obligatorio"
+# El 403 de una ruta que escribe pedida por un usuario de solo consulta.
+DETALLE_SOLO_CONSULTA = "solo_consulta"
+# Perfiles (sesión 2026-10-16, encargo del cliente). Consulta ve todas las
+# pantallas y exporta; no puede cambiar nada.
+PERFIL_ESCRITURA = "escritura"
+PERFIL_CONSULTA = "consulta"
+PERFILES = (PERFIL_ESCRITURA, PERFIL_CONSULTA)
+# Lo único que puede pedir un usuario de consulta. La regla va por método y
+# no ruta a ruta: toda ruta que escribe es POST, PATCH, PUT o DELETE, así que
+# una ruta nueva que escriba nace cerrada para consulta sin tener que
+# acordarse (`tests/test_acceso.py` lo comprueba recorriendo todas).
+METODOS_DE_LECTURA = frozenset({"GET", "HEAD", "OPTIONS"})
 # Una sesión no renueva su `ultima_actividad` más de una vez por este margen:
 # ahorra una escritura por petición sin cambiar la caducidad de forma visible.
 _MARGEN_RENOVACION = timedelta(seconds=30)
@@ -49,6 +61,11 @@ class Usuario:
     id: int
     nombre: str
     debe_cambiar_contrasena: bool = False
+    perfil: str = PERFIL_ESCRITURA
+
+    @property
+    def puede_escribir(self) -> bool:
+        return self.perfil == PERFIL_ESCRITURA
 
 
 class AccesoBloqueado(Exception):
@@ -233,7 +250,10 @@ def get_usuario_en_sesion(request: Request, db: Session = Depends(get_db)) -> Us
     """Sesión válida, aunque tenga pendiente el cambio de contraseña. Solo para
     las rutas de `/auth` (consultar la sesión, cambiar la contraseña, salir)."""
     _sesion, usuario = _sesion_de_la_peticion(request, db)
-    return Usuario(id=usuario.id, nombre=usuario.nombre, debe_cambiar_contrasena=usuario.debe_cambiar_contrasena)
+    return Usuario(
+        id=usuario.id, nombre=usuario.nombre, debe_cambiar_contrasena=usuario.debe_cambiar_contrasena,
+        perfil=usuario.perfil,
+    )
 
 
 def get_current_user(usuario: Usuario = Depends(get_usuario_en_sesion)) -> Usuario:
@@ -242,4 +262,13 @@ def get_current_user(usuario: Usuario = Depends(get_usuario_en_sesion)) -> Usuar
     sesión válida, 401; con la contraseña inicial sin cambiar, 403."""
     if usuario.debe_cambiar_contrasena:
         raise HTTPException(status_code=403, detail=DETALLE_CAMBIO_OBLIGATORIO)
+    return usuario
+
+
+def get_usuario_con_permiso(request: Request, usuario: Usuario = Depends(get_current_user)) -> Usuario:
+    """La que `app.main` pone en cada router con datos: `get_current_user`
+    más el perfil. Un usuario de consulta solo puede leer; cualquier otro
+    método responde 403, aunque la petición no venga de la web."""
+    if request.method not in METODOS_DE_LECTURA and not usuario.puede_escribir:
+        raise HTTPException(status_code=403, detail=DETALLE_SOLO_CONSULTA)
     return usuario
