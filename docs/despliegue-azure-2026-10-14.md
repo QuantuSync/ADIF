@@ -510,3 +510,79 @@ cambio): fue el cliente, probando. Después se reinició
 (`python -m app.usuarios reiniciar NOMBRE1`): contraseña temporal nueva en
 `privado/`, cambio obligatorio y sesión cerrada. Los seis quedan sin
 estrenar.
+
+## Dos perfiles y usuarios definitivos (16/10/2026)
+
+Cambio de alcance del cliente: perfil `escritura` (lo de antes, puede todo)
+y perfil `consulta` (ve todas las pantallas y exporta, nada más). Código en
+los commits `15f7cae` (API, migración 0045 y pruebas), `daf8f45` y `9cad46e`
+(web) y `191fe0f` (guía y CONTEXTO.md); detalle en la guía de operación,
+apartado Usuarios.
+
+### Despliegue
+
+Antes de tocar nada: cola sin trabajos pendientes ni en curso, copia
+manual de la base con el `pg_dump` del worker
+(`/srv/adif/copias/antes_perfiles_20261016.dump`, 45,6 MB; no la borra la
+rotación automática, que solo mira los que empiezan por `adif`) y recuento de filas de
+todas las tablas con la consulta del bloque 3. Después
+`git pull && instalar.sh` (dos veces, la segunda por el arreglo de la barra
+de arriba). `deploy/Caddyfile` no cambió, así que `entrada` no se reinició.
+
+Tras el primero, las 22 tablas con las mismas filas que antes (40.186
+líneas, 614 expedientes, 34.564 trabajos...), esquema `0045`, y los seis
+usuarios que había, con perfil `escritura` como manda la migración. El
+worker volvió con `modelo de IA: proveedor openai, modelo vision`.
+
+### Usuarios
+
+Creados antes de borrar los anteriores, con `crear <usuario> --perfil ...`,
+y las contraseñas llevadas directamente a `privado/usuarios-2026-10-16.txt`
+(ignorado por git, comprobado con `git check-ignore`), con el perfil al lado,
+sin pasar por pantalla. Once contraseñas distintas de 16 caracteres, todas
+con cambio obligatorio.
+
+- Consulta y escritura: `isabel.ibanez`, `raul.talens`.
+- Consulta: `antonio.conde`, `nuria.gomez`, `juan.merino`,
+  `mercedes.molinero`, `manuel.fraga`, `ignacio.aroca`, `margarita.vaquero`,
+  `carla.duque`, `d.redondo`.
+
+Los seis `NOMBRE` se borraron con SQL en una transacción que exigía borrar
+exactamente seis, como los provisionales. `NOMBRE1` lo había estrenado el
+cliente el 15/10; el registro de accesos se conserva. Ninguna sesión abierta
+al terminar. Se borró `privado/usuarios-2026-10-14.txt`.
+
+### Comprobación contra el dominio
+
+Con dos usuarios temporales, `verif-consulta` y `verif-escritura`, creados
+con la consola y borrados al final con SQL (transacción que exigía borrar
+exactamente dos). Con Chromium de Playwright desde el portátil:
+
+- Los dos pasan por el cambio de contraseña obligatorio y `/api/auth/sesion`
+  devuelve su perfil.
+- Con la sesión de consulta, la lista de rutas sacada del propio contenedor
+  (`app.main.app.routes`, sin `/auth` ni `/health`, con identificadores
+  inventados): las **27 que escriben responden 403 `solo_consulta`**; de las
+  de lectura, 19 dan 200 y 4 dan 404 (el identificador inventado). Los dos
+  Excel no se llamaron así, por lo que tardan.
+- En las siete pantallas, consulta no ve ningún botón que escriba y la barra
+  dice «solo consulta» bajo el nombre; escritura ve los de siempre
+  (Añadir expediente, Descargar, Extraer, Confirmar tal cual, Guardar
+  corrección y confirmar, los cuatro de cada línea, Recalcular candidatos,
+  Aceptar, Ninguno es correcto, Dejar nota, Lanzar ciclo ahora y Ejecutar
+  ahora). En la cola de revisión, consulta ve la tabla de líneas con 7
+  columnas (sin la de botones) y escritura con 8.
+- Exportación del Excel con el usuario de consulta, pulsando «Exportar
+  Excel» en el catálogo: fichero completo (zip íntegro), Materiales 19.374 filas con la cabecera, Conciliación 539, Contraste de presupuestos 515 y Resumen 73. Respecto al 14/10 son 22 filas más en Materiales y un lote más en Contraste, lo que cuadra con las 22 líneas de `6.26/28510.0066` reextraídas aquel día. No se cronometró con precisión (unos 4 minutos). Al terminar, la cola seguía con 34.564 trabajos y la base con 40.186 líneas: ninguna de las pruebas escribió nada.
+
+No se pulsó ningún botón que escriba con el usuario de escritura.
+
+### Lo que se vio de paso
+
+La primera versión ponía «· solo consulta» a la derecha del nombre y la
+barra de arriba se desbordaba a 1366 px (Contraseña y Salir cortados). Ahora
+va debajo del nombre y no ensancha nada. La barra sigue desbordándose a
+1280 px con cualquier perfil, y a 1366 px con nombres de usuario largos
+(`margarita.vaquero`, unos 20 px): ya pasaba antes y no se tocó. En móvil,
+Mantenimiento (815 px) y la cola de revisión (502 px) se siguen saliendo de
+ancho igual que el 14/10.
