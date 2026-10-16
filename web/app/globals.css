@@ -1359,9 +1359,15 @@ input:focus-visible {
   color: var(--text-muted);
 }
 
+.nav-usuario-nombre:has(.nav-usuario-perfil) {
+  display: inline-flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+
 .nav-usuario-perfil {
-  font-weight: 400;
-  opacity: 0.75;
+  font-size: 0.7rem;
+  opacity: 0.8;
 }
 
 .nav-salir {

@@ -108,5 +108,5 @@ echo
 "${COMPOSE[@]}" ps --format "table {{.Service}}\t{{.State}}\t{{.Status}}"
 echo
 echo "Listo: https://$DOMINIO"
-echo "Usuarios: cd $DEPLOY && sudo docker compose -f docker-compose.prod.yml exec api python -m app.usuarios crear <usuario>"
+echo "Usuarios: cd $DEPLOY && sudo docker compose -f docker-compose.prod.yml exec api python -m app.usuarios crear <usuario> --perfil consulta|escritura"
 echo "Guía: $REPO/docs/guia-de-operacion.md"

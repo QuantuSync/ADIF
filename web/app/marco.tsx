@@ -49,7 +49,8 @@ export default function Marco({ children }: { children: React.ReactNode }) {
           {sesion && (
             <span className="nav-usuario-nombre">
               {sesion.usuario}
-              {sesion.perfil === "consulta" && <span className="nav-usuario-perfil"> · solo consulta</span>}
+              {/* Debajo del nombre y no a su lado: la barra va justa a 1366 px. */}
+              {sesion.perfil === "consulta" && <span className="nav-usuario-perfil">solo consulta</span>}
             </span>
           )}
           <Link href="/cambiar-contrasena" className={`nav-link${pathname === "/cambiar-contrasena" ? " active" : ""}`}>
